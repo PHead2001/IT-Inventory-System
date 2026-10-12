@@ -29,7 +29,12 @@ function sceneProps(overrides: Partial<RoomSceneProps> = {}): RoomSceneProps {
     bindings: [],
     selectedCode: null,
     highlightedCodes: [],
-    focusRequest: { code: null, requestId: 0 },
+    focusRequest: {
+      code: null,
+      requestId: 0,
+      scope: 'scene-test',
+      generation: 0,
+    },
     onSelect: vi.fn(),
     onReady: vi.fn(),
     onFocusComplete: vi.fn(),
@@ -88,7 +93,12 @@ describe('rendered mesh selection', () => {
       room: { ...sceneProps().room, nodes: [group] },
       selectedCode: 'OFFICE-ONLY',
       locationNames: { 'OFFICE-ONLY': 'Office storage' },
-      focusRequest: { code: 'OFFICE-ONLY', requestId: 7 },
+      focusRequest: {
+        code: 'OFFICE-ONLY',
+        requestId: 7,
+        scope: 'scene-test',
+        generation: 1,
+      },
     });
     const visualProps = () => {
       const found: Record<string, unknown>[] = [];

@@ -428,6 +428,10 @@
     var(--room-stage-background) 65%
   );
 }
+
+.compact .canvasFrame {
+  height: 280px;
+}
 .sceneStatus {
   color: var(--foreground);
   font-size: 13px;

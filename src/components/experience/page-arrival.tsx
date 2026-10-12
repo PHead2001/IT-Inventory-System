@@ -8,6 +8,16 @@ import {
   useRoutePresentationSource,
 } from './route-presentation-source';
 
+/** Exclude potential canvas routes before lazy chunks or observers initialize. */
+export function canvasBearingRoute(pathname: string | null | undefined) {
+  return (
+    pathname === '/room' ||
+    (/^\/inventory\/(assets|quantity)\/[^/]+$/.test(pathname ?? '') &&
+      !pathname?.endsWith('/new')) ||
+    /^\/locations\/[^/]+$/.test(pathname ?? '')
+  );
+}
+
 /** Only use around conventional content with no canvas descendant. */
 export function CanvasFreeRouteContent({
   children,
@@ -96,11 +106,14 @@ export function PageArrival({
     if (pathname === livePathname) finishArrival();
   }, [arrival, listHref, pathname, livePathname, finishArrival]);
   const animate =
-    arrivalEnabled && pathname !== '/room' && livePathname !== '/room';
+    arrivalEnabled &&
+    !canvasBearingRoute(pathname) &&
+    !canvasBearingRoute(livePathname) &&
+    !canvasBearingRoute(history.previous?.pathname);
   const update =
     animate &&
     history.previous !== undefined &&
-    history.previous.pathname !== '/room';
+    !canvasBearingRoute(history.previous.pathname);
   return (
     <RoutePresentationSourceContext value={source}>
       <ViewTransition

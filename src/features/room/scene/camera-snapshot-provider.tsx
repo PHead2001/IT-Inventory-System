@@ -50,6 +50,12 @@ const CameraSnapshots = createContext<{
   ready: boolean;
 } | null>(null);
 
+/** Explicitly captured before crossing the separate Fiber root. */
+export function useRoomSceneAuthority() {
+  const context = useContext(CameraSnapshots);
+  return context?.authority ?? null;
+}
+
 export function RoomCameraSnapshotProvider({
   actorId,
   backend,

@@ -4,14 +4,24 @@ import { useFrame, useThree, type ThreeEvent } from '@react-three/fiber';
 import { OrbitControls } from '@react-three/drei';
 import {
   useCallback,
+  useContext,
+  useInsertionEffect,
   useEffect,
   useMemo,
+  useLayoutEffect,
   useRef,
   useState,
   useSyncExternalStore,
   type ComponentRef,
 } from 'react';
-import { Group, MathUtils, OrthographicCamera, Vector3 } from 'three';
+import {
+  Group,
+  MathUtils,
+  OrthographicCamera,
+  Raycaster,
+  Vector2,
+  Vector3,
+} from 'three';
 import { useEffectiveReducedMotion } from '@/components/experience/motion-preference';
 import type { RoomDefinition, RoomNode } from '../schema';
 import { findFocusBinding, type RoomBinding } from '../bindings';
@@ -63,11 +73,34 @@ import {
   VisibleHoverTracker,
   type VisibleHover,
 } from './visible-hover-runtime';
-import { placeHoverTooltip } from './visible-hover';
+import { placeHoverTooltip, visibleRoomTarget } from './visible-hover';
+import {
+  createSpatialRevealController,
+  focusToken,
+  presentationBindings,
+  revealOffset,
+  sameFocusToken,
+  SPATIAL_MOTION,
+  type FocusRequest,
+  type FocusToken,
+  type SpatialRevealController,
+} from './spatial-reveal';
 import { validCameraView, type CameraView } from './camera-view';
 import styles from '../room-visual.module.css';
+import { usePrivacyReadiness } from '@/components/auth/privacy-readiness';
+import { freshPresentationGrant } from '@/components/experience/presentation-privacy';
+import { SceneSessionContext } from './scene-budget-provider';
+import {
+  subscribePrivacyRevocation,
+  subscribeAssignmentInvalidation,
+  subscribeAuthoritativeCleanup,
+} from '@/features/scan/assign-batch';
 
 export type RoomSceneProps = {
+  onGraphicsActiveChange?: (active: boolean) => void;
+  compact?: boolean;
+  permittedCodes?: readonly string[];
+  selectionAllowed?: () => boolean;
   room: RoomDefinition;
   locationNames?: Record<string, string>;
   locationOccupancy?: RoomOccupancy;
@@ -76,12 +109,12 @@ export type RoomSceneProps = {
   bindings: RoomBinding[];
   selectedCode: string | null;
   highlightedCodes: string[];
-  focusRequest: { code: string | null; requestId: number };
+  focusRequest: FocusRequest;
   focusOnRestore?: boolean;
   onSelect(code: string): void;
   onReady(): void;
-  onFocusComplete(code: string | null): void;
-  onFocusCancel?(): void;
+  onFocusComplete(code: string | null, token?: FocusToken): void;
+  onFocusCancel?(token?: FocusToken): void;
   onFailure(message: string): void;
   canFocusSelected: boolean;
   onRequestFocus(): void;
@@ -346,6 +379,69 @@ function CameraFacingLabel({
     </group>
   );
 }
+export function RevealedBody({
+  node,
+  open,
+  settle,
+  children,
+}: {
+  node: RoomNode;
+  open: boolean;
+  settle: boolean;
+  children: React.ReactNode;
+}) {
+  const group = useRef<Group>(null);
+  const { scene, invalidate } = useThree();
+  const reduced = useEffectiveReducedMotion();
+  const motion = useRef<{ from: Vector3; to: Vector3; started: number } | null>(
+    null,
+  );
+  const offset = useMemo(
+    () => new Vector3(...toScenePosition(revealOffset(node))),
+    [node],
+  );
+  useEffect(() => {
+    // A reconciled endpoint always supersedes the previous animation, even
+    // when it already equals the body's current position before its first frame.
+    motion.current = null;
+    if (!group.current) return;
+    const to = open ? offset : new Vector3();
+    if (reduced || (open && settle)) {
+      group.current.position.copy(to);
+      scene.updateMatrixWorld(true);
+    } else if (group.current.position.distanceToSquared(to) > 1e-8) {
+      motion.current = {
+        from: group.current.position.clone(),
+        to,
+        started: performance.now(),
+      };
+    }
+    invalidate();
+  }, [open, settle, reduced, offset, scene, invalidate]);
+  useFrame(() => {
+    if (!motion.current || !group.current) return;
+    const current = motion.current;
+    const t = Math.min(
+      1,
+      (performance.now() - current.started) / SPATIAL_MOTION.revealMs,
+    );
+    group.current.position.lerpVectors(
+      current.from,
+      current.to,
+      1 - Math.pow(1 - t, 3),
+    );
+    scene.updateMatrixWorld(true);
+    if (t === 1) motion.current = null;
+    // One last frame permits hover/label drivers to observe the endpoint.
+    invalidate();
+  }, -2);
+  return (
+    <group ref={group} userData={{ roomRevealNode: node.id }}>
+      {children}
+    </group>
+  );
+}
+
 function NodeVisual({
   node,
   locationNames,
@@ -359,6 +455,8 @@ function NodeVisual({
   locationOccupancy,
   showCounts,
   canSelect,
+  openCode,
+  revealSettled,
 }: {
   locationNames?: Record<string, string>;
   profiles: RoomDefinition['rackFaceProfiles'];
@@ -372,7 +470,32 @@ function NodeVisual({
   locationOccupancy?: RoomOccupancy;
   showCounts: boolean;
   canSelect: () => boolean;
+  openCode: string | null;
+  revealSettled: boolean;
 }) {
+  const { camera, scene, gl } = useThree();
+  const pointerOwner = useRef<{
+    code: string | null;
+    pointerId: number;
+  } | null>(null);
+  const actualOwner = (event: ThreeEvent<PointerEvent | MouseEvent>) => {
+    const rect = gl.domElement.getBoundingClientRect();
+    if (!rect.width || !rect.height) return null;
+    scene.updateMatrixWorld(true);
+    camera.updateMatrixWorld();
+    const ray = new Raycaster();
+    ray.setFromCamera(
+      new Vector2(
+        ((event.clientX - rect.left) / rect.width) * 2 - 1,
+        1 - ((event.clientY - rect.top) / rect.height) * 2,
+      ),
+      camera,
+    );
+    return (
+      visibleRoomTarget(ray.intersectObjects(scene.children, true))?.code ??
+      null
+    );
+  };
   const label =
     (node.locationCode && locationNames?.[node.locationCode]) ||
     node.interaction?.label ||
@@ -384,14 +507,30 @@ function NodeVisual({
   const interactive = !!node.locationCode && !!node.interaction?.selectable;
   const click = (event: ThreeEvent<MouseEvent>) => {
     event.stopPropagation();
-    if (interactive && event.delta <= 5 && canSelect())
+    if (
+      interactive &&
+      event.delta <= 5 &&
+      canSelect() &&
+      pointerOwner.current?.code === node.locationCode &&
+      actualOwner(event) === node.locationCode
+    )
       onSelect(node.locationCode!);
+    pointerOwner.current = null;
   };
   return (
     <group
       position={toScenePosition(node.position)}
       rotation={[0, MathUtils.degToRad(node.rotationZDegrees), 0]}
     >
+      {interactive && node.interaction?.hitBox && (
+        <mesh
+          position={toScenePosition(node.interaction.hitBox.center)}
+          userData={{ hoverPassThrough: true }}
+        >
+          <boxGeometry args={toSceneSize(node.interaction.hitBox.size)} />
+          <meshBasicMaterial transparent opacity={0} depthWrite={false} />
+        </mesh>
+      )}
       {node.kind === 'box' && node.size && (
         <group
           userData={
@@ -405,111 +544,124 @@ function NodeVisual({
               : undefined
           }
           onClick={click}
+          onPointerDown={(event) => {
+            event.stopPropagation();
+            pointerOwner.current = {
+              code: actualOwner(event),
+              pointerId: event.pointerId,
+            };
+          }}
+          onPointerUp={(event) => {
+            if (
+              pointerOwner.current?.pointerId !== event.pointerId ||
+              actualOwner(event) !== pointerOwner.current?.code
+            )
+              pointerOwner.current = null;
+          }}
+          onPointerCancel={() => {
+            pointerOwner.current = null;
+          }}
           onDoubleClick={(event) => event.stopPropagation()}
         >
-          <mesh onClick={click}>
-            <boxGeometry args={toSceneSize(node.size)} />
-            <SelectionMaterial
-              color={node.visual?.color ?? '#475569'}
-              selected={selected}
-              dimmed={hasRenderedSelection && !selected}
-              hovered={hoveredCode === node.locationCode}
-              opacity={node.visual?.opacity ?? 1}
-            />
-            {(node.visual?.edges || selected) && (
-              <SelectionEdges
+          <RevealedBody
+            node={node}
+            open={node.locationCode === openCode}
+            settle={revealSettled}
+          >
+            <mesh>
+              <boxGeometry args={toSceneSize(node.size)} />
+              <SelectionMaterial
+                color={node.visual?.color ?? '#475569'}
                 selected={selected}
-                dimmed={hasRenderedSelection}
+                dimmed={hasRenderedSelection && !selected}
+                hovered={hoveredCode === node.locationCode}
+                opacity={node.visual?.opacity ?? 1}
               />
-            )}
-          </mesh>
-          {node.visual?.style === 'drawer' && (
-            <Solid
-              position={[
-                (node.interaction?.labelAnchor?.[0] ?? 1) > 0
-                  ? node.size[0] / 2 + 0.3
-                  : -node.size[0] / 2 - 0.3,
-                0,
-                0,
-              ]}
-              size={[0.6, node.size[1] * 0.3, 0.6]}
-              color="#cbd5e1"
-            />
-          )}
-          {node.visual?.style === 'container' && (
-            <Solid
-              position={[0, 0, node.size[2] / 2 - 0.4]}
-              size={[node.size[0], node.size[1], 0.8]}
-              color={node.visual.color}
-            />
-          )}
-          {node.visual?.style === 'rack' && (
-            <group>
-              <Solid
-                position={[0, -node.size[1] / 2 - 0.15, 0]}
-                size={[node.size[0] - 3, 0.3, node.size[2] - 4]}
-                color="#334155"
-              />
-              {profiles.map((profile, index) => (
-                <Solid
-                  key={profile.id}
-                  position={[
-                    0,
-                    -node.size![1] / 2 - 0.35,
-                    node.size![2] / 2 - 8 - index * 8,
-                  ]}
-                  size={[
-                    Math.min(profile.width, node.size![0] - 2),
-                    0.5,
-                    profile.height,
-                  ]}
-                  color={index % 2 === 0 ? '#94a3b8' : '#64748b'}
+              {(node.visual?.edges || selected) && (
+                <SelectionEdges
+                  selected={selected}
+                  dimmed={hasRenderedSelection}
                 />
-              ))}
-              {[0, 1, 2, 3, 4, 5].map((index) => (
-                <Solid
-                  key={index}
-                  position={[
-                    0,
-                    -node.size![1] / 2 - 0.35,
-                    -node.size![2] / 2 + 8 + index * 4,
-                  ]}
-                  size={[node.size![0] - 6, 0.5, 1]}
-                  color="#0f172a"
-                />
-              ))}
-            </group>
-          )}
-          {interactive && node.interaction?.hitBox && (
-            <mesh
-              position={toScenePosition(node.interaction.hitBox.center)}
-              userData={{ hoverPassThrough: true }}
-              onClick={click}
-            >
-              <boxGeometry args={toSceneSize(node.interaction.hitBox.size)} />
-              <meshBasicMaterial transparent opacity={0} depthWrite={false} />
+              )}
             </mesh>
-          )}
-          {interactive &&
-            (node.locationCode === selectedCode ||
-              showAllLabels ||
-              (showCounts &&
-                occupiedLocation(locationOccupancy?.[node.locationCode!]) !==
-                  null)) && (
-              <CameraFacingLabel
-                node={node}
-                label={label}
-                size={node.size}
-                prioritySelected={node.locationCode === selectedCode}
-                hovered={node.locationCode === hoveredCode}
-                occupancy={
-                  showCounts
-                    ? locationOccupancy?.[node.locationCode!]
-                    : undefined
-                }
-                onSelect={onSelect}
+            {node.visual?.style === 'drawer' && (
+              <Solid
+                position={[
+                  (node.interaction?.labelAnchor?.[0] ?? 1) > 0
+                    ? node.size[0] / 2 + 0.3
+                    : -node.size[0] / 2 - 0.3,
+                  0,
+                  0,
+                ]}
+                size={[0.6, node.size[1] * 0.3, 0.6]}
+                color="#cbd5e1"
               />
             )}
+            {node.visual?.style === 'container' && (
+              <Solid
+                position={[0, 0, node.size[2] / 2 - 0.4]}
+                size={[node.size[0], node.size[1], 0.8]}
+                color={node.visual.color}
+              />
+            )}
+            {node.visual?.style === 'rack' && (
+              <group>
+                <Solid
+                  position={[0, -node.size[1] / 2 - 0.15, 0]}
+                  size={[node.size[0] - 3, 0.3, node.size[2] - 4]}
+                  color="#334155"
+                />
+                {profiles.map((profile, index) => (
+                  <Solid
+                    key={profile.id}
+                    position={[
+                      0,
+                      -node.size![1] / 2 - 0.35,
+                      node.size![2] / 2 - 8 - index * 8,
+                    ]}
+                    size={[
+                      Math.min(profile.width, node.size![0] - 2),
+                      0.5,
+                      profile.height,
+                    ]}
+                    color={index % 2 === 0 ? '#94a3b8' : '#64748b'}
+                  />
+                ))}
+                {[0, 1, 2, 3, 4, 5].map((index) => (
+                  <Solid
+                    key={index}
+                    position={[
+                      0,
+                      -node.size![1] / 2 - 0.35,
+                      -node.size![2] / 2 + 8 + index * 4,
+                    ]}
+                    size={[node.size![0] - 6, 0.5, 1]}
+                    color="#0f172a"
+                  />
+                ))}
+              </group>
+            )}
+            {interactive &&
+              (node.locationCode === selectedCode ||
+                showAllLabels ||
+                (showCounts &&
+                  occupiedLocation(locationOccupancy?.[node.locationCode!]) !==
+                    null)) && (
+                <CameraFacingLabel
+                  node={node}
+                  label={label}
+                  size={node.size}
+                  prioritySelected={node.locationCode === selectedCode}
+                  hovered={node.locationCode === hoveredCode}
+                  occupancy={
+                    showCounts || node.locationCode === openCode
+                      ? locationOccupancy?.[node.locationCode!]
+                      : undefined
+                  }
+                  onSelect={onSelect}
+                />
+              )}
+          </RevealedBody>
         </group>
       )}
       {node.children?.map((child) => (
@@ -527,6 +679,8 @@ function NodeVisual({
           locationOccupancy={locationOccupancy}
           showCounts={showCounts}
           canSelect={canSelect}
+          openCode={openCode}
+          revealSettled={revealSettled}
         />
       ))}
     </group>
@@ -539,7 +693,7 @@ type Animation = {
   fromZoom: number;
   toZoom: number;
   started: number;
-  code: string | null;
+  token: FocusToken;
 };
 export function finishFocusAnimation(
   camera: OrthographicCamera,
@@ -569,6 +723,7 @@ export function CameraRig({
   selectionGesture,
   onDraggingChange,
   onPassiveDrag,
+  revealController: suppliedRevealController,
 }: Pick<
   RoomSceneProps,
   | 'room'
@@ -589,8 +744,39 @@ export function CameraRig({
   selectionGesture: { current: { suppressSelection: boolean } };
   onDraggingChange: (dragging: boolean) => void;
   onPassiveDrag: () => void;
+  revealController?: SpatialRevealController;
 }) {
+  const suppliedSession = useContext(SceneSessionContext);
+  // This rig belongs to the original renderer session, including late controls
+  // callbacks. A fresh provider wrapper cannot replace that owner's lifetime.
+  const [sceneSession] = useState(() => suppliedSession);
   const { camera, gl, size, invalidate } = useThree();
+  const ownRevealController = useMemo(
+    () => createSpatialRevealController(),
+    [],
+  );
+  const revealController = suppliedRevealController ?? ownRevealController;
+  const [sceneCommitted, setSceneCommitted] = useState(false);
+  const requestToken = useMemo(
+    () => focusToken(focusRequest, room.roomId),
+    [focusRequest, room.roomId],
+  );
+  const revealState = useSyncExternalStore(
+    revealController.subscribe,
+    revealController.getSnapshot,
+    revealController.getSnapshot,
+  );
+  useEffect(() => {
+    gl.domElement.dataset.spatialPhase = revealState.phase;
+    gl.domElement.dataset.spatialOpenCode = revealState.openCode ?? '';
+    gl.domElement.dataset.spatialRequest = revealState.token
+      ? JSON.stringify(revealState.token)
+      : '';
+  }, [gl, revealState]);
+  const currentToken = useRef(requestToken);
+  useLayoutEffect(() => {
+    currentToken.current = requestToken;
+  }, [requestToken]);
   const labelRegistry = useRoomLabelRegistry();
   const controls = useRef<ComponentRef<typeof OrbitControls>>(null);
   useEffect(
@@ -607,6 +793,7 @@ export function CameraRig({
     code: string | null;
     requestId: number;
     room: RoomDefinition;
+    token?: FocusToken;
   } | null>(null);
   const lastAzimuth = useRef<number | null>(null);
   const unwrappedAzimuth = useRef(0);
@@ -620,6 +807,7 @@ export function CameraRig({
   const renderedOnce = useRef(false);
   const viewCallback = useRef(onViewChange);
   const modeValue = useRef(orbitMode);
+  const appliedMode = useRef(orbitMode);
   useEffect(() => {
     viewCallback.current = onViewChange;
   }, [onViewChange]);
@@ -648,6 +836,32 @@ export function CameraRig({
     ],
     [room, bindings],
   );
+  const focusBindings = useMemo(
+    () => presentationBindings(room, bindings),
+    [room, bindings],
+  );
+  useEffect(() => {
+    if (
+      animation.current &&
+      !sameFocusToken(animation.current.token, requestToken)
+    )
+      animation.current = null;
+    const state = revealController.getSnapshot();
+    if (!sameFocusToken(state.token, requestToken))
+      revealController.begin(
+        requestToken,
+        !!findFocusBinding(focusBindings, requestToken.code),
+        performance.now(),
+      );
+  }, [requestToken, focusBindings, revealController]);
+  const interruptFocus = useCallback(() => {
+    const token =
+      animation.current?.token ?? revealController.getSnapshot().token;
+    animation.current = null;
+    revealController.interrupt(token);
+    if (token) onFocusCancel?.(token);
+    invalidate();
+  }, [revealController, onFocusCancel, invalidate]);
   const currentFrame = useCallback(() => {
     camera.updateMatrixWorld();
     const right = new Vector3().setFromMatrixColumn(camera.matrixWorld, 0);
@@ -703,6 +917,7 @@ export function CameraRig({
   }, [camera, gl, labelRegistry, room]);
   const emitView = useCallback(() => {
     if (
+      !sceneSession.current() ||
       !controls.current ||
       !(camera instanceof OrthographicCamera) ||
       initializedRoom.current !== room
@@ -717,12 +932,14 @@ export function CameraRig({
     if (!validCameraView(view)) return;
     gl.domElement.dataset.cameraView = JSON.stringify(view);
     viewCallback.current?.(view);
-  }, [camera, gl, room]);
+  }, [camera, gl, room, sceneSession]);
   useEffect(
     () => () => {
       if (!animation.current) emitView();
+      animation.current = null;
+      revealController.dispose();
     },
-    [emitView],
+    [emitView, revealController],
   );
   useEffect(() => {
     const motion = animation.current;
@@ -734,25 +951,47 @@ export function CameraRig({
     )
       return;
     animation.current = null;
+    if (
+      !sameFocusToken(currentToken.current, motion.token) ||
+      !revealController.valid(motion.token)
+    )
+      return;
     finishFocusAnimation(camera, controls.current.target, motion);
     controls.current.update();
     writeTelemetry();
     emitView();
-    onFocusComplete(motion.code);
+    revealController.finishFlight(motion.token, performance.now(), true);
+    onFocusComplete(motion.token.code, motion.token);
     invalidate();
-  }, [reduced, camera, writeTelemetry, emitView, onFocusComplete, invalidate]);
+  }, [
+    reduced,
+    camera,
+    writeTelemetry,
+    emitView,
+    onFocusComplete,
+    invalidate,
+    revealController,
+  ]);
+  useEffect(() => {
+    if (reduced) {
+      const state = revealController.getSnapshot();
+      if (state.token) revealController.settle(state.token);
+      invalidate();
+    }
+  }, [reduced, revealController, invalidate]);
   useEffect(() => {
     const canvas = gl.domElement;
     const lost = (event: Event) => {
       event.preventDefault();
       animation.current = null;
+      revealController.dispose();
       onFailure(
         'The graphics context was lost. Use the location list or retry the room.',
       );
     };
     canvas.addEventListener('webglcontextlost', lost);
     return () => canvas.removeEventListener('webglcontextlost', lost);
-  }, [gl, onFailure]);
+  }, [gl, onFailure, revealController]);
   useEffect(() => {
     if (
       !(camera instanceof OrthographicCamera) ||
@@ -806,8 +1045,19 @@ export function CameraRig({
           controls.current.minZoom,
           controls.current.maxZoom,
         );
-        if (!focusOnRestore)
-          lastFocusRequest.current = { ...focusRequest, room };
+        if (!focusOnRestore) {
+          lastFocusRequest.current = {
+            ...focusRequest,
+            room,
+            token: requestToken,
+          };
+          revealController.begin(
+            requestToken,
+            !!findFocusBinding(focusBindings, requestToken.code),
+            performance.now(),
+          );
+          revealController.finishFlight(requestToken, performance.now(), true);
+        }
       }
       camera.updateProjectionMatrix();
     }
@@ -828,11 +1078,14 @@ export function CameraRig({
     emitView,
     size.width,
     size.height,
+    requestToken,
+    focusBindings,
+    revealController,
   ]);
   useEffect(() => {
     gl.domElement.dataset.orbitMode = orbitMode;
-    if (animation.current) onFocusCancel?.();
-    animation.current = null;
+    if (appliedMode.current !== orbitMode) interruptFocus();
+    appliedMode.current = orbitMode;
     if (
       !(camera instanceof OrthographicCamera) ||
       !controls.current ||
@@ -876,15 +1129,15 @@ export function CameraRig({
     writeTelemetry,
     emitView,
     onFocusCancel,
+    interruptFocus,
     size.width,
     size.height,
   ]);
   useEffect(() => {
     if (!(camera instanceof OrthographicCamera) || !controls.current) return;
     if (
-      lastFocusRequest.current?.code === focusRequest.code &&
-      lastFocusRequest.current.requestId === focusRequest.requestId &&
-      lastFocusRequest.current.room === room
+      sameFocusToken(lastFocusRequest.current?.token ?? null, requestToken) &&
+      lastFocusRequest.current?.room === room
     )
       return;
     if (
@@ -892,12 +1145,22 @@ export function CameraRig({
       initializedRoom.current !== room
     )
       return;
-    lastFocusRequest.current = { ...focusRequest, room };
+    // Clear first, even when the next request is unbound or has no selection.
+    animation.current = null;
+    const binding = findFocusBinding(focusBindings, focusRequest.code);
+    if (focusRequest.code && !sceneCommitted) return;
+    lastFocusRequest.current = { ...focusRequest, room, token: requestToken };
     if (focusRequest.code || focusRequest.requestId > 0)
       initialFrame.current.manual();
-    const binding = findFocusBinding(bindings, focusRequest.code);
     if (focusRequest.code && !binding) {
-      onFocusComplete(null);
+      onFocusComplete(null, requestToken);
+      return;
+    }
+    if (focusRequest.code && !revealController.valid(requestToken)) return;
+    if (!focusRequest.code || focusRequest.preserveView) {
+      revealController.finishFlight(requestToken, performance.now(), true);
+      onFocusComplete(focusRequest.code, requestToken);
+      invalidate();
       return;
     }
     // Guided/Free rotation changes the projected room width. Refresh the zoom
@@ -926,6 +1189,14 @@ export function CameraRig({
         )
       : fitZoom.current;
     const offset = camera.position.clone().sub(controls.current.target);
+    if (focusRequest.fitBeforeFlight && !reduced) {
+      controls.current.target.copy(frame.target);
+      camera.position.copy(frame.target).add(offset);
+      camera.zoom = frame.zoom;
+      camera.updateProjectionMatrix();
+      controls.current.update();
+      writeTelemetry();
+    }
     if (reduced) {
       controls.current.target.copy(target);
       camera.position.copy(target).add(offset);
@@ -934,7 +1205,8 @@ export function CameraRig({
       controls.current.update();
       writeTelemetry();
       emitView();
-      onFocusComplete(focusRequest.code);
+      revealController.finishFlight(requestToken, performance.now(), true);
+      onFocusComplete(focusRequest.code, requestToken);
     } else
       animation.current = {
         from: controls.current.target.clone(),
@@ -943,7 +1215,7 @@ export function CameraRig({
         fromZoom: camera.zoom,
         toZoom: zoom,
         started: performance.now(),
-        code: focusRequest.code,
+        token: requestToken,
       };
     invalidate();
   }, [
@@ -960,6 +1232,10 @@ export function CameraRig({
     writeTelemetry,
     emitView,
     reduced,
+    focusBindings,
+    requestToken,
+    revealController,
+    sceneCommitted,
   ]);
   useEffect(() => {
     if (
@@ -973,8 +1249,7 @@ export function CameraRig({
       return;
     initialFrame.current.manual();
     lastCommandId.current = command.id;
-    if (animation.current) onFocusCancel?.();
-    animation.current = null;
+    interruptFocus();
     const control = controls.current;
     if (command.kind === 'fit') {
       const frame = currentFrame();
@@ -1049,16 +1324,28 @@ export function CameraRig({
     writeTelemetry,
     emitView,
     onFocusCancel,
+    interruptFocus,
   ]);
   useFrame(() => {
+    if (!sceneSession.current()) {
+      animation.current = null;
+      return;
+    }
     if (!ready.current) {
       if (renderedOnce.current && gl.info.render.calls > 0) {
         ready.current = true;
+        setSceneCommitted(true);
         onReady();
       } else {
         renderedOnce.current = true;
         invalidate();
       }
+    }
+    const reveal = revealController.getSnapshot();
+    if (reveal.phase === 'revealing' && reveal.token) {
+      if (performance.now() - reveal.started >= SPATIAL_MOTION.revealMs)
+        revealController.settle(reveal.token);
+      else invalidate();
     }
     if (
       !animation.current ||
@@ -1067,8 +1354,18 @@ export function CameraRig({
     )
       return;
     const motion = animation.current,
-      t = Math.min(1, (performance.now() - motion.started) / 300),
+      t = Math.min(
+        1,
+        (performance.now() - motion.started) / SPATIAL_MOTION.flightMs,
+      ),
       ease = 1 - Math.pow(1 - t, 3);
+    if (
+      !sameFocusToken(currentToken.current, motion.token) ||
+      !revealController.valid(motion.token)
+    ) {
+      animation.current = null;
+      return;
+    }
     controls.current.target.lerpVectors(motion.from, motion.to, ease);
     camera.position.copy(controls.current.target).add(motion.offset);
     camera.zoom = MathUtils.lerp(motion.fromZoom, motion.toZoom, ease);
@@ -1078,7 +1375,9 @@ export function CameraRig({
     if (t === 1) {
       animation.current = null;
       emitView();
-      onFocusComplete(motion.code);
+      revealController.finishFlight(motion.token, performance.now(), reduced);
+      onFocusComplete(motion.token.code, motion.token);
+      invalidate();
     } else invalidate();
   }, -0.75);
   return (
@@ -1119,8 +1418,7 @@ export function CameraRig({
         )
           return;
         initialFrame.current.manual();
-        if (animation.current) onFocusCancel?.();
-        animation.current = null;
+        interruptFocus();
         manualGesture.current.active = true;
         onDraggingChange(true);
         if (controls.current)
@@ -1163,6 +1461,37 @@ export function CameraRig({
   );
 }
 export default function RoomScene(props: RoomSceneProps) {
+  const privacy = usePrivacyReadiness();
+  const selectionAuthority = useRef({ props, privacy });
+  useLayoutEffect(() => {
+    selectionAuthority.current = { props, privacy };
+  }, [props, privacy]);
+  const select = useCallback((code: string) => {
+    const { props, privacy } = selectionAuthority.current;
+    if (props.permittedCodes && !props.permittedCodes.includes(code)) return;
+    if (props.selectionAllowed && !props.selectionAllowed()) return;
+    if (privacy.generation !== 'unmanaged' && !freshPresentationGrant(privacy))
+      return;
+    props.onSelect(code);
+  }, []);
+  const presentation = useMemo(
+    () => ({ room: props.room, controller: createSpatialRevealController() }),
+    [props.room],
+  );
+  const revealController = presentation.controller;
+  const reveal = useSyncExternalStore(
+    revealController.subscribe,
+    revealController.getSnapshot,
+    revealController.getSnapshot,
+  );
+  const onFailure = props.onFailure;
+  const handleFailure = useCallback(
+    (message: string) => {
+      revealController.dispose();
+      onFailure(message);
+    },
+    [revealController, onFailure],
+  );
   const [command, setCommand] = useState<ViewCommand>({ kind: 'fit', id: 0 });
   const [hoverState, setHoverState] = useState<{
     room: RoomDefinition;
@@ -1301,6 +1630,21 @@ export default function RoomScene(props: RoomSceneProps) {
   const [localShowCounts, setShowCounts] = useState(false);
   const showCounts = props.showCounts ?? localShowCounts;
   const surface = useRef<HTMLDivElement>(null);
+  useInsertionEffect(() => {
+    const mask = () => {
+      if (surface.current) {
+        surface.current.hidden = true;
+        surface.current.inert = true;
+        surface.current.setAttribute('inert', '');
+      }
+    };
+    const remove = [
+      subscribePrivacyRevocation(mask),
+      subscribeAssignmentInvalidation(mask),
+      subscribeAuthoritativeCleanup(mask),
+    ];
+    return () => remove.forEach((unsubscribe) => unsubscribe());
+  }, []);
   const interactionButton = useRef<HTMLButtonElement>(null);
   const [dragHint, setDragHint] = useState(false);
   const hintTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -1370,14 +1714,16 @@ export default function RoomScene(props: RoomSceneProps) {
     };
   }, [active, setActive]);
   const hoverCount =
-    showCounts && activeHover
+    (showCounts || activeHover?.target.code === reveal.openCode) && activeHover
       ? occupiedLocation(props.locationOccupancy?.[activeHover.target.code])
       : null;
   return (
     <div
       ref={surface}
       data-room-surface="true"
-      className={styles.scene}
+      className={
+        props.compact ? `${styles.scene} ${styles.compact}` : styles.scene
+      }
       onBlurCapture={(event) => {
         if (!event.currentTarget.contains(event.relatedTarget)) {
           setActive(false);
@@ -1414,7 +1760,8 @@ export default function RoomScene(props: RoomSceneProps) {
       />
       <div className={styles.canvasFrame} aria-label="Interactive room canvas">
         <Canvas
-          onFailure={props.onFailure}
+          onLeaseChange={props.onGraphicsActiveChange}
+          onFailure={handleFailure}
           orthographic
           frameloop="demand"
           dpr={[1, 1.5]}
@@ -1454,17 +1801,21 @@ export default function RoomScene(props: RoomSceneProps) {
                     selectedCode={props.selectedCode}
                     hasRenderedSelection={renderedSelection}
                     highlighted={highlighted}
-                    onSelect={props.onSelect}
+                    onSelect={select}
                     profiles={props.room.rackFaceProfiles}
                     showAllLabels={showAllLabels}
                     hoveredCode={activeHover?.target.code ?? null}
                     locationOccupancy={props.locationOccupancy}
                     showCounts={showCounts}
                     canSelect={canSelect}
+                    openCode={reveal.openCode}
+                    revealSettled={reveal.phase === 'settled'}
                   />
                 ))}
                 <CameraRig
                   {...props}
+                  onFailure={handleFailure}
+                  revealController={revealController}
                   command={command}
                   orbitMode={orbitMode}
                   manualGesture={manualGesture}
@@ -1514,7 +1865,7 @@ export default function RoomScene(props: RoomSceneProps) {
               }}
               onClick={(event) => {
                 event.stopPropagation();
-                props.onSelect(activeHover.target.code);
+                select(activeHover.target.code);
               }}
               onDoubleClick={(event) => event.stopPropagation()}
               className={styles.locationLabel}
@@ -1585,7 +1936,11 @@ export default function RoomScene(props: RoomSceneProps) {
                     type="button"
                     className={styles.commandButton}
                     aria-pressed={props.selectedCode === code}
-                    onClick={() => props.onSelect(code)}
+                    disabled={Boolean(
+                      props.permittedCodes &&
+                      !props.permittedCodes.includes(code),
+                    )}
+                    onClick={() => select(code)}
                   >
                     {props.locationNames?.[code] ?? code}
                     {props.locationOccupancy?.[code] &&

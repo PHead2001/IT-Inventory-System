@@ -32,6 +32,7 @@ import {
   panel,
 } from '@/features/inventory/components/read-ui';
 import styles from '@/features/inventory/components/inventory-visual.module.css';
+import { DetailRoomPreview } from '@/features/room/detail-room-preview';
 export default async function AssetPage({
   params,
   searchParams,
@@ -142,6 +143,21 @@ export default async function AssetPage({
               </div>
             </dl>
           </section>
+          <DetailRoomPreview
+            locations={locations}
+            choices={
+              !site && location
+                ? [{ code: location.code, label: location.breadcrumb }]
+                : []
+            }
+            context={
+              asset.status === 'retired'
+                ? 'Retired asset: last recorded custody is shown above.'
+                : site
+                  ? 'This asset is assigned to a site. Site custody has no storage map.'
+                  : undefined
+            }
+          />
           {member.role === 'staff' && (
             <DetailTasks
               key={member.user_id + ':' + asset.id}

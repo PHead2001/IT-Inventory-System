@@ -12,6 +12,9 @@ import {
   Component,
   useCallback,
   useMemo,
+  useId,
+  useLayoutEffect,
+  useRef,
   useState,
   type ReactNode,
 } from 'react';
@@ -21,6 +24,11 @@ import { buildRoomBindings } from './bindings';
 import { inventoryDescendantCodes } from '../locations/hierarchy';
 import { LocationPicker } from '../locations/location-picker';
 import { roomHref } from './navigation';
+import {
+  focusToken,
+  sameFocusToken,
+  type FocusToken,
+} from './scene/spatial-reveal';
 
 const RoomScene = dynamic(() => import('./scene/room-scene'), {
   ssr: false,
@@ -77,6 +85,16 @@ export function RoomWorkspace({
   const [failure, setFailure] = useState<string | null>(null);
   const [ready, setReady] = useState(false);
   const [focusTick, setFocusTick] = useState(0);
+  const workspaceId = useId();
+  const [selectionGeneration, setSelectionGeneration] = useState({
+    code: selectedCode,
+    generation: 0,
+  });
+  if (selectionGeneration.code !== selectedCode)
+    setSelectionGeneration({
+      code: selectedCode,
+      generation: selectionGeneration.generation + 1,
+    });
   const [focusedCode, setFocusedCode] = useState<string | null>(null);
   const [focusCount, setFocusCount] = useState(0);
   const bindings = useMemo(() => buildRoomBindings(stableRoom), [stableRoom]);
@@ -88,15 +106,38 @@ export function RoomWorkspace({
     [locations, selectedCode],
   );
   const focusRequest = useMemo(
-    () => ({ code: bound ? selectedCode : null, requestId: focusTick }),
-    [bound, selectedCode, focusTick],
+    () =>
+      Object.freeze({
+        code: bound ? selectedCode : null,
+        requestId: focusTick,
+        scope: workspaceId + '|' + stableRoom.roomId,
+        generation: selectionGeneration.generation,
+        fitBeforeFlight:
+          selectionGeneration.generation === 0 && focusTick === 0,
+      }),
+    [
+      bound,
+      selectedCode,
+      focusTick,
+      stableRoom.roomId,
+      workspaceId,
+      selectionGeneration.generation,
+    ],
   );
   const onReady = useCallback(() => setReady(true), []);
   const onFailure = useCallback((message: string) => setFailure(message), []);
-  const onFocusComplete = useCallback((code: string | null) => {
-    setFocusedCode(code);
-    setFocusCount((count) => count + 1);
-  }, []);
+  const activeFocusToken = useRef<FocusToken | null>(null);
+  useLayoutEffect(() => {
+    activeFocusToken.current = focusToken(focusRequest, stableRoom.roomId);
+  }, [focusRequest, stableRoom.roomId]);
+  const onFocusComplete = useCallback(
+    (code: string | null, token?: FocusToken) => {
+      if (token && !sameFocusToken(token, activeFocusToken.current)) return;
+      setFocusedCode(code);
+      setFocusCount((count) => count + 1);
+    },
+    [],
+  );
   const requestFocus = () => {
     setFocusedCode(null);
     setFocusTick((tick) => tick + 1);
@@ -198,6 +239,7 @@ export function RoomWorkspace({
                     highlightedCodes={highlightedCodes}
                     focusRequest={focusRequest}
                     onSelect={select}
+                    permittedCodes={locations.map((location) => location.code)}
                     onReady={onReady}
                     onFailure={onFailure}
                     onFocusComplete={onFocusComplete}

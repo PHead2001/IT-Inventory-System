@@ -48,6 +48,80 @@ Navigation, page return, window focus and visibility restoration refresh enabled
 
 Use simple reusable geometry and restrained lighting, a capped device pixel ratio and demand rendering. Physical material colors are retained; accent edges/emissive feedback mark selection and other geometry dims slightly until clearing it. Full motion permits one bounded selection pulse; Reduced motion uses a static highlight. A reusable baked contact-alpha footprint and clipped floor grid add depth without dynamic shadow passes. Only controls, relevant hover changes, bounded visibility continuations, bounded focus transitions and the brief Full-motion pulse request extra frames. Nonessential pulses stop offscreen or in a hidden document. No heavy postprocessing or idle camera animation is needed. The canvas exposes passive camera telemetry for real-interaction browser assertions; it cannot set camera state.
 
+## Shared spatial composition and embedded maps
+
+Modeled selection uses one immutable scope/generation/request/code token for a
+750 ms camera flight followed by a 400 ms visual reveal. New selection, clear,
+camera commands and manual input retire an older flight before it can open the
+wrong location. Reduced motion applies the complete endpoint immediately.
+Drawers and containers translate through bounded visual offsets; shelf sections
+lift gently. Resting measurements, logical bindings and room coordinates stay
+unchanged. Moving child geometry retains one verified logical pointer owner.
+Selected labels and known selected counts follow the opened body. Rack and
+aggregate selections use their existing focus/highlight rather than a fabricated
+drawer. History restoration preserves camera intent; explicit selection and
+Center selected still request focus. Existing label visibility transactions run
+after camera and reveal transforms, with the same budgets and fallback actions.
+
+Destination pickers offer **Pick on map** in addition to their conventional tree.
+The optional modal portals outside whole-page transition capture. It stages a
+stable code and commits only after **Use location** resolves the latest eligible
+UUID using `pickerLocations`: active ancestor path, active/can-hold capability,
+source exclusions and the parent form's pending state. It never submits a task or
+moves inventory. Cancel, initialization failure and unmodeled locations retain
+the form draft and keyboard tree. Sites use their existing site picker, not map
+destinations. Every mesh, label, hover and overflow action passes the same latest
+permitted-code and private-session guard.
+Initial verification defers modal opening; a successful same-owner recheck opens
+the dialog. Cancel permanently retires that modal so a later recheck cannot reopen it.
+
+Asset, quantity and location details have an independently lazy storage preview.
+It initializes near the visible region, mounts one compact map, and owns a local
+camera separate from Spaces snapshots. Several positive quantity balances require
+an explicit choice. Site assignment, retired/archived context, inactive locations
+and absent geometry have truthful text. A chunk, graphics or count failure stays
+inside the optional region and cannot delay primary record readiness. Active
+embeds reuse the existing bounded caller-authorized occupancy read after graphics
+readiness; withdrawal aborts the read and conceals old/late counts. Selected reveal
+counts are independent of the initially disabled optional all-location overlay.
+Missing, loading and failed counts remain unknown rather than invented zero.
+An authorized child beneath a modeled room still needs its own geometry binding:
+an unmodeled child retains its recorded text path and Spaces link without an
+embedded canvas, invented camera target or selected-count request.
+
+The protected layout owns one graphics slot shared by Spaces, previews and picker
+maps, including initialization and disposal. Explicit picker maps have priority;
+withdrawn passive maps offer **Resume map**, and waiting never disables the tree.
+Acquisition precedes `createRoot`/renderer initialization. Allocated slots release
+only from the installed public Fiber `unmountComponentAtNode(canvas, callback)`
+completion; requests that never allocate cancel immediately. There is no timeout
+reclamation. The original actor/backend/privacy generation/revision/epoch binds
+each scene session. Revocation synchronously hides/inerts the scene and independent
+DOM portals, and late initialization/frame callbacks cannot publish private data.
+Privacy and session context cross Fiber's separate root explicitly. Ordinary
+verification pauses the original session; a different identity cannot rebind it.
+Committed actor/backend/generation drift permanently retires each canvas, map
+dialog and embedded-count owner even without a global invalidation event. Returning
+to the original identity cannot revive its scene or staged confirmation. An ordinary
+same-owner readiness recheck can resume after verification succeeds.
+
+Fiber 9.8.1 has a failed-construction compatibility edge: its public teardown
+calls `dispose(null)` if configure rejects before setting `scene`, and its store
+publication subscriber dereferences null `gl.xr`. Only that known rejected
+configure path obtains the public store via `render(null)` while configure's
+pending promise cannot commit. It fills the missing terminal snapshot scene with
+an empty `THREE.Scene` without publishing, then invokes public teardown. That root
+is never rendered/configured again. Successful configuration followed by another
+error uses ordinary public teardown. A real installed-Fiber regression verifies
+the failure callback and subsequent slot grant; mock-clock delay is library
+completion evidence, not WebGL/browser acceptance.
+
+Whole-page `PageArrival` capture excludes `/room`, asset/quantity record details
+and location details before their lazy previews load, including the preceding
+canvas-bearing route when leaving. The independent record-title pairing remains.
+Real browser/WebGL, narrow-screen and Full/Reduced-motion acceptance is still
+required for these source changes.
+
 ## Validation
 
 Pure tests prove transforms, canonical bindings, database-derived descendants, strict URL selection and camera limits. Deterministic fake-clock visibility tests exhaust the cold 8 ms fingerprint/projection/clipping/ray phases, prove same-revision completion without reprojecting triangles, invalidate processed buffer/material and DOM state between slices, conceal stale cached results during incomplete guards, and stop demand frames at completion or the 64-frame/resource ceiling. A canonical physical-geometry probe invokes the actual hook-free room JSX and checks that its guard leaves work allowance and all 28 location queries complete under unchanged aggregate ceilings. It uses deterministic synthetic checkpoint time to prove progress; elapsed samples from separate real-clock runs remain observations and never form a mandatory OS timing assertion. This does not establish browser rendering, frame rate, phone performance or the populated 375px placement acceptance. Component tests prove the scene/application contract, coherent pending navigation, aggregate selection, repeated focus, missing bindings, retry/failure and located/unlocated links.

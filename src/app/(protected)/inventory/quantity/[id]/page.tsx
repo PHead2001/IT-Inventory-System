@@ -37,6 +37,7 @@ import {
   panel,
 } from '@/features/inventory/components/read-ui';
 import styles from '@/features/inventory/components/inventory-visual.module.css';
+import { DetailRoomPreview } from '@/features/room/detail-room-preview';
 export default async function QuantityPage({
   params,
   searchParams,
@@ -165,6 +166,23 @@ export default async function QuantityPage({
               </p>
             )}
           </section>
+          <DetailRoomPreview
+            locations={locations}
+            choices={balances
+              .filter((balance) => balance.quantity > 0)
+              .map((balance) => ({
+                code: balance.location.code,
+                label:
+                  balance.location.breadcrumb +
+                  ' · ' +
+                  countLabel(balance.quantity, 'unit'),
+              }))}
+            context={
+              item.archived
+                ? 'Archived item: recorded positive stock locations are shown.'
+                : undefined
+            }
+          />
           {member.role === 'staff' && (
             <DetailTasks
               key={member.user_id + ':' + item.id}

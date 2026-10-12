@@ -26,6 +26,15 @@ export const roomNodeSchema = z.strictObject({
       color: z.string().regex(/^#[0-9a-fA-F]{6}$/),
       opacity: finite.min(0).max(1),
       edges: z.boolean(),
+      reveal: z
+        .strictObject({
+          offset: z.tuple([
+            finite.min(-24).max(24),
+            finite.min(-24).max(24),
+            finite.min(-24).max(24),
+          ]),
+        })
+        .optional(),
     })
     .optional(),
   interaction: z

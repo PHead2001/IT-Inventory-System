@@ -1,5 +1,10 @@
 'use client';
-import { createRoot, events, extend } from '@react-three/fiber';
+import {
+  createRoot,
+  events,
+  extend,
+  unmountComponentAtNode,
+} from '@react-three/fiber';
 import {
   Color,
   Group,
@@ -27,12 +32,45 @@ extend({
   LineSegments,
   LineBasicMaterial,
 });
-import { Component, useEffect, useRef, type ReactNode } from 'react';
+import {
+  Component,
+  useCallback,
+  useContext,
+  useEffect,
+  useInsertionEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from 'react';
+import {
+  PrivacyReadinessContext,
+  usePrivacyReadiness,
+} from '@/components/auth/privacy-readiness';
+import { freshPresentationGrant } from '@/components/experience/presentation-privacy';
+import {
+  assignmentEpoch,
+  readPrivacyRevocationRevision,
+  subscribeAssignmentInvalidation,
+  subscribePrivacyRevocation,
+  subscribeAuthoritativeCleanup,
+} from '@/features/scan/assign-batch';
+import { useRoomSceneAuthority } from './camera-snapshot-provider';
+import { cameraAuthorityKey } from './camera-snapshot-store';
+import {
+  ScenePriorityContext,
+  SceneSessionContext,
+  useSceneBudget,
+} from './scene-budget-provider';
+import type { SceneLease } from './scene-budget';
+import { teardownFailedCanvas } from './failed-canvas-teardown';
 
 type Configuration = NonNullable<
   Parameters<ReturnType<typeof createRoot>['configure']>[0]
 >;
 type Props = Configuration & {
+  onLeaseChange?: (active: boolean) => void;
   children: ReactNode;
   fallback?: ReactNode;
   onFailure(message: string): void;
@@ -62,8 +100,190 @@ export function SafeCanvas({
   children,
   fallback,
   onFailure,
+  onLeaseChange,
   ...configuration
 }: Props) {
+  const budget = useSceneBudget();
+  const priority = useContext(ScenePriorityContext);
+  const privacy = usePrivacyReadiness();
+  const authority = useRoomSceneAuthority();
+  const key = authority
+    ? cameraAuthorityKey(authority)
+    : privacy.generation === 'unmanaged'
+      ? 'unmanaged'
+      : null;
+  const [owner] = useState(() => {
+    let retired = false;
+    return {
+      key,
+      generation: privacy.generation,
+      revision: readPrivacyRevocationRevision(),
+      epoch: assignmentEpoch(),
+      retired: () => retired,
+      retire: () => {
+        retired = true;
+      },
+    };
+  });
+  const latest = useRef({ privacy, key, onLeaseChange });
+  useLayoutEffect(() => {
+    latest.current = { privacy, key, onLeaseChange };
+  }, [privacy, key, onLeaseChange]);
+  const host = useRef<HTMLDivElement>(null);
+  const [lease, setLease] = useState<SceneLease | null>(null);
+  const [retry, setRetry] = useState(0);
+  const leaseRef = useRef<SceneLease | null>(null);
+  useLayoutEffect(() => {
+    // A committed identity/environment change retires the original session even
+    // if an outer controller has not emitted its invalidation event yet.
+    if (
+      !owner.retired() &&
+      (owner.key !== key || owner.generation !== privacy.generation)
+    ) {
+      owner.retire();
+      if (host.current) {
+        host.current.hidden = true;
+        host.current.inert = true;
+        host.current.setAttribute('inert', '');
+      }
+      leaseRef.current?.cancel();
+    }
+  }, [key, privacy.generation, owner]);
+  const permittedFor = (candidate: {
+    privacy: typeof privacy;
+    key: string | null;
+  }) =>
+    !owner.retired() &&
+    owner.key !== null &&
+    owner.key === candidate.key &&
+    owner.generation === candidate.privacy.generation &&
+    owner.revision === readPrivacyRevocationRevision() &&
+    owner.epoch === assignmentEpoch() &&
+    (candidate.privacy.generation === 'unmanaged'
+      ? candidate.privacy.ready
+      : freshPresentationGrant(candidate.privacy));
+  const current = useCallback(() => {
+    const { privacy, key } = latest.current;
+    return (
+      !owner.retired() &&
+      owner.key !== null &&
+      owner.key === key &&
+      owner.generation === privacy.generation &&
+      owner.revision === readPrivacyRevocationRevision() &&
+      owner.epoch === assignmentEpoch() &&
+      (privacy.generation === 'unmanaged'
+        ? privacy.ready
+        : freshPresentationGrant(privacy))
+    );
+  }, [owner]);
+  const session = useMemo(() => ({ current }), [current]);
+  useInsertionEffect(() => {
+    const retire = () => {
+      owner.retire();
+      if (host.current) {
+        host.current.hidden = true;
+        host.current.inert = true;
+        host.current.setAttribute('inert', '');
+      }
+      leaseRef.current?.cancel();
+    };
+    const remove = [
+      subscribePrivacyRevocation(retire),
+      subscribeAssignmentInvalidation(retire),
+      subscribeAuthoritativeCleanup(retire),
+    ];
+    return () => {
+      owner.retire();
+      remove.forEach((unsubscribe) => unsubscribe());
+    };
+  }, [owner]);
+  useEffect(() => {
+    if (!current()) return;
+    let live = true;
+    let granted = false;
+    const request = budget.request(
+      priority,
+      () => {
+        granted = true;
+        if (leaseRef.current && live && current()) {
+          setLease(leaseRef.current);
+          latest.current.onLeaseChange?.(true);
+        }
+      },
+      () => {
+        if (live) {
+          setLease(null);
+          latest.current.onLeaseChange?.(false);
+        }
+      },
+    );
+    leaseRef.current = request;
+    if (granted && current()) {
+      setLease(request);
+      latest.current.onLeaseChange?.(true);
+    }
+    return () => {
+      live = false;
+      request.cancel();
+      latest.current.onLeaseChange?.(false);
+      leaseRef.current = null;
+    };
+    // A session never adopts a new identity; ordinary verification resumes the original session.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [budget, priority, privacy.ready, key, owner, retry]);
+  const permitted = permittedFor({ privacy, key });
+  return (
+    <div
+      ref={host}
+      hidden={!permitted}
+      inert={!permitted}
+      style={{ height: '100%', width: '100%' }}
+    >
+      {lease && permitted ? (
+        <CanvasRoot
+          {...configuration}
+          onFailure={(message) => {
+            if (current()) onFailure(message);
+          }}
+          fallback={fallback}
+          lease={lease}
+          current={current}
+        >
+          <PrivacyReadinessContext value={privacy}>
+            <SceneSessionContext value={session}>
+              {children}
+            </SceneSessionContext>
+          </PrivacyReadinessContext>
+        </CanvasRoot>
+      ) : (
+        <div className="p-4 text-sm">
+          <p role="status">
+            The map is paused while another map is in use. The location browser
+            remains available.
+          </p>
+          <button
+            type="button"
+            className="min-h-11 text-cyan-300 underline"
+            onClick={() => {
+              if (current()) setRetry((value) => value + 1);
+            }}
+          >
+            Resume map
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function CanvasRoot({
+  children,
+  fallback,
+  onFailure,
+  lease,
+  current,
+  ...configuration
+}: Props & { lease: SceneLease; current(): boolean }) {
   const canvas = useRef<HTMLCanvasElement>(null);
   const container = useRef<HTMLDivElement>(null);
   const root = useRef<ReturnType<typeof createRoot> | null>(null);
@@ -71,16 +291,17 @@ export function SafeCanvas({
   const latest = useRef({ children, configuration });
   useEffect(() => {
     latest.current = { children, configuration };
-    if (ready.current)
+    if (ready.current && current())
       root.current?.render(
         <GraphicsBoundary onFailure={onFailure}>{children}</GraphicsBoundary>,
       );
-  }, [children, configuration, onFailure]);
+  }, [children, configuration, onFailure, current]);
   useEffect(() => {
     const element = canvas.current,
       host = container.current;
     if (!element || !host) return;
     let disposed = false;
+    let tearingDown = false;
     let lastWidth = 0,
       lastHeight = 0;
     let queue = Promise.resolve();
@@ -97,18 +318,33 @@ export function SafeCanvas({
       lastHeight = height;
       queue = queue.then(async () => {
         if (disposed) return;
+        let configureRejected = false;
         try {
-          root.current ??= createRoot(element);
-          await root.current.configure({
-            ...latest.current.configuration,
-            events,
-            size: { width, height, top: 0, left: 0 },
-            onCreated: (state) => {
-              // Drei Html portals into events.connected, so connect the host, never the canvas fallback subtree.
-              state.events.connect?.(host);
-            },
-          });
-          if (disposed) return;
+          if (!current()) return;
+          if (!root.current) {
+            if (!lease.allocate()) return;
+            try {
+              root.current = createRoot(element);
+            } catch (error) {
+              lease.complete();
+              throw error;
+            }
+          }
+          await root.current
+            .configure({
+              ...latest.current.configuration,
+              events,
+              size: { width, height, top: 0, left: 0 },
+              onCreated: (state) => {
+                // Drei Html portals into events.connected, so connect the host, never the canvas fallback subtree.
+                state.events.connect?.(host);
+              },
+            })
+            .catch((error: unknown) => {
+              configureRejected = true;
+              throw error;
+            });
+          if (disposed || !current()) return;
           ready.current = true;
           root.current.render(
             <GraphicsBoundary onFailure={onFailure}>
@@ -116,7 +352,19 @@ export function SafeCanvas({
             </GraphicsBoundary>,
           );
         } catch {
-          if (!disposed)
+          const report = !disposed;
+          disposed = true;
+          ready.current = false;
+          if (root.current && !tearingDown) {
+            tearingDown = true;
+            if (configureRejected)
+              teardownFailedCanvas(root.current, element, () =>
+                lease.complete(),
+              );
+            else unmountComponentAtNode(element, () => lease.complete());
+            root.current = null;
+          }
+          if (report)
             onFailure(
               'The room renderer could not initialize. Use the location list or retry.',
             );
@@ -132,11 +380,20 @@ export function SafeCanvas({
       cancelAnimationFrame(frame);
       observer.disconnect();
       ready.current = false;
-      const current = root.current;
-      root.current = null;
-      void queue.finally(() => current?.unmount());
+      void queue.finally(() => {
+        const current = root.current;
+        root.current = null;
+        if (current && !tearingDown) {
+          tearingDown = true;
+          unmountComponentAtNode(element, () => lease.complete());
+        }
+        // No allocation belongs to the outer request, whose cancellation releases
+        // it immediately. StrictMode may replay this inner effect on that lease.
+      });
     };
-  }, [onFailure]);
+    // This allocation owns one original lease; callback changes cannot recreate it.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [lease]);
   return (
     <div
       ref={container}

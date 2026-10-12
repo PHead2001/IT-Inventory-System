@@ -8,6 +8,7 @@ export function generateMetadata() {
 }
 import { ProtectedPrivacyContent } from '@/components/auth/privacy-content';
 import { ShowInRoom } from '@/features/room/show-in-room';
+import { DetailRoomPreview } from '@/features/room/detail-room-preview';
 import Link from '@/components/experience/route-link';
 import { notFound, redirect } from 'next/navigation';
 import { readFilters } from '@/features/inventory/read-model';
@@ -124,6 +125,10 @@ export default async function LocationPage({
               Export
             </ExportLink>
           </nav>
+          <DetailRoomPreview
+            locations={locations}
+            choices={[{ code: location.code, label: location.breadcrumb }]}
+          />
           {children.length > 0 && (
             <section className={panel + ' mb-5'}>
               <h2 className="mb-3 text-lg font-semibold">Child locations</h2>

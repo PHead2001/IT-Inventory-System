@@ -1,5 +1,37 @@
 # Validation
 
+## Spatial composition source slice
+
+W13/W14/A302/A303 focused coverage includes immutable focus precedence and
+interruption, 750/400 ms completion ordering, Reduced endpoints, measured-rest
+binding preservation, selected exact counts with the optional overlay off, map
+and tree UUID parity/no submission/draft preservation, current eligibility and
+pending-parent checks, modal revocation masking, lazy multi-balance detail choice,
+independently bounded embedded occupancy, one-scene preemption/resume and late
+initialization rejection.
+Canvas, map-dialog and embedded-count regressions also cover committed
+actor/backend/generation A/B/A retirement without global invalidation, ordinary
+same-owner readiness recovery and pending initialization that finishes after
+retirement. `fiber-teardown.test.ts` executes the installed public
+Fiber root/configure/unmount contract in jsdom, proving that a rejected renderer
+construction releases the next lease only after actual teardown completion. It
+does not create WebGL or prove graphics appearance. Successful-configure errors
+use ordinary teardown and never enter the failed-configure adapter.
+Additional authored regressions cover actual modal opening after initial
+verification, permanent cancel retirement, an unmodeled child within IT Closet,
+captured camera publication and actual RoomScene selections through the original
+picker owner. These source assertions require fresh execution on this candidate.
+
+Use the canonical `npm run test -- --maxWorkers=1` with the affected room,
+location-picker and PageArrival test files, then `npm run typecheck`, scoped
+zero-warning lint and formatting. This local source slice has no migration or
+database mutation. Browser acceptance still requires populated Spaces and all
+three detail surfaces, storage workflows, Full/Reduced motion, desktop/390 px,
+keyboard fallback, manual focus interruption, live mesh/hover/overflow gating,
+Back/camera restoration, context loss and actual disposal/resource overlap.
+Independent architecture review and full exact-HEAD PR certification remain
+separate gates; focused jsdom passes do not fulfill audited visual acceptance.
+
 ## C403 live-search timing coverage
 
 `tests/e2e/inventory-search.spec.ts` uses applied URL, input, row count,

@@ -34,7 +34,10 @@ export function RoomLabel({
   const register = useRoomLabelLayout();
   const interactive = !!code && !!onSelect;
   const occupied = occupiedLocation(occupancy);
-  const counts = occupied ? occupancyText(occupied) : null;
+  const counts =
+    occupancy && (selected || occupied)
+      ? occupancyText(occupancy, selected)
+      : null;
   const [focused, setFocused] = useState(false);
   const [hovered, setHovered] = useState(false);
   const expanded = focused || hovered;

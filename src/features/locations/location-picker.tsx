@@ -1,6 +1,10 @@
 'use client';
 
 import { useEffect, useId, useMemo, useRef, useState } from 'react';
+import dynamic from 'next/dynamic';
+import { usePrivacyReadiness } from '@/components/auth/privacy-readiness';
+import { freshPresentationGrant } from '@/components/experience/presentation-privacy';
+import { RoomRegionBoundary } from '../room/room-region-boundary';
 import { RequiredMark } from '@/components/forms/validation';
 import { countLabel } from '@/lib/count';
 import { pickerPosition } from './picker-position';
@@ -14,8 +18,12 @@ import {
   type PickerMode,
   type PickerTreeRow,
 } from './picker-model';
+const LocationMapPicker = dynamic(() => import('./location-map-picker'), {
+  ssr: false,
+});
 
 export type LocationPickerProps = {
+  mapEnabled?: boolean;
   locations: LocationRef[];
   mode: PickerMode;
   label: string;
@@ -40,6 +48,7 @@ export type LocationPickerProps = {
 };
 
 export function LocationPicker({
+  mapEnabled = true,
   locations,
   mode,
   label,
@@ -61,6 +70,8 @@ export function LocationPicker({
   description,
   className = '',
 }: LocationPickerProps) {
+  const privacy = usePrivacyReadiness();
+  const [mapOpen, setMapOpen] = useState(false);
   const emptyAccessibleLabel =
     emptyLabel === 'All locations'
       ? 'All locations, no location filter'
@@ -500,6 +511,58 @@ export function LocationPicker({
         </span>
       </button>
       {name && <input type="hidden" name={name} value={selectedValue} />}
+      {mode === 'destination' && mapEnabled && (
+        <button
+          type="button"
+          className="min-h-11 text-sm text-cyan-300 underline disabled:opacity-50"
+          disabled={disabled || loading || Boolean(loadError)}
+          onClick={() => {
+            close();
+            setMapOpen(true);
+          }}
+        >
+          Pick on map
+        </button>
+      )}
+      {mapOpen && (
+        <RoomRegionBoundary
+          fallback={
+            <p role="status" className="text-sm">
+              Map unavailable. Choose a location in the browser.
+            </p>
+          }
+        >
+          <LocationMapPicker
+            locations={locations}
+            excludeIds={excludeIds}
+            disabled={disabled || loading || Boolean(loadError)}
+            initialValue={selectedValue}
+            onClose={() => {
+              setMapOpen(false);
+              triggerRef.current?.focus();
+            }}
+            onUse={(code) => {
+              if (
+                disabled ||
+                loading ||
+                loadError ||
+                (privacy.generation !== 'unmanaged' &&
+                  !freshPresentationGrant(privacy))
+              )
+                return;
+              // Resolve from the latest complete eligibility model only at explicit confirmation.
+              const destination = pickerLocations(locations, 'destination', {
+                excludeIds,
+              }).find((location) => location.code === code);
+              if (!destination) return;
+              if (value === undefined) setLocalValue(destination.id);
+              onValueChange?.(destination.id);
+              setMapOpen(false);
+              triggerRef.current?.focus();
+            }}
+          />
+        </RoomRegionBoundary>
+      )}
       {validationMessage && (
         <p id={messageId} role="alert" className="text-sm text-amber-200">
           {validationMessage}

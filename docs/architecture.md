@@ -1,5 +1,15 @@
 # Application architecture
 
+Optional record previews and storage-destination maps reuse the room's logical
+code selection, camera flight and visual opening controller. Form confirmation
+resolves the latest eligible UUID through the existing picker model and never
+dispatches inventory commands. The protected layout owns a single graphics lease
+covering initialization through actual Fiber disposal completion; original
+actor/backend/privacy authority binds each renderer, with synchronous DOM/portal
+masking and explicit context across its separate root. Detail readiness is
+independent of lazy graphics and counts. See [room navigation](room-navigation.md#shared-spatial-composition-and-embedded-maps)
+for the pinned failed-initialization adapter and remaining browser acceptance.
+
 Record and relevant settings/form routes stream only generic server metadata.
 Caller-authorized cached page readers remain the only source of private names.
 Successful page slots register those names with explicit server route paths in the
