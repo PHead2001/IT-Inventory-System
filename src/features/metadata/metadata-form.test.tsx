@@ -1593,6 +1593,9 @@ describe('published metadata form', () => {
       />,
     );
     expect(screen.getByLabelText('Asset tag')).toHaveValue('');
+    expect(screen.getByLabelText('Asset tag')).not.toHaveAttribute(
+      'aria-describedby',
+    );
     expect(screen.getByLabelText('Serial number')).toBeInTheDocument();
     expect(screen.queryByLabelText('Item code (SKU)')).toBeNull();
     expect(screen.queryByLabelText('Reorder threshold (optional)')).toBeNull();
@@ -3613,6 +3616,14 @@ describe('creation intent review', () => {
       />,
     );
     await waitFor(() => expect(screen.getByLabelText('Name')).toBeEnabled());
+    const tagDescription = screen
+      .getByLabelText('Asset tag')
+      .getAttribute('aria-describedby');
+    expect(tagDescription).toBeTruthy();
+    expect(document.getElementById(tagDescription!)).toHaveAttribute(
+      'role',
+      'status',
+    );
     fireEvent.change(screen.getByLabelText('Name'), {
       target: { value: '  Device  ' },
     });

@@ -1295,7 +1295,7 @@ export function MetadataForm({
             scopeId + '-metadata-' + name,
             name === 'item_code' && invalidItemCode
               ? scopeId + '-metadata-item_code-help'
-              : name === 'asset_tag'
+              : name === 'asset_tag' && !preview
                 ? scopeId + '-metadata-asset-tag-check'
                 : name === 'reorder_threshold'
                   ? scopeId + '-metadata-threshold-help'

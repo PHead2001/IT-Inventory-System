@@ -1,5 +1,16 @@
 # Validation
 
+## Room label transition correctness
+
+Captured selected-label transition regressions use a deterministic injected clock
+and a 150,000-operation cap to verify complete coverage, collision-free placement,
+pointer containment, the full selected footprint and stable settled pins. These
+are geometry and bounded-work assertions, not host timing benchmarks. Separate
+injected-deadline regressions verify cooperative expiry and safe retained pins;
+the runtime's 16 ms deadline is unchanged. Browser placement and performance
+acceptance require the populated room E2E checks and are not established by these
+unit tests.
+
 ## C403 live-search timing coverage
 
 `tests/e2e/inventory-search.spec.ts` uses applied URL, input, row count,

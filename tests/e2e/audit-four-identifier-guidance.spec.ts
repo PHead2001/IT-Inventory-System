@@ -236,10 +236,18 @@ for (const width of [1280, 390])
           .select('id,asset_tag')
           .eq('category_id', f.categoryId);
         expect(unchanged.error).toBeNull();
-        expect(unchanged.data).toHaveLength(3);
-        expect(
-          unchanged.data!.find((row) => row.id === one.entity_id)?.asset_tag,
-        ).toBe(collision);
+        expect(unchanged.data).toEqual(
+          expect.arrayContaining([
+            { id: one.entity_id, asset_tag: collision },
+            { id: two.entity_id, asset_tag: secondTag },
+            { id: historical.entity_id, asset_tag: retiredTag },
+            {
+              id: colonAsset.entity_id,
+              asset_tag: `A4-COLON-${f.suffix}`,
+            },
+          ]),
+        );
+        expect(unchanged.data).toHaveLength(4);
       } finally {
         await f.cleanup();
       }

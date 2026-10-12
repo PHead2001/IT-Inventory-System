@@ -1638,7 +1638,7 @@ function AssignmentFields({
               {match.context && (
                 <p
                   id={`assign-match-context-${index}`}
-                  className="break-words text-sm text-slate-400"
+                  className="break-words text-sm text-[var(--muted)]"
                 >
                   <ScanMatchContext match={match} />
                 </p>

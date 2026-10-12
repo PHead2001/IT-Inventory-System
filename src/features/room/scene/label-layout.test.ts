@@ -475,12 +475,22 @@ describe('scene label placement', () => {
               }
             : entry,
       );
-      const detailed = layoutLabelsDetailed(input, narrowViewport, morePanel);
+      // Geometry and work-budget correctness must not depend on OS scheduling.
+      // Separate injected-deadline tests exercise the runtime watchdog.
+      const detailed = layoutLabelsDetailed(
+        input,
+        narrowViewport,
+        morePanel,
+        { maxOperations: 150_000 },
+        () => 0,
+      );
+      expect(detailed.status, JSON.stringify(detailed.stats)).toBe('complete');
       const result = detailed.placements;
       expect(
         result.every((entry) => entry.visible),
         JSON.stringify(detailed.stats),
       ).toBe(true);
+      assertPacking(input, result, narrowViewport, morePanel);
       const selected = input.find((entry) => entry.selected)!;
       const full = result.find((entry) => entry.id === selected.id)!;
       expect(full.compact ?? false).toBe(false);
@@ -507,7 +517,15 @@ describe('scene label placement', () => {
           previous: { dx: placed.dx, dy: placed.dy, compact: !!placed.compact },
         };
       });
-      expect(layoutLabels(settled, narrowViewport, morePanel)).toEqual(result);
+      const settledResult = layoutLabelsDetailed(
+        settled,
+        narrowViewport,
+        morePanel,
+        { maxOperations: 150_000 },
+        () => 0,
+      );
+      expect(settledResult.status).toBe('complete');
+      expect(settledResult.placements).toEqual(result);
       expect(settled.find((entry) => entry.id === selected.id)?.focused).toBe(
         true,
       );
@@ -575,7 +593,7 @@ describe('scene label placement', () => {
         : entry,
     );
     // An operation cap makes the priority regression deterministic across hosts.
-    // The real-clock transition cases above independently retain the 16ms gate.
+    // Separate injected-deadline tests retain the cooperative watchdog contract.
     const result = layoutLabelsDetailed(
       input,
       narrowViewport,
