@@ -1,6 +1,7 @@
 // @vitest-environment node
 import { afterEach, expect, it, vi } from 'vitest';
 import { NextRequest } from 'next/server';
+import { unstable_doesMiddlewareMatch } from 'next/experimental/testing/server';
 import type { CookieMethodsServer } from '@supabase/ssr';
 vi.mock('server-only', () => ({}));
 const sdk = vi.hoisted(() => ({
@@ -14,10 +15,35 @@ vi.mock('@supabase/ssr', () => sdk);
 vi.mock('./lib/supabase/config', () => ({
   supabaseConfig: sdk.config,
 }));
-import { proxy } from './proxy';
+import { proxy, config } from './proxy';
 afterEach(() => {
   vi.unstubAllEnvs();
   vi.restoreAllMocks();
+});
+it.each([
+  '/inventory/quantity/missing.jpg',
+  '/inventory/assets/missing.svg',
+  '/locations/missing.png',
+  '/sites/missing.webp',
+  '/settings/sites/missing.gif',
+  '/settings/locations/missing.jpeg',
+  '/settings/forms/missing.jpg',
+  '/sites/missing.jpg/open/asset',
+])('matches and replaces spoofed document identity for %s', async (path) => {
+  expect(
+    unstable_doesMiddlewareMatch({ config, nextConfig: {}, url: path }),
+  ).toBe(true);
+  sdk.createServerClient.mockReturnValue({
+    auth: { getClaims: async () => ({ data: null, error: null }) },
+  });
+  const response = await proxy(
+    new NextRequest(`http://localhost:3000${path}?ignored=1`, {
+      headers: { 'x-inventory-document-path': '/inventory/quantity/new' },
+    }),
+  );
+  expect(
+    response.headers.get('x-middleware-request-x-inventory-document-path'),
+  ).toBe(path);
 });
 it.each([
   '/api/auth/logout',

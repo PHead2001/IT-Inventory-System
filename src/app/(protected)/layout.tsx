@@ -19,6 +19,7 @@ import {
   CommandProvider,
   CommandButtons,
 } from '@/features/commands/command-provider';
+import { admitDocumentRecord } from './document-admission.server';
 
 export const dynamic = 'force-dynamic';
 
@@ -28,6 +29,7 @@ export default async function ApplicationLayout({
   children: React.ReactNode;
 }) {
   const { member } = await requireMember();
+  await admitDocumentRecord();
   const privacy = await readLogoutGeneration();
   return (
     <ProtectedPrivacyBoundary

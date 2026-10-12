@@ -586,8 +586,15 @@ test('Spaces preserves current contents across slow responses and uses coherent 
       .click();
     await expect.poll(() => pending.length).toBe(3);
     const panel = page.getByRole('region', { name: 'Location inventory' });
+    await expect(panel).toHaveAttribute('aria-busy', 'true');
     await expect(
-      panel.getByText('Loading contents for Black Container…'),
+      panel.locator('[data-loading-shape="contents"]'),
+    ).toBeVisible();
+    // The polite announcement lives outside the busy region so it is not deferred.
+    await expect(
+      page
+        .getByRole('status')
+        .filter({ hasText: 'Loading contents for Black Container…' }),
     ).toBeVisible();
     await expect(panel.getByText(/matching rows/)).toHaveCount(0);
     pending[2].release();
@@ -595,6 +602,10 @@ test('Spaces preserves current contents across slow responses and uses coherent 
       has: page.getByRole('link', { name: setup.splitName, exact: true }),
     });
     await expect(split.getByText('1 unit', { exact: true })).toBeVisible();
+    await expect(panel).toHaveAttribute('aria-busy', 'false');
+    await expect(panel.locator('[data-loading-shape="contents"]')).toHaveCount(
+      0,
+    );
     await expect(
       split.getByText('Across all storage: 2 available'),
     ).toBeVisible();

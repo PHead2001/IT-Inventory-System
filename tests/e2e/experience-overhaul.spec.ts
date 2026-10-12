@@ -1,4 +1,5 @@
 import { metadataReviewButton, metadataSaveButton } from './metadata-controls';
+import { expectCategoryAdded } from './configuration-assertions';
 import {
   expect,
   test,
@@ -517,9 +518,7 @@ test('a newly required field requests targeted confirmation before changing the 
   await page.goto('/settings/categories');
   await page.getByLabel('Display name').fill(category);
   await page.getByRole('button', { name: 'Add category' }).click();
-  await expect(page.getByRole('status')).toContainText(
-    `Category added: ${category}.`,
-  );
+  await expectCategoryAdded(page, category);
   await page.goto('/inventory/quantity/new');
   const create = page.getByRole('form', { name: 'Add quantity item' });
   await create
@@ -576,9 +575,7 @@ test('a stale category publication retains the exact unsaved input for explicit 
   await page.goto('/settings/categories');
   await page.getByLabel('Display name').fill(category);
   await page.getByRole('button', { name: 'Add category' }).click();
-  await expect(page.getByRole('status')).toContainText(
-    `Category added: ${category}.`,
-  );
+  await expectCategoryAdded(page, category);
   await page.goto('/settings/forms');
   await page.getByRole('link', { name: category, exact: true }).click();
   await expect(page).toHaveURL(/\/settings\/forms\/[0-9a-f-]{36}$/);
@@ -944,12 +941,27 @@ test('Back into a selected modeled space focuses from its saved camera baseline'
   await page.goto('/room?location=ITC-S1A');
   const viewer = page.getByTestId('room-viewer');
   await expect(viewer).toHaveAttribute('data-focused-code', 'ITC-S1A');
+  const beforePan = await readyCameraSnapshot(viewer);
   await (
     await mapOverflow(viewer)
   )
     .getByRole('button', { name: 'Pan right' })
     .click();
-  const displaced = await readyCameraSnapshot(viewer);
+  // A non-null saved snapshot may still precede the scene's pan-command commit.
+  const pan: { snapshot: CameraSnapshot | null } = { snapshot: null };
+  await expect
+    .poll(async () => {
+      pan.snapshot = parseCameraSnapshot(
+        await viewer.getAttribute('data-camera-view'),
+      );
+      return (
+        pan.snapshot !== null &&
+        JSON.stringify(pan.snapshot.target) !== JSON.stringify(beforePan.target)
+      );
+    })
+    .toBe(true);
+  const displaced = pan.snapshot;
+  if (!displaced) throw new Error('Panned camera snapshot unavailable');
   await page.getByLabel('Space', { exact: true }).selectOption('it-office');
   await expect(viewer).toHaveCount(0);
   await page.goBack();
