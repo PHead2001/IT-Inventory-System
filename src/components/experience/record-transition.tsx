@@ -1,6 +1,6 @@
 'use client';
 
-import { ViewTransition, useContext } from 'react';
+import { ViewTransition, useContext, type ComponentProps } from 'react';
 import Link from '@/components/experience/route-link';
 import { useRouteMotion } from './route-motion';
 import {
@@ -92,13 +92,11 @@ export function InventoryRecordLink({
 
 export function RecordTitle({
   record,
-  className,
   children,
+  ...headingProps
 }: {
   record: RecordIdentity;
-  className?: string;
-  children: React.ReactNode;
-}) {
+} & ComponentProps<'h1'>) {
   const { intent, validNow, pathname, finishAfterSnapshot, current } =
     useRouteMotion();
   const contentIdentity = useContext(RouteContentIdentityContext);
@@ -117,7 +115,7 @@ export function RecordTitle({
         finishAfterSnapshot(instance);
       }}
     >
-      <h1 className={className}>{children}</h1>
+      <h1 {...headingProps}>{children}</h1>
     </ViewTransition>
   );
 }

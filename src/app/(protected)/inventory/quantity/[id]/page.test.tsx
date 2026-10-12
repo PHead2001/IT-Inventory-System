@@ -77,3 +77,4 @@ it('keeps a quantity correction distinct from custody movement in the record his
   expect(history).not.toHaveTextContent('No destination');
   expect(history).not.toHaveTextContent('5 units');
 });
+vi.mock('server-only', () => ({}));

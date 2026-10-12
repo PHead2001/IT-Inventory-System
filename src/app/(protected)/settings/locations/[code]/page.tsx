@@ -1,12 +1,18 @@
 import { RouteReady } from '@/components/experience/route-ready';
 import { routeReadyProps } from '@/components/experience/route-ready.server';
-import Link from '@/components/experience/route-link';
+import { PrivateDocumentTitle } from '@/components/auth/private-document-title';
 import { ProtectedPrivacyContent } from '@/components/auth/privacy-content';
+import Link from '@/components/experience/route-link';
 import { notFound } from 'next/navigation';
 import { requireMember } from '@/lib/auth/session.server';
-import { getManagedLocations } from '@/features/custody/queries.server';
+import { readManagedLocationPage } from './read.server';
+import { recordTitle } from '@/app/(protected)/record-title';
 import { LocationManagementForm } from '@/features/custody/management-form';
 import { panel } from '@/features/inventory/components/read-ui';
+
+export function generateMetadata() {
+  return recordTitle('Rename location');
+}
 
 export default async function ManageLocationPage({
   params,
@@ -17,8 +23,7 @@ export default async function ManageLocationPage({
 }) {
   const { member } = await requireMember();
   const { code } = await params;
-  const locations = await getManagedLocations();
-  const location = locations.find((row) => row.code === code);
+  const location = await readManagedLocationPage(code);
   if (!location) notFound();
   return (
     <ProtectedPrivacyContent>
@@ -28,6 +33,10 @@ export default async function ManageLocationPage({
           searchParams,
         )}
       >
+        <PrivateDocumentTitle
+          routePath={`/settings/locations/${encodeURIComponent(code)}`}
+          title={recordTitle(location.name, 'Location settings').title.absolute}
+        />
         <>
           <Link
             className="inline-flex min-h-11 items-center text-cyan-300 underline"

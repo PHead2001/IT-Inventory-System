@@ -273,6 +273,9 @@ export function mapHistory(
       .filter(([key]) => (before[key] ?? null) !== (after[key] ?? null))
       .map(([key, field]) => ({
         field,
+        ...(['asset_tag', 'serial_number', 'item_code'].includes(key)
+          ? { presentation: 'code' as const }
+          : {}),
         before: display(key, before[key], before),
         after: display(key, after[key], after),
       })),

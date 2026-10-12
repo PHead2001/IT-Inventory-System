@@ -1,4 +1,10 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import {
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+} from '@testing-library/react';
 import { beforeEach, expect, it, vi } from 'vitest';
 import { TaskResetContext } from '@/features/inventory/components/task-state';
 import { CustodyChangeForm } from './custody-change-form';
@@ -236,6 +242,14 @@ it.each(['transfer', 'assign', 'return'] as const)(
     fireEvent.click(screen.getByRole('button', { name: /^Review / }));
     const review = screen.getByRole('region', { name: 'Review changes' });
     expect(review).toHaveTextContent(`${sourceLabel} → ${destinationLabel}`);
+    if (action === 'assign' || action === 'return') {
+      const storageCode = action === 'assign' ? right.code : left.code;
+      const code = within(review).getByText(storageCode, { exact: true });
+      expect(code).toHaveClass('experience-code');
+      expect(code.parentElement).toHaveTextContent(
+        `${action === 'assign' ? sourceLabel : destinationLabel}`,
+      );
+    }
     expect(submitCustody).not.toHaveBeenCalled();
     fireEvent.click(
       screen.getByRole('button', {
@@ -1041,3 +1055,130 @@ it.each([
     expect(submitCustody).toHaveBeenCalledOnce();
   },
 );
+
+const retirementProps = {
+  kind: 'asset' as const,
+  action: 'retire' as const,
+  entityId: id(1),
+  entityName: 'Laptop',
+  version: '7',
+  locations: [location],
+  sites: [site],
+  currentSite: site,
+};
+it.each(['E-waste', 'Lost', 'Stolen', 'RMA', 'Sold', 'Transferred'])(
+  'uses retirement preset %s in the editable site reason, review and exact custody payload',
+  async (preset) => {
+    vi.mocked(submitCustody).mockResolvedValue({
+      ok: true,
+      entityId: id(1),
+      version: '8',
+      changed: true,
+    });
+    render(<CustodyChangeForm {...retirementProps} />);
+    fireEvent.click(screen.getByRole('button', { name: preset }));
+    expect(screen.getByLabelText('Reason (required)')).toHaveValue(preset);
+    const form = screen.getByRole('form', { name: 'Retire asset at site' });
+    fireEvent.submit(form);
+    expect(screen.getByText('Reason: ' + preset)).toBeVisible();
+    expect(submitCustody).not.toHaveBeenCalled();
+    fireEvent.submit(form);
+    await waitFor(() => expect(submitCustody).toHaveBeenCalledOnce());
+    expect(vi.mocked(submitCustody).mock.calls[0][0]).toEqual({
+      operation: 'asset_site_change',
+      requestId: expect.any(String),
+      payload: {
+        action: 'retire',
+        asset_id: id(1),
+        expected_version: '7',
+        reason: preset,
+        reference: null,
+        source_site_id: site.id,
+      },
+    });
+  },
+);
+it('keeps a manual site retirement reason and optional note stable through refresh and exact unknown-outcome replay', async () => {
+  vi.mocked(submitCustody)
+    .mockRejectedValueOnce(new Error('response lost'))
+    .mockResolvedValueOnce({
+      ok: true,
+      entityId: id(1),
+      version: '8',
+      changed: true,
+    });
+  const view = render(<CustodyChangeForm {...retirementProps} />);
+  fireEvent.click(screen.getByRole('button', { name: 'Sold' }));
+  fireEvent.change(screen.getByLabelText('Reason (required)'), {
+    target: { value: 'Sold after owner approval' },
+  });
+  fireEvent.change(screen.getByLabelText('Retirement note (optional)'), {
+    target: { value: '  Invoice 42  ' },
+  });
+  view.rerender(
+    <CustodyChangeForm
+      {...retirementProps}
+      sites={[...retirementProps.sites]}
+    />,
+  );
+  expect(screen.getByLabelText('Reason (required)')).toHaveValue(
+    'Sold after owner approval',
+  );
+  const form = screen.getByRole('form', { name: 'Retire asset at site' });
+  fireEvent.submit(form);
+  expect(
+    screen.getByText('Reason: Sold after owner approval — Invoice 42'),
+  ).toBeVisible();
+  fireEvent.submit(form);
+  await screen.findByText(/result could not be confirmed/i);
+  const command = vi.mocked(submitCustody).mock.calls[0][0];
+  expect(command).toMatchObject({
+    payload: { reason: 'Sold after owner approval — Invoice 42' },
+  });
+  expect(screen.getByLabelText('Retirement note (optional)')).toBeDisabled();
+  // The result message can render while the async transition still has the
+  // disabled Saving button. Retry only after that transition has settled.
+  await waitFor(() =>
+    expect(
+      screen.getByRole('button', { name: 'Retry same custody transaction' }),
+    ).toBeEnabled(),
+  );
+  view.rerender(
+    <CustodyChangeForm
+      {...retirementProps}
+      version="8"
+      sites={[]}
+      currentSite={null}
+    />,
+  );
+  expect(screen.getByLabelText('Reason (required)')).toHaveValue(
+    'Sold after owner approval',
+  );
+  expect(screen.getByLabelText('Retirement note (optional)')).toHaveValue(
+    '  Invoice 42  ',
+  );
+  fireEvent.click(
+    screen.getByRole('button', { name: 'Retry same custody transaction' }),
+  );
+  await waitFor(() => expect(submitCustody).toHaveBeenCalledTimes(2));
+  expect(vi.mocked(submitCustody).mock.calls[1][0]).toEqual(command);
+  expect(await screen.findByRole('button', { name: 'Done' })).toBeVisible();
+});
+it.each([
+  ['', 'note cannot replace reason'],
+  ['  ', 'note cannot replace reason'],
+  ['E-waste', 'x'.repeat(2000)],
+])('blocks blank or overlong site retirement reason %s', (reason, note) => {
+  render(<CustodyChangeForm {...retirementProps} />);
+  fireEvent.change(screen.getByLabelText('Reason (required)'), {
+    target: { value: reason },
+  });
+  fireEvent.change(screen.getByLabelText('Retirement note (optional)'), {
+    target: { value: note },
+  });
+  fireEvent.submit(screen.getByRole('form', { name: 'Retire asset at site' }));
+  expect(
+    screen.queryByRole('button', { name: 'Retire asset at site' }),
+  ).toBeNull();
+  expect(submitCustody).not.toHaveBeenCalled();
+});

@@ -1,4 +1,5 @@
 import { fits } from './viewport-controls';
+import { expectPrivateTitleExcluded } from '../helpers/private-title';
 import { interfaceTest, interfaceLogin } from './interface-fixtures';
 import { openRecordTask } from './record-task-controls';
 import { metadataReviewButton, metadataSaveButton } from './metadata-controls';
@@ -826,7 +827,9 @@ interfaceTest(
       await expect(
         page.getByRole('region', { name: 'Forms and fields' }),
       ).toBeVisible();
-      await expect(page).toHaveTitle('Category forms · IT Inventory');
+      await expect(page).toHaveTitle(
+        `${interfaceRecord.categoryName} form · Settings · IT Inventory`,
+      );
       await expect(
         page.getByRole('navigation', { name: 'Designer panels' }),
       ).toBeVisible();
@@ -840,9 +843,7 @@ interfaceTest(
         interfaceRecord.categoryId,
         interfaceRecord.name,
       ])
-        await expect(page.locator('head title')).not.toContainText(
-          privateValue,
-        );
+        await expectPrivateTitleExcluded(page, privateValue);
     }
   },
 );

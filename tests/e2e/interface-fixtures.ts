@@ -20,6 +20,7 @@ export const interfaceTest = base.extend<{
   interfaceRecord: {
     id: string;
     categoryId: string;
+    categoryName: string;
     name: string;
     itemCode: string;
   };
@@ -42,9 +43,10 @@ export const interfaceTest = base.extend<{
     let categoryId: string | undefined, itemId: string | undefined;
     try {
       const suffix = randomUUID();
+      const categoryName = 'Interface fixture ' + suffix;
       const category = await command(caller, 'category_create', {
         code: 'A3-UI-' + suffix.replaceAll('-', '').slice(0, 16).toUpperCase(),
-        name: 'Interface fixture ' + suffix,
+        name: categoryName,
         sort_order: 900,
       });
       categoryId = category.category_id;
@@ -65,7 +67,13 @@ export const interfaceTest = base.extend<{
         custom_patch: { set: {}, unset: [] },
       });
       itemId = item.entity_id;
-      await provideRecord({ id: itemId, categoryId, name, itemCode });
+      await provideRecord({
+        id: itemId,
+        categoryId,
+        categoryName,
+        name,
+        itemCode,
+      });
     } finally {
       await cleanupInterfaceFixture({
         record: async () => {

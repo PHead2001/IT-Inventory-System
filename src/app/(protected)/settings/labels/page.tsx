@@ -9,7 +9,7 @@ export default async function LabelSettingsPage({
 }: {
   searchParams?: Promise<Record<string, string | string[] | undefined>>;
 } = {}) {
-  const { labelDefaults, canManage } = await getLabelSettings();
+  const { labelDefaults, canManage, labelBinding } = await getLabelSettings();
   return (
     <ProtectedPrivacyContent>
       <RouteReady {...await routeReadyProps('/settings/labels', searchParams)}>
@@ -21,6 +21,7 @@ export default async function LabelSettingsPage({
           <SettingsPanel
             mode="labels"
             labelDefaults={labelDefaults}
+            labelBinding={labelBinding}
             canManage={canManage}
           />
         </>

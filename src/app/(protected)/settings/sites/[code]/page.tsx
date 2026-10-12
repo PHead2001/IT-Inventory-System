@@ -1,13 +1,16 @@
 import { RouteReady } from '@/components/experience/route-ready';
 import { routeReadyProps } from '@/components/experience/route-ready.server';
-import Link from '@/components/experience/route-link';
+import { PrivateDocumentTitle } from '@/components/auth/private-document-title';
+import { readManagedSitePage } from './read.server';
+import { recordTitle } from '@/app/(protected)/record-title';
+export function generateMetadata() {
+  return recordTitle('Site details and settings');
+}
 import { ProtectedPrivacyContent } from '@/components/auth/privacy-content';
+import Link from '@/components/experience/route-link';
 import { notFound } from 'next/navigation';
 import { requireMember } from '@/lib/auth/session.server';
-import {
-  getSite,
-  getSiteArchiveReview,
-} from '@/features/custody/queries.server';
+import { getSiteArchiveReview } from '@/features/custody/queries.server';
 import { SiteManagementForm } from '@/features/custody/management-form';
 import { panel } from '@/features/inventory/components/read-ui';
 
@@ -20,7 +23,7 @@ export default async function ManageSitePage({
 }) {
   const { member } = await requireMember();
   const { code } = await params;
-  const site = await getSite(code);
+  const site = await readManagedSitePage(code);
   if (!site) notFound();
   const review =
     member.role === 'staff' && member.can_manage_configuration
@@ -34,6 +37,10 @@ export default async function ManageSitePage({
           searchParams,
         )}
       >
+        <PrivateDocumentTitle
+          routePath={`/settings/sites/${encodeURIComponent(code)}`}
+          title={recordTitle(site.name, 'Site settings').title.absolute}
+        />
         <>
           <Link
             className="inline-flex min-h-11 items-center text-cyan-300 underline"

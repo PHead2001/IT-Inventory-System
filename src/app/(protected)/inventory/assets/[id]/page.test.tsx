@@ -116,3 +116,4 @@ it('renders one authoritative asset timeline without duplicating custody or merg
     screen.getByRole('link', { name: 'Current site (SITE-1)' }),
   ).toBeVisible();
 });
+vi.mock('server-only', () => ({}));

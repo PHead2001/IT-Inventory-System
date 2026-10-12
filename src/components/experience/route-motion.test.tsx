@@ -30,6 +30,7 @@ import {
   assignmentEpoch,
   readPrivacyRevocationRevision,
 } from '@/features/scan/assign-batch';
+import { RecordName } from '@/components/record-name';
 import { SettingsPanel } from '@/features/configuration/settings-panel';
 import {
   InventoryBackLink,
@@ -1292,5 +1293,61 @@ it('hash Back keeps a still-mounted Settings request busy until its actual actio
     expect(runtime.refresh).toHaveBeenCalledOnce();
   } finally {
     window.history.replaceState(null, '', originalHref);
+  }
+});
+
+it('shares the measured record heading while disclosure keeps one stable accessible h1 and a non-participating probe', async () => {
+  const spies = [
+    vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockReturnValue(300),
+    vi.spyOn(HTMLElement.prototype, 'scrollWidth', 'get').mockReturnValue(300),
+    vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get').mockReturnValue(100),
+    vi.spyOn(HTMLElement.prototype, 'scrollHeight', 'get').mockReturnValue(180),
+  ];
+  const probes: HTMLElement[] = [];
+  const append = document.body.append.bind(document.body);
+  const appendSpy = vi
+    .spyOn(document.body, 'append')
+    .mockImplementation((...nodes) => {
+      nodes.forEach((node) => {
+        if (
+          node instanceof HTMLElement &&
+          node.getAttribute('aria-hidden') === 'true'
+        )
+          probes.push(node);
+      });
+      append(...nodes);
+    });
+  try {
+    const rendered = render(view(<List />));
+    fireEvent.click(screen.getByRole('link', { name: 'Cable row 2' }));
+    const name = screen
+      .getByRole('link', { name: 'Cable row 2' })
+      .getAttribute('data-test-transition-name');
+    runtime.pathname = detailPath;
+    rendered.rerender(
+      view(<RecordName record={record} name={'Cable '.repeat(35)} />),
+    );
+    const heading = screen.getByRole('heading');
+    expect(heading).toHaveAttribute('data-test-transition-name', name);
+    expect(heading).toHaveAttribute(
+      'data-test-transition-share',
+      'record-title',
+    );
+    const toggle = screen.getByRole('button', { name: 'Show full name' });
+    expect(toggle).toHaveAttribute('aria-controls', heading.id);
+    toggle.focus();
+    fireEvent.click(toggle);
+    expect(screen.getByRole('button', { name: 'Show less' })).toHaveFocus();
+    expect(screen.getByRole('heading')).toBe(heading);
+    expect(document.querySelectorAll('h1')).toHaveLength(1);
+    expect(probes).toHaveLength(1);
+    expect(probes[0].style.viewTransitionName).toBe('none');
+    expect(probes[0].isConnected).toBe(false);
+    fireEvent.click(toggle);
+    expect(screen.getByRole('heading')).toBe(heading);
+    expect(toggle).toHaveAttribute('aria-expanded', 'false');
+  } finally {
+    appendSpy.mockRestore();
+    spies.forEach((spy) => spy.mockRestore());
   }
 });

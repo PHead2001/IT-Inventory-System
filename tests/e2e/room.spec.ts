@@ -645,10 +645,13 @@ test('all visible room text shares collision placement and demand rendering sett
   const viewer = await ready(page);
   const canvas = viewer.locator('canvas');
   await page.getByRole('button', { name: 'Fit room' }).click();
+  await settledLabels(page);
   await setRoomLabels(page, true);
   for (const width of [1280, 375, 390]) {
     await page.setViewportSize({ width, height: 1000 });
+    await settledLabels(page);
     await page.getByRole('button', { name: 'Fit room' }).click();
+    await settledLabels(page);
     const labels = viewer.locator(
       '[data-room-label-code], [data-room-decorative-label], [data-hover-tooltip]',
     );
@@ -657,23 +660,29 @@ test('all visible room text shares collision placement and demand rendering sett
       .toBeGreaterThan(0);
     await expect
       .poll(async () => {
-        const boxes = (
-          await Promise.all(
-            (await labels.filter({ visible: true }).all()).map((label) =>
-              label.boundingBox(),
-            ),
+        // Measure every visible label in one synchronous DOM snapshot so
+        // pairwise comparisons cannot combine rectangles from different frames.
+        const boxes = await labels
+          .filter({ visible: true })
+          .evaluateAll((elements) =>
+            elements.map((element) => {
+              const { x, y, width, height } = element.getBoundingClientRect();
+              return { x, y, width, height };
+            }),
+          );
+        return (
+          boxes.length > 0 &&
+          boxes.every((box, index) =>
+            boxes
+              .slice(index + 1)
+              .every(
+                (other) =>
+                  box.x + box.width <= other.x ||
+                  other.x + other.width <= box.x ||
+                  box.y + box.height <= other.y ||
+                  other.y + other.height <= box.y,
+              ),
           )
-        ).filter((box) => box !== null);
-        return boxes.every((box, index) =>
-          boxes
-            .slice(index + 1)
-            .every(
-              (other) =>
-                box!.x + box!.width <= other!.x ||
-                other!.x + other!.width <= box!.x ||
-                box!.y + box!.height <= other!.y ||
-                other!.y + other!.height <= box!.y,
-            ),
         );
       })
       .toBe(true);

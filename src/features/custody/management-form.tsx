@@ -977,7 +977,8 @@ export function LocationManagementForm({
       </h2>
       <p className="text-sm text-slate-300">
         Storage layout changes require an application update. This action
-        changes only the display name. Permanent code: {baseline.code}.
+        changes only the display name. Permanent code:{' '}
+        <span className="experience-code">{baseline.code}</span>.
       </p>
       <label className="block space-y-2">
         Name

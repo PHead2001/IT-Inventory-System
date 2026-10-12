@@ -1,5 +1,11 @@
 import { RouteReady } from '@/components/experience/route-ready';
 import { routeReadyProps } from '@/components/experience/route-ready.server';
+import { PrivateDocumentTitle } from '@/components/auth/private-document-title';
+import { readLocationPage } from './read.server';
+import { recordTitle } from '@/app/(protected)/record-title';
+export function generateMetadata() {
+  return recordTitle('Location details');
+}
 import { ProtectedPrivacyContent } from '@/components/auth/privacy-content';
 import { ShowInRoom } from '@/features/room/show-in-room';
 import Link from '@/components/experience/route-link';
@@ -12,7 +18,6 @@ import {
   hasInventoryConstraints,
 } from '@/features/inventory/scope-presentation';
 import {
-  getLocation,
   getInventory,
   getLocations,
 } from '@/features/inventory/queries.server';
@@ -38,7 +43,7 @@ export default async function LocationPage({
       Array.isArray(value) ? value[0] : value,
     ]),
   );
-  const location = await getLocation(code);
+  const location = await readLocationPage(code);
   if (!location) notFound();
   const [result, locations] = await Promise.all([
     getInventory({ ...filters, location: code }),
@@ -71,6 +76,10 @@ export default async function LocationPage({
           searchParams,
         )}
       >
+        <PrivateDocumentTitle
+          routePath={`/locations/${encodeURIComponent(code)}`}
+          title={recordTitle(location.name, 'Locations').title.absolute}
+        />
         <>
           <Link
             className="inline-flex min-h-11 items-center text-cyan-300 underline"

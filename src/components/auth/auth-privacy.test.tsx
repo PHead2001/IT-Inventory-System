@@ -15,7 +15,11 @@ import { ProtectedPrivacyContent } from './privacy-content';
 import { AuthForm } from './auth-form';
 import { useEffect, useState, type ComponentProps } from 'react';
 import { PrivateRestorationGate } from './privacy-readiness';
-import { invalidateAssignmentPrivacy } from '@/features/scan/assign-batch';
+import { PrivateDocumentTitle } from './private-document-title';
+import {
+  revokePrivatePresentation,
+  invalidateAssignmentPrivacy,
+} from '@/features/scan/assign-batch';
 import { QueueLogoutForm } from '@/features/labels/queue-logout-form';
 import { HistoryList } from '@/features/inventory/components/read-ui';
 const protectedBinding = {
@@ -83,7 +87,12 @@ beforeEach(() => {
     generation: { status: 'absent' },
   });
 });
-afterEach(() => vi.restoreAllMocks());
+afterEach(() => {
+  vi.restoreAllMocks();
+  document.head
+    .querySelectorAll('[data-title-regression]')
+    .forEach((node) => node.remove());
+});
 it('clears all acknowledged password logout namespaces before navigating without retaining password fields', async () => {
   seed();
   actions.setPassword.mockResolvedValueOnce({
@@ -1190,4 +1199,211 @@ it('distinguishes an outgoing history disclosure from its incoming page during h
   ).not.toBeVisible();
   fireEvent.click(screen.getByText('View event details'));
   expect(screen.getByText('Removed 12 units across 1 location.')).toBeVisible();
+});
+
+function NamedRetainedTask() {
+  const [command] = useState(() => crypto.randomUUID());
+  return (
+    <>
+      <PrivateDocumentTitle
+        routePath="/inventory/quantity/owned"
+        title="Private quantity · IT Inventory"
+      />
+      <form data-command={command} aria-label="Retained task">
+        <input aria-label="Draft" defaultValue="original" />
+        <button disabled>Outcome unknown</button>
+      </form>
+    </>
+  );
+}
+function namedBoundary(binding = protectedBinding) {
+  return (
+    <ProtectedTestBoundary binding={binding}>
+      <NamedRetainedTask />
+    </ProtectedTestBoundary>
+  );
+}
+it('synchronously clears revoked names, restores only fresh same-owner titles, and retains draft and command identity', async () => {
+  routing.pathname = '/inventory/quantity/owned';
+  render(namedBoundary());
+  const input = await screen.findByLabelText('Draft');
+  const form = screen.getByRole('form', { name: 'Retained task' });
+  const command = form.dataset.command;
+  fireEvent.change(input, { target: { value: 'unsaved draft' } });
+  await waitFor(() =>
+    expect(document.title).toBe('Private quantity · IT Inventory'),
+  );
+  const retainedTitles = Array.from({ length: 2 }, () => {
+    const node = document.createElement('title');
+    node.dataset.titleRegression = 'retained';
+    node.textContent = 'Private quantity · IT Inventory';
+    document.head.append(node);
+    return node;
+  });
+  let finish!: (value: { status: 'absent' }) => void;
+  actions.readLogoutPrivacyGeneration.mockImplementationOnce(
+    () =>
+      new Promise((resolve) => {
+        finish = resolve;
+      }),
+  );
+  act(() => {
+    revokePrivatePresentation();
+    expect(document.title).toBe('IT Inventory');
+    expect(
+      [...document.head.querySelectorAll('title')].map(
+        (node) => node.textContent,
+      ),
+    ).toEqual(Array.from({ length: 3 }, () => 'IT Inventory'));
+    expect(retainedTitles.every((node) => node.isConnected)).toBe(true);
+  });
+  await waitFor(() => expect(finish).toBeTypeOf('function'));
+  expect(input).not.toBeVisible();
+  expect(form).toHaveAttribute('data-command', command);
+  await act(async () => finish({ status: 'absent' }));
+  await waitFor(() =>
+    expect(document.title).toBe('Private quantity · IT Inventory'),
+  );
+  await waitFor(() =>
+    expect(
+      [...document.head.querySelectorAll('title')].map(
+        (node) => node.textContent,
+      ),
+    ).toEqual(
+      Array.from({ length: 3 }, () => 'Private quantity · IT Inventory'),
+    ),
+  );
+  expect(screen.getByLabelText('Draft')).toBe(input);
+  expect(input).toHaveValue('unsaved draft');
+  expect(screen.getByRole('form', { name: 'Retained task' })).toBe(form);
+  expect(
+    screen.getByRole('button', { name: 'Outcome unknown' }),
+  ).toBeDisabled();
+});
+it('retains the visible accepted title during a benign check, clears failure, and repairs delayed generic metadata only after recovery', async () => {
+  routing.pathname = '/inventory/quantity/owned';
+  render(namedBoundary());
+  await screen.findByLabelText('Draft');
+  await waitFor(() =>
+    expect(document.title).toBe('Private quantity · IT Inventory'),
+  );
+  let reject!: (error: Error) => void;
+  actions.readLogoutPrivacyGeneration.mockImplementationOnce(
+    () =>
+      new Promise((_resolve, fail) => {
+        reject = fail;
+      }),
+  );
+  fireEvent.focus(window);
+  await waitFor(() => expect(reject).toBeTypeOf('function'));
+  expect(screen.getByLabelText('Draft')).toBeVisible();
+  expect(document.title).toBe('Private quantity · IT Inventory');
+  await act(async () => reject(new Error('Failed verification')));
+  expect(document.title).toBe('IT Inventory');
+  document.title = 'Quantity item · IT Inventory';
+  await waitFor(() => expect(document.title).toBe('IT Inventory'));
+  fireEvent.click(
+    screen.getByRole('button', { name: 'Retry privacy cleanup' }),
+  );
+  await waitFor(() =>
+    expect(document.title).toBe('Private quantity · IT Inventory'),
+  );
+  document.title = 'Quantity item · IT Inventory';
+  await waitFor(() =>
+    expect(document.title).toBe('Private quantity · IT Inventory'),
+  );
+});
+it('does not allow retained route slots or a different owner to restore a title', async () => {
+  routing.pathname = '/inventory/quantity/owned';
+  const view = render(namedBoundary());
+  await screen.findByLabelText('Draft');
+  routing.pathname = '/inventory/assets/other';
+  view.rerender(namedBoundary());
+  await waitFor(() => expect(document.title).toBe('IT Inventory'));
+  document.title = 'Asset · IT Inventory';
+  await waitFor(() => expect(document.title).toBe('IT Inventory'));
+  routing.pathname = '/inventory/quantity/owned';
+  actions.readProtectedPrivacyIdentity.mockResolvedValue({ status: 'denied' });
+  view.rerender(
+    namedBoundary({ ...protectedBinding, actorId: 'different-actor' }),
+  );
+  await screen.findByRole('alert');
+  expect(document.title).toBe('IT Inventory');
+  expect(screen.queryByLabelText('Draft')).not.toBeVisible();
+});
+
+it('never exposes the registered name before the initial private check completes', async () => {
+  routing.pathname = '/inventory/quantity/owned';
+  document.title = 'Stale private name';
+  let finish!: (value: { status: 'absent' }) => void;
+  actions.readLogoutPrivacyGeneration.mockImplementationOnce(
+    () =>
+      new Promise((resolve) => {
+        finish = resolve;
+      }),
+  );
+  render(namedBoundary());
+  expect(document.title).toBe('IT Inventory');
+  expect(screen.queryByLabelText('Draft')).not.toBeInTheDocument();
+  await waitFor(() => expect(finish).toBeTypeOf('function'));
+  await act(async () => finish({ status: 'absent' }));
+  await waitFor(() =>
+    expect(document.title).toBe('Private quantity · IT Inventory'),
+  );
+});
+it('does not take ownership of safe public Auth metadata', async () => {
+  document.title = 'Sign in · IT Inventory';
+  render(
+    <AuthPrivacyBoundary>
+      <button>Sign in</button>
+    </AuthPrivacyBoundary>,
+  );
+  await screen.findByRole('button', { name: 'Sign in' });
+  expect(document.title).toBe('Sign in · IT Inventory');
+});
+
+it('restores preexisting Inventory and Add quantity titles only after current navigation verification without remounting its draft', async () => {
+  routing.pathname = '/inventory';
+  document.title = 'Inventory · IT Inventory';
+  let finish!: (value: { status: 'absent' }) => void;
+  actions.readLogoutPrivacyGeneration.mockImplementationOnce(
+    () =>
+      new Promise((resolve) => {
+        finish = resolve;
+      }),
+  );
+  const ordinary = () => (
+    <ProtectedTestBoundary>
+      <form aria-label="Ordinary draft">
+        <input aria-label="Ordinary name" defaultValue="draft" />
+      </form>
+    </ProtectedTestBoundary>
+  );
+  const view = render(ordinary());
+  expect(document.title).toBe('IT Inventory');
+  await waitFor(() => expect(finish).toBeTypeOf('function'));
+  await act(async () => finish({ status: 'absent' }));
+  const input = await screen.findByLabelText('Ordinary name');
+  fireEvent.change(input, { target: { value: 'unchanged unsaved name' } });
+  expect(document.title).toBe('Inventory · IT Inventory');
+  actions.readLogoutPrivacyGeneration.mockImplementationOnce(
+    () =>
+      new Promise((resolve) => {
+        finish = resolve;
+      }),
+  );
+  routing.pathname = '/inventory/quantity/new';
+  view.rerender(ordinary());
+  expect(document.title).toBe('IT Inventory');
+  await act(async () => {
+    await Promise.resolve();
+  });
+  document.title = 'Old private metadata';
+  await waitFor(() => expect(document.title).toBe('IT Inventory'));
+  await act(async () => finish({ status: 'absent' }));
+  await waitFor(() =>
+    expect(document.title).toBe('Add quantity item · IT Inventory'),
+  );
+  expect(screen.getByLabelText('Ordinary name')).toBe(input);
+  expect(input).toHaveValue('unchanged unsaved name');
 });

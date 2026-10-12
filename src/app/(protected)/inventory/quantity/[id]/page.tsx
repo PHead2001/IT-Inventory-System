@@ -1,12 +1,16 @@
+import { InventoryBackLink } from '@/components/experience/record-transition';
 import { RouteReady } from '@/components/experience/route-ready';
 import { routeReadyProps } from '@/components/experience/route-ready.server';
+import { PrivateDocumentTitle } from '@/components/auth/private-document-title';
+import { RecordName } from '@/components/record-name';
+import { readQuantityPage } from './read.server';
+import { recordTitle } from '@/app/(protected)/record-title';
+export function generateMetadata() {
+  return recordTitle('Quantity item');
+}
 import { custodyEventLabel } from '@/features/custody/vocabulary';
 import { ProtectedPrivacyContent } from '@/components/auth/privacy-content';
 import { RecordStatus } from '@/components/record-status';
-import {
-  InventoryBackLink,
-  RecordTitle,
-} from '@/components/experience/record-transition';
 import Link from '@/components/experience/route-link';
 import { inventoryReturnPath } from '@/features/inventory/create-return';
 import { notFound } from 'next/navigation';
@@ -14,7 +18,6 @@ import { requireMember } from '@/lib/auth/session.server';
 import { countLabel } from '@/lib/count';
 import { siteCountCorrectionSummary } from '@/features/inventory/history-summary';
 import {
-  getQuantityDetail,
   getQuantityArchiveReview,
   getCategories,
   getLocations,
@@ -45,7 +48,7 @@ export default async function QuantityPage({
   const { id } = await params;
   const query = await searchParams;
   const returnTo = inventoryReturnPath(query?.returnTo);
-  const detail = await getQuantityDetail(id);
+  const detail = await readQuantityPage(id);
   if (!detail) notFound();
   const { item, balances, history, stockSummary } = detail;
   const [
@@ -75,6 +78,10 @@ export default async function QuantityPage({
           searchParams,
         )}
       >
+        <PrivateDocumentTitle
+          routePath={`/inventory/quantity/${encodeURIComponent(id)}`}
+          title={recordTitle(detail.item.name).title.absolute}
+        />
         <>
           <section className={`experience-surface-bright ${styles.detailHero}`}>
             <InventoryBackLink
@@ -92,12 +99,10 @@ export default async function QuantityPage({
                 <p className="experience-eyebrow">
                   {item.categoryName} · Quantity item
                 </p>
-                <RecordTitle
+                <RecordName
+                  name={item.name}
                   record={{ kind: 'quantity', id: item.id }}
-                  className="experience-heading mt-2"
-                >
-                  {item.name}
-                </RecordTitle>
+                />
                 <p className="experience-muted mt-2 text-sm">
                   <RecordStatus
                     status={item.archived ? 'archived' : 'active'}
