@@ -1,17 +1,44 @@
 'use client';
 import {
+  LoadingAnnouncement,
+  LoadingReveal,
+  LoadingSkeleton,
+} from '@/components/ui/loading-skeleton';
+import { useRouteRouter as useRouter } from '@/components/experience/route-pending';
+import { recordStatusLabel } from '@/lib/record-status';
+import { RecordStatus } from '@/components/record-status';
+import { usePathname, useSearchParams } from 'next/navigation';
+import {
   useCallback,
   useEffect,
+  useLayoutEffect,
+  useId,
   useMemo,
   useRef,
   useState,
   type FormEvent,
   type SetStateAction,
 } from 'react';
-import Link from 'next/link';
-import { usePathname, useRouter, useSearchParams } from 'next/navigation';
+import Link from '@/components/experience/route-link';
+import {
+  PrivateRestorationGate,
+  usePrivacyReadiness,
+  usePrivacyRevocationRevision,
+} from '@/components/auth/privacy-readiness';
+import {
+  assignmentEpoch,
+  readAuthoritativeCleanupRevision,
+  readPrivacyRevocationRevision,
+} from '@/features/scan/assign-batch';
+
 import { flushSync } from 'react-dom';
 import { waitForSheetReadiness } from './sheet-readiness';
+import { PrintMediaEditor } from './print-media-editor';
+import {
+  parseLayoutDraft,
+  type LayoutDraft,
+  type PrintLayout,
+} from './print-layout';
 import type {
   CategoryRef,
   LocationRef,
@@ -47,6 +74,8 @@ import {
   defaultFilters,
   defaultJob,
   MAX_COPIES,
+  MAX_QUEUE_STORAGE_LENGTH,
+  MAX_COPY_DRAFT_LENGTH,
   MAX_DISTINCT,
   MAX_LABELS,
   parseStoredQueue,
@@ -155,10 +184,14 @@ type LabelDesignerProps = {
 
 export function LabelDesigner(props: LabelDesignerProps) {
   return (
-    <LabelDesignerWorkspace
-      key={queueStorageKey(props.origin, props.memberId)}
-      {...props}
-    />
+    <PrivateRestorationGate
+      scope={queueStorageKey(props.origin, props.memberId)}
+    >
+      <LabelDesignerWorkspace
+        key={queueStorageKey(props.origin, props.memberId)}
+        {...props}
+      />
+    </PrivateRestorationGate>
   );
 }
 
@@ -172,6 +205,14 @@ function LabelDesignerWorkspace({
   addIntent = emptyIntent,
   defaults = defaultJob,
 }: LabelDesignerProps) {
+  const privacy = usePrivacyReadiness();
+  const revocationRevision = usePrivacyRevocationRevision();
+  const observedRevocation = useRef(readPrivacyRevocationRevision());
+  const [revoked, setRevoked] = useState(false);
+  const admitted =
+    privacy.ready && (!revoked || privacy.verifiedEpoch === assignmentEpoch());
+  const cleanupRevision = useRef(readAuthoritativeCleanupRevision());
+  const restoredStorageKey = useRef<string | null>(null);
   const router = useRouter();
   const pathname = usePathname();
   const query = useSearchParams().toString();
@@ -193,6 +234,16 @@ function LabelDesignerWorkspace({
     initial.map(entryFor),
   );
   const currentEntries = useRef(initial.map(entryFor));
+  const copyNoticeId = useId();
+  const [copyDrafts, setCopyDraftsState] = useState<Record<string, string>>({});
+  const currentCopyDrafts = useRef<Record<string, string>>({});
+  const copiesEpoch = useRef(0);
+  const [copyGeneration, setCopyGeneration] = useState(0);
+  const copiesValid = Object.keys(copyDrafts).length === 0;
+  const setCopyDrafts = useCallback((next: Record<string, string>) => {
+    currentCopyDrafts.current = next;
+    setCopyDraftsState(next);
+  }, []);
   const setEntries = useCallback((update: SetStateAction<QueueEntry[]>) => {
     const next =
       typeof update === 'function' ? update(currentEntries.current) : update;
@@ -224,6 +275,17 @@ function LabelDesignerWorkspace({
     setDraftState(next);
   };
   const [job, setJob] = useState<JobSettings>(defaults);
+  const [layoutValid, setLayoutValid] = useState(true);
+  const [mediaDraft, setMediaDraft] = useState<LayoutDraft | null>(null);
+  const [mediaDraftRecovery, setMediaDraftRecovery] = useState<{
+    value: unknown;
+  } | null>(null);
+  const [layoutRecovery, setLayoutRecovery] = useState<{
+    value: unknown;
+  } | null>(null);
+  const [mediaReset, setMediaReset] = useState(0);
+  const geometryEpoch = useRef(0);
+  const [mediaGeneration, setMediaGeneration] = useState(0);
   const [locationCode, setLocationCode] = useState('');
   const [search, setSearch] = useState<{
     rows: LabelCandidate[];
@@ -231,6 +293,7 @@ function LabelDesignerWorkspace({
     page: number;
     pageSize: number;
   } | null>(null);
+  const [searchPending, setSearchPending] = useState(true);
   const [printRows, setPrintRows] = useState<LabelRecord[] | null>(null);
   const [prepared, setPrepared] = useState<LiveLabel[] | null>(null);
   const [validatedKey, setValidatedKey] = useState('');
@@ -252,16 +315,101 @@ function LabelDesignerWorkspace({
   const selectionKey = entries.map(queueIdentity).join('|');
   const clearPrintAuthorization = useRef<(() => void) | null>(null);
   const activePrintAbort = useRef<AbortController | null>(null);
+  const cancelCopyPrint = () => {
+    copiesEpoch.current++;
+    setCopyGeneration(copiesEpoch.current);
+    activePrintAbort.current?.abort();
+    clearPrintAuthorization.current?.();
+    setReadySheetKey('');
+    setFallbackPending(false);
+    setFormatAcknowledged(false);
+  };
+  const changeMedia = (
+    next: JobSettings,
+    valid = true,
+    rawDraft: LayoutDraft | null = mediaDraft,
+  ) => {
+    geometryEpoch.current++;
+    setMediaGeneration(geometryEpoch.current);
+    activePrintAbort.current?.abort();
+    clearPrintAuthorization.current?.();
+    setReadySheetKey('');
+    setFormatAcknowledged(false);
+    setFallbackPending(false);
+    setLayoutValid(valid);
+    setJob(next);
+    setMediaDraft(rawDraft);
+    if (valid) {
+      setLayoutRecovery(null);
+      setMediaDraftRecovery(null);
+    }
+  };
   const byId = useMemo(
     () => new Map(live.map((record) => [queueIdentity(record), record])),
     [live],
   );
+  useLayoutEffect(() => {
+    const wiped = readAuthoritativeCleanupRevision();
+    if (
+      observedRevocation.current === revocationRevision &&
+      cleanupRevision.current === wiped
+    )
+      return;
+    observedRevocation.current = revocationRevision;
+    setRevoked(true);
+    cleanupRevision.current = wiped;
+    queueEpoch.current++;
+    manualClearEpoch.current++;
+    selectionEpoch.current++;
+    copiesEpoch.current++;
+    geometryEpoch.current++;
+    setCopyGeneration(copiesEpoch.current);
+    setMediaGeneration(geometryEpoch.current);
+    setCopyDrafts({});
+    setLayoutRecovery(null);
+    setMediaDraft(null);
+    setMediaDraftRecovery(null);
+    setLayoutValid(true);
+    setMediaReset((value) => value + 1);
+    setFormatAcknowledged(false);
+    setFallbackPending(false);
+    activePrintAbort.current?.abort();
+    clearPrintAuthorization.current?.();
+    restoredStorageKey.current = storageKey;
+    setEntries([]);
+    setLive([]);
+    setSelected([]);
+    setSearch(null);
+    setSearchPending(true);
+    setFilters(defaultFilters);
+    setDraftState(defaultFilters);
+    setJob(defaultJob);
+    setPrintRows(null);
+    setPrepared(null);
+    setPendingChanges([]);
+    setReviewed({});
+    removalReviews.current = {};
+    setValidatedKey('');
+    setReadySheetKey('');
+    setMessage('');
+    setQueueFeedback('');
+    setHydrated(true);
+  }, [
+    revocationRevision,
+    privacy.cleanupRevision,
+    storageKey,
+    setEntries,
+    setLive,
+    setCopyDrafts,
+  ]);
 
   useEffect(
     () => () => {
       queueEpoch.current++;
       manualClearEpoch.current++;
       selectionEpoch.current++;
+      copiesEpoch.current++;
+      geometryEpoch.current++;
       activePrintAbort.current?.abort();
       clearPrintAuthorization.current?.();
     },
@@ -269,11 +417,17 @@ function LabelDesignerWorkspace({
   );
 
   useEffect(() => {
+    if (!admitted || restoredStorageKey.current === storageKey) return;
     let current = true;
     // Hydration is asynchronous so React does not render a second, synchronous
     // state cascade while mounting. The cleanup also ignores a late RPC reply.
     queueMicrotask(() => {
-      if (!current) return;
+      if (
+        !current ||
+        cleanupRevision.current !== readAuthoritativeCleanupRevision()
+      )
+        return;
+      restoredStorageKey.current = storageKey;
       let stored: ReturnType<typeof parseStoredQueue> = null;
       try {
         stored = parseStoredQueue(
@@ -298,41 +452,94 @@ function LabelDesignerWorkspace({
         setFilters(stored.filters);
         setDraftState(stored.filters);
         setJob(stored.job);
+        setLayoutRecovery(stored.layoutRecovery ?? null);
+        setMediaDraft(stored.mediaDraft ?? null);
+        setMediaDraftRecovery(stored.mediaDraftRecovery ?? null);
+        setLayoutValid(
+          !stored.layoutRecovery &&
+            !stored.mediaDraftRecovery &&
+            (!stored.mediaDraft ||
+              Boolean(parseLayoutDraft(stored.mediaDraft))),
+        );
+        setCopyDrafts(
+          Object.fromEntries(
+            Object.entries(stored.copyDrafts ?? {}).filter(([id]) =>
+              currentEntries.current.some(
+                (entry) => queueIdentity(entry) === id,
+              ),
+            ),
+          ),
+        );
+        setMediaReset((value) => value + 1);
       }
       setHydrated(true);
     });
     return () => {
       current = false;
     };
-  }, [storageKey, setEntries]);
+  }, [storageKey, setEntries, admitted, setCopyDrafts]);
   useEffect(() => {
-    if (!hydrated) return;
+    // An old passive effect can run before the boundary's reset commits. Fence
+    // its writes against the live wipe revision, not only captured readiness.
+    if (
+      !hydrated ||
+      !admitted ||
+      cleanupRevision.current !== readAuthoritativeCleanupRevision()
+    )
+      return;
     try {
-      sessionStorage.setItem(
-        storageKey,
-        JSON.stringify({ entries, filters, job }),
-      );
+      const serialized = JSON.stringify({
+        entries,
+        filters,
+        copyDrafts,
+        ...(mediaDraftRecovery
+          ? { mediaDraft: mediaDraftRecovery.value }
+          : mediaDraft
+            ? { mediaDraft }
+            : {}),
+        job: layoutRecovery ? { ...job, layout: layoutRecovery.value } : job,
+      });
+      if (serialized.length > MAX_QUEUE_STORAGE_LENGTH)
+        throw new Error('Label job exceeds local storage budget');
+      sessionStorage.setItem(storageKey, serialized);
     } catch {
       // Search and printing remain available with an in-memory queue.
       queueMicrotask(() => setStorageUnavailable(true));
     }
-  }, [storageKey, hydrated, entries, filters, job]);
+  }, [
+    storageKey,
+    hydrated,
+    entries,
+    filters,
+    job,
+    admitted,
+    layoutRecovery,
+    copyDrafts,
+    mediaDraft,
+    mediaDraftRecovery,
+  ]);
   useEffect(() => {
     // Restore the caller's filters before issuing a search. Otherwise revisits
     // query defaults and then immediately query the restored filters again.
-    if (!hydrated) return;
+    if (!hydrated || !admitted) return;
     let current = true;
     void searchLabelRecords(filters)
       .then((result) => {
-        if (current) setSearch(result);
+        if (current) {
+          setSearch(result);
+          setSearchPending(false);
+        }
       })
       .catch(() => {
-        if (current) setMessage('Label search could not be loaded. Try again.');
+        if (current) {
+          setSearchPending(false);
+          setMessage('Label search could not be loaded. Try again.');
+        }
       });
     return () => {
       current = false;
     };
-  }, [filters, hydrated]);
+  }, [filters, hydrated, admitted]);
 
   const invalidate = useCallback(
     (preserveRemovalReviews = false) => {
@@ -512,6 +719,13 @@ function LabelDesignerWorkspace({
     setLive,
   ]);
   const removeEntries = (ids: Set<string>, clear = false) => {
+    setCopyDrafts(
+      Object.fromEntries(
+        Object.entries(currentCopyDrafts.current).filter(
+          ([id]) => !clear && !ids.has(id),
+        ),
+      ),
+    );
     removalReviews.current = Object.fromEntries(
       Object.entries(reviewed).filter(([id]) => !clear && !ids.has(id)),
     );
@@ -660,7 +874,7 @@ function LabelDesignerWorkspace({
               (row) => queueIdentity(row) === queueIdentity(key),
             )?.name ??
             locations.find((location) => location.code === key.key)?.name ??
-            key.key,
+            `Selected ${recordKind(key.kind).toLowerCase()}`,
         },
       ],
       false,
@@ -856,6 +1070,8 @@ function LabelDesignerWorkspace({
   };
   const print = async () => {
     if (
+      Object.keys(currentCopyDrafts.current).length > 0 ||
+      !layoutValid ||
       intentPending ||
       !prepared ||
       !printRows ||
@@ -867,6 +1083,14 @@ function LabelDesignerWorkspace({
     )
       return;
     const epoch = ++queueEpoch.current;
+    const printGeometryEpoch = geometryEpoch.current;
+    const printCopiesEpoch = copiesEpoch.current;
+    const currentPrint = () =>
+      epoch === queueEpoch.current &&
+      printGeometryEpoch === geometryEpoch.current &&
+      printCopiesEpoch === copiesEpoch.current &&
+      Object.keys(currentCopyDrafts.current).length === 0 &&
+      !printAbort.signal.aborted;
     activePrintAbort.current?.abort();
     const printAbort = new AbortController();
     activePrintAbort.current = printAbort;
@@ -876,7 +1100,7 @@ function LabelDesignerWorkspace({
       const fresh = await getQueueRecords(
         entries.map(({ kind, key }) => ({ kind, key })),
       );
-      if (epoch !== queueEpoch.current) return;
+      if (!currentPrint()) return;
       currentReadVerified = true;
       const observed = latchObservedChanges(currentEntries.current, fresh);
       if (observed !== currentEntries.current) setEntries(observed);
@@ -907,6 +1131,8 @@ function LabelDesignerWorkspace({
         : null;
       const printGeneration = refreshedRows
         ? JSON.stringify([
+            printGeometryEpoch,
+            printCopiesEpoch,
             selectionKey,
             totalCopies(entries),
             job,
@@ -937,9 +1163,9 @@ function LabelDesignerWorkspace({
         printGeneration,
         totalCopies(entries),
         printAbort.signal,
-        () => epoch === queueEpoch.current,
+        currentPrint,
       );
-      if (readiness === 'cancelled' || epoch !== queueEpoch.current) return;
+      if (readiness === 'cancelled' || !currentPrint()) return;
       if (readiness !== 'ready') {
         setMessage(
           'Wait for every code and label text to fit, or choose a larger label.',
@@ -959,13 +1185,13 @@ function LabelDesignerWorkspace({
         );
         return;
       }
-      if (epoch !== queueEpoch.current || printAbort.signal.aborted) return;
+      if (!currentPrint()) return;
       // The final check grants exactly one print lifecycle. A second
       // beforeprint (including Ctrl/Cmd+P) cannot reuse that grant.
       clearPrintAuthorization.current?.();
       let armed = true;
       const beforePrint = () => {
-        if (armed) {
+        if (armed && currentPrint()) {
           armed = false;
           sheet.dataset.printAuthorized = 'true';
         } else delete sheet.dataset.printAuthorized;
@@ -987,7 +1213,7 @@ function LabelDesignerWorkspace({
         clear();
       }
     } catch {
-      if (epoch !== queueEpoch.current) return;
+      if (!currentPrint()) return;
       setValidatedKey('');
       setRefreshFailed(true);
       if (!currentReadVerified) {
@@ -1005,17 +1231,28 @@ function LabelDesignerWorkspace({
       setBusy(false);
     }
   };
-  const setCopies = (identity: string, value: number) => {
-    const next = updateCopies(entries, identity, value);
-    if (!next) {
-      setMessage(
-        `Use 1–${MAX_COPIES} copies per record and at most ${MAX_LABELS} labels total.`,
-      );
+  const setCopies = (identity: string, raw: string) => {
+    if (
+      !currentEntries.current.some((entry) => queueIdentity(entry) === identity)
+    )
       return;
-    }
-    setEntries(next);
-    activePrintAbort.current?.abort();
-    clearPrintAuthorization.current?.();
+    cancelCopyPrint();
+    const next =
+      raw.trim() === ''
+        ? null
+        : updateCopies(currentEntries.current, identity, Number(raw));
+    const drafts = { ...currentCopyDrafts.current };
+    if (next) {
+      delete drafts[identity];
+      setEntries(next);
+    } else drafts[identity] = raw.slice(0, MAX_COPY_DRAFT_LENGTH);
+    setCopyDrafts(drafts);
+  };
+  const revertCopies = (identity: string) => {
+    cancelCopyPrint();
+    const drafts = { ...currentCopyDrafts.current };
+    delete drafts[identity];
+    setCopyDrafts(drafts);
   };
   const submitSearch = (event: FormEvent) => {
     event.preventDefault();
@@ -1026,6 +1263,7 @@ function LabelDesignerWorkspace({
         'Unsubmitted label selection cleared because search or filters changed.',
       );
     setSearch(null);
+    setSearchPending(true);
     setFilters({ ...draft, page: 1 });
   };
   const fallbackCount = entries.filter(
@@ -1039,6 +1277,8 @@ function LabelDesignerWorkspace({
       ? expandLabels(entries, prepared)
       : printRows;
   const sheetKey = JSON.stringify([
+    mediaGeneration,
+    copyGeneration,
     selectionKey,
     totalCopies(entries),
     job,
@@ -1047,7 +1287,7 @@ function LabelDesignerWorkspace({
   useEffect(() => {
     let current = true;
     const sheet = document.querySelector<HTMLElement>('.label-print-root');
-    if (!sheet || !displayRows?.length) return;
+    if (!copiesValid || !layoutValid || !sheet || !displayRows?.length) return;
     const check = () => {
       if (!current) return;
       const cards = Array.from(
@@ -1100,7 +1340,7 @@ function LabelDesignerWorkspace({
     };
     // Sheet identity captures rows and layout; readiness follows the rendered DOM.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sheetKey, formatAcknowledged]);
+  }, [sheetKey, formatAcknowledged, layoutValid, copiesValid]);
 
   return (
     <div className={styles.workspace}>
@@ -1210,14 +1450,29 @@ function LabelDesignerWorkspace({
             />
             <button className={styles.primaryButton}>Search</button>
           </form>
-          <section className={styles.surface} aria-label="Label search results">
+          <LoadingAnnouncement
+            label="Loading matching records…"
+            active={admitted && searchPending}
+          />
+          <section
+            className={styles.surface}
+            aria-label="Label search results"
+            aria-busy={searchPending}
+          >
             <p className={styles.eyebrow}>Search results</p>
             <h2 className={styles.title}>Records</h2>
             <p className={styles.subtle} id="label-results-scroll-hint">
               {search
                 ? `${countLabel(search.total, 'matching record')}. Scroll this list to browse the current page.`
-                : 'Loading matching records…'}
+                : 'Search records to add to your label queue.'}
             </p>
+            {admitted && searchPending && (
+              <LoadingSkeleton
+                shape="rows"
+                label="Loading matching records…"
+                announce={false}
+              />
+            )}
             <div className={styles.queueActions}>
               <span>{countLabel(selected.length, 'selected record')}</span>
               <button
@@ -1248,144 +1503,171 @@ function LabelDesignerWorkspace({
             <p role="status" aria-live="polite" className={styles.notice}>
               {queueFeedback}
             </p>
-            <div
-              className={styles.results}
-              role="region"
-              aria-label="Search result records"
-              aria-describedby="label-results-scroll-hint"
-              tabIndex={0}
+            <LoadingReveal
+              busy={searchPending}
+              reveal={!!search}
+              motionReady={admitted}
             >
-              {search?.rows.map((record) => (
-                <div key={record.kind + record.key} className={styles.result}>
-                  <div className={styles.resultMain}>
-                    <label className={styles.fieldLabel}>
-                      <input
-                        type="checkbox"
-                        disabled={busy}
-                        aria-label={`Select ${record.name}, ${recordKind(record.kind)}, ${record.holdingContext}`}
-                        checked={selected.some(
-                          (row) => queueIdentity(row) === queueIdentity(record),
-                        )}
-                        onChange={(event) =>
-                          setSelected((current) =>
-                            event.target.checked
-                              ? selectLabelRows(current, [record])
-                              : current.filter(
-                                  (row) =>
-                                    queueIdentity(row) !==
-                                    queueIdentity(record),
-                                ),
-                          )
+              <div
+                className={styles.results}
+                role="region"
+                aria-label="Search result records"
+                aria-describedby="label-results-scroll-hint"
+                tabIndex={0}
+              >
+                {search?.rows.map((record) => (
+                  <div key={record.kind + record.key} className={styles.result}>
+                    <div className={styles.resultMain}>
+                      <label className={styles.fieldLabel}>
+                        <input
+                          type="checkbox"
+                          disabled={busy}
+                          aria-label={`Select ${record.name}, ${recordKind(record.kind)}, ${record.holdingContext}`}
+                          checked={selected.some(
+                            (row) =>
+                              queueIdentity(row) === queueIdentity(record),
+                          )}
+                          onChange={(event) =>
+                            setSelected((current) =>
+                              event.target.checked
+                                ? selectLabelRows(current, [record])
+                                : current.filter(
+                                    (row) =>
+                                      queueIdentity(row) !==
+                                      queueIdentity(record),
+                                  ),
+                            )
+                          }
+                        />
+                        Select record
+                      </label>
+                      <Link
+                        href={
+                          record.kind === 'quantity'
+                            ? '/inventory/quantity/' + record.key
+                            : '/inventory/assets/' + record.key
                         }
-                      />
-                      Select record
-                    </label>
-                    <Link
-                      href={
-                        record.kind === 'quantity'
-                          ? '/inventory/quantity/' + record.key
-                          : '/inventory/assets/' + record.key
-                      }
-                      className={styles.resultLink}
-                    >
-                      {record.name}
-                    </Link>
-                    <p className={styles.resultMeta}>
-                      {recordKind(record.kind)} · {record.categoryName} ·{' '}
-                      {record.status}
-                    </p>
-                    <p className={styles.resultMeta}>
-                      {record.kind === 'quantity' ? 'Holdings: ' : 'Location: '}
-                      {record.holdingContext}
-                    </p>
-                    {(record.itemCode ||
-                      record.assetTag ||
-                      record.serialNumber ||
-                      record.manufacturer ||
-                      record.model) && (
+                        className={styles.resultLink}
+                      >
+                        {record.name}
+                      </Link>
                       <p className={styles.resultMeta}>
-                        {[
-                          record.itemCode && `Item code: ${record.itemCode}`,
-                          record.assetTag,
-                          record.serialNumber,
-                          record.manufacturer,
-                          record.model,
-                        ]
-                          .filter(Boolean)
-                          .join(' · ')}
+                        {recordKind(record.kind)} · {record.categoryName} ·{' '}
+                        <RecordStatus status={record.status} />
                       </p>
-                    )}
-                    {record.customPreview &&
-                      record.customPreview.answers.length > 0 && (
-                        <div className={styles.resultMeta}>
-                          <dl>
-                            {record.customPreview.answers.map(
-                              (answer, index) => (
-                                <div key={index}>
-                                  <dt className="inline font-medium">
-                                    {answer.label}:{' '}
-                                  </dt>
-                                  <dd className="inline">
-                                    {answer.displayValue}
-                                    {answer.truncated ? '…' : ''}
-                                  </dd>
-                                </div>
-                              ),
-                            )}
-                          </dl>
-                          <Link
-                            href={
-                              record.kind === 'quantity'
-                                ? '/inventory/quantity/' + record.key
-                                : '/inventory/assets/' + record.key
-                            }
-                            className={styles.resultLink}
-                          >
-                            {record.customPreview.truncated
-                              ? 'View all details'
-                              : 'Full details'}
-                          </Link>
-                        </div>
+                      <p className={styles.resultMeta}>
+                        {record.kind === 'quantity'
+                          ? 'Holdings: '
+                          : 'Location: '}
+                        {record.holdingContext}
+                      </p>
+                      {(record.itemCode ||
+                        record.assetTag ||
+                        record.serialNumber ||
+                        record.manufacturer ||
+                        record.model) && (
+                        <p className={styles.resultMeta}>
+                          {[
+                            record.itemCode && `Item code: ${record.itemCode}`,
+                            record.assetTag,
+                            record.serialNumber,
+                          ]
+                            .filter(Boolean)
+                            .map((code, index) => (
+                              <span key={index} className="experience-code">
+                                {index > 0 && ' · '}
+                                {code}
+                              </span>
+                            ))}
+                          {[record.manufacturer, record.model]
+                            .filter(Boolean)
+                            .map((label, index) => (
+                              <span key={index}>
+                                {(record.itemCode ||
+                                  record.assetTag ||
+                                  record.serialNumber ||
+                                  index > 0) &&
+                                  ' · '}
+                                {label}
+                              </span>
+                            ))}
+                        </p>
                       )}
-                  </div>
-                  <button
-                    type="button"
-                    disabled={
-                      busy ||
-                      entries.some(
+                      {record.customPreview &&
+                        record.customPreview.answers.length > 0 && (
+                          <div className={styles.resultMeta}>
+                            <dl>
+                              {record.customPreview.answers.map(
+                                (answer, index) => (
+                                  <div key={index}>
+                                    <dt className="inline font-medium">
+                                      {answer.label}:{' '}
+                                    </dt>
+                                    <dd className="inline">
+                                      {answer.displayValue}
+                                      {answer.truncated ? '…' : ''}
+                                    </dd>
+                                  </div>
+                                ),
+                              )}
+                            </dl>
+                            <Link
+                              href={
+                                record.kind === 'quantity'
+                                  ? '/inventory/quantity/' + record.key
+                                  : '/inventory/assets/' + record.key
+                              }
+                              className={styles.resultLink}
+                            >
+                              {record.customPreview.truncated
+                                ? 'View all details'
+                                : 'Full details'}
+                            </Link>
+                          </div>
+                        )}
+                    </div>
+                    <button
+                      type="button"
+                      disabled={
+                        busy ||
+                        entries.some(
+                          (entry) =>
+                            queueIdentity(entry) === queueIdentity(record),
+                        )
+                      }
+                      onClick={() =>
+                        void add({ kind: record.kind, key: record.key })
+                      }
+                      className={styles.secondaryButton}
+                    >
+                      {entries.some(
                         (entry) =>
                           queueIdentity(entry) === queueIdentity(record),
                       )
-                    }
-                    onClick={() =>
-                      void add({ kind: record.kind, key: record.key })
-                    }
-                    className={styles.secondaryButton}
-                  >
+                        ? 'In queue'
+                        : 'Add to queue'}
+                    </button>
                     {entries.some(
                       (entry) => queueIdentity(entry) === queueIdentity(record),
-                    )
-                      ? 'In queue'
-                      : 'Add to queue'}
-                  </button>
-                  {entries.some(
-                    (entry) => queueIdentity(entry) === queueIdentity(record),
-                  ) && (
-                    <a
-                      href="#label-queue"
-                      className={styles.resultLink}
-                      aria-label={`Review queue for ${record.name}`}
-                    >
-                      {countLabel(entries.length, 'record')} /{' '}
-                      {countLabel(totalCopies(entries), 'label')}
-                    </a>
-                  )}
-                </div>
-              ))}
-              {search && search.total === 0 && (
-                <p className={styles.empty}>No records match these filters.</p>
-              )}
-            </div>
+                    ) && (
+                      <a
+                        href="#label-queue"
+                        className={styles.resultLink}
+                        aria-label={`Review queue for ${record.name}`}
+                      >
+                        {countLabel(entries.length, 'record')} /{' '}
+                        {countLabel(totalCopies(entries), 'label')}
+                      </a>
+                    )}
+                  </div>
+                ))}
+                {search && search.total === 0 && (
+                  <p className={styles.empty}>
+                    No records match these filters.
+                  </p>
+                )}
+              </div>
+            </LoadingReveal>
             {search && search.total > 0 && (
               <div className={styles.pagination}>
                 <span>
@@ -1396,6 +1678,7 @@ function LabelDesignerWorkspace({
                   disabled={filters.page <= 1}
                   onClick={() => (
                     setSearch(null),
+                    setSearchPending(true),
                     setFilters({ ...filters, page: filters.page - 1 })
                   )}
                   className={styles.textButton}
@@ -1406,6 +1689,7 @@ function LabelDesignerWorkspace({
                   disabled={filters.page * search.pageSize >= search.total}
                   onClick={() => (
                     setSearch(null),
+                    setSearchPending(true),
                     setFilters({ ...filters, page: filters.page + 1 })
                   )}
                   className={styles.textButton}
@@ -1521,8 +1805,8 @@ function LabelDesignerWorkspace({
                         </h4>
                         <p className={styles.subtle}>
                           {stateChanged
-                            ? `Lifecycle changed from ${entry.baselineState} to ${row.state}.`
-                            : `Current state: ${row.state}.`}
+                            ? `Lifecycle changed from ${recordStatusLabel(entry.baselineState)} to ${recordStatusLabel(row.state)}.`
+                            : `Current state: ${recordStatusLabel(row.state)}.`}
                           {tagChanged ? ' Identifier changed.' : ''}
                         </p>
                         <div className={styles.queueActions}>
@@ -1569,7 +1853,8 @@ function LabelDesignerWorkspace({
                             aria-label={`Review ${row.name}`}
                           >
                             <p className={styles.subtle}>
-                              Current authorized snapshot: {row.state}
+                              Current authorized snapshot:{' '}
+                              <RecordStatus status={row.state} />
                               {row.tag
                                 ? ` · Tag ${row.tag}`
                                 : row.kind === 'asset'
@@ -1659,32 +1944,103 @@ function LabelDesignerWorkspace({
             {entries.length === 0 && (
               <p className={styles.empty}>Add a record or location to begin.</p>
             )}
+            <LoadingAnnouncement
+              label="Loading queued record details…"
+              active={
+                admitted &&
+                !refreshFailed &&
+                entries.some(
+                  (entry) =>
+                    !byId.has(queueIdentity(entry)) &&
+                    !unavailable.includes(queueIdentity(entry)),
+                )
+              }
+            />
             <div className={styles.queueList}>
-              {entries.map((entry) => {
+              {entries.map((entry, index) => {
                 const id = queueIdentity(entry),
                   record = byId.get(id);
+                const readState = refreshPending
+                  ? 'refreshing…'
+                  : refreshFailed
+                    ? 'refresh failed; retry'
+                    : unavailable.includes(id)
+                      ? 'unavailable to this account'
+                      : '';
+                const detailsPending =
+                  !record && !refreshFailed && !unavailable.includes(id);
+                const invalidCopies = Object.hasOwn(copyDrafts, id);
+                const noticeId = `${copyNoticeId}-copies-${index}`;
                 return (
                   <div key={id} className={styles.queueEntry}>
-                    <span className={styles.queueName}>
-                      {record
-                        ? `${record.name} · ${record.kind === 'location' ? 'Location' : (record.categoryName ?? 'Uncategorized')} · ${record.holdingContext} · ${record.state}`
-                        : `${id} · unavailable`}
-                    </span>
-                    <div className={styles.queueActions}>
-                      <label className={styles.copies}>
-                        Copies{' '}
-                        <input
-                          type="number"
-                          min={1}
-                          max={MAX_COPIES}
-                          disabled={busy}
-                          value={entry.copies}
-                          onChange={(event) =>
-                            setCopies(id, Number(event.target.value))
-                          }
-                          className={styles.copiesInput}
+                    <LoadingReveal
+                      className={styles.queueName}
+                      busy={detailsPending}
+                      reveal={!!record}
+                      motionReady={admitted}
+                    >
+                      <span>
+                        {record
+                          ? `${record.name} · ${record.kind === 'location' ? 'Location' : (record.categoryName ?? 'Uncategorized')} · ${record.holdingContext} · ${recordStatusLabel(record.state)}`
+                          : `${recordKind(entry.kind)} ${index + 1}${readState ? ' · ' + readState : ''}`}
+                      </span>
+                      {admitted && detailsPending && (
+                        <LoadingSkeleton
+                          shape="queue-row"
+                          label="Loading queued record details…"
+                          announce={false}
                         />
-                      </label>
+                      )}
+                    </LoadingReveal>
+                    <div className={styles.queueActions}>
+                      <div className={styles.copiesControl}>
+                        <label className={styles.copies}>
+                          Copies{' '}
+                          <input
+                            type="number"
+                            min={1}
+                            max={MAX_COPIES}
+                            disabled={busy}
+                            value={
+                              invalidCopies ? copyDrafts[id] : entry.copies
+                            }
+                            aria-invalid={invalidCopies || undefined}
+                            aria-describedby={
+                              invalidCopies ? noticeId : undefined
+                            }
+                            onChange={(event) =>
+                              setCopies(id, event.target.value)
+                            }
+                            className={styles.copiesInput}
+                          />
+                        </label>
+                        {invalidCopies && (
+                          <>
+                            <p
+                              id={noticeId}
+                              role="status"
+                              className={styles.copyNotice}
+                            >
+                              {copyDrafts[id] === ''
+                                ? 'Empty value'
+                                : `“${copyDrafts[id]}”`}{' '}
+                              is invalid. Use whole numbers from 1–{MAX_COPIES}{' '}
+                              copies per record and at most {MAX_LABELS} labels
+                              total. Last valid count: {entry.copies}{' '}
+                              {entry.copies === 1 ? 'copy' : 'copies'}. Printing
+                              is paused until corrected or reverted.
+                            </p>
+                            <button
+                              type="button"
+                              disabled={busy}
+                              className={styles.textButton}
+                              onClick={() => revertCopies(id)}
+                            >
+                              Revert Copies
+                            </button>
+                          </>
+                        )}
+                      </div>
                       <button
                         type="button"
                         disabled={busy || !hydrated}
@@ -1719,11 +2075,16 @@ function LabelDesignerWorkspace({
               value={job.size}
               disabled={busy}
               onChange={(event) => {
-                setJob({
-                  ...job,
-                  size: event.target.value as JobSettings['size'],
-                });
-                clearPrintAuthorization.current?.();
+                changeMedia(
+                  {
+                    ...job,
+                    size: event.target.value as JobSettings['size'],
+                    layout: null,
+                  },
+                  true,
+                  null,
+                );
+                setMediaReset((value) => value + 1);
               }}
               className={styles.settingSelect}
             >
@@ -1740,11 +2101,16 @@ function LabelDesignerWorkspace({
               value={job.page}
               disabled={busy}
               onChange={(event) => {
-                setJob({
-                  ...job,
-                  page: event.target.value as JobSettings['page'],
-                });
-                clearPrintAuthorization.current?.();
+                changeMedia(
+                  {
+                    ...job,
+                    page: event.target.value as JobSettings['page'],
+                    layout: null,
+                  },
+                  true,
+                  null,
+                );
+                setMediaReset((value) => value + 1);
               }}
               className={styles.settingSelect}
             >
@@ -1762,10 +2128,13 @@ function LabelDesignerWorkspace({
               value={job.format}
               disabled={busy}
               onChange={(event) => {
-                setJob({
-                  ...job,
-                  format: event.target.value as JobSettings['format'],
-                });
+                changeMedia(
+                  {
+                    ...job,
+                    format: event.target.value as JobSettings['format'],
+                  },
+                  layoutValid,
+                );
                 clearPrintAuthorization.current?.();
                 setFormatAcknowledged(false);
                 setFallbackPending(false);
@@ -1783,6 +2152,34 @@ function LabelDesignerWorkspace({
         <p id="job-barcode-help" className={styles.subtle}>
           {barcodeTypeHelp}
         </p>
+        <PrintMediaEditor
+          key={mediaReset}
+          layout={job.layout}
+          size={job.size}
+          page={job.page}
+          initialDraft={mediaDraft}
+          onChange={(layout: PrintLayout | null, valid, draft) =>
+            changeMedia(valid ? { ...job, layout } : job, valid, draft)
+          }
+        />
+        {(layoutRecovery || mediaDraftRecovery) && (
+          <p role="alert" className={styles.error}>
+            The saved print dimensions are invalid. Your queue is retained.
+            Review new dimensions or reset the print media before printing.
+          </p>
+        )}
+        {!layoutValid && (
+          <button
+            type="button"
+            className={styles.secondaryButton}
+            onClick={() => {
+              changeMedia({ ...job, layout: null }, true, null);
+              setMediaReset((value) => value + 1);
+            }}
+          >
+            Reset print media
+          </button>
+        )}
         <p className={styles.subtle}>
           New jobs start with the shared choices in Settings. Print at actual
           size / 100%. Code 128 asset tags require reprinting if the tag
@@ -1858,6 +2255,8 @@ function LabelDesignerWorkspace({
           <button
             type="button"
             disabled={
+              !copiesValid ||
+              !layoutValid ||
               intentPending ||
               !prepared ||
               busy ||
@@ -1884,6 +2283,7 @@ function LabelDesignerWorkspace({
               <span
                 className={styles.statusDot}
                 data-ready={
+                  copiesValid &&
                   !!prepared &&
                   !busy &&
                   !refreshPending &&
@@ -1900,22 +2300,24 @@ function LabelDesignerWorkspace({
                 }
               />
               <span className={styles.statusText}>
-                {refreshFailed
-                  ? 'Refresh failed — retry before printing'
-                  : refreshPending
-                    ? 'Checking current records — printing paused'
-                    : pendingChanges.length ||
-                        unavailable.length ||
-                        fallbackPending
-                      ? 'Review required before printing'
-                      : readySheetKey === sheetKey &&
-                          validatedKey === selectionKey
-                        ? 'Sheet ready for final print check'
-                        : 'Preparing codes and layout — printing paused'}
+                {!copiesValid
+                  ? 'Correct or revert Copies — printing paused'
+                  : refreshFailed
+                    ? 'Refresh failed — retry before printing'
+                    : refreshPending
+                      ? 'Checking current records — printing paused'
+                      : pendingChanges.length ||
+                          unavailable.length ||
+                          fallbackPending
+                        ? 'Review required before printing'
+                        : readySheetKey === sheetKey &&
+                            validatedKey === selectionKey
+                          ? 'Sheet ready for final print check'
+                          : 'Preparing codes and layout — printing paused'}
               </span>
             </div>
           )}
-        {displayRows && (
+        {copiesValid && layoutValid && displayRows && (
           <div className={styles.sheetFrame}>
             <LabelSheet
               records={displayRows}
@@ -1925,6 +2327,7 @@ function LabelDesignerWorkspace({
               page={job.page}
               format={job.format}
               generation={sheetKey}
+              layout={job.layout}
             />
           </div>
         )}

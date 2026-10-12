@@ -2,12 +2,14 @@ import { createServerClient } from '@supabase/ssr';
 import { NextResponse, type NextRequest } from 'next/server';
 import { supabaseConfig } from './lib/supabase/config';
 import { validReturnPath } from './features/scan/targets';
+import { documentPathHeader } from './lib/document-route';
 import {
   createAuthDiagnostic,
   observeAuthStage,
 } from './lib/auth/diagnostic.server';
 
 export async function proxy(request: NextRequest) {
+  request.headers.set(documentPathHeader, request.nextUrl.pathname);
   // Replace any caller-supplied header with a value derived from the matched URL.
   request.headers.set(
     'x-inventory-return',
@@ -15,6 +17,15 @@ export async function proxy(request: NextRequest) {
   );
   let response = NextResponse.next({ request: { headers: request.headers } });
   response.headers.set('Cache-Control', 'private, no-store');
+  // These handlers own transport admission and caller-scoped logout/cookie reads.
+  // Refreshing here would write cookies even before a rejected request, and turn
+  // the read-only generation comparison into a session refresh.
+  if (
+    request.nextUrl.pathname === '/api/auth/logout' ||
+    request.nextUrl.pathname === '/api/auth/privacy-confirm' ||
+    request.nextUrl.pathname === '/api/auth/privacy-read'
+  )
+    return response;
   const { url, key } = supabaseConfig();
   const supabase = createServerClient(url, key, {
     cookies: {
@@ -46,6 +57,13 @@ export async function proxy(request: NextRequest) {
 }
 export const config = {
   matcher: [
+    '/inventory/quantity/:path*',
+    '/inventory/assets/:path*',
+    '/locations/:path*',
+    '/sites/:path*',
+    '/settings/sites/:path*',
+    '/settings/locations/:path*',
+    '/settings/forms/:path*',
     '/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)',
   ],
 };

@@ -1,0 +1,90 @@
+// IT Inventory's committed-lifetime patch of upstream SelectiveBloom. MIT attribution in README.md/LICENSE.
+function SelectiveBloom({ selection = EMPTY_ARRAY, selectionLayer = 10, lights = EMPTY_ARRAY, luminanceThreshold, luminanceSmoothing, mipmapBlur, radius, levels, resolutionScale, resolutionX, resolutionY, ref, ownerCurrent, ...liveProps }) {
+  const context = use(EffectComposerContext);
+  const { scene, camera } = context;
+  const suppliedCurrent = ownerCurrent || inventoryOwnerCurrent;
+  const parentCurrent = context.ownerCurrent || inventoryOwnerCurrent;
+  const current = useMemo(() => () => suppliedCurrent() && parentCurrent(), [suppliedCurrent, parentCurrent]);
+  const invalidate = useThree((state) => state.invalidate);
+  const api = use(selectionContext);
+  const [record, setRecord] = useState(null);
+  const component = useRef({ live: true });
+  useLayoutEffect(() => {
+    component.current.live = true;
+    return () => { component.current.live = false; };
+  }, []);
+  useEffect(() => {
+    if (!component.current.live || !current()) return;
+    const owned = { effect: null, retired: false, defaults: new Map(), applied: new Map(), cleanup: new Set(), current: () => !owned.retired && component.current.live && current() };
+    try {
+      if (!owned.current()) return;
+      owned.effect = new SelectiveBloomEffect(scene, camera, {
+        blendFunction: 0, luminanceThreshold, luminanceSmoothing, mipmapBlur, radius, levels, resolutionScale, resolutionX, resolutionY
+      });
+      if (!owned.current()) { owned.retired = true; owned.effect.dispose(); return; }
+      setRecord(owned);
+      if (owned.current()) context.requestRebuild();
+    } catch (error) {
+      owned.retired = true;
+      owned.effect?.dispose();
+      if (component.current.live && current()) throw error;
+      return;
+    }
+    return () => {
+      if (owned.retired) return;
+      owned.retired = true;
+      let failure;
+      for (const cleanup of [...owned.cleanup]) {
+        try { cleanup(); } catch (error) { failure ??= error; }
+      }
+      try { owned.effect.dispose(); } catch (error) { failure ??= error; }
+      if (failure) throw failure;
+    };
+  }, [scene, camera, luminanceThreshold, luminanceSmoothing, mipmapBlur, radius, levels, resolutionScale, resolutionX, resolutionY, current, context.requestRebuild]);
+  useLayoutEffect(() => {
+    if (!record?.current()) return;
+    const effect = record.effect;
+    let changed = false;
+    for (const key of LIVE_KEYS$2) {
+      if (!record.current()) return;
+      if (!record.defaults.has(key)) { const value = readPierced(effect, key); record.defaults.set(key, value); record.applied.set(key, value); }
+      const next = liveProps[key] !== void 0 ? liveProps[key] : record.defaults.get(key);
+      if (!Object.is(record.applied.get(key), next)) { applyPierced(effect, key, next); record.applied.set(key, next); changed = true; }
+    }
+    if (changed && record.current()) invalidate();
+  });
+  useEffect(() => {
+    if (!record?.current()) return;
+    const effect = record.effect;
+    effect.selection.layer = selectionLayer;
+    if (!record.current()) return;
+    const selected = api ? api.enabled ? api.selected || EMPTY_ARRAY : EMPTY_ARRAY : (Array.isArray(selection) ? selection : [selection]).map(resolveRef).filter((object) => object != null);
+    effect.selection.set(selected);
+    const resolved = lights.map(resolveRef).filter((light) => light != null);
+    const layer = selectionLayer;
+    const claimed = [];
+    let cleaned = false;
+    const cleanup = () => {
+      if (cleaned) return;
+      cleaned = true; record.cleanup.delete(cleanup);
+      effect.selection.clear();
+      for (const [light, previouslyEnabled] of claimed) if (!previouslyEnabled) light.layers.disable(layer);
+      if (record.current()) invalidate();
+    };
+    record.cleanup.add(cleanup);
+    try {
+      if (!resolved.length && record.current()) console.warn("SelectiveBloom requires lights to work.");
+      for (const light of resolved) {
+        if (!record.current()) { cleanup(); return; }
+        const previouslyEnabled = light.layers.isEnabled(layer);
+        claimed.push([light, previouslyEnabled]);
+        light.layers.enable(layer);
+      }
+      if (record.current()) invalidate();
+      return cleanup;
+    } catch (error) { try { cleanup(); } catch { /* Preserve the setup failure. */ } throw error; }
+  }, [record, selection, selectionLayer, lights, api, invalidate]);
+  useInventoryOwnedRef(ref, record, record?.effect);
+  if (!record?.current()) return null;
+  return /* @__PURE__ */ jsx("primitive", { object: record.effect, dispose: null });
+}

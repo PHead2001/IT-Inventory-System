@@ -1,6 +1,10 @@
 'use client';
 
 import { useEffect, useId, useMemo, useRef, useState } from 'react';
+import dynamic from 'next/dynamic';
+import { usePrivacyReadiness } from '@/components/auth/privacy-readiness';
+import { freshPresentationGrant } from '@/components/experience/presentation-privacy';
+import { RoomRegionBoundary } from '../room/room-region-boundary';
 import { RequiredMark } from '@/components/forms/validation';
 import { countLabel } from '@/lib/count';
 import { pickerPosition } from './picker-position';
@@ -14,8 +18,12 @@ import {
   type PickerMode,
   type PickerTreeRow,
 } from './picker-model';
+const LocationMapPicker = dynamic(() => import('./location-map-picker'), {
+  ssr: false,
+});
 
 export type LocationPickerProps = {
+  mapEnabled?: boolean;
   locations: LocationRef[];
   mode: PickerMode;
   label: string;
@@ -29,6 +37,7 @@ export type LocationPickerProps = {
   /** Current item balances for source options; omitted counts remain unknown. */
   availability?: Record<string, number>;
   allowAll?: boolean;
+  emptyLabel?: string;
   required?: boolean;
   disabled?: boolean;
   error?: string;
@@ -39,6 +48,7 @@ export type LocationPickerProps = {
 };
 
 export function LocationPicker({
+  mapEnabled = true,
   locations,
   mode,
   label,
@@ -51,6 +61,7 @@ export function LocationPicker({
   sourceIds,
   availability,
   allowAll = false,
+  emptyLabel = 'All locations',
   required = false,
   disabled = false,
   error,
@@ -59,6 +70,12 @@ export function LocationPicker({
   description,
   className = '',
 }: LocationPickerProps) {
+  const privacy = usePrivacyReadiness();
+  const [mapOpen, setMapOpen] = useState(false);
+  const emptyAccessibleLabel =
+    emptyLabel === 'All locations'
+      ? 'All locations, no location filter'
+      : emptyLabel;
   const stockLabel = (location: LocationRef | null | undefined) =>
     location && availability && Object.hasOwn(availability, location.id)
       ? `${countLabel(availability[location.id], 'unit')} available`
@@ -482,7 +499,7 @@ export function LocationPicker({
                   ? selectedValue
                   : 'Unavailable location'
                 : allowAll
-                  ? 'All locations'
+                  ? emptyLabel
                   : 'Select a location')}
           </span>
           {unavailable && (
@@ -494,6 +511,58 @@ export function LocationPicker({
         </span>
       </button>
       {name && <input type="hidden" name={name} value={selectedValue} />}
+      {mode === 'destination' && mapEnabled && (
+        <button
+          type="button"
+          className="min-h-11 text-sm text-cyan-300 underline disabled:opacity-50"
+          disabled={disabled || loading || Boolean(loadError)}
+          onClick={() => {
+            close();
+            setMapOpen(true);
+          }}
+        >
+          Pick on map
+        </button>
+      )}
+      {mapOpen && (
+        <RoomRegionBoundary
+          fallback={
+            <p role="status" className="text-sm">
+              Map unavailable. Choose a location in the browser.
+            </p>
+          }
+        >
+          <LocationMapPicker
+            locations={locations}
+            excludeIds={excludeIds}
+            disabled={disabled || loading || Boolean(loadError)}
+            initialValue={selectedValue}
+            onClose={() => {
+              setMapOpen(false);
+              triggerRef.current?.focus();
+            }}
+            onUse={(code) => {
+              if (
+                disabled ||
+                loading ||
+                loadError ||
+                (privacy.generation !== 'unmanaged' &&
+                  !freshPresentationGrant(privacy))
+              )
+                return;
+              // Resolve from the latest complete eligibility model only at explicit confirmation.
+              const destination = pickerLocations(locations, 'destination', {
+                excludeIds,
+              }).find((location) => location.code === code);
+              if (!destination) return;
+              if (value === undefined) setLocalValue(destination.id);
+              onValueChange?.(destination.id);
+              setMapOpen(false);
+              triggerRef.current?.focus();
+            }}
+          />
+        </RoomRegionBoundary>
+      )}
       {validationMessage && (
         <p id={messageId} role="alert" className="text-sm text-amber-200">
           {validationMessage}
@@ -598,7 +667,7 @@ export function LocationPicker({
                       aria-label={
                         location
                           ? `${location.name}, ${location.breadcrumb}, ${location.code}${stockLabel(location) ? ', ' + stockLabel(location) : ''}`
-                          : 'All locations, no location filter'
+                          : emptyAccessibleLabel
                       }
                       id={listId + '-' + index}
                       aria-selected={selectedValue === optionValue}
@@ -611,11 +680,14 @@ export function LocationPicker({
                     >
                       <span className="min-w-0">
                         <span className="block font-medium text-slate-100">
-                          {location?.name ?? 'All locations'}
+                          {location?.name ?? emptyLabel}
                           {selectedValue === optionValue ? ' ✓' : ''}
                         </span>
                         <span className="block break-words text-xs text-slate-400">
-                          {location?.breadcrumb ?? 'No location filter'}
+                          {location?.breadcrumb ??
+                            (emptyLabel === 'All locations'
+                              ? 'No location filter'
+                              : emptyLabel)}
                         </span>
                         {stockLabel(location) && (
                           <span className="block text-sm text-slate-300">
@@ -681,7 +753,7 @@ export function LocationPicker({
                       aria-label={
                         location
                           ? `${location.name}, ${isNavigation ? 'navigation group' : isGroup ? 'selectable group' : 'selectable location'}, ${location.code}${!isNavigation && stockLabel(location) ? ', ' + stockLabel(location) : ''}`
-                          : 'All locations, no location filter'
+                          : emptyAccessibleLabel
                       }
                       tabIndex={
                         effectiveActiveTreeId === rowId ||
@@ -729,7 +801,7 @@ export function LocationPicker({
                         {row?.hasChildren ? (isExpanded ? '⌄' : '›') : '·'}
                       </span>
                       <span className="min-w-0 flex-1 font-medium break-words">
-                        {location?.name ?? 'All locations'}
+                        {location?.name ?? emptyLabel}
                         {selectedRow ? ' ✓' : ''}
                         {!isNavigation && stockLabel(location) && (
                           <span className="block text-sm font-normal text-slate-300">

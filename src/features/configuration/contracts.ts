@@ -1,6 +1,24 @@
 import { z } from 'zod';
+import { printLayoutSchema } from '@/features/labels/print-layout';
 
 const uuid = z.uuid();
+const backendOrigin = z
+  .string()
+  .max(2048)
+  .refine((value) => {
+    try {
+      const url = new URL(value);
+      return (
+        ['http:', 'https:'].includes(url.protocol) &&
+        url.origin === value &&
+        !url.username &&
+        !url.password
+      );
+    } catch {
+      return false;
+    }
+  });
+export type LabelSettingsBinding = { actorId: string; backend: string };
 const version = z.union([
   z.string().regex(/^[1-9]\d*$/),
   z.number().int().positive().safe().transform(String),
@@ -9,12 +27,10 @@ const total = z.union([
   z.string().regex(/^(0|[1-9]\d*)$/),
   z.number().int().nonnegative().safe().transform(String),
 ]);
-const name = z
-  .string()
-  .trim()
-  .min(1)
-  .max(200)
-  .transform((value) => value.replace(/\s+/g, ' '));
+export function normalizeCategoryName(value: string) {
+  return value.trim().replace(/\s+/g, ' ');
+}
+const name = z.string().trim().min(1).max(200).transform(normalizeCategoryName);
 const schemas = {
   category_create: z.strictObject({
     code: z
@@ -39,6 +55,7 @@ const schemas = {
     size: z.enum(['90x50', '70x35']),
     page: z.enum(['letter', 'A4']),
     format: z.enum(['qr', 'code128']),
+    layout: printLayoutSchema.nullable().optional(),
   }),
 };
 export type ConfigurationOperation = keyof typeof schemas;
@@ -126,6 +143,8 @@ export function parseConfigurationCommand(input: unknown) {
         ],
       ),
       requestId: uuid,
+      expectedActorId: uuid.optional(),
+      expectedBackend: backendOrigin.optional(),
       payload: z.record(z.string(), z.unknown()),
     })
     .safeParse(input);
@@ -140,6 +159,10 @@ export function parseConfigurationResult(value: unknown) {
   return resultSchema.safeParse(value);
 }
 const messages: Record<string, string> = {
+  actor_changed:
+    'The signed-in staff member changed. Return to the original account before saving these label settings.',
+  backend_changed:
+    'This workspace changed environments. Return to the original workspace before retrying these label settings.',
   P1001: 'Only an active configuration maintainer can change settings.',
   P1002: 'These settings changed. Refresh them and review the latest values.',
   P1008: 'This category cannot be changed in its current state.',

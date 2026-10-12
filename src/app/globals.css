@@ -6,6 +6,9 @@
   --text-xs--line-height: 1.45;
 }
 :root {
+  /* No native viewport snapshot: shell stays live, and no ancestor captures WebGL. */
+  view-transition-name: none;
+  --motion-route: 200ms;
   color-scheme: dark;
   --background: #060d18;
   --surface: #101e30;
@@ -152,6 +155,7 @@
   --labels-copies-input-border: #648ca0a8;
   --labels-copies-input-background: #081827;
   --labels-copies-input-text: #effaff;
+  --labels-copies-error-text: #ffceb5;
   --labels-empty-border: #63829780;
   --labels-empty-text: #b8cfdb;
   --labels-sheet-workspace-border: #50def26e;
@@ -409,6 +413,45 @@ a {
   background: var(--workspace-header-background);
   backdrop-filter: blur(12px);
 }
+
+/* Indeterminate work only: the 150ms reveal is owned by actual pending signals. */
+.experience-route-progress {
+  position: fixed;
+  inset: 0 0 auto;
+  height: 2px;
+  z-index: 100;
+  pointer-events: none;
+  overflow: hidden;
+  opacity: 0;
+  transition: opacity var(--motion-feedback) ease;
+}
+.experience-route-progress[data-visible='true'] {
+  opacity: 1;
+}
+.experience-route-progress-bar {
+  display: block;
+  height: 100%;
+  width: 40%;
+  background: var(--accent);
+}
+.experience-route-progress[data-visible='true']:not([data-static='true'])
+  .experience-route-progress-bar {
+  animation: route-pending-sweep 1.2s ease-in-out infinite;
+}
+.experience-route-progress[data-static='true'] {
+  transition: none;
+}
+.experience-route-progress[data-static='true'] .experience-route-progress-bar {
+  width: 100%;
+}
+@keyframes route-pending-sweep {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(350%);
+  }
+}
 .experience-header-inner {
   max-width: 1600px;
   min-height: 72px;
@@ -578,30 +621,65 @@ a {
   z-index: 50;
   left: 16px;
   top: -100px;
+  /* A preceding cleanup panel can move this positioned shell down the page. */
+  clip-path: inset(50%);
   background: var(--surface);
   color: var(--foreground);
   padding: 12px;
 }
 .experience-skip-link:focus {
   top: 8px;
+  clip-path: none;
 }
 .experience-motion-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
   min-height: 44px;
-  padding: 0 14px;
+  max-width: 100%;
+  padding: 8px 14px;
   border: 1px solid var(--workspace-motion-toggle-border);
-  border-radius: 999px;
+  border-radius: 12px;
   background: var(--workspace-motion-toggle-background);
   color: var(--workspace-motion-toggle-text);
-  font-size: 12px;
+  font-size: 14px;
   cursor: pointer;
   text-align: left;
   transition:
     border-color var(--motion-feedback),
     transform var(--motion-feedback);
 }
-.experience-motion-toggle span,
-.experience-motion-toggle small {
+.experience-motion-toggle:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+}
+.experience-motion-state {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 8px;
+}
+.experience-motion-track {
   display: block;
+  width: 36px;
+  padding: 3px;
+  border: 1px solid var(--muted);
+  border-radius: 999px;
+}
+.experience-motion-track > span {
+  display: block;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--muted);
+}
+.experience-motion-toggle[aria-checked='true'] .experience-motion-track {
+  border-color: var(--accent);
+}
+.experience-motion-toggle[aria-checked='true'] .experience-motion-track > span {
+  margin-left: auto;
+  background: var(--accent);
 }
 .experience-motion-toggle small {
   margin-top: 2px;
@@ -1118,7 +1196,7 @@ html[data-motion='full'] .experience-auth-panel {
   }
 }
 @media (max-width: 640px) {
-  .experience-header:has(.experience-account > details[open]) {
+  .experience-header:has(.experience-account details[open]) {
     position: relative;
     z-index: 10;
   }
@@ -1147,7 +1225,7 @@ html[data-motion='full'] .experience-auth-panel {
     flex-shrink: 0;
     max-width: none;
   }
-  .experience-account > details {
+  .experience-account details {
     position: static;
   }
   .experience-account-name {
@@ -1198,6 +1276,70 @@ html[data-motion='full'] .experience-auth-panel {
     transition-duration: 0.01ms !important;
   }
 }
+@keyframes route-content-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+@keyframes route-content-out {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+  }
+}
+::view-transition-group(.route-content) {
+  animation: none;
+}
+::view-transition-old(.route-content) {
+  animation: route-content-out var(--motion-route) var(--ease-workspace) both;
+}
+::view-transition-new(.route-content) {
+  animation: route-content-in var(--motion-route) var(--ease-workspace) both;
+}
+::view-transition-group(.record-title),
+::view-transition-old(.record-title),
+::view-transition-new(.record-title) {
+  animation-duration: var(--motion-route);
+  animation-timing-function: var(--ease-workspace);
+}
+::view-transition-group(.record-title) {
+  transform-origin: 0 0;
+  /* Hold native dimension keyframes until onShare replaces them. This affects
+     CSS animations only; the replacement WAAPI transform runs normally. */
+  animation-play-state: paused;
+}
+::view-transition-old(.record-title),
+::view-transition-new(.record-title) {
+  /* The UA inherits play state through image-pair from the paused group.
+     Only geometry waits for onShare; finite image fades must still finish. */
+  animation-play-state: running;
+  width: 100%;
+  height: 100%;
+  object-fit: fill;
+}
+/* Snapshots must never block focus, errors, clicks or the live canvas. */
+::view-transition {
+  pointer-events: none;
+}
+html[data-motion='reduced']::view-transition-group(*),
+html[data-route-motion-private='false']::view-transition-group(*) {
+  display: none;
+  animation: none;
+}
+@media (prefers-reduced-motion: reduce) {
+  ::view-transition-group(*) {
+    display: none;
+    animation: none;
+  }
+}
+
 html[data-motion='reduced'] *,
 html[data-motion='reduced'] *::before,
 html[data-motion='reduced'] *::after {

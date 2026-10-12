@@ -1,4 +1,7 @@
 'use client';
+import { useRouteRouter as useRouter } from '@/components/experience/route-pending';
+import { ScanMatchLabel } from './scan-match-label';
+import { RecordStatus } from '@/components/record-status';
 import {
   useCallback,
   useEffect,
@@ -6,10 +9,11 @@ import {
   useState,
   type FormEvent,
 } from 'react';
-import Link from 'next/link';
-import { useRouter } from 'next/navigation';
-import type { IScannerControls } from '@zxing/browser';
+import Link from '@/components/experience/route-link';
+
 import styles from './scan-visual.module.css';
+import { assignmentEpoch } from './assign-batch';
+import { createCameraSession } from './camera-session';
 import {
   resolveItemCode,
   resolveScan,
@@ -19,10 +23,16 @@ import {
 export function ScanPanel() {
   const router = useRouter();
   const video = useRef<HTMLVideoElement>(null);
-  const controls = useRef<IScannerControls | null>(null);
+  const session = useRef<ReturnType<typeof createCameraSession> | null>(null);
   const generation = useRef(0);
   const mounted = useRef(true);
   const consumed = useRef(false);
+  const scopeEpoch = useRef(assignmentEpoch());
+  const scopeInvalidated = useRef(false);
+  const inputControl = useRef<HTMLInputElement>(null);
+  const cancelControl = useRef<HTMLButtonElement>(null);
+  const firstMatch = useRef<HTMLAnchorElement>(null);
+  const completionFocus = useRef<'input' | 'match' | null>(null);
   const [camera, setCamera] = useState<'idle' | 'starting' | 'running'>('idle');
   const [cameraIssue, setCameraIssue] = useState(false);
   const [input, setInput] = useState('');
@@ -30,18 +40,13 @@ export function ScanPanel() {
   const [message, setMessage] = useState('');
   const [result, setResult] = useState<ScanResolution | null>(null);
   const [busy, setBusy] = useState(false);
+  const [scopeBlocked, setScopeBlocked] = useState(false);
+  const [previewKey, setPreviewKey] = useState(0);
 
   const stop = useCallback(() => {
     generation.current++;
-    controls.current?.stop();
-    controls.current = null;
-    if (
-      typeof MediaStream !== 'undefined' &&
-      video.current?.srcObject instanceof MediaStream
-    ) {
-      video.current.srcObject.getTracks().forEach((track) => track.stop());
-      video.current.srcObject = null;
-    }
+    session.current?.stop();
+    session.current = null;
     if (mounted.current) {
       setCamera('idle');
       setBusy(false);
@@ -49,67 +54,125 @@ export function ScanPanel() {
   }, []);
   useEffect(() => {
     mounted.current = true;
+    const invalidate = () => {
+      scopeInvalidated.current = true;
+      setScopeBlocked(true);
+      completionFocus.current = null;
+      stop();
+      setInput('');
+      setResult(null);
+      setMessage(
+        'Your account changed. Reload Scan before looking up equipment.',
+      );
+    };
+    window.addEventListener('assignment-scope-invalidated', invalidate);
+    // An earlier shell sibling can invalidate after render but before this effect.
+    if (scopeEpoch.current !== assignmentEpoch()) invalidate();
     return () => {
+      window.removeEventListener('assignment-scope-invalidated', invalidate);
       mounted.current = false;
       stop();
     };
   }, [stop]);
+  useEffect(() => {
+    if (busy) cancelControl.current?.focus();
+    else if (completionFocus.current) {
+      if (completionFocus.current === 'match') firstMatch.current?.focus();
+      else inputControl.current?.focus();
+      completionFocus.current = null;
+    }
+  }, [busy, result]);
 
   const open = useCallback(
     async (
       text: string,
       lookupMode: 'identifier' | 'item_code' = 'identifier',
     ) => {
-      if (consumed.current) return;
+      if (
+        consumed.current ||
+        scopeInvalidated.current ||
+        scopeEpoch.current !== assignmentEpoch()
+      )
+        return;
       consumed.current = true;
+      completionFocus.current = null;
       stop();
       const token = generation.current;
       setBusy(true);
       setMessage('');
+      setResult(null);
       try {
         const resolution =
           lookupMode === 'item_code'
             ? await resolveItemCode(text)
             : await resolveScan(text);
-        if (!mounted.current || token !== generation.current) return;
+        if (
+          !mounted.current ||
+          token !== generation.current ||
+          scopeEpoch.current !== assignmentEpoch()
+        )
+          return;
         setResult(resolution);
         if (
           resolution.status === 'found' &&
           resolution.matches[0].state === 'active'
         ) {
+          setMessage(
+            `Opening ${resolution.matches[0].label || 'the matching record'}…`,
+          );
           router.push(resolution.matches[0].path);
-        } else if (resolution.status === 'invalid')
-          setMessage(
-            lookupMode === 'item_code'
-              ? 'Enter an Item code (SKU) with at most 100 characters and no control characters.'
-              : 'This is not a supported inventory label or identifier.',
-          );
-        else if (resolution.status === 'unknown')
-          setMessage(
-            lookupMode === 'item_code'
-              ? 'No quantity item has that exact Item code (SKU).'
-              : 'No matching location, asset, or quantity item was found.',
-          );
-        else if (resolution.status === 'ambiguous')
-          setMessage(
-            'This identifier matches more than one record. Choose the intended record.',
-          );
-        else
-          setMessage(
-            'This record is inactive, retired, or archived. Review its state before opening.',
-          );
+        } else {
+          completionFocus.current = resolution.matches.length
+            ? 'match'
+            : 'input';
+          if (resolution.status === 'invalid')
+            setMessage(
+              lookupMode === 'item_code'
+                ? 'Enter an Item code (SKU) with at most 100 characters and no control characters.'
+                : 'This is not a supported inventory label or identifier.',
+            );
+          else if (resolution.status === 'unknown')
+            setMessage(
+              lookupMode === 'item_code'
+                ? 'No quantity item has that exact Item code (SKU).'
+                : 'No matching location, asset, or quantity item was found.',
+            );
+          else if (resolution.status === 'ambiguous')
+            setMessage(
+              'This identifier matches more than one record. Choose the intended record.',
+            );
+          else
+            setMessage(
+              'This record is inactive, retired, or archived. Review its state before opening.',
+            );
+        }
       } catch {
-        if (mounted.current && token === generation.current)
+        if (
+          mounted.current &&
+          token === generation.current &&
+          scopeEpoch.current === assignmentEpoch()
+        ) {
+          completionFocus.current = 'input';
           setMessage('Lookup could not be completed. Please try again.');
+        }
       } finally {
-        if (mounted.current && token === generation.current) setBusy(false);
+        if (
+          mounted.current &&
+          token === generation.current &&
+          scopeEpoch.current === assignmentEpoch()
+        )
+          setBusy(false);
       }
     },
     [router, stop],
   );
 
   const start = async () => {
+    if (scopeInvalidated.current || scopeEpoch.current !== assignmentEpoch())
+      return;
+    completionFocus.current = null;
     stop();
+    setPreviewKey((key) => key + 1);
     setCameraIssue(false);
     consumed.current = false;
     setResult(null);
@@ -130,24 +193,21 @@ export function ScanPanel() {
       const reader = new InventoryCodeReader(undefined, {
         delayBetweenScanAttempts: 250,
       });
-      const running = await reader.decodeFromConstraints(
-        { video: { facingMode: { ideal: 'environment' } }, audio: false },
-        video.current,
-        (decoded) => {
-          if (
-            decoded &&
-            mounted.current &&
-            token === generation.current &&
-            !consumed.current
-          )
-            void open(decoded.getText());
-        },
-      );
-      if (!mounted.current || token !== generation.current) {
-        running.stop();
+      const current = createCameraSession(reader, video.current, (decoded) => {
+        if (
+          decoded &&
+          mounted.current &&
+          token === generation.current &&
+          !consumed.current
+        )
+          void open(decoded.getText());
+      });
+      session.current = current;
+      const running = await current.start();
+      if (!running || !mounted.current || token !== generation.current) {
+        current.stop();
         return;
       }
-      controls.current = running;
       setCamera('running');
     } catch (error) {
       if (!mounted.current || token !== generation.current) return;
@@ -169,7 +229,11 @@ export function ScanPanel() {
   };
   return (
     <div className={styles.workspace}>
-      <div className={styles.columns}>
+      <section
+        className={styles.columns}
+        aria-label="Equipment inspection"
+        aria-busy={busy}
+      >
         <section
           className={`${styles.card} ${styles.cameraCard}`}
           aria-label="Camera scanner"
@@ -181,6 +245,7 @@ export function ScanPanel() {
             opens information only.
           </p>
           <video
+            key={previewKey}
             ref={video}
             muted
             playsInline
@@ -192,6 +257,7 @@ export function ScanPanel() {
             {camera === 'idle' ? (
               <button
                 type="button"
+                disabled={scopeBlocked}
                 onClick={() => void start()}
                 className={styles.primaryButton}
               >
@@ -228,7 +294,7 @@ export function ScanPanel() {
           <p className={styles.description}>
             Use this when a camera is unavailable or a label will not scan.
           </p>
-          <fieldset className={styles.fieldset}>
+          <fieldset className={styles.fieldset} disabled={scopeBlocked}>
             <legend className={styles.legend}>Look up as</legend>
             <label className={styles.radioChoice}>
               <input
@@ -258,7 +324,7 @@ export function ScanPanel() {
                   setMode('item_code');
                 }}
               />
-              Quantity Item code (SKU)
+              Quantity item code (SKU)
             </label>
           </fieldset>
           <label htmlFor="scan-text" className={styles.fieldLabel}>
@@ -267,11 +333,20 @@ export function ScanPanel() {
               : 'Paste a label URL, barcode text, or exact identifier'}
           </label>
           <input
+            ref={inputControl}
+            disabled={scopeBlocked}
             id="scan-text"
             value={input}
-            onChange={(event) => setInput(event.target.value)}
+            onChange={(event) => {
+              completionFocus.current = null;
+              stop();
+              consumed.current = false;
+              setResult(null);
+              setMessage('');
+              setInput(event.target.value);
+            }}
             maxLength={1024}
-            className={styles.input}
+            className={styles.input + ' experience-code'}
           />
           <p className={styles.hint}>
             {mode === 'item_code'
@@ -279,25 +354,50 @@ export function ScanPanel() {
               : 'Locations use LOC:CODE; asset tags use AST:tag. Bare identifiers are checked for exact matches across locations, assets, and quantity items.'}
           </p>
           <div className={styles.submitRow}>
-            <button disabled={busy} className={styles.primaryButton}>
-              {busy ? 'Looking up…' : 'Open'}
+            <button
+              disabled={busy || scopeBlocked}
+              className={styles.primaryButton}
+            >
+              {busy ? 'Inspecting equipment…' : 'Open'}
             </button>
           </div>
         </form>
-      </div>
-      {message && (
-        <p role="status" className={styles.message}>
-          {message}
-        </p>
+      </section>
+      <p role="status" className={busy || message ? styles.message : 'sr-only'}>
+        {busy ? 'Inspecting equipment…' : message}
+      </p>
+      {busy && (
+        <button
+          ref={cancelControl}
+          type="button"
+          className={styles.secondaryButton}
+          onClick={() => {
+            completionFocus.current = null;
+            stop();
+            consumed.current = false;
+            setResult(null);
+            setMessage('Inspection cancelled. Enter or scan another code.');
+            inputControl.current?.focus();
+          }}
+        >
+          Cancel inspection
+        </button>
       )}
       {result && result.matches.length > 0 && (
         <ul className={styles.results} aria-label="Matching records">
-          {result.matches.map((match) => (
+          {result.matches.map((match, index) => (
             <li key={match.path} className={styles.result}>
-              <Link href={match.path} onClick={stop} className="underline">
-                {match.label}
+              <Link
+                ref={index === 0 ? firstMatch : undefined}
+                href={match.path}
+                onClick={stop}
+                className="underline"
+              >
+                <ScanMatchLabel match={match} />
               </Link>
-              <span className={styles.state}>{match.state}</span>
+              <span className={styles.state}>
+                <RecordStatus status={match.state} />
+              </span>
             </li>
           ))}
         </ul>

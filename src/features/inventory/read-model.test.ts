@@ -58,6 +58,40 @@ it('maps quantity history view rows with null endpoints into ledger-based move a
     ],
   };
   const move = mapHistory(historyRow.parse(base), [location, destination], []);
+  const raw = {
+    ...base,
+    before_metadata: {
+      name: 'Asset tag',
+      asset_tag: 'Tag-0O',
+      serial_number: 'Serial-1l',
+      item_code: 'SKU/<x>',
+    },
+    after_metadata: {
+      name: 'Item code (SKU)',
+      asset_tag: 'tag-0O',
+      serial_number: 'Serial-2l',
+      item_code: 'SKU/🔌',
+    },
+  };
+  const snapshot = structuredClone(raw);
+  const changes = mapHistory(
+    historyRow.parse(raw),
+    [location, destination],
+    [],
+  ).metadataChanges;
+  expect(
+    changes
+      .filter((change) => change.presentation === 'code')
+      .map((change) => [change.field, change.before, change.after]),
+  ).toEqual([
+    ['Asset tag', 'Tag-0O', 'tag-0O'],
+    ['Item code (SKU)', 'SKU/<x>', 'SKU/🔌'],
+    ['Serial number', 'Serial-1l', 'Serial-2l'],
+  ]);
+  expect(
+    changes.find((change) => change.field === 'Name')?.presentation,
+  ).toBeUndefined();
+  expect(raw).toEqual(snapshot);
   expect(move.fromLocation).toBeNull();
   expect(move.toLocation).toBeNull();
   expect(historySummary(move)).toBe(

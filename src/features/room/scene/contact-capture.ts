@@ -33,7 +33,10 @@ export function createContactCapture(
   depth: number,
   height: number,
   resolution: number,
+  current: () => boolean = () => true,
 ) {
+  if (!current()) throw new Error('Retired room contact owner');
+  let disposed = false;
   const owned: { dispose(): void }[] = [];
   const own = <T extends { dispose(): void }>(resource: T): T => {
     owned.push(resource);
@@ -92,6 +95,7 @@ export function createContactCapture(
     const color = new Color('#000000');
     let depthShaderSupported = true;
     depthMaterial.onBeforeCompile = (shader) => {
+      if (disposed || !current()) return;
       if (
         !shader.fragmentShader.includes('void main() {') ||
         !shader.fragmentShader.includes(
@@ -129,7 +133,6 @@ export function createContactCapture(
     const blurScene = new Scene();
     blurScene.add(new Mesh(blurGeometry, blurMaterial));
     const blurCamera = new OrthographicCamera(-1, 1, 1, -1, 0, 1);
-    let disposed = false;
     return {
       texture: target.texture,
       capture(
@@ -137,6 +140,7 @@ export function createContactCapture(
         casters: readonly EffectMesh[],
         shadowColor: Color,
       ) {
+        if (!current()) return;
         if (disposed) throw new Error('Disposed room contact capture');
         const previousTarget = gl.getRenderTarget();
         const previousFace = gl.getActiveCubeFace();
@@ -154,12 +158,14 @@ export function createContactCapture(
         const checkShaderErrors = gl.debug.checkShaderErrors;
         const onShaderError = gl.debug.onShaderError;
         let shaderFailed = false;
+        let capturing = true;
         const context = gl.getContext();
         const renderPass = (
           destination: WebGLRenderTarget,
           scene: Scene,
           camera: OrthographicCamera,
         ) => {
+          if (!current()) return;
           if (context.isContextLost())
             throw new Error('Lost room contact context');
           gl.setRenderTarget(destination);
@@ -195,6 +201,7 @@ export function createContactCapture(
           // Only the two owned materials render inside this synchronous scope.
           gl.debug.checkShaderErrors = true;
           gl.debug.onShaderError = () => {
+            if (disposed || !capturing || !current()) return;
             shaderFailed = true;
           };
           gl.xr.enabled = false;
@@ -210,6 +217,7 @@ export function createContactCapture(
           blurMaterial.uniforms.direction.value.set(0, 1.4 / resolution);
           renderPass(target, blurScene, blurCamera);
         } finally {
+          capturing = false;
           captureScene.clear();
           gl.debug.checkShaderErrors = checkShaderErrors;
           gl.debug.onShaderError = onShaderError;

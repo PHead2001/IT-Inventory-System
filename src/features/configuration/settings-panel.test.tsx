@@ -89,7 +89,9 @@ it('reports the committed category outcome instead of generic settings success',
     target: { value: 'Updated source' },
   });
   fireEvent.click(screen.getByRole('button', { name: 'Save name' }));
-  expect(await screen.findByText('Category name saved.')).toBeVisible();
+  expect(
+    await screen.findByText('Category name saved: Updated source.'),
+  ).toBeVisible();
   expect(mocks.refresh).toHaveBeenCalledOnce();
 });
 
@@ -195,11 +197,288 @@ it('saves shared label defaults using the existing version and payload keys', as
           size: '70x35',
           page: 'A4',
           format: 'code128',
+          layout: null,
         },
       }),
     ),
   );
 });
+
+it('keeps refreshed shared defaults separate from the draft version until explicitly loaded', async () => {
+  mocks.submit.mockResolvedValue({
+    ok: false,
+    code: 'P1002',
+    message: 'Settings changed. Review the latest defaults.',
+  });
+  const view = render(
+    <SettingsPanel mode="labels" labelDefaults={defaults} canManage />,
+  );
+  fireEvent.change(screen.getByRole('combobox', { name: 'Barcode type' }), {
+    target: { value: 'code128' },
+  });
+  const latest = {
+    ...defaults,
+    version: '2',
+    layout: {
+      version: 1 as const,
+      mode: 'single' as const,
+      labelWidth: 700,
+      labelHeight: 350,
+    },
+  };
+  view.rerender(
+    <SettingsPanel mode="labels" labelDefaults={latest} canManage />,
+  );
+  fireEvent.click(screen.getByRole('button', { name: 'Save shared defaults' }));
+  await waitFor(() => expect(mocks.submit).toHaveBeenCalledOnce());
+  expect(mocks.submit.mock.calls[0][0].payload).toMatchObject({
+    expected_version: '1',
+    layout: null,
+    format: 'code128',
+  });
+  await waitFor(() =>
+    expect(
+      screen.getByRole('button', { name: 'Load latest shared defaults' }),
+    ).toBeEnabled(),
+  );
+  fireEvent.click(
+    screen.getByRole('button', { name: 'Load latest shared defaults' }),
+  );
+  expect(screen.getByRole('combobox', { name: 'Barcode type' })).toHaveValue(
+    'qr',
+  );
+  expect(screen.getByLabelText('Label width (mm)')).toHaveValue('70');
+  fireEvent.click(screen.getByRole('button', { name: 'Save shared defaults' }));
+  await waitFor(() => expect(mocks.submit).toHaveBeenCalledTimes(2));
+  expect(mocks.submit.mock.calls[1][0].payload).toMatchObject({
+    expected_version: '2',
+    layout: latest.layout,
+  });
+});
+
+it('retains an uncertain label save through an unrelated category save and retries its exact identity once', async () => {
+  mocks.submit.mockRejectedValueOnce(new Error('response lost'));
+  const view = render(
+    <SettingsPanel categories={[source]} labelDefaults={defaults} canManage />,
+  );
+  fireEvent.change(screen.getByRole('combobox', { name: 'Output' }), {
+    target: { value: 'single' },
+  });
+  fireEvent.click(screen.getByRole('button', { name: 'Save shared defaults' }));
+  const retry = await screen.findByRole('button', {
+    name: 'Retry same label settings save',
+  });
+  await waitFor(() => expect(retry).toBeEnabled());
+  const original = mocks.submit.mock.calls[0][0];
+  view.rerender(
+    <SettingsPanel
+      categories={[source]}
+      labelDefaults={{ ...defaults, version: '2' }}
+      canManage
+    />,
+  );
+  expect(
+    screen.getByRole('button', { name: 'Load latest shared defaults' }),
+  ).toBeDisabled();
+  expect(screen.getByLabelText('Label width (mm)')).toBeDisabled();
+  mocks.submit.mockResolvedValueOnce({
+    ok: true,
+    result: { changed: true, version: '2' },
+  });
+  fireEvent.click(screen.getByRole('button', { name: 'Rename Source' }));
+  fireEvent.change(screen.getByLabelText('New category name'), {
+    target: { value: 'Other name' },
+  });
+  fireEvent.click(screen.getByRole('button', { name: 'Save name' }));
+  await waitFor(() => expect(retry).toBeEnabled());
+  expect(mocks.submit.mock.calls[1][0].operation).toBe('category_rename');
+  let resolve!: (value: unknown) => void;
+  mocks.submit.mockImplementationOnce(
+    () =>
+      new Promise((done) => {
+        resolve = done;
+      }),
+  );
+  fireEvent.click(retry);
+  fireEvent.click(retry);
+  expect(mocks.submit).toHaveBeenCalledTimes(3);
+  expect(mocks.submit.mock.calls[2][0]).toEqual(original);
+  expect(
+    screen.getByRole('button', { name: 'Retry same label settings save' }),
+  ).toBeDisabled();
+  await act(async () =>
+    resolve({ ok: true, result: { changed: true, version: '2' } }),
+  );
+  await waitFor(() =>
+    expect(
+      screen.getByRole('button', { name: 'Save shared defaults' }),
+    ).toBeEnabled(),
+  );
+  mocks.submit.mockResolvedValueOnce({
+    ok: true,
+    result: { changed: true, version: '3' },
+  });
+  fireEvent.change(screen.getByLabelText('Label width (mm)'), {
+    target: { value: '80' },
+  });
+  fireEvent.click(screen.getByRole('button', { name: 'Save shared defaults' }));
+  await waitFor(() => expect(mocks.submit).toHaveBeenCalledTimes(4));
+  expect(mocks.submit.mock.calls[3][0].payload.expected_version).toBe('2');
+  expect(mocks.submit.mock.calls[3][0].requestId).not.toBe(original.requestId);
+});
+
+it.each([
+  {
+    actorId: 'b1000000-0000-4000-8000-000000000009',
+    backend: 'https://isolated.supabase.co',
+    code: 'actor_changed',
+  },
+  {
+    actorId: 'b1000000-0000-4000-8000-000000000001',
+    backend: 'https://other.supabase.co',
+    code: 'backend_changed',
+  },
+])(
+  'blocks changed label owner props and preserves the original bound unknown command ($code)',
+  async (changed) => {
+    const binding = {
+      actorId: 'b1000000-0000-4000-8000-000000000001',
+      backend: 'https://isolated.supabase.co',
+    };
+    mocks.submit
+      .mockRejectedValueOnce(new Error('response lost'))
+      .mockResolvedValueOnce({
+        ok: false,
+        code: changed.code,
+        message: 'Restore the original workspace.',
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        result: { changed: true, version: '2' },
+      });
+    const view = render(
+      <SettingsPanel
+        mode="labels"
+        labelDefaults={defaults}
+        labelBinding={binding}
+        canManage
+      />,
+    );
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Save shared defaults' }),
+    );
+    await waitFor(() =>
+      expect(
+        screen.getByRole('button', { name: 'Retry same label settings save' }),
+      ).toBeEnabled(),
+    );
+    const original = mocks.submit.mock.calls[0][0];
+    expect(original).toMatchObject({
+      expectedActorId: binding.actorId,
+      expectedBackend: binding.backend,
+      payload: { expected_version: '1', layout: null },
+    });
+    const latest = { ...defaults, version: '2' };
+    view.rerender(
+      <SettingsPanel
+        mode="labels"
+        labelDefaults={latest}
+        labelBinding={{ actorId: changed.actorId, backend: changed.backend }}
+        canManage
+      />,
+    );
+    const blocked = screen.getByRole('button', {
+      name: 'Retry same label settings save',
+    });
+    expect(blocked).toBeDisabled();
+    expect(
+      screen.getByRole('button', { name: 'Load latest shared defaults' }),
+    ).toBeDisabled();
+    fireEvent.click(blocked);
+    expect(mocks.submit).toHaveBeenCalledOnce();
+    view.rerender(
+      <SettingsPanel
+        mode="labels"
+        labelDefaults={latest}
+        labelBinding={binding}
+        canManage
+      />,
+    );
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Retry same label settings save' }),
+    );
+    await waitFor(() => expect(mocks.submit).toHaveBeenCalledTimes(2));
+    await waitFor(() =>
+      expect(
+        screen.getByRole('button', { name: 'Retry same label settings save' }),
+      ).toBeEnabled(),
+    );
+    expect(
+      screen.getByRole('button', { name: 'Load latest shared defaults' }),
+    ).toBeDisabled();
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Retry same label settings save' }),
+    );
+    await waitFor(() => expect(mocks.submit).toHaveBeenCalledTimes(3));
+    expect(mocks.submit.mock.calls[1][0]).toEqual(original);
+    expect(mocks.submit.mock.calls[2][0]).toEqual(original);
+  },
+);
+
+it.each(['55P03', '57014', 'P1001', 'P1009', 'P1012', 'P1016'])(
+  'retains unknown label identity when retry returns %s before confirming its outcome',
+  async (code) => {
+    mocks.submit
+      .mockRejectedValueOnce(new Error('lost response'))
+      .mockResolvedValueOnce({
+        ok: false,
+        code,
+        message: 'Retry could not confirm the original save.',
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        result: { changed: true, version: '2' },
+      });
+    const view = render(
+      <SettingsPanel mode="labels" labelDefaults={defaults} canManage />,
+    );
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Save shared defaults' }),
+    );
+    await waitFor(() =>
+      expect(
+        screen.getByRole('button', { name: 'Retry same label settings save' }),
+      ).toBeEnabled(),
+    );
+    const original = mocks.submit.mock.calls[0][0];
+    view.rerender(
+      <SettingsPanel
+        mode="labels"
+        labelDefaults={{ ...defaults, version: '2' }}
+        canManage
+      />,
+    );
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Retry same label settings save' }),
+    );
+    await waitFor(() => expect(mocks.submit).toHaveBeenCalledTimes(2));
+    await waitFor(() =>
+      expect(
+        screen.getByRole('button', { name: 'Retry same label settings save' }),
+      ).toBeEnabled(),
+    );
+    expect(
+      screen.getByRole('button', { name: 'Load latest shared defaults' }),
+    ).toBeDisabled();
+    expect(screen.getByRole('combobox', { name: 'Label size' })).toBeDisabled();
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Retry same label settings save' }),
+    );
+    await waitFor(() => expect(mocks.submit).toHaveBeenCalledTimes(3));
+    expect(mocks.submit.mock.calls[1][0]).toEqual(original);
+    expect(mocks.submit.mock.calls[2][0]).toEqual(original);
+  },
+);
 
 it('retains an invalid rename draft with a durable associated error and input focus', () => {
   render(<SettingsPanel mode="categories" categories={[source]} canManage />);
@@ -428,7 +707,7 @@ it('allows an unreferenced last category to be deleted and shows the empty state
     name: 'Removal impact review',
   });
   expect(review).toHaveTextContent(
-    'truly unreferenced category will be deleted',
+    'category has no inventory or history references',
   );
   const confirm = within(review).getByRole('button', {
     name: 'Remove category Source',
@@ -436,10 +715,66 @@ it('allows an unreferenced last category to be deleted and shows the empty state
   await waitFor(() => expect(confirm).toBeEnabled());
   fireEvent.click(confirm);
   await waitFor(() => expect(mocks.submit).toHaveBeenCalledTimes(1));
+  expect(await screen.findByText('Category removed: Source.')).toBeVisible();
   view.rerender(
     <SettingsPanel categories={[]} labelDefaults={defaults} canManage />,
   );
   expect(screen.getByText(/No active categories/)).toBeInTheDocument();
+});
+
+it('names removal confirmation and committed feedback from the reviewed snapshot despite stale category props', async () => {
+  const reviewed = impact(null, '0');
+  reviewed.review.source_name = 'Renamed on the server';
+  reviewed.review.source_version = '2';
+  mocks.review.mockResolvedValue(reviewed);
+  let finish!: (value: unknown) => void;
+  mocks.submit.mockImplementationOnce(
+    () =>
+      new Promise((resolve) => {
+        finish = resolve;
+      }),
+  );
+  const view = render(
+    <SettingsPanel mode="categories" categories={[source]} canManage />,
+  );
+  fireEvent.click(screen.getByRole('button', { name: 'Remove Source' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Review impact' }));
+  const review = await screen.findByRole('region', {
+    name: 'Removal impact review',
+  });
+  expect(
+    screen.getByRole('heading', { name: 'Remove Renamed on the server?' }),
+  ).toBeVisible();
+  const confirm = within(review).getByRole('button', {
+    name: 'Remove category Renamed on the server',
+  });
+  await waitFor(() => expect(confirm).toBeEnabled());
+  fireEvent.click(confirm);
+  await waitFor(() => expect(mocks.submit).toHaveBeenCalledOnce());
+  expect(mocks.submit.mock.calls[0][0].payload).toEqual({
+    category_id: source.id,
+    replacement_id: null,
+    review_token: token,
+  });
+  expect(
+    screen.queryByText('Category removed: Renamed on the server.'),
+  ).toBeNull();
+  view.rerender(
+    <SettingsPanel
+      mode="categories"
+      categories={[{ ...source, name: 'Another stale prop' }]}
+      canManage
+    />,
+  );
+  await act(async () => finish({ ok: true, result: { changed: true } }));
+  expect(
+    await screen.findByText('Category removed: Renamed on the server.'),
+  ).toBeVisible();
+  expect(screen.queryByText('Category removed: Source.')).toBeNull();
+  expect(
+    screen.queryByText('Category removed: Another stale prop.'),
+  ).toBeNull();
+  expect(mocks.refresh).toHaveBeenCalledOnce();
 });
 
 it('keeps an authored form category for history and shows target metadata gaps before removal', async () => {
@@ -473,3 +808,49 @@ it('keeps an authored form category for history and shows target metadata gaps b
   );
   expect(review).toHaveTextContent('retained for readable history');
 });
+
+it('names the category only after its creation commits', async () => {
+  let finish!: (value: unknown) => void;
+  mocks.submit.mockImplementationOnce(
+    () =>
+      new Promise((resolve) => {
+        finish = resolve;
+      }),
+  );
+  render(<SettingsPanel mode="categories" categories={[source]} canManage />);
+  fireEvent.change(screen.getByLabelText('Display name'), {
+    target: { value: 'Adapters' },
+  });
+  fireEvent.click(screen.getByRole('button', { name: 'Add category' }));
+  expect(screen.queryByText('Category added: Adapters.')).toBeNull();
+  await act(async () => finish({ ok: true, result: { changed: true } }));
+  expect(await screen.findByText('Category added: Adapters.')).toBeVisible();
+});
+
+it.each(['create', 'rename'] as const)(
+  'shows the normalized committed category name after %s without waiting for refresh',
+  async (operation) => {
+    mocks.submit.mockResolvedValue({ ok: true, result: { changed: true } });
+    render(<SettingsPanel mode="categories" categories={[source]} canManage />);
+    if (operation === 'rename')
+      fireEvent.click(screen.getByRole('button', { name: 'Rename Source' }));
+    fireEvent.change(
+      screen.getByLabelText(
+        operation === 'create' ? 'Display name' : 'New category name',
+      ),
+      { target: { value: '  USB   Adapters\t and   Cables  ' } },
+    );
+    fireEvent.click(
+      screen.getByRole('button', {
+        name: operation === 'create' ? 'Add category' : 'Save name',
+      }),
+    );
+    const expected =
+      operation === 'create'
+        ? 'Category added: USB Adapters and Cables.'
+        : 'Category name saved: USB Adapters and Cables.';
+    // textContent preserves repeated spaces that accessible queries normalize.
+    expect((await screen.findByText(expected)).textContent).toBe(expected);
+    expect(mocks.refresh).toHaveBeenCalledOnce();
+  },
+);

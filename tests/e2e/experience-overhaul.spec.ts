@@ -1,5 +1,12 @@
 import { metadataReviewButton, metadataSaveButton } from './metadata-controls';
-import { expect, test, type Locator, type Page } from '@playwright/test';
+import { expectCategoryAdded } from './configuration-assertions';
+import {
+  expect,
+  test,
+  type Locator,
+  type Page,
+  type Request,
+} from '@playwright/test';
 import { randomUUID } from 'node:crypto';
 import { createClient } from '@supabase/supabase-js';
 import { PNG } from 'pngjs';
@@ -14,6 +21,38 @@ import fixture from '../fixtures/auth.json' with { type: 'json' };
 import { setLocalReducedMotion } from './motion-settings';
 
 test.use({ deviceScaleFactor: 2 });
+
+async function pendingDesignerActor(page: Page, privateName: string) {
+  let actor = '';
+  await expect
+    .poll(async () => {
+      actor = await page.evaluate((name) => {
+        for (const key of Object.keys(sessionStorage)) {
+          if (!key.startsWith('it-inventory:form-designer:v1:')) continue;
+          const raw = sessionStorage.getItem(key);
+          if (!raw?.includes(name)) continue;
+          const draft = JSON.parse(raw) as { memberId?: unknown };
+          if (typeof draft.memberId === 'string') return draft.memberId;
+        }
+        return '';
+      }, privateName);
+      return actor;
+    })
+    .toMatch(/^[0-9a-f-]{36}$/i);
+  return actor;
+}
+
+/** Privacy generation reads/acknowledgements are separate from this actor check. */
+function isDesignerIdentityRequest(request: Request, actor: string) {
+  if (request.method() !== 'POST' || !request.headers()['next-action'])
+    return false;
+  try {
+    const args: unknown = JSON.parse(request.postData() ?? '');
+    return Array.isArray(args) && args.length === 1 && args[0] === actor;
+  } catch {
+    return false;
+  }
+}
 
 async function expectLocationIdentity(
   panel: Locator,
@@ -479,7 +518,7 @@ test('a newly required field requests targeted confirmation before changing the 
   await page.goto('/settings/categories');
   await page.getByLabel('Display name').fill(category);
   await page.getByRole('button', { name: 'Add category' }).click();
-  await expect(page.getByRole('status')).toContainText('Category added.');
+  await expectCategoryAdded(page, category);
   await page.goto('/inventory/quantity/new');
   const create = page.getByRole('form', { name: 'Add quantity item' });
   await create
@@ -536,7 +575,7 @@ test('a stale category publication retains the exact unsaved input for explicit 
   await page.goto('/settings/categories');
   await page.getByLabel('Display name').fill(category);
   await page.getByRole('button', { name: 'Add category' }).click();
-  await expect(page.getByRole('status')).toContainText('Category added.');
+  await expectCategoryAdded(page, category);
   await page.goto('/settings/forms');
   await page.getByRole('link', { name: category, exact: true }).click();
   await expect(page).toHaveURL(/\/settings\/forms\/[0-9a-f-]{36}$/);
@@ -599,6 +638,7 @@ test('same-user focus checks coalesce while the unsaved designer remains mounted
   const input = designer.getByLabel('Section heading').last();
   const pendingName = `Unsaved focus ${crypto.randomUUID()}`;
   await input.fill(pendingName);
+  const actor = await pendingDesignerActor(page, pendingName);
   let release!: () => void;
   const gate = new Promise<void>((resolve) => {
     release = resolve;
@@ -609,7 +649,7 @@ test('same-user focus checks coalesce while the unsaved designer remains mounted
   });
   let actionRequests = 0;
   await page.route('**/settings/forms/**', async (route) => {
-    if (route.request().method() === 'POST') {
+    if (isDesignerIdentityRequest(route.request(), actor)) {
       actionRequests++;
       started();
       await gate;
@@ -651,12 +691,13 @@ test('a transient access-check failure retains local edits and pauses Save until
   const input = designer.getByLabel('Section heading').last();
   const pendingName = `Retained on failure ${crypto.randomUUID()}`;
   await input.fill(pendingName);
+  const actor = await pendingDesignerActor(page, pendingName);
   let interrupted!: () => void;
   const requestFailed = new Promise<void>((resolve) => {
     interrupted = resolve;
   });
   await page.route('**/settings/forms/**', async (route) => {
-    if (route.request().method() === 'POST') {
+    if (isDesignerIdentityRequest(route.request(), actor)) {
       await route.abort('failed');
       interrupted();
     } else await route.continue();
@@ -725,6 +766,10 @@ test('account switch during a held designer gesture permanently masks the old pr
     ).toBeVisible();
     await page.bringToFront();
     await page.evaluate(() => window.dispatchEvent(new Event('focus')));
+    // A privacy presentation mask alone is not terminal designer denial.
+    await expect(page.getByText(/Configuration access changed\./)).toHaveCount(
+      1,
+    );
     await expect(
       designer.getByRole('button', { name: 'Save changes' }),
     ).toHaveCount(0);
@@ -739,6 +784,9 @@ test('account switch during a held designer gesture permanently masks the old pr
     ).toBe(false);
     await page.mouse.up();
     await page.evaluate(() => window.dispatchEvent(new Event('focus')));
+    await expect(page.getByText(/Configuration access changed\./)).toHaveCount(
+      1,
+    );
     await expect(
       designer.getByRole('button', { name: 'Save changes' }),
     ).toHaveCount(0);
@@ -893,12 +941,27 @@ test('Back into a selected modeled space focuses from its saved camera baseline'
   await page.goto('/room?location=ITC-S1A');
   const viewer = page.getByTestId('room-viewer');
   await expect(viewer).toHaveAttribute('data-focused-code', 'ITC-S1A');
+  const beforePan = await readyCameraSnapshot(viewer);
   await (
     await mapOverflow(viewer)
   )
     .getByRole('button', { name: 'Pan right' })
     .click();
-  const displaced = await readyCameraSnapshot(viewer);
+  // A non-null saved snapshot may still precede the scene's pan-command commit.
+  const pan: { snapshot: CameraSnapshot | null } = { snapshot: null };
+  await expect
+    .poll(async () => {
+      pan.snapshot = parseCameraSnapshot(
+        await viewer.getAttribute('data-camera-view'),
+      );
+      return (
+        pan.snapshot !== null &&
+        JSON.stringify(pan.snapshot.target) !== JSON.stringify(beforePan.target)
+      );
+    })
+    .toBe(true);
+  const displaced = pan.snapshot;
+  if (!displaced) throw new Error('Panned camera snapshot unavailable');
   await page.getByLabel('Space', { exact: true }).selectOption('it-office');
   await expect(viewer).toHaveCount(0);
   await page.goBack();

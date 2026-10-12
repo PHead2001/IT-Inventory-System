@@ -4,6 +4,7 @@ import { setTimeout as delay } from 'node:timers/promises';
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import { Client } from 'pg';
 import authFixture from '../fixtures/auth.json' with { type: 'json' };
+import { testPrintMediaConfiguration } from './print-media-configuration';
 
 function local(value: string | undefined, port: number) {
   assert.ok(value);
@@ -1027,6 +1028,14 @@ async function main() {
     page: originalDefaults.page,
     format: originalDefaults.format,
   });
+  // Media scenarios advance the singleton version only after the original
+  // historical four-field/default-version sequence has completed.
+  await testPrintMediaConfiguration(
+    owner,
+    maintainer.client,
+    maintainer.id,
+    db,
+  );
 
   const isolation = await newCategory(maintainer.client, prefix + ' Isolation');
   const receiptId = uuid();

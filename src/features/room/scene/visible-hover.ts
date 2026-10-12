@@ -42,24 +42,36 @@ export function visibleRoomTarget(
   return visibleRoomHit(intersections)?.target ?? null;
 }
 
+/** Eligibility and logical ownership shared by rays and triangle traversal.
+ * Material-array eligibility alone does not prove a particular face visible. */
+export function visibleRoomMeshTarget(object: Object3D) {
+  // Drei Edges uses a Mesh subclass whose position buffer is a shader extrusion
+  // template. Its disabled picking and decorative strokes are not solid faces.
+  if ('isLineSegments2' in object && object.isLineSegments2 === true)
+    return null;
+  if (!(object instanceof Mesh) || object.userData.hoverPassThrough)
+    return null;
+  if (!object.visible || !object.material) return null;
+  for (let parent = object.parent; parent; parent = parent.parent)
+    if (!parent.visible) return null;
+  const materials = Array.isArray(object.material)
+    ? object.material
+    : [object.material];
+  if (materials.every((material) => !material.visible || material.opacity <= 0))
+    return null;
+  return { object, target: interactiveAncestor(object) };
+}
+
 /** Retain the actual first visible intersection for camera-side anchors. */
 export function visibleRoomHit(intersections: Intersection<Object3D>[]) {
   for (const hit of intersections) {
-    const { object } = hit;
-    if (!(object instanceof Mesh) || object.userData.hoverPassThrough) continue;
-    if (!object.visible || !object.material) continue;
-    let hiddenParent = false;
-    for (let parent = object.parent; parent; parent = parent.parent)
-      if (!parent.visible) hiddenParent = true;
-    if (hiddenParent) continue;
-    const materials = Array.isArray(object.material)
-      ? object.material
-      : [object.material];
-    if (
-      materials.every((material) => !material.visible || material.opacity <= 0)
-    )
-      continue;
-    return { hit, target: interactiveAncestor(object) };
+    const surface = visibleRoomMeshTarget(hit.object);
+    if (!surface) continue;
+    const material = Array.isArray(surface.object.material)
+      ? surface.object.material[hit.face?.materialIndex ?? 0]
+      : surface.object.material;
+    if (!material || !material.visible || material.opacity <= 0) continue;
+    return { hit, target: surface.target };
   }
   return null;
 }

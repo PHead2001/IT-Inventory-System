@@ -386,7 +386,7 @@ test('representative shell and auth surfaces render at desktop and phone sizes w
       path: testInfo.outputPath('overview-phone-390-viewport.png'),
     });
     await expect(
-      page.getByRole('button', { name: 'Reduce motion locally' }),
+      page.getByRole('switch', { name: 'Reduce motion in this browser' }),
     ).toHaveCount(0);
     await expect(
       page.getByRole('heading', { name: 'Low-stock overview' }),
@@ -690,10 +690,10 @@ test('the first styled paint is reduced before hydration and the saved preferenc
       );
       await probe.goto('/settings');
       await expect(
-        probe.getByRole('button', {
-          name: saved ? 'Use system motion setting' : 'Reduce motion locally',
+        probe.getByRole('switch', {
+          name: 'Reduce motion in this browser',
         }),
-      ).toHaveAttribute('aria-pressed', String(saved));
+      ).toHaveAttribute('aria-checked', String(saved));
     } finally {
       release();
       await probe.close();
@@ -722,26 +722,41 @@ test('desktop navigation reaches personal motion Settings after long-page scroll
     const settingsBox = await settings.boundingBox();
     expect(settingsBox).toBeTruthy();
     await expect(
-      page.getByRole('button', { name: 'Reduce motion locally' }),
+      page.getByRole('switch', { name: 'Reduce motion in this browser' }),
     ).toHaveCount(0);
     await settings.click();
     await expect(page).toHaveURL(/\/settings$/);
-    const toggle = page.getByRole('button', { name: 'Reduce motion locally' });
+    const toggle = page.getByRole('switch', {
+      name: 'Reduce motion in this browser',
+    });
+    await expect(toggle).toBeEnabled();
     await toggle.scrollIntoViewIfNeeded();
-    const toggleBox = await toggle.boundingBox();
-    expect(toggleBox).toBeTruthy();
-    expect(toggleBox!.y + toggleBox!.height).toBeLessThanOrEqual(height);
-    expect(
-      await toggle.evaluate((button) => {
-        const box = button.getBoundingClientRect();
-        return button.contains(
-          document.elementFromPoint(
-            box.x + box.width / 2,
-            box.y + box.height / 2,
-          ),
-        );
-      }),
-    ).toBe(true);
+    // Native snapshots can briefly intercept hit testing. Browser document
+    // scrolling also rounds to CSS pixels (CI's bottom was 330.359375 at 330px).
+    // Check containment and pointer ownership together after actionability,
+    // allowing only the repository's one-pixel scroll-rounding tolerance.
+    await expect
+      .poll(() =>
+        toggle.evaluate((button) => {
+          const box = button.getBoundingClientRect();
+          return {
+            contained:
+              box.width > 0 &&
+              box.height > 0 &&
+              box.top >= -1 &&
+              box.left >= -1 &&
+              box.bottom <= innerHeight + 1 &&
+              box.right <= innerWidth + 1,
+            receivesPointer: button.contains(
+              document.elementFromPoint(
+                box.x + box.width / 2,
+                box.y + box.height / 2,
+              ),
+            ),
+          };
+        }),
+      )
+      .toEqual({ contained: true, receivesPointer: true });
     await toggle.focus();
     await expect(toggle).toBeFocused();
   }
@@ -1148,6 +1163,30 @@ test('configuration and inventory creation surfaces render at desktop and phone 
           .locator('[data-control-id]')
           .filter({ hasText: 'Visual check field' }),
       ).toBeVisible();
+      const inspectorClearance = await page
+        .getByTestId('designer-inspector')
+        .evaluate((inspector) => {
+          const toolbar = document.querySelector<HTMLElement>(
+            '[role="toolbar"][aria-label="Form designer"]',
+          )!;
+          return {
+            top: inspector.getBoundingClientRect().top,
+            toolbarBottom: toolbar.getBoundingClientRect().bottom,
+          };
+        });
+      expect(inspectorClearance.top).toBeGreaterThanOrEqual(
+        inspectorClearance.toolbarBottom + 15,
+      );
+      // Sticky settings deliberately stay above a scrolled canvas. Compare the
+      // initial panel alignment separately, with the document at its origin.
+      await page.evaluate(() =>
+        window.scrollTo({ top: 0, behavior: 'instant' }),
+      );
+      // Allow bounded coordinate rounding/scroll anchoring tolerance at the
+      // origin; the panel geometry assertions below remain unchanged.
+      await expect
+        .poll(() => page.evaluate(() => Math.abs(scrollY)))
+        .toBeLessThanOrEqual(2);
       const panels = await page.evaluate(() => {
         const heading = (text: string) =>
           [...document.querySelectorAll('main h3')].find(

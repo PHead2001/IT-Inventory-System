@@ -1,5 +1,6 @@
 /* eslint-disable react-hooks/immutability -- Canvas pointer telemetry and raycasting are imperative graphics operations. */
 'use client';
+import { useSceneCurrent } from './scene-current';
 import { useFrame, useThree } from '@react-three/fiber';
 import { useCallback, useEffect, useRef } from 'react';
 import { Raycaster, Vector2 } from 'three';
@@ -53,6 +54,7 @@ export function VisibleHoverTracker({
 }) {
   const { camera, gl, scene, invalidate } = useThree();
   const effects = useOptionalSceneEffects();
+  const isCurrent = useSceneCurrent(effects);
   const lastVisualSample = useRef({ camera: '', epoch: -1 });
   const raycaster = useRef(new Raycaster());
   const ndc = useRef(new Vector2());
@@ -64,6 +66,7 @@ export function VisibleHoverTracker({
   });
   const sample = useCallback(
     (pointerMoved = false) => {
+      if (!isCurrent()) return;
       if (!pointer.current.known) return;
       if (!pointer.current.inside && !retainDuringLabelHandoff) return;
       const canvas = gl.domElement;
@@ -140,13 +143,16 @@ export function VisibleHoverTracker({
       active,
       suspended,
       effects,
+      isCurrent,
     ],
   );
   useEffect(() => {
     const canvas = gl.domElement;
+    if (!isCurrent()) return;
     const previousCursor = canvas.style.cursor;
     const move = (event: PointerEvent) => {
       if (event.pointerType === 'touch') return;
+      if (!isCurrent()) return;
       pointer.current = {
         clientX: event.clientX,
         clientY: event.clientY,
@@ -157,6 +163,7 @@ export function VisibleHoverTracker({
       invalidate();
     };
     const leave = () => {
+      if (!isCurrent()) return;
       pointer.current.inside = false;
       effects?.clearHover();
       canvas.style.cursor = active ? 'grab' : 'auto';
@@ -172,7 +179,7 @@ export function VisibleHoverTracker({
       delete canvas.dataset.hoverVisibleCode;
       canvas.style.cursor = previousCursor;
     };
-  }, [gl, invalidate, onCanvasLeave, sample, active, effects]);
+  }, [gl, invalidate, onCanvasLeave, sample, active, effects, isCurrent]);
   // OrbitControls and the focus rig invalidate demand frames even if the pointer
   // stays motionless. Recheck the visible surface after each camera update.
   useFrame(() => sample());

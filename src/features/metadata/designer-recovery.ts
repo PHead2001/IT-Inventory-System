@@ -165,8 +165,8 @@ export function completeDesignerNavigation(
   }
 }
 
-/** Called by the protected-layout signout form; leaves other session data alone. */
-export function clearAllDesignerRecovery(): void {
+/** Confirmed logout cleanup verifies erasure before admitting another session. */
+export function clearAllDesignerRecovery(): boolean {
   unresolved.clear();
   try {
     const keys: string[] = [];
@@ -174,9 +174,22 @@ export function clearAllDesignerRecovery(): void {
       const candidate = sessionStorage.key(index);
       if (candidate?.startsWith(PREFIX)) keys.push(candidate);
     }
-    for (const candidate of keys) sessionStorage.removeItem(candidate);
+    let absent = true;
+    for (const candidate of keys) {
+      try {
+        sessionStorage.removeItem(candidate);
+      } catch {
+        /* Readback must prove deletion independently. */
+      }
+      try {
+        if (sessionStorage.getItem(candidate) !== null) absent = false;
+      } catch {
+        absent = false;
+      }
+    }
+    return absent;
   } catch {
-    /* Storage may be disabled. */
+    return false;
   }
 }
 

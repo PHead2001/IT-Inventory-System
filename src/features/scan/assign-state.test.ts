@@ -30,6 +30,61 @@ export const candidate: AssignmentCandidate = {
   sources: [{ id: id(3), name: 'Red', active: false, quantity: 2 }],
 };
 describe('assignment review/commit state', () => {
+  it('marks only a completed read of the exact current confirmed receipt and preserves that state across receipt-preserving actions', () => {
+    const state = {
+      ...initialAssignState(context),
+      receipt: {
+        result: {
+          ok: true as const,
+          changed: true,
+          entityId: candidate.id,
+          version: '8',
+          eventId: id(8),
+        },
+        detailsUnrequested: true,
+        name: candidate.name,
+        sourceName: 'Red',
+        siteName: context.siteName,
+        units: '1',
+        reference: context.reference,
+        kind: candidate.kind,
+        entityId: candidate.id,
+      },
+    };
+    expect(
+      assignReducer(state, { type: 'receipt-read-completed', eventId: id(9) }),
+    ).toBe(state);
+    expect(
+      assignReducer(initialAssignState(context), {
+        type: 'receipt-read-completed',
+        eventId: id(8),
+      }).receipt,
+    ).toBeNull();
+    const requested = assignReducer(state, {
+      type: 'receipt-read-completed',
+      eventId: id(8),
+    });
+    expect(requested.receipt?.detailsUnrequested).toBe(false);
+    expect(requested.receipt?.result).toBe(state.receipt.result);
+    for (const event of [
+      { type: 'next' as const, generation: 1 },
+      {
+        type: 'context' as const,
+        context: { ...context, reference: 'NEXT-TICKET' },
+        generation: 1,
+      },
+      {
+        type: 'hydrate' as const,
+        snapshot: {
+          ...initialAssignState(context),
+          receipt: requested.receipt,
+        },
+      },
+    ])
+      expect(assignReducer(requested, event).receipt?.detailsUnrequested).toBe(
+        false,
+      );
+  });
   it('rejects late resolution after context changes and freezes unresolved commands against context/source edits', () => {
     const reading = assignReducer(initialAssignState(context), {
       type: 'lookup',

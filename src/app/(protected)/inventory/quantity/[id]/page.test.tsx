@@ -1,3 +1,4 @@
+vi.mock('server-only', () => ({}));
 import { render, screen } from '@testing-library/react';
 import { expect, it, vi } from 'vitest';
 import type { QuantityDetail } from '@/features/inventory/contracts-ui';
@@ -76,3 +77,4 @@ it('keeps a quantity correction distinct from custody movement in the record his
   expect(history).not.toHaveTextContent('No destination');
   expect(history).not.toHaveTextContent('5 units');
 });
+vi.mock('server-only', () => ({}));

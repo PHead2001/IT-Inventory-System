@@ -1,10 +1,14 @@
 import { useState } from 'react';
-import { render, screen, within } from '@testing-library/react';
+import { act, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { describe, expect, it, vi } from 'vitest';
-import { RoomToolbar } from './room-toolbar';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { RoomToolbar, placeRoomControls } from './room-toolbar';
 
-function setupToolbar({ initialActive = true, canFocusSelected = true } = {}) {
+function setupToolbar({
+  initialActive = true,
+  canFocusSelected = true,
+  onOverlayChange = vi.fn(),
+} = {}) {
   const onActiveChange = vi.fn();
   const onRequestFocus = vi.fn(),
     onCommand = vi.fn();
@@ -26,11 +30,18 @@ function setupToolbar({ initialActive = true, canFocusSelected = true } = {}) {
         onLabelsChange={vi.fn()}
         showCounts={false}
         onCountsChange={vi.fn()}
+        onOverlayChange={onOverlayChange}
       />
     );
   }
-  render(<Toolbar />);
-  return { user: userEvent.setup(), onActiveChange, onRequestFocus, onCommand };
+  const rendered = render(<Toolbar />);
+  return {
+    user: userEvent.setup(),
+    onActiveChange,
+    onRequestFocus,
+    onCommand,
+    unmount: rendered.unmount,
+  };
 }
 
 describe('revealing view actions dismiss controls', () => {
@@ -135,6 +146,162 @@ describe('revealing view actions dismiss controls', () => {
       expect(onCommand).toHaveBeenCalledTimes(2);
     },
   );
+});
+
+describe('measured controls placement', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+    vi.unstubAllGlobals();
+  });
+  const viewport = { left: 0, top: 0, right: 375, bottom: 812 };
+  const anchor = { left: 30, top: 348, right: 345, bottom: 392 };
+  const size = { width: 220, height: 200 };
+  it('keeps the phone popup above the toolbar and out of the observed canvas', () => {
+    const placed = placeRoomControls(anchor, viewport, size, true);
+    expect(placed).toEqual({
+      left: 125,
+      top: 143,
+      width: 220,
+      maxHeight: 200,
+      side: 'above',
+    });
+    expect(placed.top + placed.maxHeight).toBeLessThan(anchor.top);
+    expect(placed.top + placed.maxHeight).toBeLessThan(404.046875);
+  });
+  it.each([
+    [{ left: 30, top: 2, right: 345, bottom: 46 }, viewport, 'below'],
+    [{ left: 4, top: 4, right: 120, bottom: 48 }, viewport, 'right'],
+    [{ left: 255, top: 4, right: 371, bottom: 48 }, viewport, 'left'],
+    [anchor, { left: 20, top: 300, right: 320, bottom: 510 }, 'below'],
+    [
+      { left: 4, top: 105, right: 371, bottom: 149 },
+      { left: 0, top: 0, right: 375, bottom: 180 },
+      'above',
+    ],
+    [{ left: 30, top: 900, right: 345, bottom: 944 }, viewport, 'above'],
+    [{ left: -80, top: -80, right: 235, bottom: -36 }, viewport, 'below'],
+  ] as const)(
+    'falls back to %s inside the current visual viewport',
+    (bounds, view, side) => {
+      const placed = placeRoomControls(bounds, view, size, true);
+      expect(placed.side).toBe(side);
+      expect(placed.left).toBeGreaterThanOrEqual(view.left + 4);
+      expect(placed.top).toBeGreaterThanOrEqual(view.top + 4);
+      expect(placed.left + placed.width).toBeLessThanOrEqual(view.right - 4);
+      expect(placed.top + placed.maxHeight).toBeLessThanOrEqual(
+        view.bottom - 4,
+      );
+      expect(placed.maxHeight).toBeGreaterThan(0);
+      expect(placed.maxHeight).toBeLessThanOrEqual(200);
+    },
+  );
+  it('coalesces open-only resize/scroll measurements without replacing or moving native focused actions on panel scroll', async () => {
+    let bounds = anchor;
+    const frameCallbacks = new Map<number, FrameRequestCallback>();
+    let nextFrame = 1;
+    const raf = vi.fn((callback: FrameRequestCallback) => {
+      const id = nextFrame++;
+      frameCallbacks.set(id, callback);
+      return id;
+    });
+    const cancel = vi.fn((id: number) => frameCallbacks.delete(id));
+    vi.stubGlobal('requestAnimationFrame', raf);
+    vi.stubGlobal('cancelAnimationFrame', cancel);
+    const disconnect = vi.fn();
+    vi.stubGlobal(
+      'ResizeObserver',
+      class {
+        observe() {}
+        disconnect = disconnect;
+      },
+    );
+    const visual = Object.assign(new EventTarget(), {
+      offsetLeft: 0,
+      offsetTop: 0,
+      width: 375,
+      height: 812,
+    });
+    vi.stubGlobal('visualViewport', visual);
+    const removeVisualListener = vi.spyOn(visual, 'removeEventListener');
+    vi.spyOn(HTMLElement.prototype, 'scrollHeight', 'get').mockReturnValue(600);
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(
+      function () {
+        return {
+          ...bounds,
+          width: bounds.right - bounds.left,
+          height: bounds.bottom - bounds.top,
+          x: bounds.left,
+          y: bounds.top,
+          toJSON() {},
+        };
+      },
+    );
+    const onOverlayChange = vi.fn();
+    const { user, onCommand, unmount } = setupToolbar({ onOverlayChange });
+    window.dispatchEvent(new Event('resize'));
+    expect(raf).not.toHaveBeenCalled();
+    await user.click(screen.getByRole('button', { name: 'More map controls' }));
+    const panel = screen.getByRole('region', { name: 'More map controls' });
+    const recenter = within(panel).getByRole('button', { name: 'Recenter' });
+    expect(recenter).toHaveFocus();
+    expect(panel.dataset.placement).toBe('above');
+    const envelope = panel.getAttribute('style');
+    const notifications = onOverlayChange.mock.calls.length;
+    window.dispatchEvent(new Event('resize'));
+    panel.dispatchEvent(new Event('scroll', { bubbles: true }));
+    expect(raf).toHaveBeenCalledTimes(1);
+    act(() => {
+      const callbacks = [...frameCallbacks.values()];
+      frameCallbacks.clear();
+      callbacks.forEach((callback) => callback(1));
+    });
+    expect(panel.getAttribute('style')).toBe(envelope);
+    expect(recenter).toHaveFocus();
+    expect(onOverlayChange).toHaveBeenCalledTimes(notifications);
+    expect(frameCallbacks.size).toBe(0);
+    bounds = { ...anchor, top: 2, bottom: 46 };
+    window.dispatchEvent(new Event('resize'));
+    act(() => {
+      const callbacks = [...frameCallbacks.values()];
+      frameCallbacks.clear();
+      callbacks.forEach((callback) => callback(2));
+    });
+    expect(panel.dataset.placement).toBe('below');
+    expect(recenter).toHaveFocus();
+    expect(within(panel).getByRole('button', { name: 'Recenter' })).toBe(
+      recenter,
+    );
+    Object.assign(visual, { offsetTop: 20, width: 300, height: 250 });
+    visual.dispatchEvent(new Event('resize'));
+    visual.dispatchEvent(new Event('scroll'));
+    act(() => {
+      const callbacks = [...frameCallbacks.values()];
+      frameCallbacks.clear();
+      callbacks.forEach((callback) => callback(3));
+    });
+    const top = parseFloat(panel.style.top) + bounds.top,
+      left = parseFloat(panel.style.left) + bounds.left;
+    expect(top).toBeGreaterThanOrEqual(24);
+    expect(left).toBeGreaterThanOrEqual(4);
+    expect(top + parseFloat(panel.style.maxHeight)).toBeLessThanOrEqual(266);
+    expect(left + parseFloat(panel.style.width)).toBeLessThanOrEqual(296);
+    expect(recenter).toHaveFocus();
+    window.dispatchEvent(new Event('resize'));
+    await user.keyboard('{Escape}');
+    expect(cancel).toHaveBeenCalled();
+    expect(disconnect).toHaveBeenCalledOnce();
+    expect(removeVisualListener).toHaveBeenCalledTimes(2);
+    const requested = raf.mock.calls.length;
+    window.dispatchEvent(new Event('resize'));
+    expect(raf).toHaveBeenCalledTimes(requested);
+    expect(onCommand).not.toHaveBeenCalled();
+    await user.click(screen.getByRole('button', { name: 'More map controls' }));
+    visual.dispatchEvent(new Event('resize'));
+    unmount();
+    expect(disconnect).toHaveBeenCalledTimes(2);
+    expect(removeVisualListener).toHaveBeenCalledTimes(4);
+    expect(frameCallbacks.size).toBe(0);
+  });
 });
 
 describe('room toolbar Escape', () => {

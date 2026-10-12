@@ -1,4 +1,5 @@
 import { expectRecordVersion, openRecordTask } from './record-task-controls';
+import { expectCategoryAdded } from './configuration-assertions';
 import { metadataReviewButton, metadataSaveButton } from './metadata-controls';
 import { randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
@@ -106,15 +107,33 @@ async function followHistoryLink(page: Page, name: string) {
   await expect(page).toHaveURL(destination.href);
   const history = page.getByRole('region', { name: 'Custom history field' });
   await expect(history).toBeVisible();
+  // The URL may advance while the source snapshot remains visible. Match the
+  // destination's side and field before operating its native disclosure.
+  await expect(
+    history.getByText(
+      destination.searchParams.get('side') === 'after'
+        ? 'After event'
+        : 'Before event',
+      { exact: true },
+    ),
+  ).toBeVisible();
+  const fieldId = destination.searchParams.get('field');
+  const recordedField = fieldId
+    ? history.getByText('Field: ' + fieldId, { exact: true })
+    : null;
+  if (recordedField) await expect(recordedField).toBeAttached();
   const technical = history.getByText('Technical recorded value', {
     exact: true,
   });
-  if (await technical.count()) await technical.click();
-  const fieldId = destination.searchParams.get('field');
-  if (fieldId)
-    await expect(
-      history.getByText('Field: ' + fieldId, { exact: true }),
-    ).toBeVisible();
+  if (await technical.count()) {
+    const disclosure = technical.locator('xpath=ancestor::details[1]');
+    // React preserves an expanded <details> across snapshot query updates.
+    // A second unconditional click would close the raw-value evidence.
+    if ((await disclosure.getAttribute('open')) === null)
+      await technical.click();
+    await expect(disclosure).toHaveAttribute('open', '');
+  }
+  if (recordedField) await expect(recordedField).toBeVisible();
 }
 async function login(page: Page, role: 'staff' | 'viewer' = 'staff') {
   await page.goto('/login');
@@ -434,7 +453,7 @@ test('authors all twelve types through the UI and preserves their preview, creat
   await page.goto('/settings/categories');
   await page.getByLabel('Display name').fill(category);
   await page.getByRole('button', { name: 'Add category' }).click();
-  await expect(page.getByRole('status')).toContainText('Category added.');
+  await expectCategoryAdded(page, category);
   await page.goto('/settings/forms');
   await page.getByRole('link', { name: category, exact: true }).click();
   const designer = page.getByRole('region', { name: 'Forms and fields' });

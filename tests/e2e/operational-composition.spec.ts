@@ -11,6 +11,7 @@ import { mkdirSync } from 'node:fs';
 import { resolve } from 'node:path';
 import fixture from '../fixtures/auth.json' with { type: 'json' };
 import { chooseLocation } from './location-picker';
+import { useStandardQrLabelJob } from './label-job-controls';
 import { captureE2eEvidence } from '../../scripts/e2e-diagnostics';
 import {
   expectRecordStatus,
@@ -473,7 +474,14 @@ test('CP3 U07 U14 asset identity is concise and an actual other-tab retirement r
   await expect(page).toHaveURL(/\/inventory\/assets\/[0-9a-f-]+$/);
   const url = page.url(),
     id = new URL(url).pathname.split('/').at(-1)!;
-  await expect(page.getByText(tag, { exact: true })).toHaveCount(1);
+  const identity = page
+    .getByRole('main')
+    .locator('section')
+    .filter({ has: page.getByRole('heading', { name, exact: true }) });
+  await expect(identity).toHaveCount(1);
+  await expect(
+    identity.locator('dl').getByText(tag, { exact: true }),
+  ).toBeVisible();
   await page.evaluate(() => window.scrollTo(0, 0));
   await capture(page, info, 'asset-primary-identity');
   const created = page.getByRole('listitem').filter({
@@ -486,7 +494,7 @@ test('CP3 U07 U14 asset identity is concise and an actual other-tab retirement r
   await expect(
     created.getByRole('link', { name, exact: true }),
   ).toHaveAttribute('href', '/inventory/assets/' + id);
-  await expect(created.getByText(tag, { exact: true })).toHaveCount(0);
+  await expect(created.getByText(tag, { exact: true })).not.toBeVisible();
   await created
     .locator('summary')
     .filter({ hasText: 'View event details' })
@@ -517,8 +525,10 @@ test('CP3 U07 U14 asset identity is concise and an actual other-tab retirement r
   const secondURL = page.url(),
     secondId = new URL(secondURL).pathname.split('/').at(-1)!;
   await page.goto('/labels?asset=' + secondId);
+  await useStandardQrLabelJob(page);
   await expect(page.getByText(/1 distinct record · 1 label/)).toBeVisible();
   await page.goto('/labels?asset=' + id);
+  await useStandardQrLabelJob(page);
   await expect(page.getByText(/2 distinct records.*2 labels/)).toBeVisible();
   await expect(
     page.getByRole('button', { name: /Print selected labels/ }),
@@ -619,7 +629,9 @@ test('CP3 U08 designer starts with useful canvas and supports keyboard recovery,
   const category = 'CP3 canvas ' + randomUUID().slice(0, 8);
   await page.getByLabel('Display name').fill(category);
   await page.getByRole('button', { name: 'Add category' }).click();
-  await expect(page.getByRole('status')).toContainText('Category added.');
+  await expect(
+    page.getByRole('status').filter({ hasText: /^Category added:/ }),
+  ).toContainText(`Category added: ${category}.`);
   await page.goto('/settings/forms');
   await page.getByRole('link', { name: category, exact: true }).click();
   await page.setViewportSize({ width: 1180, height: 757 });

@@ -98,7 +98,10 @@ export async function expectStableReceiptAction(
 
 /** Open a task through its ordinary launcher; forms mount only on demand. */
 export async function openRecordTask(page: Page, formName: string) {
-  const task = page.getByRole('region', { name: 'Record tasks' });
+  const task = page.getByRole('region', {
+    name: 'Record tasks',
+    includeHidden: true,
+  });
   const labels: Record<string, string> = {
     'Edit quantity metadata': 'Edit details',
     'Edit asset metadata': 'Edit details',
@@ -122,8 +125,14 @@ export async function openRecordTask(page: Page, formName: string) {
     exact: true,
   });
   if (await current.isVisible()) return current;
-  if (!(await launcher.isVisible())) {
-    const section = launcher.locator('xpath=ancestor::details[1]');
+  // Privacy readiness can defer attachment or hide the whole workspace. Neither
+  // implies a closed task group; primary launchers have no details ancestor.
+  await launcher.waitFor({ state: 'attached' });
+  const section = launcher.locator('xpath=ancestor::details[1]');
+  if (
+    (await section.count()) > 0 &&
+    (await section.getAttribute('open')) === null
+  ) {
     await section.locator('summary').click();
   }
   await launcher.click();

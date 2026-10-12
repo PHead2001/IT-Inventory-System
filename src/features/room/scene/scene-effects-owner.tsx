@@ -6,12 +6,15 @@ import {
   Suspense,
   lazy,
   useEffect,
+  useCallback,
+  useLayoutEffect,
   useMemo,
   useRef,
   useSyncExternalStore,
   useState,
   type ReactNode,
 } from 'react';
+import { useSceneCurrent } from './scene-current';
 import type { RoomDefinition } from '../schema';
 import { useSceneEffects } from './scene-effects-context';
 import { CachedContactShadows } from './cached-contact-shadows';
@@ -48,6 +51,7 @@ export function SceneEffectsOwner({
   quality?: EffectsQuality;
 }) {
   const effects = useSceneEffects();
+  const isCurrent = useSceneCurrent(effects);
   const state = useSyncExternalStore(
     effects.subscribe,
     effects.getSnapshot,
@@ -76,14 +80,30 @@ export function SceneEffectsOwner({
     selectedMeshes.length > 0 &&
     lights.length > 0 &&
     !state.bloomFailure;
+  const eligibility = useRef(allowed);
+  useLayoutEffect(() => {
+    eligibility.current = allowed;
+  }, [allowed]);
+  const bloomCurrent = useCallback(
+    () => isCurrent() && eligibility.current,
+    [isCurrent],
+  );
+  const failure = useCallback(
+    (reason: string) => {
+      if (bloomCurrent()) effects.failBloom(reason);
+    },
+    [effects, bloomCurrent],
+  );
   const previous = useRef({ camera: '', active: false, captures: 0 });
   const sceneFrames = useRef(0);
   useEffect(() => {
+    if (!isCurrent()) return;
     effects.clearHover();
     effects.invalidateHover();
     invalidate();
-  }, [effects, selectedCode, invalidate]);
+  }, [effects, selectedCode, invalidate, isCurrent]);
   useEffect(() => {
+    if (!isCurrent()) return;
     gl.domElement.dataset.bloomStatus =
       state.bloomFailure ??
       (quality !== 'standard'
@@ -119,8 +139,10 @@ export function SceneEffectsOwner({
     selectedMeshes,
     invalidate,
     rawColor,
+    isCurrent,
   ]);
   useFrame((_frame, delta) => {
+    if (!isCurrent()) return;
     const cameraKey = [
       ...camera.matrixWorld.elements,
       ...camera.projectionMatrix.elements,
@@ -150,19 +172,18 @@ export function SceneEffectsOwner({
       effects.quality.evidence(),
     );
   });
+  if (!isCurrent()) return null;
   return (
     <>
       <CachedContactShadows room={room} quality={quality} />
       {allowed && (
-        <SceneEffectsBoundary
-          key={effects.sceneGeneration}
-          onFailure={effects.failBloom}
-        >
+        <SceneEffectsBoundary key={effects.sceneGeneration} onFailure={failure}>
           <Suspense fallback={null}>
             <LazyBloom
               selection={selectedMeshes}
               lights={lights}
               rawColor={rawColor}
+              current={bloomCurrent}
             />
           </Suspense>
         </SceneEffectsBoundary>

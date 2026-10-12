@@ -19,6 +19,7 @@ import {
 } from 'three';
 import { SelectionMaterial } from './selection-material';
 import { SceneDepth } from './scene-depth';
+import { SceneSessionContext } from './scene-budget-provider';
 import type { RoomDefinition } from '../schema';
 import {
   readScenePalette,
@@ -317,4 +318,52 @@ describe('shared room graphics palette', () => {
     expect(canvas.dataset.paletteStatus).toBe('unsupported-token');
     document.documentElement.removeAttribute('data-theme');
   });
+});
+
+it('fences saved and queued palette notifications at original-session retirement while removing every listener', async () => {
+  let current = true;
+  const original = { current: () => current };
+  let notify!: MutationCallback;
+  const disconnect = vi.fn();
+  vi.stubGlobal(
+    'MutationObserver',
+    class {
+      constructor(callback: MutationCallback) {
+        notify = callback;
+      }
+      observe() {}
+      disconnect = disconnect;
+    },
+  );
+  const reads = vi.spyOn(window, 'getComputedStyle');
+  const tree = (session = original) => (
+    <SceneSessionContext value={session}>
+      <ScenePaletteProvider>{null}</ScenePaletteProvider>
+    </SceneSessionContext>
+  );
+  const view = render(tree());
+  expect(reads).toHaveBeenCalledOnce();
+  const saved = notify;
+  await act(async () => {
+    saved([], {} as MutationObserver);
+    current = false;
+    await Promise.resolve();
+  });
+  expect(reads).toHaveBeenCalledOnce();
+  invalidate.mockClear();
+  view.rerender(tree({ current: () => true }));
+  saved([], {} as MutationObserver);
+  await act(async () => {
+    await Promise.resolve();
+  });
+  expect(reads).toHaveBeenCalledOnce();
+  expect(invalidate).not.toHaveBeenCalled();
+  view.unmount();
+  expect(disconnect).toHaveBeenCalledOnce();
+  saved([], {} as MutationObserver);
+  await act(async () => {
+    await Promise.resolve();
+  });
+  expect(reads).toHaveBeenCalledOnce();
+  vi.unstubAllGlobals();
 });

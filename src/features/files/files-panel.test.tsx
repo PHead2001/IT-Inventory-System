@@ -4,9 +4,11 @@ import {
   render,
   screen,
   waitFor,
+  within,
 } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import userEvent from '@testing-library/user-event';
+import { readFileSync } from 'node:fs';
 
 const mocks = vi.hoisted(() => ({
   operation: vi.fn(),
@@ -30,6 +32,132 @@ import { OperationalTimeProvider } from '@/components/operational-time';
 import * as operationalTime from '@/lib/operational-time';
 import { HistoryList } from '@/features/inventory/components/read-ui';
 
+it('marks only the file surface busy during the deferred initial read and reveals actual files', async () => {
+  let finish!: (value: unknown) => void;
+  mocks.browserRpc.mockImplementation((name: string) =>
+    name === 'inventory_file_cards'
+      ? new Promise((resolve) => {
+          finish = resolve;
+        })
+      : mocks.operation(name),
+  );
+  render(
+    <FilesPanel
+      parentType="asset"
+      parentId="00000000-0000-4000-8000-000000000001"
+      active
+      staff
+      actorId="staff"
+    />,
+  );
+  const panel = screen.getByRole('region', { name: 'Inventory files' });
+  expect(panel).toHaveAttribute('aria-busy', 'true');
+  expect(
+    panel.querySelector('[data-loading-shape="files"]'),
+  ).toBeInTheDocument();
+  const announcement = screen.getByText('Loading files…');
+  expect(announcement).toHaveClass('sr-only');
+  expect(announcement.closest('[aria-busy="true"]')).toBeNull();
+  await act(async () =>
+    finish({ data: { revision: '1', files: [pending] }, error: null }),
+  );
+  await within(panel).findByText('Uploaded · review required');
+  expect(panel).toHaveAttribute('aria-busy', 'false');
+  expect(screen.queryByText('Loading files…')).not.toBeInTheDocument();
+  expect(
+    panel.querySelector('[data-loading-shape="files"]'),
+  ).not.toBeInTheDocument();
+});
+
+it.each(['quantity', 'asset'] as const)(
+  'reveals a deferred empty %s collection immediately inside the animated host',
+  async (parentType) => {
+    let finish!: (value: unknown) => void;
+    mocks.browserRpc.mockImplementation((name: string) =>
+      name === 'inventory_file_cards'
+        ? new Promise((resolve) => {
+            finish = resolve;
+          })
+        : mocks.operation(name),
+    );
+    const originalAnimate = HTMLElement.prototype.animate;
+    const originalMedia = window.matchMedia;
+    const originalMotion = document.documentElement.dataset.motion;
+    const originalRootStyle = document.documentElement.getAttribute('style');
+    const hosts: HTMLElement[] = [];
+    const cancel = vi.fn();
+    const animate = vi.fn(function (this: HTMLElement) {
+      hosts.push(this);
+      return { cancel };
+    });
+    HTMLElement.prototype.animate =
+      animate as unknown as typeof originalAnimate;
+    window.matchMedia = vi.fn(() => ({
+      matches: false,
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+    })) as unknown as typeof originalMedia;
+    document.documentElement.dataset.motion = 'full';
+    try {
+      // jsdom does not load the app stylesheet. Supply its actual shared motion
+      // tokens so the real reveal admission follows the production contract.
+      const globals = readFileSync('src/app/globals.css', 'utf8');
+      for (const [, token, value] of globals.matchAll(
+        /(--(?:motion-feedback|ease-workspace)):\s*([^;]+);/g,
+      ))
+        document.documentElement.style.setProperty(token, value);
+      render(
+        <FilesPanel
+          parentType={parentType}
+          parentId="00000000-0000-4000-8000-000000000001"
+          active
+          staff
+          actorId="staff"
+        />,
+      );
+      const empty =
+        parentType === 'quantity' ? 'No photo yet.' : 'No attachments yet.';
+      expect(screen.queryByText(empty)).not.toBeInTheDocument();
+      expect(animate).not.toHaveBeenCalled();
+      const fileInput = screen.getByLabelText(
+        parentType === 'quantity'
+          ? 'Add recognition photo'
+          : 'Add photo or PDF',
+      );
+      await act(async () =>
+        finish({ data: { revision: '1', files: [] }, error: null }),
+      );
+      const message = screen.getByText(empty);
+      expect(message).toBeVisible();
+      expect(animate).toHaveBeenCalledOnce();
+      expect(animate).toHaveBeenCalledWith(
+        [{ opacity: 0.65 }, { opacity: 1 }],
+        { duration: 130, easing: 'cubic-bezier(0.2, 0.8, 0.2, 1)' },
+      );
+      expect(hosts[0]).toContainElement(message);
+      expect(hosts[0]).toHaveAttribute('aria-busy', 'false');
+      expect(fileInput).toBeEnabled();
+      expect(
+        screen.getByLabelText(
+          parentType === 'quantity'
+            ? 'Add recognition photo'
+            : 'Add photo or PDF',
+        ),
+      ).toBe(fileInput);
+      expect(screen.queryByText('Loading files…')).not.toBeInTheDocument();
+    } finally {
+      HTMLElement.prototype.animate = originalAnimate;
+      window.matchMedia = originalMedia;
+      if (originalMotion === undefined)
+        delete document.documentElement.dataset.motion;
+      else document.documentElement.dataset.motion = originalMotion;
+      if (originalRootStyle === null)
+        document.documentElement.removeAttribute('style');
+      else document.documentElement.setAttribute('style', originalRootStyle);
+    }
+  },
+);
+
 it('uses one local browse/drop path, revokes image previews, and never embeds or publishes a selected PDF', async () => {
   const create = vi
     .spyOn(URL, 'createObjectURL')
@@ -45,6 +173,9 @@ it('uses one local browse/drop path, revokes image previews, and never embeds or
     />,
   );
   await screen.findByText('Uploaded · review required');
+  expect(
+    screen.getByText(/Nothing uploads until you choose Upload and review\./),
+  ).toBeVisible();
   const image = new File(['benign image fixture'], 'selected.png', {
     type: 'image/png',
   });
@@ -229,6 +360,8 @@ beforeEach(() => {
 });
 
 it('labels the actual file upload/activity instants in the one shared display zone and preserves their source fractions', async () => {
+  userEvent.setup();
+  const copy = vi.spyOn(navigator.clipboard, 'writeText').mockResolvedValue();
   const zone = vi
     .spyOn(operationalTime, 'browserDisplayTimeZone')
     .mockReturnValue({ timeZone: 'America/Los_Angeles', fallback: false });
@@ -302,13 +435,25 @@ it('labels the actual file upload/activity instants in the one shared display zo
       const exact = '2 Oct 2026, 22:23:06 UTC-07:00 (America/Los_Angeles)';
       if (time.closest('summary')) {
         expect(time.closest('summary')).toHaveAttribute('title', exact);
-        expect(time.closest('details')).toHaveTextContent(at);
+        const disclosure = time.closest('details')!;
+        expect(disclosure).toHaveTextContent(exact);
+        expect(disclosure).not.toHaveTextContent(at);
+        fireEvent.click(time.closest('summary')!);
+        fireEvent.click(
+          within(disclosure).getByRole('button', {
+            name: 'Copy technical details',
+          }),
+        );
+        await waitFor(() =>
+          expect(copy).toHaveBeenCalledWith(`Recorded instant: ${at}`),
+        );
       } else expect(time).toHaveTextContent(exact);
     }
     expect(container.textContent).toContain('Uploaded:');
     expect(mocks.upload).not.toHaveBeenCalled();
     expect(zone).toHaveBeenCalledOnce();
   } finally {
+    copy.mockRestore();
     zone.mockRestore();
   }
 });

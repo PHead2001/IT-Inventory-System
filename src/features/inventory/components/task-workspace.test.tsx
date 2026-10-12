@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, type FormEvent } from 'react';
 import { fireEvent, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { expect, it, vi } from 'vitest';
@@ -8,7 +8,13 @@ const choices = [
   { id: 'receive', label: 'Receive stock' },
   { id: 'move', label: 'Move stock' },
 ];
-function Draft({ id }: { id: string }) {
+function Draft({
+  id,
+  completedVersion,
+}: {
+  id: string;
+  completedVersion?: string;
+}) {
   const [value, setValue] = useState('');
   const [phase, setPhase] = useState('');
   const reset = useTaskReset();
@@ -17,6 +23,7 @@ function Draft({ id }: { id: string }) {
     pending: phase === 'pending' || phase === 'completed-pending',
     uncertain: phase === 'unknown',
     completed: phase === 'complete' || phase === 'completed-pending',
+    completedVersion: phase === 'complete' ? completedVersion : undefined,
   });
   return (
     <div>
@@ -216,4 +223,173 @@ it('keeps completed pending work truthful and locked until the follow-up finishe
   expect(screen.queryByRole('status')).toBeNull();
   fireEvent.click(screen.getByRole('button', { name: 'New transaction' }));
   expect(screen.queryByLabelText('receive entry')).toBeNull();
+});
+
+it('keeps Close task next to the form actions in keyboard order', async () => {
+  const user = userEvent.setup();
+  render(
+    <TaskWorkspace choices={choices} context="Cable">
+      {() => (
+        <form>
+          <button type="button">Review move</button>
+          <button type="button">Cancel</button>
+        </form>
+      )}
+    </TaskWorkspace>,
+  );
+  await user.click(screen.getByRole('button', { name: 'Move stock' }));
+  const cancel = screen.getByRole('button', { name: 'Cancel' });
+  cancel.focus();
+  await user.tab();
+  expect(screen.getByRole('button', { name: 'Close task' })).toHaveFocus();
+  expect(screen.getAllByRole('heading', { name: 'Move stock' })).toHaveLength(
+    1,
+  );
+});
+it.each(['Receive stock', 'Move stock'])(
+  'explicit %s reentry starts a fresh completed task without a close detour',
+  async (label) => {
+    const user = userEvent.setup();
+    render(<Workspace />);
+    await user.click(screen.getByRole('button', { name: label }));
+    const entry = screen.getByRole('textbox');
+    await user.type(entry, 'completed draft');
+    await user.click(screen.getByRole('button', { name: 'complete' }));
+    await user.click(screen.getByRole('button', { name: label }));
+    expect(screen.getByRole('textbox')).toHaveValue('');
+    expect(screen.queryByRole('alertdialog')).toBeNull();
+    expect(
+      screen.queryByRole('button', { name: 'New transaction' }),
+    ).toBeNull();
+    expect(screen.getByRole('heading', { name: label })).toHaveFocus();
+  },
+);
+it.each(['Receive stock', 'Move stock'])(
+  'fences an explicit %s form behind its known completion version and keeps later drafts intact',
+  async (label) => {
+    const user = userEvent.setup();
+    const refresh = vi.fn().mockImplementationOnce(() => {
+      throw new Error('offline');
+    });
+    const content = (version: string) => (
+      <TaskWorkspace
+        choices={choices}
+        context="This item"
+        recordVersion={version}
+        onRefresh={refresh}
+      >
+        {(id) => <Draft id={id} completedVersion="9007199254740993" />}
+      </TaskWorkspace>
+    );
+    const view = render(content('9007199254740992'));
+    await user.click(screen.getByRole('button', { name: 'Receive stock' }));
+    await user.type(screen.getByRole('textbox'), 'saved');
+    await user.click(screen.getByRole('button', { name: 'complete' }));
+    expect(screen.getByRole('textbox')).toHaveValue('saved');
+    await user.click(screen.getByRole('button', { name: label }));
+    expect(screen.queryByRole('textbox')).toBeNull();
+    expect(screen.getByRole('alert')).toHaveTextContent(
+      'current record could not be loaded',
+    );
+    expect(refresh).toHaveBeenCalledOnce();
+    await user.click(
+      screen.getByRole('button', { name: 'Retry loading record' }),
+    );
+    expect(refresh).toHaveBeenCalledTimes(2);
+    expect(screen.queryByRole('textbox')).toBeNull();
+    view.rerender(content('9007199254740993'));
+    expect(screen.getByRole('textbox')).toHaveValue('');
+    await user.type(screen.getByRole('textbox'), 'new draft');
+    view.rerender(content('9007199254740994'));
+    expect(screen.getByRole('textbox')).toHaveValue('new draft');
+    expect(screen.queryByRole('alert')).toBeNull();
+  },
+);
+it('opens a same-version no-op completion immediately and keeps pending/uncertain forms on their original instance', () => {
+  const refresh = vi.fn();
+  render(
+    <TaskWorkspace
+      choices={choices}
+      context="This item"
+      recordVersion="4"
+      onRefresh={refresh}
+    >
+      {(id) => <Draft id={id} completedVersion="4" />}
+    </TaskWorkspace>,
+  );
+  const launcher = screen.getByRole('button', { name: 'Receive stock' });
+  fireEvent.click(launcher);
+  fireEvent.click(screen.getByRole('button', { name: 'complete' }));
+  fireEvent.click(launcher);
+  expect(screen.getByRole('textbox')).toHaveValue('');
+  expect(refresh).not.toHaveBeenCalled();
+  for (const phase of ['pending', 'unknown']) {
+    fireEvent.click(screen.getByRole('button', { name: phase }));
+    const input = screen.getByRole('textbox');
+    fireEvent.click(launcher);
+    expect(screen.getByRole('textbox')).toBe(input);
+    expect(launcher).toBeDisabled();
+  }
+});
+
+it('blocks a withdrawn task immediately and never silently revives its retained dirty draft', () => {
+  const view = render(<Workspace />);
+  fireEvent.click(screen.getByRole('button', { name: 'Receive stock' }));
+  fireEvent.change(screen.getByLabelText('receive entry'), {
+    target: { value: 'retained private draft' },
+  });
+  const input = screen.getByLabelText('receive entry');
+  view.rerender(<Workspace tasks={[choices[1]]} />);
+  expect(input).not.toBeVisible();
+  expect(input).toBeDisabled();
+  expect(screen.queryByRole('textbox')).toBeNull();
+  expect(screen.getByRole('status')).toHaveTextContent('no longer available');
+  view.rerender(<Workspace />);
+  expect(input).not.toBeVisible();
+  expect(input).toHaveValue('retained private draft');
+  fireEvent.click(screen.getByRole('button', { name: 'Close task' }));
+  expect(screen.getByRole('alertdialog')).toBeVisible();
+  fireEvent.click(screen.getByRole('button', { name: 'Stay with this task' }));
+  expect(input).not.toBeVisible();
+  fireEvent.click(screen.getByRole('button', { name: 'Receive stock' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Discard and switch' }));
+  expect(screen.getByLabelText('receive entry')).toHaveValue('');
+  expect(screen.getByRole('heading', { name: 'Receive stock' })).toHaveFocus();
+});
+it('keeps a withdrawn clean task inaccessible and returns focus to Tasks on Close', () => {
+  const view = render(<Workspace />);
+  fireEvent.click(screen.getByRole('button', { name: 'Receive stock' }));
+  view.rerender(<Workspace tasks={[choices[1]]} />);
+  expect(screen.queryByRole('textbox')).toBeNull();
+  fireEvent.click(screen.getByRole('button', { name: 'Close task' }));
+  expect(screen.queryByRole('alertdialog')).toBeNull();
+  expect(screen.queryByLabelText('receive entry')).toBeNull();
+  expect(screen.getByRole('heading', { name: 'Tasks' })).toHaveFocus();
+});
+
+it('rejects interaction and submission from a retained withdrawn form', () => {
+  const submit = vi.fn((event: FormEvent) => event.preventDefault());
+  const click = vi.fn();
+  const content = (eligible: boolean) => (
+    <TaskWorkspace choices={eligible ? choices : [choices[1]]} context="Cable">
+      {() => (
+        <form aria-label="Receive form" onSubmit={submit}>
+          <button type="submit" onClick={click}>
+            Save receipt
+          </button>
+        </form>
+      )}
+    </TaskWorkspace>
+  );
+  const view = render(content(true));
+  fireEvent.click(screen.getByRole('button', { name: 'Receive stock' }));
+  const form = screen.getByRole('form', { name: 'Receive form' });
+  const save = screen.getByRole('button', { name: 'Save receipt' });
+  view.rerender(content(false));
+  expect(screen.queryByRole('form', { name: 'Receive form' })).toBeNull();
+  expect(save).toBeDisabled();
+  fireEvent.click(save);
+  fireEvent.submit(form);
+  expect(click).not.toHaveBeenCalled();
+  expect(submit).not.toHaveBeenCalled();
 });

@@ -35,7 +35,7 @@ function BrowserLocation({
           {search ? location.breadcrumb : location.name}
         </span>
         {location.code.length <= 24 && (
-          <span className="block overflow-x-auto whitespace-nowrap text-xs text-slate-300">
+          <span className="experience-code block overflow-x-auto whitespace-nowrap text-xs text-slate-300">
             {location.code}
           </span>
         )}

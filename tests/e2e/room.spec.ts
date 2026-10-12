@@ -12,6 +12,8 @@ import { measureRoomTarget, roomTargetMeetsMinimum } from './room-target-size';
 import {
   enableRoomLayoutDiagnostics,
   reportRoomLayoutFailure,
+  type RoomLayoutWitnessStage,
+  type RoomPointerAttempt,
 } from './room-layout-diagnostics';
 import {
   observeRoomScene,
@@ -1042,10 +1044,13 @@ test('all visible room text shares collision placement and demand rendering sett
   const viewer = await ready(page);
   const canvas = viewer.locator('canvas');
   await page.getByRole('button', { name: 'Fit room' }).click();
+  await settledLabels(page);
   await setRoomLabels(page, true);
   for (const width of [1280, 375, 390]) {
     await page.setViewportSize({ width, height: 1000 });
+    await settledLabels(page);
     await page.getByRole('button', { name: 'Fit room' }).click();
+    await settledLabels(page);
     const labels = viewer.locator(
       '[data-room-label-code], [data-room-decorative-label], [data-hover-tooltip]',
     );
@@ -1054,23 +1059,29 @@ test('all visible room text shares collision placement and demand rendering sett
       .toBeGreaterThan(0);
     await expect
       .poll(async () => {
-        const boxes = (
-          await Promise.all(
-            (await labels.filter({ visible: true }).all()).map((label) =>
-              label.boundingBox(),
-            ),
+        // Measure every visible label in one synchronous DOM snapshot so
+        // pairwise comparisons cannot combine rectangles from different frames.
+        const boxes = await labels
+          .filter({ visible: true })
+          .evaluateAll((elements) =>
+            elements.map((element) => {
+              const { x, y, width, height } = element.getBoundingClientRect();
+              return { x, y, width, height };
+            }),
+          );
+        return (
+          boxes.length > 0 &&
+          boxes.every((box, index) =>
+            boxes
+              .slice(index + 1)
+              .every(
+                (other) =>
+                  box.x + box.width <= other.x ||
+                  other.x + other.width <= box.x ||
+                  box.y + box.height <= other.y ||
+                  other.y + other.height <= box.y,
+              ),
           )
-        ).filter((box) => box !== null);
-        return boxes.every((box, index) =>
-          boxes
-            .slice(index + 1)
-            .every(
-              (other) =>
-                box!.x + box!.width <= other!.x ||
-                other!.x + other!.width <= box!.x ||
-                box!.y + box!.height <= other!.y ||
-                other!.y + other!.height <= box!.y,
-            ),
         );
       })
       .toBe(true);
@@ -1713,8 +1724,15 @@ test('visible drawer labels remain distinct and clickable across desktop and pho
         'data-label-suppressed',
         /^(true|false)$/,
       );
-      await expect(label).toHaveAttribute('data-label-dx', /^-?\d/);
-      await expect(label).toHaveAttribute('data-label-dy', /^-?\d/);
+      // A hidden or never-placed target has no placement offset. Keep the
+      // subsequent real click/focus and opaque-visibility checks authoritative.
+      if (
+        (await label.getAttribute('data-label-suppressed')) === 'false' &&
+        (await label.isVisible())
+      ) {
+        await expect(label).toHaveAttribute('data-label-dx', /^-?\d/);
+        await expect(label).toHaveAttribute('data-label-dy', /^-?\d/);
+      }
     }
     await chooseMapMode(page, 'Free Orbit');
     const clicked = new Set<string>();
@@ -2185,7 +2203,7 @@ test('manual pointer movement interrupts an in-flight selected-location focus', 
     .click();
   const displaced = await camera(page);
   const completedBefore = Number(await viewer.getAttribute('data-focus-count'));
-  // CI input delivery can exceed the whole 300 ms animation. Control elapsed
+  // CI input delivery can exceed the whole 750 ms flight. Control elapsed
   // time, while still exercising the real focus button and trusted pointer drag.
   await page.clock.pauseAt(await page.evaluate(() => Date.now() + 10_000));
   await toolbar.getByRole('button', { name: 'Center selected' }).click();
@@ -2205,7 +2223,7 @@ test('manual pointer movement interrupts an in-flight selected-location focus', 
   await page.mouse.up({ button: 'right' });
   const stopped = await camera(page);
   expect(stopped.target).not.toEqual(inFlight.target);
-  await page.clock.runFor(400);
+  await page.clock.runFor(1200);
   near((await camera(page)).target, stopped.target);
   expect(Number(await viewer.getAttribute('data-focus-count'))).toBe(
     completedBefore,
@@ -2213,7 +2231,7 @@ test('manual pointer movement interrupts an in-flight selected-location focus', 
   await expect(viewer).toHaveAttribute('data-selected-code', 'ITC-D01');
   // A subsequent uninterrupted request must still complete under the same clock.
   await toolbar.getByRole('button', { name: 'Center selected' }).click();
-  await page.clock.runFor(400);
+  await page.clock.runFor(1200);
   await expect(viewer).toHaveAttribute(
     'data-focus-count',
     String(completedBefore + 1),
@@ -2379,6 +2397,70 @@ test('search focuses the room and aggregate selection survives reload and browse
   await expect(viewer).toHaveAttribute('data-focused-code', 'ITC-D01');
 });
 
+test('native Back restores the exact room selection and settles contents after changing motion in Settings', async ({
+  page,
+}) => {
+  test.setTimeout(90_000);
+  await page.emulateMedia({ reducedMotion: 'no-preference' });
+  await login(page);
+  await page.goto('/room?space=it-closet&location=ITC-RACK');
+  for (const [code, reduced] of [
+    ['ITC-RACK', true],
+    ['ITC-RED', false],
+  ] as const) {
+    if (code === 'ITC-RED') {
+      // Preserve the initially server-rendered Rack entry, then change the
+      // client-owned selection before visiting a fully settled other route.
+      await page.reload();
+      await selected(page, 'ITC-RACK');
+      await ready(page);
+      await chooseRoomLocation(page, code);
+    }
+    await selected(page, code);
+    await ready(page);
+    const inventory = page.getByRole('region', {
+      name: 'Location inventory',
+      exact: true,
+    });
+    await expect(inventory).toHaveAttribute('aria-busy', 'false');
+    const roomUrl = page.url();
+    await page
+      .getByRole('navigation', { name: 'Main navigation' })
+      .getByRole('link', { name: 'Settings', exact: true })
+      .click();
+    await expect(page).toHaveURL(/\/settings$/);
+    const toggle = page.getByRole('switch', {
+      name: 'Reduce motion in this browser',
+    });
+    await expect(toggle).toBeEnabled();
+    if ((await toggle.getAttribute('aria-checked')) !== String(reduced))
+      await toggle.click();
+    await expect(toggle).toHaveAttribute('aria-checked', String(reduced));
+    const progress = page.locator('.experience-route-progress');
+    await expect(progress).toHaveAttribute('data-visible', 'false');
+    await expect(progress).toHaveAttribute('aria-hidden', 'true');
+    await expect(progress.getByRole('status')).toHaveCount(0);
+    await page.goBack();
+    await expect(page).toHaveURL(roomUrl);
+    await selected(page, code);
+    const viewer = await ready(page);
+    await expect(viewer).toHaveAttribute('data-selected-code', code);
+    if (code === 'ITC-RED')
+      await expect(viewer).toHaveAttribute('data-focused-code', code);
+    await expect(inventory).toHaveAttribute('aria-busy', 'false');
+    await expect(progress).toHaveAttribute('data-visible', 'false');
+    await expect(progress).toHaveAttribute('aria-hidden', 'true');
+    await expect(progress.getByRole('status')).toHaveCount(0);
+    await expect(
+      page.getByText('Inventory could not be loaded.', { exact: true }),
+    ).toHaveCount(0);
+    await expect(page.locator('html')).toHaveAttribute(
+      'data-motion',
+      reduced ? 'reduced' : 'full',
+    );
+  }
+});
+
 test('room location browser refreshes filtered selections and results', async ({
   page,
 }) => {
@@ -2397,6 +2479,89 @@ test('room location browser refreshes filtered selections and results', async ({
   await browser.getByRole('button', { name: /ITC-D04$/ }).click();
   await selected(page, 'ITC-D04');
   await expect(search).toHaveValue('ITC-D04');
+});
+
+test('phone More settles focused room labels and scrolls to keyboard Help and Close without moving the camera', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 375, height: 812 });
+  await login(page);
+  await page.goto('/room?location=ITC-D01');
+  const viewer = await ready(page);
+  await selected(page, 'ITC-D01');
+  await expect(viewer).toHaveAttribute('data-focused-code', 'ITC-D01');
+  await setRoomLabels(page, true);
+  const more = page.getByRole('button', {
+    name: 'More map controls',
+    exact: true,
+  });
+  await more.evaluate((element) => element.scrollIntoView({ block: 'start' }));
+  await settledLabels(page);
+  const before = await camera(page);
+  await more.click();
+  const popup = page.getByRole('region', {
+    name: 'More map controls',
+    exact: true,
+  });
+  await expect(popup).toBeVisible();
+  await settledLabels(page);
+  await expect(
+    viewer.getByRole('list', {
+      name: 'Locations with unavailable room labels',
+      exact: true,
+    }),
+  ).toHaveCount(0);
+  const scroll = await page.evaluate(() => scrollY);
+  const rect = await popup.boundingBox();
+  expect(rect).not.toBeNull();
+  await page.mouse.move(
+    rect!.x + rect!.width / 2,
+    rect!.y + Math.min(70, rect!.height / 2),
+  );
+  await page.mouse.wheel(0, 1200);
+  await expect
+    .poll(() => popup.evaluate((element) => element.scrollTop))
+    .toBeGreaterThan(30);
+  const help = popup.getByRole('button', { name: 'Controls', exact: true });
+  const close = popup.getByRole('button', {
+    name: 'Close controls',
+    exact: true,
+  });
+  await expect(help).toBeInViewport({ ratio: 0.95 });
+  await expect(close).toBeInViewport({ ratio: 0.95 });
+  expect(await page.evaluate(() => scrollY)).toBe(scroll);
+  await popup.getByRole('button', { name: 'Recenter', exact: true }).focus();
+  let reachedHelp = false;
+  for (let tabs = 0; tabs < 24; tabs++) {
+    await page.keyboard.press('Tab');
+    if (await help.evaluate((element) => document.activeElement === element)) {
+      reachedHelp = true;
+      break;
+    }
+  }
+  expect(reachedHelp).toBe(true);
+  await page.keyboard.press('Enter');
+  await expect(help).toHaveAttribute('aria-expanded', 'true');
+  await page.keyboard.press('Tab');
+  await expect(close).toBeFocused();
+  await page.keyboard.press('Enter');
+  await expect(popup).toHaveCount(0);
+  await expect(more).toBeFocused();
+  await settledLabels(page);
+  await expect(
+    viewer.getByRole('list', {
+      name: 'Locations with unavailable room labels',
+      exact: true,
+    }),
+  ).toHaveCount(0);
+  const after = await camera(page);
+  near(after.position, before.position);
+  near(after.target, before.target);
+  near(after.view, before.view);
+  near(after.projection, before.projection);
+  expect(after.zoom).toBeCloseTo(before.zoom, 6);
+  expect(await page.evaluate(() => scrollY)).toBe(scroll);
+  await selected(page, 'ITC-D01');
 });
 
 test('location browser has keyboard drill-down, aggregate selection, and full search breadcrumbs', async ({
@@ -2655,7 +2820,12 @@ test('optional room counts reconcile with active leaf contents and refresh as un
         BigInt(counts.counts['ITC-D01'].asset_count),
     ),
   ).toBe(String((await contents.json()).result.total));
-  await expect(page.getByText(/counts are a snapshot/)).toBeVisible();
+  const countsExplanation = page.getByRole('status').filter({
+    hasText:
+      'Counts show quantity items with stock and active individual assets at each storage location.',
+  });
+  await expect(countsExplanation).toBeVisible();
+  await expect(countsExplanation).toContainText(/counts are a snapshot/);
   const refreshed = page.waitForResponse(
     (response) =>
       response.url().includes('/api/room/occupancy?') &&
@@ -2676,6 +2846,7 @@ test('optional room counts reconcile with active leaf contents and refresh as un
     .click();
   await toggle.click();
   await expect(toggle).toHaveAttribute('aria-pressed', 'false');
+  await expect(countsExplanation).toHaveCount(0);
   await expect(page.getByText(/counts are a snapshot/)).toHaveCount(0);
 });
 
@@ -2684,6 +2855,7 @@ async function assertOccupiedWitnessActions(
   scene: WitnessSnapshot,
   counts: RoomOccupancy,
   witnesses = roomVisibilityWitnesses(scene),
+  onWitness?: (attempt: RoomPointerAttempt) => void,
 ) {
   expect(
     witnesses.size,
@@ -2692,6 +2864,11 @@ async function assertOccupiedWitnessActions(
   const viewer = page.getByTestId('room-viewer');
   const boxes = [];
   for (const code of witnesses.keys()) {
+    onWitness?.({
+      expectedCode: code,
+      point: witnesses.get(code)![0],
+      candidates: witnesses.get(code)!,
+    });
     expect(
       counts[code],
       'authorized occupied leaf snapshot for ' + code,
@@ -2751,15 +2928,84 @@ async function assertOccupiedWitnessActions(
           box.y + box.height <= other.y,
       ).toBe(true);
   await expect(
-    page.getByRole('list', { name: 'Locations whose markers do not fit' }),
+    page.getByRole('list', { name: 'Locations with unavailable room labels' }),
   ).toHaveCount(0);
   return witnesses;
+}
+
+async function assertOccupiedWitnessActionsWithDiagnostics(
+  page: Page,
+  scene: WitnessSnapshot,
+  counts: RoomOccupancy,
+  stage: RoomLayoutWitnessStage,
+  witnesses = roomVisibilityWitnesses(scene),
+) {
+  let target: RoomPointerAttempt | undefined;
+  try {
+    const result = await assertOccupiedWitnessActions(
+      page,
+      scene,
+      counts,
+      witnesses,
+      (attempt) => {
+        target = attempt;
+      },
+    );
+    await reportRoomLayoutFailure(
+      page,
+      bindingBounds.map((binding) => binding.code),
+      stage,
+      'measurement',
+    );
+    return result;
+  } catch (error) {
+    await reportRoomLayoutFailure(
+      page,
+      bindingBounds.map((binding) => binding.code),
+      stage,
+      'failure',
+      target,
+    );
+    throw error;
+  }
+}
+
+/** Keep the independently chosen code while refreshing real DOM coverage.
+ * Hover can repack neighboring controls after the previous journey. */
+async function currentUncoveredRoomPoint(
+  page: Page,
+  attempt: RoomPointerAttempt,
+) {
+  for (let capture = 0; capture < 2; capture++) {
+    const current = await uncoveredRoomWitnesses(
+      page,
+      new Map([[attempt.expectedCode, attempt.candidates]]),
+    );
+    const point = current.get(attempt.expectedCode);
+    if (point) {
+      attempt.point = point;
+      return point;
+    }
+    if (capture === 0) {
+      await page.mouse.move(15, 15);
+      await settledLabels(page);
+      const fresh = roomVisibilityWitnesses(await captureRoomWitness(page));
+      attempt.candidates = fresh.get(attempt.expectedCode) ?? [];
+      if (attempt.candidates[0]) attempt.point = attempt.candidates[0];
+    }
+  }
+  throw new Error(
+    'Independent target has no currently uncovered canvas sample: ' +
+      attempt.expectedCode,
+  );
 }
 
 test('375px populated room gives every independently witnessed opaque target an action with More and selected long text', async ({
   page,
 }, testInfo) => {
   test.setTimeout(180_000);
+  const pageErrors: string[] = [];
+  page.on('pageerror', (error) => pageErrors.push(error.message));
   await enableRoomLayoutDiagnostics(page);
   await observeRoomScene(page);
   await page.setViewportSize({ width: 375, height: 812 });
@@ -2772,7 +3018,47 @@ test('375px populated room gives every independently witnessed opaque target an 
     name: 'More map controls',
     exact: true,
   });
+  const assertMoreOutsideCanvasWhenAboveFits = async () => {
+    const panel = page.getByRole('region', {
+      name: 'More map controls',
+      exact: true,
+    });
+    // Scroll/resize schedules popup placement on rAF. Read every rectangle and
+    // the resulting placement together on each retry, never reuse a below-menu
+    // rectangle captured before awaiting the later "above" attribute.
+    await expect
+      .poll(() =>
+        panel.evaluate((element) => {
+          const surface = element.closest('[data-room-surface]');
+          const bar = surface
+            ?.querySelector('[role="toolbar"]')
+            ?.getBoundingClientRect();
+          const frame = surface
+            ?.querySelector('canvas')
+            ?.getBoundingClientRect();
+          if (!bar || !frame) return false;
+          const popup = element.getBoundingClientRect();
+          const top = window.visualViewport?.offsetTop ?? 0;
+          const fullHeight = Math.min(
+            parseFloat(
+              getComputedStyle(element).getPropertyValue('--room-menu-height'),
+            ) || 200,
+            (window.visualViewport?.height ?? window.innerHeight) * 0.35,
+            element.scrollHeight + 2,
+          );
+          return (
+            bar.top - top - 9 < fullHeight ||
+            (element.getAttribute('data-placement') === 'above' &&
+              popup.top >= top + 4 &&
+              popup.bottom <= bar.top - 5 &&
+              popup.bottom <= frame.top)
+          );
+        }),
+      )
+      .toBe(true);
+  };
   await more.click();
+  await assertMoreOutsideCanvasWhenAboveFits();
   const initialSnapshot = page.waitForResponse(
     (response) =>
       response.url().includes('/api/room/occupancy?') && response.ok(),
@@ -2786,6 +3072,57 @@ test('375px populated room gives every independently witnessed opaque target an 
     expect(BigInt(value.quantity_unit_count)).toBeGreaterThan(0n);
   await more.click();
   await page.getByRole('button', { name: 'Fit room', exact: true }).click();
+  await canvas.scrollIntoViewIfNeeded();
+  await settledLabels(page);
+  // Page scrolling flips More across the canvas without moving the camera.
+  // Its old opaque mask must not keep independently visible actions hidden.
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.getByRole('button', { name: 'Fit room', exact: true }).click();
+  await more.click();
+  await settledLabels(page);
+  const menu = page.getByRole('region', {
+    name: 'More map controls',
+    exact: true,
+  });
+  const scrollFrame = await canvas.boundingBox();
+  expect(scrollFrame).not.toBeNull();
+  await page.mouse.move(5, 800);
+  await page.mouse.wheel(0, scrollFrame!.y - 149);
+  await expect
+    .poll(async () => Math.abs((await canvas.boundingBox())!.y - 149))
+    .toBeLessThan(5);
+  await expect(menu).toHaveAttribute('data-placement', 'below');
+  await settledLabels(page);
+  const coveredScene = await captureRoomWitness(page);
+  const coveredWitnesses = await assertOccupiedWitnessActionsWithDiagnostics(
+    page,
+    coveredScene,
+    counts,
+    'scroll-more-overlapping-canvas',
+  );
+  const unchangedCamera = await camera(page);
+  const scrollRevision = Number(
+    await canvas.getAttribute('data-label-layout-revision'),
+  );
+  await page.mouse.wheel(0, -250);
+  await expect(menu).toHaveAttribute('data-placement', 'above');
+  await assertMoreOutsideCanvasWhenAboveFits();
+  await settledLabels(page, scrollRevision);
+  await expect(more).toHaveAttribute('aria-expanded', 'true');
+  const restoredCamera = await camera(page);
+  near(restoredCamera.position, unchangedCamera.position);
+  near(restoredCamera.target, unchangedCamera.target);
+  expect(restoredCamera.zoom).toBeCloseTo(unchangedCamera.zoom, 5);
+  const uncoveredScene = await captureRoomWitness(page);
+  const restoredWitnesses = await assertOccupiedWitnessActionsWithDiagnostics(
+    page,
+    uncoveredScene,
+    counts,
+    'scroll-more-outside-canvas-without-reopening',
+  );
+  expect(restoredWitnesses.size).toBeGreaterThan(coveredWitnesses.size);
+  await more.click();
+  await page.setViewportSize({ width: 375, height: 812 });
   await canvas.scrollIntoViewIfNeeded();
   await settledLabels(page);
   const initialSize = await canvas.boundingBox();
@@ -2847,15 +3184,17 @@ test('375px populated room gives every independently witnessed opaque target an 
       await more.click();
     await canvas.scrollIntoViewIfNeeded();
     await settledLabels(page);
+    if (open) await assertMoreOutsideCanvasWhenAboveFits();
     const scene = await captureRoomWitness(page);
     expect(scene.frame.width).toBe(initialSize!.width);
     expect(scene.frame.height).toBe(initialSize!.height);
     const report = roomVisibilityWitnessReport(scene);
     report.partiallyExposedCodes.forEach((code) => partialCodes.add(code));
-    const witnesses = await assertOccupiedWitnessActions(
+    const witnesses = await assertOccupiedWitnessActionsWithDiagnostics(
       page,
       scene,
       counts,
+      scenario,
       report.witnesses,
     );
     await testInfo.attach(scenario + '-opaque-witnesses', {
@@ -2877,44 +3216,69 @@ test('375px populated room gives every independently witnessed opaque target an 
       uncovered.size,
       'actual canvas journeys reach independently witnessed surfaces',
     ).toBeGreaterThan(0);
-    for (const [code, point] of uncovered) {
-      await page.mouse.move(point.x, point.y);
-      await expect(canvas).toHaveAttribute('data-hover-visible-code', code);
-      // The expected code came from independent triangles, never this telemetry.
-      await expect(
-        viewer.locator('[data-room-label-code="' + code + '"]'),
-      ).toBeVisible();
+    for (const [code, originalPoint] of uncovered) {
+      const attempt: RoomPointerAttempt = {
+        expectedCode: code,
+        point: originalPoint,
+        candidates: witnesses.get(code)!,
+      };
+      try {
+        const point = await currentUncoveredRoomPoint(page, attempt);
+        await page.mouse.move(point.x, point.y);
+        await expect(canvas).toHaveAttribute('data-hover-visible-code', code);
+        // The expected code came from independent triangles, never this telemetry.
+        await expect(
+          viewer.locator('[data-room-label-code="' + code + '"]'),
+        ).toBeVisible();
+      } catch (error) {
+        await reportRoomLayoutFailure(
+          page,
+          bindingBounds.map((binding) => binding.code),
+          scenario,
+          'failure',
+          attempt,
+        );
+        throw error;
+      }
     }
     await page.mouse.move(15, 15);
     await settledLabels(page);
     if (scenario === 'fit-open') {
-      const [code, point] = [...uncovered][0];
+      const [code, originalPoint] = [...uncovered][0];
       selectedCode = code;
-      await page.mouse.click(point.x, point.y);
-      await selected(page, code);
+      const attempt: RoomPointerAttempt = {
+        expectedCode: code,
+        point: originalPoint,
+        candidates: witnesses.get(code)!,
+      };
+      try {
+        const point = await currentUncoveredRoomPoint(page, attempt);
+        await page.mouse.click(point.x, point.y);
+        await selected(page, code);
+      } catch (error) {
+        await reportRoomLayoutFailure(
+          page,
+          bindingBounds.map((binding) => binding.code),
+          scenario,
+          'failure',
+          attempt,
+        );
+        throw error;
+      }
       await page.getByRole('button', { name: 'Fit room', exact: true }).click();
       if ((await more.getAttribute('aria-expanded')) !== 'true')
         await more.click();
       await canvas.scrollIntoViewIfNeeded();
       await settledLabels(page);
+      await assertMoreOutsideCanvasWhenAboveFits();
       const selectedScene = await captureRoomWitness(page);
-      let selectedWitnesses;
-      try {
-        selectedWitnesses = await assertOccupiedWitnessActions(
+      const selectedWitnesses =
+        await assertOccupiedWitnessActionsWithDiagnostics(
           page,
           selectedScene,
           counts,
+          'fit-open-selected-before-long-text',
         );
-      } catch (error) {
-        try {
-          await reportRoomLayoutFailure(
-            page,
-            bindingBounds.map((binding) => binding.code),
-          );
-        } finally {
-          throw error;
-        }
-      }
       expect(
         selectedWitnesses.has(code),
         'selected target is independently witnessed after reopening More',
@@ -2935,7 +3299,12 @@ test('375px populated room gives every independently witnessed opaque target an 
       await settledLabels(page);
       // Same captured physical scene and overlay: text-only stress cannot remove
       // neighbors from the independently required visible set.
-      await assertOccupiedWitnessActions(page, selectedScene, counts);
+      await assertOccupiedWitnessActionsWithDiagnostics(
+        page,
+        selectedScene,
+        counts,
+        'fit-open-selected-long-text',
+      );
       await expect(label).toBeVisible();
       await expect(label).toContainText(
         'carefully packed networking accessories',
@@ -3037,6 +3406,107 @@ test('375px populated room gives every independently witnessed opaque target an 
     partialCodes.size,
     'actual opaque blockers leave partially exposed witnessed faces across the camera poses',
   ).toBeGreaterThan(0);
+
+  // Keep the cold 375px scenarios above intact, then exercise the same mounted
+  // room through the hosted failure's 375 -> 390 resize with ordinary controls.
+  await page.emulateMedia({ reducedMotion: 'no-preference' });
+  await expect(page.locator('html')).toHaveAttribute('data-motion', 'full');
+  await chooseMapMode(page, 'Guided');
+  await setRoomLabels(page, true);
+  await page.getByRole('button', { name: 'Fit room', exact: true }).click();
+  await canvas.scrollIntoViewIfNeeded();
+  await page.mouse.move(15, 15);
+  await settledLabels(page);
+  expect((await camera(page)).elevation).toBeCloseTo((35 * Math.PI) / 180, 3);
+  const red = viewer.locator('[data-room-label-code="ITC-RED"]');
+  expect(
+    roomVisibilityWitnesses(await captureRoomWitness(page)).has('ITC-RED'),
+  ).toBe(true);
+  await red.click();
+  await expect(viewer).toHaveAttribute('data-selected-code', 'ITC-RED');
+  await expect(page).toHaveURL(/location=ITC-RED(?:&|$)/);
+  await page.getByRole('button', { name: 'Fit room', exact: true }).click();
+  await more.click();
+  await canvas.scrollIntoViewIfNeeded();
+  await page.mouse.move(15, 15);
+  await settledLabels(page);
+  await assertMoreOutsideCanvasWhenAboveFits();
+  await assertOccupiedWitnessActions(
+    page,
+    await captureRoomWitness(page),
+    counts,
+  );
+
+  const beforeResize = Number(
+    await canvas.getAttribute('data-label-layout-revision'),
+  );
+  await page.setViewportSize({ width: 390, height: 844 });
+  await settledLabels(page, beforeResize);
+  await page.getByRole('button', { name: 'Fit room', exact: true }).click();
+  await expect(more).toHaveAttribute('aria-expanded', 'false');
+  await more.click();
+  await canvas.scrollIntoViewIfNeeded();
+  await page.mouse.move(15, 15);
+  await settledLabels(page);
+  await assertMoreOutsideCanvasWhenAboveFits();
+  await expect(viewer).toHaveAttribute('data-selected-code', 'ITC-RED');
+  await expect(red).toHaveAttribute('aria-pressed', 'true');
+  await expect(red).toHaveAttribute('data-label-compact', 'false');
+  expect(await canvas.getAttribute('data-label-layout-error')).toBeNull();
+  const resizedScene = await captureRoomWitness(page);
+  const resizedRequiredWitnesses = roomVisibilityWitnesses(resizedScene);
+  expect(
+    resizedRequiredWitnesses.has('ITC-S4C'),
+    'the previously missing action is independently exposed after mounted resize',
+  ).toBe(true);
+  const resizedWitnesses = await assertOccupiedWitnessActions(
+    page,
+    resizedScene,
+    counts,
+    resizedRequiredWitnesses,
+  );
+  await testInfo.attach('390-after-mounted-resize-opaque-witnesses', {
+    body: JSON.stringify({
+      viewport: page.viewportSize(),
+      frame: resizedScene.frame,
+      codeSamples: [...resizedWitnesses].map(([code, points]) => ({
+        code,
+        samples: points.length,
+      })),
+      triangleCount: resizedScene.triangles.length,
+      method:
+        'Fresh actual committed R3F world triangles after mounted resize; bounded samples, not exhaustive pixel proof.',
+    }),
+    contentType: 'application/json',
+  });
+  await page.screenshot({
+    path: testInfo.outputPath('390-after-mounted-resize-selected-more.png'),
+  });
+  const resizedUncovered = await uncoveredRoomWitnesses(page, resizedWitnesses);
+  const nextSelection = [...resizedUncovered].find(
+    ([code]) => code !== 'ITC-RED',
+  );
+  expect(
+    nextSelection,
+    'resized room exposes an independently witnessed new pointer selection',
+  ).toBeDefined();
+  const [resizedCode, resizedPoint] = nextSelection!;
+  await page.mouse.move(resizedPoint.x, resizedPoint.y);
+  await expect(canvas).toHaveAttribute('data-hover-visible-code', resizedCode);
+  await page.mouse.click(resizedPoint.x, resizedPoint.y);
+  await expect(viewer).toHaveAttribute('data-selected-code', resizedCode);
+  await expect(page).toHaveURL(
+    new RegExp('location=' + resizedCode + '(?:&|$)'),
+  );
+  await expect(
+    page
+      .getByRole('region', { name: 'Location inventory', exact: true })
+      .getByText(resizedCode, { exact: true }),
+  ).toBeVisible();
+  await page.mouse.move(15, 15);
+  await settledLabels(page);
+  expect(await canvas.getAttribute('data-label-layout-error')).toBeNull();
+  expect(pageErrors).toEqual([]);
 });
 
 test('real emulated touch tap remains selectable through normal pointerup and implicit capture release', async ({

@@ -1,3 +1,4 @@
+vi.mock('server-only', () => ({}));
 import { render, screen } from '@testing-library/react';
 import { beforeEach, expect, it, vi } from 'vitest';
 const mocks = vi.hoisted(() => ({
@@ -65,3 +66,4 @@ it('shows read-only state to a viewer and rejects missing sites', async () => {
     ManageSitePage({ params: Promise.resolve({ code: 'MISSING' }) }),
   ).rejects.toThrow('NOT_FOUND');
 });
+vi.mock('server-only', () => ({}));

@@ -56,6 +56,7 @@ export function SceneDepth({ room }: { room: RoomDefinition }) {
           key={index}
           position={[x, 0.025, -y]}
           rotation={[-Math.PI / 2, 0, 0]}
+          userData={{ roomEffectHelper: true, hoverPassThrough: true }}
           raycast={() => {}}
         >
           <planeGeometry args={[12, 12]} />

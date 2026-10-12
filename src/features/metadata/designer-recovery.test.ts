@@ -33,6 +33,35 @@ describe('designer session recovery', () => {
     clearDesignerRecovery(id(1), id(2));
     expect(readDesignerRecovery(id(1), id(2)).item).toBeNull();
   });
+  it.each(['silent', 'throw', 'readback'] as const)(
+    'does not acknowledge authoritative cleanup after %s deletion failure',
+    (mode) => {
+      writeDesignerRecovery({ ...entry, uncertainSave: true });
+      const storageKey = sessionStorage.key(0)!;
+      const remove = Storage.prototype.removeItem;
+      const get = Storage.prototype.getItem;
+      const deletion = vi
+        .spyOn(Storage.prototype, 'removeItem')
+        .mockImplementation(function (this: Storage, key) {
+          if (key === storageKey && mode === 'throw')
+            throw new Error('blocked');
+          if (key === storageKey && mode === 'silent') return;
+          remove.call(this, key);
+        });
+      const readback = vi
+        .spyOn(Storage.prototype, 'getItem')
+        .mockImplementation(function (this: Storage, key) {
+          if (key === storageKey && mode === 'readback')
+            throw new Error('blocked');
+          return get.call(this, key);
+        });
+      expect(clearAllDesignerRecovery()).toBe(false);
+      deletion.mockRestore();
+      readback.mockRestore();
+      expect(clearAllDesignerRecovery()).toBe(true);
+      expect(readDesignerRecovery(id(1), id(2)).item).toBeNull();
+    },
+  );
   it('completes an explicit discard only after the intended target mounts for the same actor', () => {
     writeDesignerRecovery({ ...entry, discardAfterCategoryId: id(8) });
     completeDesignerNavigation(id(4), id(8));

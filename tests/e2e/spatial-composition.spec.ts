@@ -1,0 +1,568 @@
+import { expect, test, type Locator, type Page } from '@playwright/test';
+import rawRoom from '../../data/rooms/it-closet.json' with { type: 'json' };
+import { roomSchema, type RoomNode } from '../../src/features/room/schema';
+import { buildRoomBindings } from '../../src/features/room/bindings';
+import { toScenePosition } from '../../src/features/room/coordinates';
+import { revealOffset } from '../../src/features/room/scene/spatial-reveal';
+import {
+  occupancyText,
+  type RoomOccupancy,
+} from '../../src/features/room/occupancy-contract';
+import {
+  acceptanceCommand,
+  acceptanceFixtures,
+  acceptanceLogin,
+} from './audit-three-acceptance-fixtures';
+import { chooseLocation } from './location-picker';
+import {
+  beginNewRecordTransaction,
+  openRecordTask,
+} from './record-task-controls';
+import {
+  observeSpatialComposition,
+  expectSingleLiveRenderer,
+  expectNoRendererOverlap,
+  expectRevealPosition,
+  spatialFrames,
+} from './spatial-composition-observations';
+
+const room = roomSchema.parse(rawRoom);
+const bindings = buildRoomBindings(room);
+function revealNode(code: string): RoomNode {
+  const binding = bindings.find(
+    (entry) => entry.code === code && entry.primary,
+  );
+  expect(binding, 'canonical primary binding ' + code).toBeTruthy();
+  const find = (nodes: RoomNode[]): RoomNode | undefined => {
+    for (const node of nodes) {
+      if (node.id === binding!.nodeId) return node;
+      const child = find(node.children ?? []);
+      if (child) return child;
+    }
+  };
+  return find(room.nodes)!;
+}
+async function selectRoom(page: Page, code: string) {
+  const browser = page.getByRole('navigation', { name: 'Location browser' });
+  await browser.getByRole('searchbox', { name: 'Browse locations' }).fill(code);
+  await browser.getByRole('button', { name: new RegExp(`${code}$`) }).click();
+  await expect(page.getByTestId('room-viewer')).toHaveAttribute(
+    'data-selected-code',
+    code,
+  );
+}
+async function sceneReady(scope: Locator) {
+  const canvas = scope.locator('canvas');
+  await expect(canvas).toBeVisible();
+  await expect(canvas).toHaveAttribute('data-camera-position', /\[/);
+  return canvas;
+}
+async function stageDrawerLabel(dialog: Locator) {
+  await dialog.getByRole('button', { name: 'Fit room', exact: true }).click();
+  await dialog
+    .getByRole('button', { name: 'More map controls', exact: true })
+    .click();
+  const labels = dialog.getByRole('button', {
+    name: 'Show labels',
+    exact: true,
+  });
+  if ((await labels.getAttribute('aria-pressed')) !== 'true')
+    await labels.click();
+  await dialog
+    .getByRole('button', { name: 'More map controls', exact: true })
+    .click();
+  const label = dialog.locator('[data-room-label-code="ITC-D01"]');
+  await expect(label).toBeVisible();
+  await label.click();
+  await expect(dialog.locator('canvas')).toHaveAttribute(
+    'data-spatial-open-code',
+    'ITC-D01',
+  );
+}
+async function receiveForm(page: Page) {
+  const form = await openRecordTask(page, 'Receive stock');
+  await form.getByLabel('Quantity to receive').fill('3');
+  await form
+    .getByLabel('Reason (required)')
+    .fill('Keep this unsubmitted map draft');
+  return form;
+}
+
+test('A302 map stages a destination UUID, preserves Cancel drafts and hands the actual graphics slot back to detail', async ({
+  page,
+}, testInfo) => {
+  test.setTimeout(120_000);
+  const owned = await acceptanceFixtures();
+  try {
+    const source = await owned.location('ITC-S1A');
+    const destination = await owned.location('ITC-D01');
+    const item = await owned.quantity('Map draft ' + owned.suffix, source, 5);
+    await observeSpatialComposition(page);
+    await page.emulateMedia({ reducedMotion: 'reduce' });
+    await acceptanceLogin(page);
+    await page.goto('/inventory/quantity/' + item);
+    const preview = page.getByRole('region', { name: 'Storage preview' });
+    await preview.scrollIntoViewIfNeeded();
+    const originalCanvas = await sceneReady(preview);
+    const original = await originalCanvas.elementHandle();
+    await expectSingleLiveRenderer(page);
+    const form = await receiveForm(page);
+    await chooseLocation(form, 'Receive at', 'ITC-S1A');
+    const value = form.getByRole('combobox', {
+      name: 'Receive at',
+      exact: true,
+    });
+    await expect(value).toContainText('ITC-S1A');
+    // This counter observes server-action transport, not every POST endpoint.
+    // The persisted version below independently proves no inventory write.
+    let serverActionPosts = 0;
+    page.on('request', (request) => {
+      if (request.method() === 'POST' && request.headers()['next-action'])
+        serverActionPosts++;
+    });
+    await form.getByRole('button', { name: 'Pick on map' }).click();
+    const dialog = page.getByRole('dialog', {
+      name: 'Pick a storage location',
+    });
+    await expect(dialog).toBeVisible();
+    await sceneReady(dialog);
+    await expectSingleLiveRenderer(page);
+    await expect
+      .poll(() => original!.evaluate((canvas) => canvas.isConnected))
+      .toBe(false);
+    // Change from the source through the real visible map label, not through
+    // a test callback or the dialog's conventional picker.
+    await stageDrawerLabel(dialog);
+    await expect(value).toContainText('ITC-S1A');
+    await dialog.getByRole('button', { name: 'Cancel', exact: true }).click();
+    await expect(dialog).toHaveCount(0);
+    await expect(value).toContainText('ITC-S1A');
+    await expect(form.getByLabel('Quantity to receive')).toHaveValue('3');
+    await expect(form.getByLabel('Reason (required)')).toHaveValue(
+      'Keep this unsubmitted map draft',
+    );
+    await expect(
+      form.getByRole('combobox', { name: 'Receive at', exact: true }),
+    ).toBeFocused();
+    await expect(
+      preview.getByRole('button', { name: 'Resume map' }),
+    ).toBeVisible();
+    await preview.getByRole('button', { name: 'Resume map' }).click();
+    await sceneReady(preview);
+    await expectSingleLiveRenderer(page);
+    await form.getByRole('button', { name: 'Pick on map' }).click();
+    await sceneReady(dialog);
+    await stageDrawerLabel(dialog);
+    await dialog
+      .getByRole('button', { name: 'Use location', exact: true })
+      .click();
+    await expect(dialog).toHaveCount(0);
+    await expect(value).toContainText('ITC-D01');
+    await expect(
+      form.getByRole('region', { name: 'Review changes' }),
+    ).toHaveCount(0);
+    await expect(form.getByLabel('Reason (required)')).toHaveValue(
+      'Keep this unsubmitted map draft',
+    );
+    expect(
+      serverActionPosts,
+      'no server-action POST during picker-only interactions',
+    ).toBe(0);
+    const persisted = await owned.caller
+      .from('quantity_items')
+      .select('version')
+      .eq('id', item)
+      .single();
+    expect(persisted.error).toBeNull();
+    expect(persisted.data!.version).toBe(1);
+    // Only an explicit review and confirm may write. Read the persisted UUID;
+    // this form's controlled picker intentionally renders no hidden UUID input.
+    const confirmReceive = async (current: Locator) => {
+      await current
+        .getByRole('button', { name: 'Review receive stock', exact: true })
+        .click();
+      await current
+        .getByRole('button', { name: 'Confirm receive stock', exact: true })
+        .click();
+      await expect(
+        page
+          .getByRole('region', { name: 'Record tasks' })
+          .getByRole('button', { name: 'Done', exact: true }),
+      ).toBeVisible();
+    };
+    const balance = async () => {
+      const result = await owned.caller
+        .from('stock_balances')
+        .select('location_id,quantity')
+        .eq('item_id', item)
+        .eq('location_id', destination)
+        .single();
+      expect(result.error).toBeNull();
+      return result.data!;
+    };
+    await confirmReceive(form);
+    expect(await balance()).toEqual({ location_id: destination, quantity: 3 });
+    await beginNewRecordTransaction(page, 'New transaction');
+    const treeForm = await receiveForm(page);
+    await chooseLocation(treeForm, 'Receive at', 'ITC-D01');
+    await confirmReceive(treeForm);
+    expect(await balance()).toEqual({ location_id: destination, quantity: 6 });
+    await expectNoRendererOverlap(page);
+    await page.screenshot({
+      path: testInfo.outputPath('map-destination-draft.png'),
+      fullPage: true,
+    });
+  } finally {
+    await owned.cleanup();
+  }
+});
+
+test('A302 graphics failure and unmodeled destination keep the real keyboard tree and form draft usable', async ({
+  page,
+}) => {
+  test.setTimeout(120_000);
+  const owned = await acceptanceFixtures();
+  try {
+    const item = await owned.quantity(
+      'Map alternatives ' + owned.suffix,
+      await owned.location('ITC-S1A'),
+      2,
+    );
+    const unmodeled = await owned.ownedLocation('Unmodeled map destination');
+    await acceptanceLogin(page);
+    await page.goto('/inventory/quantity/' + item);
+    const form = await receiveForm(page);
+    await form.getByRole('button', { name: 'Pick on map' }).click();
+    const dialog = page.getByRole('dialog', {
+      name: 'Pick a storage location',
+    });
+    const canvas = await sceneReady(dialog);
+    // Browser's actual context-loss event exercises the production failure path.
+    await canvas.evaluate((element) => {
+      if (!(element instanceof HTMLCanvasElement))
+        throw new Error('Expected actual canvas');
+      const gl = element.getContext('webgl2');
+      if (!gl) throw new Error('Actual WebGL2 context unavailable');
+      const extension = gl.getExtension('WEBGL_lose_context');
+      if (!extension)
+        throw new Error('Browser cannot exercise actual context loss');
+      extension.loseContext();
+    });
+    await expect(
+      dialog.getByText(
+        'Map unavailable. The recorded location and location browser remain available.',
+      ),
+    ).toBeVisible();
+    const browser = dialog.getByRole('combobox', {
+      name: 'Choose location in browser',
+      exact: true,
+    });
+    await browser.focus();
+    await browser.press('Enter');
+    const search = dialog.getByRole('combobox', { name: 'Search locations' });
+    await expect(search).toBeFocused();
+    await search.fill(unmodeled.code);
+    await search.press('ArrowDown');
+    await search.press('Enter');
+    await expect(browser).toContainText(unmodeled.code);
+    await expect(
+      dialog.getByText(
+        'This location has no modeled map. Use its recorded location below.',
+      ),
+    ).toBeVisible();
+    await expect(dialog.locator('canvas')).toHaveCount(0);
+    await dialog.getByRole('button', { name: 'Use location' }).click();
+    await expect(
+      form.getByRole('combobox', { name: 'Receive at', exact: true }),
+    ).toContainText(unmodeled.code);
+    await expect(form.getByLabel('Quantity to receive')).toHaveValue('3');
+    await expect(
+      form.getByRole('region', { name: 'Review changes' }),
+    ).toHaveCount(0);
+  } finally {
+    await owned.cleanup();
+  }
+});
+
+for (const surface of ['quantity', 'asset', 'location'] as const) {
+  test(`A303 ${surface} detail initializes its actual lazy preview independently of record readiness`, async ({
+    page,
+  }, testInfo) => {
+    test.setTimeout(120_000);
+    const owned = await acceptanceFixtures();
+    try {
+      const source = await owned.location('ITC-S1A');
+      let path = '/locations/ITC-S1A';
+      if (surface === 'quantity') {
+        const item = await owned.quantity(
+          'Explicit preview choice ' + owned.suffix,
+          source,
+          5,
+        );
+        await acceptanceCommand(owned.caller, 'quantity_receive', {
+          item_id: item,
+          expected_version: 1,
+          location_id: await owned.location('ITC-D01'),
+          quantity: 4,
+          reason: 'Owned preview second holding',
+        });
+        path = '/inventory/quantity/' + item;
+      } else if (surface === 'asset') {
+        path =
+          '/inventory/assets/' +
+          (await owned.asset('Lazy preview asset ' + owned.suffix, source));
+      }
+      await observeSpatialComposition(page);
+      // Deliberately small initial visible region places the preview outside
+      // its documented 100px lazy margin; restore phone height for inspection.
+      await page.setViewportSize({ width: 390, height: 200 });
+      await acceptanceLogin(page);
+      await page.goto(path);
+      await expect(
+        page.getByRole('main').getByRole('heading', { level: 1 }),
+      ).toBeVisible();
+      const progress = page.locator('.experience-route-progress');
+      await expect(progress).toHaveAttribute('data-visible', 'false');
+      await expect(progress).toHaveAttribute('aria-hidden', 'true');
+      await expect(progress.locator('[role="status"]')).toHaveCount(0);
+      const preview = page.getByRole('region', { name: 'Storage preview' });
+      if (surface === 'quantity') {
+        await expect(
+          preview.getByText('Choose a location to preview its map.'),
+        ).toBeVisible();
+        await expect(preview.locator('canvas')).toHaveCount(0);
+        const choice = preview.getByLabel('Choose a recorded stock location');
+        await expect(choice).toHaveValue('');
+        await expect(choice.locator('option')).toHaveCount(3);
+        await choice.selectOption('ITC-D01');
+      } else {
+        // The near-region observer must not initialize an offscreen preview.
+        const bounds = await preview.boundingBox();
+        expect(bounds!.y).toBeGreaterThan(300);
+        await expect(preview.locator('canvas')).toHaveCount(0);
+      }
+      await preview.scrollIntoViewIfNeeded();
+      await page.setViewportSize({ width: 390, height: 844 });
+      const canvas = await sceneReady(preview);
+      const code = surface === 'quantity' ? 'ITC-D01' : 'ITC-S1A';
+      await expect(canvas).toHaveAttribute('data-spatial-open-code', code);
+      await expect(
+        preview.getByRole('link', { name: 'Show ' + code + ' in room' }),
+      ).toBeVisible();
+      await expectSingleLiveRenderer(page);
+      if (surface === 'quantity') {
+        await preview
+          .getByLabel('Choose a recorded stock location')
+          .selectOption('ITC-S1A');
+        await expect(preview.locator('canvas')).toHaveAttribute(
+          'data-spatial-open-code',
+          'ITC-S1A',
+        );
+        await expect(
+          preview.getByRole('link', { name: 'Show ITC-S1A in room' }),
+        ).toBeVisible();
+        await expectSingleLiveRenderer(page);
+      }
+      await page.screenshot({
+        path: testInfo.outputPath(surface + '-lazy-preview-390.png'),
+        fullPage: true,
+      });
+      await expectNoRendererOverlap(page);
+    } finally {
+      await owned.cleanup();
+    }
+  });
+}
+
+for (const motion of ['no-preference', 'reduce'] as const) {
+  test(`W13 ${motion} drawer, container and shelf bodies visibly reveal with exact selected counts and reverse on clear`, async ({
+    page,
+  }, testInfo) => {
+    test.setTimeout(120_000);
+    const owned = await acceptanceFixtures();
+    try {
+      const codes = ['ITC-D01', 'ITC-RED', 'ITC-S1A'];
+      const item = await owned.quantity(
+        'Reveal counts ' + owned.suffix,
+        await owned.location(codes[0]),
+        5,
+      );
+      for (const [index, code] of codes.slice(1).entries())
+        await acceptanceCommand(owned.caller, 'quantity_receive', {
+          item_id: item,
+          expected_version: index + 1,
+          location_id: await owned.location(code),
+          quantity: 5,
+          reason: 'Owned revealed stock fixture',
+        });
+      await observeSpatialComposition(page);
+      await page.emulateMedia({ reducedMotion: motion });
+      await acceptanceLogin(page);
+      await page.goto('/room');
+      const viewer = page.getByTestId('room-viewer');
+      const canvas = await sceneReady(viewer);
+      for (const code of codes) {
+        const node = revealNode(code);
+        await expectRevealPosition(canvas, node.id, [0, 0, 0]);
+        const snapshot = page.waitForResponse(
+          (response) =>
+            response.url().includes('/api/room/occupancy?') &&
+            response.status() === 200,
+        );
+        await selectRoom(page, code);
+        const counts: { counts: RoomOccupancy } = await (await snapshot).json();
+        await expect(canvas).toHaveAttribute('data-spatial-phase', 'settled');
+        await expectRevealPosition(
+          canvas,
+          node.id,
+          toScenePosition(revealOffset(node)),
+        );
+        const badge = viewer.locator('[data-room-label-code="' + code + '"]');
+        await expect(badge).toBeVisible();
+        await expect(badge).toContainText(
+          occupancyText(counts.counts[code], true),
+        );
+        await expect(badge).toHaveAccessibleName(
+          new RegExp(occupancyText(counts.counts[code], true)),
+        );
+        await viewer.getByRole('button', { name: 'More map controls' }).click();
+        await expect(
+          viewer.getByRole('button', { name: 'Show item counts' }),
+        ).toHaveAttribute('aria-pressed', 'false');
+        await viewer.getByRole('button', { name: 'More map controls' }).click();
+        await page.screenshot({
+          path: testInfo.outputPath(code + '-revealed-counts.png'),
+        });
+        await page.getByRole('button', { name: 'Clear selection' }).click();
+        await expect(canvas).toHaveAttribute('data-spatial-open-code', '');
+        await expectRevealPosition(canvas, node.id, [0, 0, 0]);
+        await expect(viewer).toHaveAttribute('data-selected-code', '');
+        await page.screenshot({
+          path: testInfo.outputPath(code + '-cleared-rest.png'),
+        });
+      }
+    } finally {
+      await owned.cleanup();
+    }
+  });
+}
+
+test('A303 an owned unmodeled closet child keeps truthful recorded previews without a canvas or counts read', async ({
+  page,
+}) => {
+  test.setTimeout(120_000);
+  const owned = await acceptanceFixtures();
+  try {
+    const location = await owned.ownedLocation(
+      'Recorded unmodeled closet storage',
+      'ITC',
+    );
+    const quantity = await owned.quantity(
+      'Unmodeled preview stock ' + owned.suffix,
+      location.id,
+      2,
+    );
+    const asset = await owned.asset(
+      'Unmodeled preview asset ' + owned.suffix,
+      location.id,
+    );
+    await acceptanceLogin(page);
+    let countReads = 0;
+    page.on('request', (request) => {
+      if (request.url().includes('/api/room/occupancy?')) countReads++;
+    });
+    for (const path of [
+      '/locations/' + location.code,
+      '/inventory/quantity/' + quantity,
+      '/inventory/assets/' + asset,
+    ]) {
+      await page.goto(path);
+      const preview = page.getByRole('region', { name: 'Storage preview' });
+      await preview.scrollIntoViewIfNeeded();
+      await expect(
+        preview.getByText(
+          'This location has no modeled map. Use its recorded location below.',
+        ),
+      ).toBeVisible();
+      await expect(preview.getByText(new RegExp(location.name))).toBeVisible();
+      await expect(
+        preview.getByRole('link', {
+          name: 'Show ' + location.code + ' in Spaces',
+        }),
+      ).toBeVisible();
+      await expect(preview.locator('canvas')).toHaveCount(0);
+    }
+    expect(countReads).toBe(0);
+  } finally {
+    await owned.cleanup();
+  }
+});
+
+test('W14 actual Full flight precedes reveal, newer selection retires it, and Reduced snaps the complete endpoint', async ({
+  page,
+}, testInfo) => {
+  test.setTimeout(120_000);
+  await observeSpatialComposition(page);
+  await page.clock.install();
+  await page.emulateMedia({ reducedMotion: 'no-preference' });
+  await acceptanceLogin(page);
+  await page.goto('/room');
+  const viewer = page.getByTestId('room-viewer');
+  const canvas = await sceneReady(viewer);
+  await page.clock.pauseAt(await page.evaluate(() => Date.now() + 10_000));
+  const initialTarget = await canvas.getAttribute('data-camera-target');
+  await selectRoom(page, 'ITC-D01');
+  await page.clock.runFor(16);
+  await expect(canvas).toHaveAttribute('data-spatial-phase', 'flying');
+  await expectRevealPosition(canvas, revealNode('ITC-D01').id, [0, 0, 0]);
+  await page.clock.runFor(400);
+  expect(await canvas.getAttribute('data-camera-target')).not.toBe(
+    initialTarget,
+  );
+  await expect(canvas).toHaveAttribute('data-spatial-open-code', '');
+  await selectRoom(page, 'ITC-RED');
+  await page.clock.runFor(16);
+  await expect(canvas).toHaveAttribute('data-spatial-phase', 'flying');
+  await page.clock.runFor(760);
+  await expect(canvas).toHaveAttribute('data-spatial-phase', 'revealing');
+  await expect(canvas).toHaveAttribute('data-spatial-open-code', 'ITC-RED');
+  const arrivedTarget = await canvas.getAttribute('data-camera-target');
+  await expectRevealPosition(canvas, revealNode('ITC-D01').id, [0, 0, 0]);
+  await page.clock.runFor(420);
+  await expect(canvas).toHaveAttribute('data-camera-target', arrivedTarget!);
+  await expect(canvas).toHaveAttribute('data-spatial-phase', 'settled');
+  await expectRevealPosition(
+    canvas,
+    revealNode('ITC-RED').id,
+    toScenePosition(revealOffset(revealNode('ITC-RED'))),
+  );
+  // Real toolbar input interrupts before the older drawer flight can reveal.
+  await selectRoom(page, 'ITC-D01');
+  await page.clock.runFor(100);
+  await viewer.getByRole('button', { name: 'More map controls' }).click();
+  await viewer.getByRole('button', { name: 'Pan right' }).click();
+  await page.clock.runFor(1200);
+  await expect(canvas).toHaveAttribute('data-spatial-phase', 'cancelled');
+  await expect(canvas).toHaveAttribute('data-spatial-open-code', '');
+  await expectRevealPosition(canvas, revealNode('ITC-D01').id, [0, 0, 0]);
+  await viewer.getByRole('button', { name: 'More map controls' }).click();
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  await selectRoom(page, 'ITC-S1A');
+  await page.clock.runFor(32);
+  await expect(canvas).toHaveAttribute('data-spatial-phase', 'settled');
+  await expectRevealPosition(
+    canvas,
+    revealNode('ITC-S1A').id,
+    toScenePosition(revealOffset(revealNode('ITC-S1A'))),
+  );
+  const pendingFrames = spatialFrames(canvas, 3);
+  await page.clock.runFor(64);
+  expect(
+    (await pendingFrames).every(
+      (sample) => sample.phase === 'settled' && sample.open === 'ITC-S1A',
+    ),
+  ).toBe(true);
+  await page.screenshot({
+    path: testInfo.outputPath('reduced-complete-spatial-endpoint.png'),
+  });
+});

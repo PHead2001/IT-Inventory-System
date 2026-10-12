@@ -1,13 +1,21 @@
 import { expectScopedInteractiveTransitions } from './interactive-style-contract';
 import { randomUUID } from 'node:crypto';
-import { test, expect, type Page } from '@playwright/test';
+import {
+  test,
+  expect,
+  type CDPSession,
+  type Page,
+  type Request,
+} from '@playwright/test';
 import { createClient } from '@supabase/supabase-js';
+import { Client } from 'pg';
 import { PNG } from 'pngjs';
 import { NotFoundException } from '@zxing/library';
 import fixture from '../fixtures/auth.json' with { type: 'json' };
 import { chooseLocation } from './location-picker';
 import { metadataReviewButton, metadataSaveButton } from './metadata-controls';
 import { decodeInventoryFrame } from '../../src/features/scan/decode-frame';
+import { waitForHeldActionResponse } from './held-action-response';
 
 async function signIn(page: Page, role: 'staff' | 'viewer' = 'staff') {
   await page.goto('/login');
@@ -71,6 +79,48 @@ async function generatedLabel(
   }).getText();
 }
 
+/** Seed only owned legacy holdings on the disposable loopback database.
+ * Inactive balances can predate current destination guards; application writes
+ * still go through the existing caller-authorized custody action below. */
+async function seedInactiveScanSource(itemId: string, suffix: string) {
+  const target = new URL(process.env.LOCAL_DB_URL!);
+  expect(['localhost', '127.0.0.1', '[::1]']).toContain(target.hostname);
+  expect(target.port).toBe('54322');
+  expect(target.pathname).toBe('/postgres');
+  const parentId = randomUUID(),
+    sourceId = randomUUID();
+  const sourceCode = `SCAN-OLD-${suffix}`;
+  const db = new Client({
+    connectionString: target.href,
+    application_name: 'scan-owned-legacy-source-fixture',
+  });
+  await db.connect();
+  try {
+    await db.query('begin');
+    await db.query(
+      `insert into public.locations(id,code,name,kind,active,can_hold_inventory)
+      values($1,$2,$3,'room',false,false)`,
+      [parentId, `${sourceCode}-ROOM`, `Legacy scan room ${suffix}`],
+    );
+    await db.query(
+      `insert into public.locations(id,code,name,parent_id,kind,active,can_hold_inventory)
+      values($1,$2,$3,$4,'container',false,true)`,
+      [sourceId, sourceCode, `Legacy scan bin ${suffix}`, parentId],
+    );
+    await db.query(
+      `insert into public.stock_balances(item_id,location_id,quantity) values($1,$2,2)`,
+      [itemId, sourceId],
+    );
+    await db.query('commit');
+    return { id: sourceId, code: sourceCode };
+  } catch (error) {
+    await db.query('rollback');
+    throw error;
+  } finally {
+    await db.end();
+  }
+}
+
 test('generated labels inspect and explicitly assign a repeat quantity and an asset in one site batch', async ({
   page,
 }) => {
@@ -123,6 +173,7 @@ test('generated labels inspect and explicitly assign a repeat quantity and an as
 
   const client = await staffClient();
   try {
+    const inactiveSource = await seedInactiveScanSource(quantityId, suffix);
     const site = await client
       .from('sites')
       .select('id')
@@ -151,6 +202,11 @@ test('generated labels inspect and explicitly assign a repeat quantity and an as
     await page
       .getByLabel('Ticket number reference (optional)', { exact: true })
       .fill(ticket);
+    await chooseLocation(
+      page.locator('body'),
+      'Preferred storage source (optional)',
+      inactiveSource.code,
+    );
     const input = page.getByLabel('Scan, paste, or search inventory', {
       exact: true,
     });
@@ -160,6 +216,33 @@ test('generated labels inspect and explicitly assign a repeat quantity and an as
     await expect(review).toContainText(quantityName);
     await expectScopedInteractiveTransitions(page);
     await expect(review.getByLabel('Units to assign')).toHaveValue('1');
+    await expect(review.getByLabel('Storage source')).toHaveValue(
+      inactiveSource.id,
+    );
+    await expect(review.getByLabel('Storage source')).toContainText(
+      'inactive source',
+    );
+    expect(await eventCount()).toBe(0);
+    await review.getByRole('link', { name: 'Open inventory record' }).click();
+    await expect(page).toHaveURL(
+      new RegExp(`/inventory/quantity/${quantityId}$`),
+    );
+    await page.goBack();
+    await expect(
+      page.getByLabel('Ticket number reference (optional)'),
+    ).toHaveValue(ticket);
+    await expect(page.getByLabel('Destination site')).toHaveValue(
+      site.data!.id,
+    );
+    await expect(
+      page.getByLabel('Preferred storage source (optional)'),
+    ).toContainText(inactiveSource.code);
+    await expect(
+      page.getByRole('status').filter({
+        hasText:
+          /^Availability refreshed\. Review the source and units before confirming\.$/,
+      }),
+    ).toBeVisible();
     expect(await eventCount()).toBe(0);
     await page
       .getByRole('button', { name: 'Confirm assign', exact: true })
@@ -175,6 +258,12 @@ test('generated labels inspect and explicitly assign a repeat quantity and an as
     await expect(
       page.getByLabel('Ticket number reference (optional)', { exact: true }),
     ).toHaveValue(ticket);
+    expect(await eventCount()).toBe(1);
+    await page.reload();
+    await expect(receipt).toContainText(quantityName);
+    await expect(
+      page.getByRole('region', { name: 'Batch checklist' }),
+    ).toContainText('1 quantity assignment (1 unit) confirmed');
     expect(await eventCount()).toBe(1);
 
     // The same identifier is a new, explicit keyboard-scanner intent, then a new confirmation.
@@ -194,6 +283,22 @@ test('generated labels inspect and explicitly assign a repeat quantity and an as
     ).toContainText('2 units');
     await expect(input).toBeEnabled();
     expect(await eventCount()).toBe(2);
+    const remaining = await client
+      .from('stock_balances')
+      .select('quantity')
+      .eq('item_id', quantityId)
+      .eq('location_id', inactiveSource.id)
+      .single();
+    expect(remaining.error).toBeNull();
+    expect(remaining.data!.quantity).toBe(0);
+    const issued = await client
+      .from('assignment_events')
+      .select('from_location_id,quantity')
+      .eq('item_id', quantityId)
+      .eq('from_location_id', inactiveSource.id);
+    expect(issued.error).toBeNull();
+    expect(issued.data).toHaveLength(2);
+    expect(issued.data!.every((line) => line.quantity === 1)).toBe(true);
 
     await input.fill(assetLabel);
     await input.press('Enter');
@@ -205,6 +310,7 @@ test('generated labels inspect and explicitly assign a repeat quantity and an as
     await expect(receipt).toContainText(assetName);
     await expect(input).toBeEnabled();
     expect(await eventCount()).toBe(3);
+
     await input.fill(assetLabel);
     await input.press('Enter');
     await expect(review).toContainText('already assigned');
@@ -213,6 +319,25 @@ test('generated labels inspect and explicitly assign a repeat quantity and an as
     ).toBeDisabled();
     expect(await eventCount()).toBe(3);
 
+    await page
+      .getByRole('button', { name: 'Finish batch', exact: true })
+      .click();
+    const summary = page.getByRole('region', { name: 'Batch summary' });
+    await expect(summary).toContainText(
+      '1 asset assignment · 2 quantity assignments (2 units) confirmed',
+    );
+    await expect(
+      summary.getByRole('link', { name: /View committed history/ }),
+    ).toHaveCount(3);
+    expect(await eventCount()).toBe(3);
+    await page.reload();
+    await expect(summary).toBeVisible();
+    await page.getByRole('button', { name: 'End batch', exact: true }).click();
+    await expect(page.getByLabel('Destination site')).toHaveValue('');
+    await expect(
+      page.getByLabel('Ticket number reference (optional)'),
+    ).toHaveValue('');
+    expect(await eventCount()).toBe(3);
     await page.goto('/scan');
     await page
       .getByLabel('Paste a label URL, barcode text, or exact identifier')
@@ -279,4 +404,612 @@ test('viewer assignment entry has no writable batch controls', async ({
   await expect(
     page.getByLabel('Destination site', { exact: true }),
   ).toHaveCount(0);
+});
+
+test('real scan batch cancels late reads, refreshes stale stock, reconciles lost responses/storage cleanup and clears on logout from another route', async ({
+  page,
+  context,
+}) => {
+  test.setTimeout(180_000);
+  await signIn(page);
+  const suffix = randomUUID().slice(0, 8).toUpperCase();
+  await page.goto('/settings/sites');
+  const siteForm = page.locator('form').filter({
+    has: page.getByRole('heading', {
+      name: 'Add property/site',
+      exact: true,
+    }),
+  });
+  await siteForm
+    .getByLabel('Name', { exact: true })
+    .fill(`Resilient scan ${suffix}`);
+  await siteForm
+    .getByLabel('Permanent code', { exact: true })
+    .fill(`RES-${suffix}`);
+  await siteForm.getByRole('button', { name: 'Save site' }).click();
+  await expect(
+    page.getByRole('region', { name: 'Site creation complete' }),
+  ).toBeVisible();
+  await page.goto('/inventory/quantity/new');
+  const form = page.getByRole('form', { name: 'Add quantity item' });
+  await form
+    .getByLabel('Name', { exact: true })
+    .fill(`Resilient adapters ${suffix}`);
+  await form.getByLabel('Initial quantity').fill('5');
+  await chooseLocation(form, 'Initial location', 'ITC-RED');
+  await metadataReviewButton(form).click();
+  await metadataSaveButton(form).click();
+  await expect(page).toHaveURL(/\/inventory\/quantity\/[0-9a-f-]+$/);
+  const path = new URL(page.url()).pathname;
+  const client = await staffClient();
+  const site = await client
+    .from('sites')
+    .select('id')
+    .eq('code', `RES-${suffix}`)
+    .single();
+  expect(site.error).toBeNull();
+  const siteId = site.data!.id;
+  const count = async () => {
+    const result = await client
+      .from('assignment_events')
+      .select('id', { count: 'exact', head: true })
+      .eq('to_site_id', siteId);
+    expect(result.error).toBeNull();
+    return result.count;
+  };
+  // Hold the actual inspection, not privacy verification or identifier lookup.
+  // Its business arguments are stable across Next action-ID/build changes.
+  const isFixtureInspection = (request: Request) => {
+    if (request.method() !== 'POST' || !request.headers()['next-action'])
+      return false;
+    try {
+      const args: unknown = request.postDataJSON();
+      if (!Array.isArray(args) || args.length !== 1) return false;
+      const input: unknown = args[0];
+      return (
+        typeof input === 'object' &&
+        input !== null &&
+        'path' in input &&
+        input.path === path &&
+        'siteId' in input &&
+        input.siteId === siteId &&
+        'actorId' in input &&
+        typeof input.actorId === 'string'
+      );
+    } catch {
+      return false;
+    }
+  };
+  const inspect = async (target: Page) => {
+    const input = target.getByLabel('Scan, paste, or search inventory');
+    await input.fill(path);
+    await input.press('Enter');
+    await expect(
+      target.getByRole('region', { name: 'Review assignment' }),
+    ).toBeVisible();
+  };
+  try {
+    await page.goto(`/scan?mode=assign&site=${siteId}`);
+    await page
+      .getByLabel('Ticket number reference (optional)')
+      .fill(`PRIVATE-${suffix}`);
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let signalIntercepted!: () => void;
+    const intercepted = new Promise<void>((resolve) => {
+      signalIntercepted = resolve;
+    });
+    let delayed = false;
+    await page.route('**/scan?mode=assign*', async (route) => {
+      if (!delayed && isFixtureInspection(route.request())) {
+        delayed = true;
+        signalIntercepted();
+        await held;
+      }
+      await route.continue();
+    });
+    await page.getByLabel('Scan, paste, or search inventory').fill(path);
+    await page.getByLabel('Scan, paste, or search inventory').press('Enter');
+    await intercepted; // Prove the real read is held before cancelling it.
+    const inspectingAnnouncement = page
+      .getByRole('status')
+      .filter({ hasText: /^Inspecting equipment…$/ });
+    await expect(inspectingAnnouncement).toHaveCount(1);
+    await expect(inspectingAnnouncement).toBeVisible();
+    await expect(inspectingAnnouncement).toHaveText('Inspecting equipment…');
+    expect(
+      await inspectingAnnouncement.evaluate(
+        (node) => node.closest('[aria-busy="true"]') === null,
+      ),
+    ).toBe(true);
+    await expect(
+      page.getByRole('form', { name: 'Inspect equipment' }),
+    ).toHaveAttribute('aria-busy', 'true');
+    await expect(
+      page.getByRole('button', { name: 'Cancel inspection' }),
+    ).toBeFocused();
+    await page.getByRole('button', { name: 'Cancel inspection' }).click();
+    await expect(
+      page.getByLabel('Scan, paste, or search inventory'),
+    ).toBeFocused();
+    release();
+    // Drain the resumed handler before removal: default unroute can mark the
+    // still-running route handled before its continuation completes.
+    await page.unrouteAll({ behavior: 'wait' });
+    await expect(
+      page.getByRole('region', { name: 'Review assignment' }),
+    ).toHaveCount(0);
+    expect(await count()).toBe(0);
+    let releaseInterrupted!: () => void;
+    const interruptedRead = new Promise<void>((resolve) => {
+      releaseInterrupted = resolve;
+    });
+    let signalInterrupted!: () => void;
+    const interruptedLookup = new Promise<void>((resolve) => {
+      signalInterrupted = resolve;
+    });
+    let interruptedDelayed = false;
+    await page.route('**/scan?mode=assign*', async (route) => {
+      if (!interruptedDelayed && isFixtureInspection(route.request())) {
+        interruptedDelayed = true;
+        signalInterrupted();
+        await interruptedRead;
+      }
+      await route.continue();
+    });
+    try {
+      await page.getByLabel('Scan, paste, or search inventory').fill(path);
+      await page.getByLabel('Scan, paste, or search inventory').press('Enter');
+      await interruptedLookup;
+      await page.getByRole('link', { name: 'Inventory', exact: true }).click();
+      await expect(page).toHaveURL(/\/inventory(?:\?.*)?$/);
+      // Prove the read remained orphaned after the old React owner unmounted.
+      // Full-document goto may instead abort and honestly settle it as failed.
+      expect(
+        await page.evaluate(() => {
+          const key = Object.keys(sessionStorage).find((value) =>
+            value.startsWith('inventory-assign-batch-v1:'),
+          )!;
+          const saved = JSON.parse(sessionStorage.getItem(key)!);
+          const row = saved.entries.at(-1);
+          return {
+            status: row.status,
+            requestId: row.requestId,
+            historical: saved.historical,
+          };
+        }),
+      ).toEqual({ status: 'pending', requestId: null, historical: null });
+      await page.goBack();
+      await expect(
+        page.getByRole('region', { name: 'Batch checklist' }),
+      ).toContainText('0 pending');
+      await expect(
+        page.getByRole('region', { name: 'Batch checklist' }),
+      ).toContainText(
+        'Inspection interrupted before confirmation. Nothing was submitted.',
+      );
+      await expect(
+        page.getByRole('button', { name: 'Inspect equipment', exact: true }),
+      ).toBeEnabled();
+      releaseInterrupted();
+      await page.unrouteAll({ behavior: 'wait' });
+      await expect(
+        page.getByRole('region', { name: 'Review assignment' }),
+      ).toHaveCount(0);
+      await page.reload();
+      await expect(
+        page.getByRole('region', { name: 'Batch checklist' }),
+      ).toContainText('0 pending');
+      expect(await count()).toBe(0);
+    } finally {
+      releaseInterrupted();
+      await page.unrouteAll({ behavior: 'wait' });
+    }
+    await inspect(page);
+    // Restore a persisted pending review on a phone. Unlike the late-result
+    // cancellation above, this read completes between a real press and release.
+    const originalViewport = page.viewportSize();
+    for (const releaseGesture of [
+      'inside',
+      'outside',
+      'touch outside',
+    ] as const) {
+      if (releaseGesture !== 'inside') await inspect(page);
+      await page.setViewportSize({ width: 375, height: 812 });
+      let releaseRestore!: () => void;
+      const heldRestore = new Promise<void>((resolve) => {
+        releaseRestore = resolve;
+      });
+      let signalRestore!: () => void;
+      const restoreIntercepted = new Promise<void>((resolve) => {
+        signalRestore = resolve;
+      });
+      let restoreDelayed = false;
+      let heldRestoreRequest: Request | undefined;
+      let touch: CDPSession | undefined;
+      let touchActive = false;
+      let fixtureFailed = false;
+      await page.route('**/scan?mode=assign*', async (route) => {
+        if (!restoreDelayed && isFixtureInspection(route.request())) {
+          restoreDelayed = true;
+          heldRestoreRequest = route.request();
+          signalRestore();
+          await heldRestore;
+        }
+        await route.continue();
+      });
+      try {
+        await page.reload();
+        await restoreIntercepted;
+        const inspection = page.getByRole('form', {
+          name: 'Inspect equipment',
+        });
+        const cancel = inspection.getByRole('button', {
+          name: /^(Cancel inspection|Skip inspection \/ review)$/,
+        });
+        const expectStationaryCancel = async () => {
+          // Inspect the winning browser CSS, including Tailwind's individual
+          // transform properties, while the real primary pointer is held.
+          await expect
+            .poll(() =>
+              cancel.evaluate((element) => {
+                const style = getComputedStyle(element);
+                return {
+                  transform:
+                    style.transform === 'none' ||
+                    new DOMMatrixReadOnly(style.transform).isIdentity,
+                  scale:
+                    style.scale === 'none' ||
+                    style.scale
+                      .split(' ')
+                      .every((value) => Number(value) === 1),
+                  translate:
+                    style.translate === 'none' ||
+                    style.translate
+                      .split(' ')
+                      .every((value) => Number.parseFloat(value) === 0),
+                };
+              }),
+            )
+            .toEqual({ transform: true, scale: true, translate: true });
+        };
+        await expect(inspection).toHaveAttribute('aria-busy', 'true');
+        await expect(cancel).toHaveText('Cancel inspection');
+        await expect(cancel).toBeFocused();
+        await cancel.scrollIntoViewIfNeeded();
+        await page.evaluate(() => document.fonts.ready);
+        const before = await cancel.boundingBox();
+        expect(before).toBeTruthy();
+        const point = {
+          x: before!.x + before!.width / 2,
+          y: before!.y + before!.height / 2,
+        };
+        const scrollBefore = await page.evaluate(() => window.scrollY);
+        if (releaseGesture === 'touch outside') {
+          touch = await context.newCDPSession(page);
+          await touch.send('Emulation.setTouchEmulationEnabled', {
+            enabled: true,
+            maxTouchPoints: 1,
+          });
+          await cancel.evaluate((element) => {
+            element.style.touchAction = 'none'; // Keep this deliberate drag from becoming page pan.
+            const evidence = {
+              captured: false,
+              released: false,
+              target: false,
+              x: -1,
+              type: '',
+            };
+            (
+              window as Window & { capturedCancelRelease?: typeof evidence }
+            ).capturedCancelRelease = evidence;
+            element.addEventListener(
+              'gotpointercapture',
+              () => {
+                evidence.captured = true;
+              },
+              { once: true },
+            );
+            element.addEventListener(
+              'pointerup',
+              (event) => {
+                const pointer = event as PointerEvent;
+                evidence.released = true;
+                evidence.target = event.target === element;
+                evidence.x = pointer.clientX;
+                evidence.type = pointer.pointerType;
+              },
+              { once: true },
+            );
+          });
+          await touch.send('Input.dispatchTouchEvent', {
+            type: 'touchStart',
+            touchPoints: [
+              { ...point, id: 11, radiusX: 1, radiusY: 1, force: 1 },
+            ],
+          });
+          touchActive = true;
+        } else {
+          await page.mouse.move(point.x, point.y);
+          await page.mouse.down();
+        }
+        await expect(cancel).toBeFocused();
+        await expectStationaryCancel();
+        expect(heldRestoreRequest).toBeDefined();
+        const restoredResponse = waitForHeldActionResponse(
+          page,
+          heldRestoreRequest!,
+        );
+        releaseRestore();
+        await restoredResponse;
+        // A usable decoded restoration is the completion contract. Waiting for
+        // the enclosing Flight stream's EOF can hang after the action resolves.
+        await expect(inspection).toHaveAttribute('aria-busy', 'false');
+        await expect(
+          page.getByRole('status').filter({
+            hasText:
+              /^Availability refreshed\. Review the source and units before confirming\.$/,
+          }),
+        ).toBeVisible();
+        await expect(cancel).toHaveText('Skip inspection / review');
+        // These checks happen with the mouse still held. Review focus must not
+        // scroll the pressed target away and divert the browser's eventual click.
+        await expect(cancel).toBeFocused();
+        await expectStationaryCancel();
+        expect(await page.evaluate(() => window.scrollY)).toBe(scrollBefore);
+        const after = await cancel.boundingBox();
+        expect(after).toMatchObject({
+          x: before!.x,
+          y: before!.y,
+          height: before!.height,
+        });
+        expect(
+          await cancel.evaluate(
+            (element, point) =>
+              document.elementFromPoint(point.x, point.y)?.closest('button') ===
+              element,
+            point,
+          ),
+        ).toBe(true);
+        expect(await count()).toBe(0);
+        if (releaseGesture !== 'inside') {
+          if (touch)
+            await touch.send('Input.dispatchTouchEvent', {
+              type: 'touchMove',
+              touchPoints: [
+                { x: 2, y: point.y, id: 11, radiusX: 1, radiusY: 1, force: 1 },
+              ],
+            });
+          else await page.mouse.move(2, point.y); // Nonfocusable page edge, no Cancel click.
+          expect(
+            await cancel.evaluate(
+              (element, y) =>
+                document.elementFromPoint(2, y)?.closest('button') === element,
+              point.y,
+            ),
+          ).toBe(false);
+        }
+        if (touch) {
+          await touch.send('Input.dispatchTouchEvent', {
+            type: 'touchEnd',
+            touchPoints: [],
+          });
+          touchActive = false;
+          expect(
+            await page.evaluate(
+              () =>
+                (window as Window & { capturedCancelRelease?: object })
+                  .capturedCancelRelease,
+            ),
+          ).toMatchObject({
+            captured: true,
+            released: true,
+            target: true,
+            x: 2,
+            type: 'touch',
+          });
+        } else await page.mouse.up();
+        if (releaseGesture !== 'inside') {
+          await expect(
+            page.getByRole('region', { name: 'Review assignment' }),
+          ).toBeFocused();
+          await expect(
+            page.getByRole('region', { name: 'Batch checklist' }),
+          ).toContainText('1 pending');
+          expect(await count()).toBe(0);
+          await cancel.click(); // Settle deliberately after proving aborted focus transfer.
+        }
+        await expect(
+          page.getByLabel('Scan, paste, or search inventory'),
+        ).toBeFocused();
+        await expect(
+          page.getByRole('region', { name: 'Review assignment' }),
+        ).toHaveCount(0);
+        await expect(
+          page.getByRole('region', { name: 'Batch checklist' }),
+        ).toContainText('0 pending');
+        await expect(
+          page.getByRole('region', { name: 'Batch checklist' }),
+        ).toContainText('Skipped before confirmation.');
+        expect(await count()).toBe(0);
+      } catch (error) {
+        fixtureFailed = true;
+        throw error;
+      } finally {
+        releaseRestore();
+        const cleanupErrors: unknown[] = [];
+        const cleanup = async (action: () => Promise<unknown>) => {
+          try {
+            await action();
+          } catch (error) {
+            cleanupErrors.push(error);
+          }
+        };
+        if (touch) {
+          const session = touch;
+          if (touchActive) {
+            await cleanup(async () => {
+              await session.send('Input.dispatchTouchEvent', {
+                type: 'touchCancel',
+                touchPoints: [],
+              });
+              touchActive = false;
+            });
+          }
+          await cleanup(() =>
+            session.send('Emulation.setTouchEmulationEnabled', {
+              enabled: false,
+            }),
+          );
+          await cleanup(() => session.detach());
+        }
+        await cleanup(() => page.mouse.up());
+        await cleanup(() => page.unrouteAll({ behavior: 'wait' }));
+        if (originalViewport)
+          await cleanup(() => page.setViewportSize(originalViewport));
+        // Keep the original assertion/protocol failure if teardown also fails,
+        // but do not hide a cleanup failure after an otherwise successful run.
+        if (!fixtureFailed && cleanupErrors.length) throw cleanupErrors[0];
+      }
+    }
+    await inspect(page);
+    const other = await context.newPage();
+    await other.goto(`/scan?mode=assign&site=${siteId}`);
+    await expect(
+      other.getByLabel('Ticket number reference (optional)'),
+    ).toHaveValue('');
+    await inspect(other);
+    await other
+      .getByRole('button', { name: 'Confirm assign', exact: true })
+      .click();
+    await expect(
+      other.getByRole('region', { name: 'Latest assignment receipt' }),
+    ).toBeVisible();
+    await other.close();
+    expect(await count()).toBe(1);
+    await page
+      .getByRole('button', { name: 'Confirm assign', exact: true })
+      .click();
+    await expect(
+      page.getByRole('button', { name: 'Inspect current state' }),
+    ).toBeVisible();
+    await expect(
+      page.getByRole('region', { name: 'Batch checklist' }),
+    ).toContainText('Failed');
+    expect(await count()).toBe(1);
+    await page.getByRole('button', { name: 'Inspect current state' }).click();
+    await expect(
+      page.getByRole('region', { name: 'Review assignment' }),
+    ).toContainText('4 available');
+    await page.evaluate(() => {
+      const original = Storage.prototype.setItem;
+      (
+        window as Window & { restoreAssignmentStorage?: () => void }
+      ).restoreAssignmentStorage = () => {
+        Storage.prototype.setItem = original;
+      };
+      Storage.prototype.setItem = function (key, value) {
+        if (key.startsWith('inventory-assign-v1:'))
+          throw new DOMException('quota', 'QuotaExceededError');
+        original.call(this, key, value);
+      };
+    });
+    await page
+      .getByRole('button', { name: 'Confirm assign', exact: true })
+      .click();
+    const blockedAssignment = page.getByRole('alert').filter({
+      hasText: /^This assignment could not be saved\./,
+    });
+    await expect(blockedAssignment).toBeVisible();
+    await expect(blockedAssignment).toHaveText(
+      'This assignment could not be saved. Keep the review open and retry when browser storage is available. Nothing was submitted.',
+    );
+    expect(await count()).toBe(1);
+    await page.evaluate(() =>
+      (
+        window as Window & { restoreAssignmentStorage?: () => void }
+      ).restoreAssignmentStorage?.(),
+    );
+    let lost = false;
+    await page.route('**/scan?mode=assign*', async (route) => {
+      if (
+        !lost &&
+        route.request().method() === 'POST' &&
+        route.request().postData()?.includes('quantity_site_change')
+      ) {
+        lost = true;
+        await route.fetch(); // Execute the real server action, lose only its response.
+        await route.abort('failed');
+      } else await route.continue();
+    });
+    await page
+      .getByRole('button', { name: 'Confirm assign', exact: true })
+      .click();
+    await expect(
+      page.getByRole('button', { name: 'Retry same assignment' }),
+    ).toBeVisible();
+    expect(await count()).toBe(2);
+    await expect(
+      page.getByRole('button', { name: 'Finish batch' }),
+    ).toBeDisabled();
+    await page.unroute('**/scan?mode=assign*');
+    await page.reload();
+    await page.getByRole('button', { name: 'Retry same assignment' }).click();
+    await expect(
+      page.getByRole('region', { name: 'Latest assignment receipt' }),
+    ).toBeVisible();
+    expect(await count()).toBe(2);
+    await expect(
+      page
+        .getByRole('region', { name: 'Batch checklist' })
+        .getByRole('link', { name: /View committed history/ }),
+    ).toHaveCount(1);
+    await inspect(page);
+    await page.evaluate(() => {
+      const original = Storage.prototype.removeItem;
+      Storage.prototype.removeItem = function (key) {
+        if (key.startsWith('inventory-assign-v1:'))
+          throw new Error('cleanup unavailable');
+        original.call(this, key);
+      };
+    });
+    await page
+      .getByRole('button', { name: 'Confirm assign', exact: true })
+      .click();
+    await expect(
+      page.getByRole('alert').filter({
+        hasText:
+          /^Assignment confirmed\. Reload to finish updating this batch before assigning more\.$/,
+      }),
+    ).toBeVisible();
+    expect(await count()).toBe(3);
+    await page.reload(); // Clear-only reconciliation must not issue a new mutation.
+    await expect(
+      page.getByLabel('Scan, paste, or search inventory'),
+    ).toBeEnabled();
+    expect(await count()).toBe(3);
+    await page.goto('/inventory');
+    await page.getByRole('button', { name: 'Sign out', exact: true }).click();
+    await expect(page).toHaveURL(/\/login$/);
+    expect(
+      await page.evaluate(() =>
+        Object.keys(sessionStorage).filter(
+          (key) =>
+            key.startsWith('inventory-assign-batch-v1:') ||
+            key.startsWith('inventory-assign-v1:'),
+        ),
+      ),
+    ).toEqual([]);
+    await signIn(page);
+    await page.goto('/scan?mode=assign');
+    await expect(page.getByLabel('Destination site')).toHaveValue('');
+    await expect(
+      page.getByLabel('Ticket number reference (optional)'),
+    ).toHaveValue('');
+    expect(await count()).toBe(3);
+  } finally {
+    await client.auth.signOut();
+  }
 });

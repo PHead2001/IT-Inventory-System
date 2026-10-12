@@ -1,4 +1,5 @@
 import { openRecordTask } from './record-task-controls';
+import { expectCategoryAdded } from './configuration-assertions';
 import { metadataReviewButton, metadataSaveButton } from './metadata-controls';
 import { randomUUID } from 'node:crypto';
 import { expect, test, type Locator, type Page } from '@playwright/test';
@@ -176,15 +177,11 @@ test('quantity label identity survives receipt, move, issue and return while pri
     .getByLabel('Destination site')
     .selectOption({ label: `Label site ${suffix} (${siteCode})` });
   await issue.getByLabel('Units').fill('3');
-  await issue
-    .getByRole('button', { name: 'Review issue stock to a site' })
-    .click();
-  await issue
-    .getByRole('button', { name: 'Confirm issue stock to a site' })
-    .click();
+  await issue.getByRole('button', { name: 'Review issue' }).click();
+  await issue.getByRole('button', { name: 'Issue to site' }).click();
   await expect(
     page.getByRole('region', { name: 'Custody completion' }),
-  ).toContainText('Custody saved');
+  ).toContainText('Issued to site');
   await expectStock(page, 12, 3, {
     'ITC-S1A': 8,
     'ITC-S1B': 2,
@@ -197,17 +194,13 @@ test('quantity label identity survives receipt, move, issue and return while pri
   await returned
     .getByLabel('Source site')
     .selectOption({ label: `Label site ${suffix} (${siteCode})` });
-  await chooseLocation(returned, 'Return to storage', 'ITC-S1B');
+  await chooseLocation(returned, 'Storage location', 'ITC-S1B');
   await returned.getByLabel('Units').fill('1');
-  await returned
-    .getByRole('button', { name: 'Review return to storage' })
-    .click();
-  await returned
-    .getByRole('button', { name: 'Confirm return to storage' })
-    .click();
+  await returned.getByRole('button', { name: 'Review return' }).click();
+  await returned.getByRole('button', { name: 'Return to storage' }).click();
   await expect(
     page.getByRole('region', { name: 'Custody completion' }),
-  ).toContainText('Custody saved');
+  ).toContainText('Returned from site');
   await expectStock(page, 13, 2, {
     'ITC-S1A': 8,
     'ITC-S1B': 3,
@@ -312,7 +305,7 @@ test('designer hide and restore retain false, zero and empty values while an uns
   await page.goto('/settings/categories');
   await page.getByLabel('Display name').fill(category);
   await page.getByRole('button', { name: 'Add category' }).click();
-  await expect(page.getByRole('status')).toContainText('Category added.');
+  await expectCategoryAdded(page, category);
   let designer = await openDesigner(page, category);
   const fields = [
     { type: 'boolean', name: 'False flag' },

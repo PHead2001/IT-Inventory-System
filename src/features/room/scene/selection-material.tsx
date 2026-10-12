@@ -1,4 +1,5 @@
 'use client';
+import { useSceneCurrent } from './scene-current';
 import { useFrame, useThree } from '@react-three/fiber';
 import { useEffect, useMemo, useRef } from 'react';
 import { Color, MeshStandardMaterial } from 'three';
@@ -24,6 +25,7 @@ export function SelectionMaterial({
   const pulse = useRef<number | null>(null);
   const finishPulse = useRef<(() => void) | null>(null);
   const effects = useOptionalSceneEffects();
+  const isCurrent = useSceneCurrent(effects);
   const reduced = useEffectiveReducedMotion();
   const palette = useScenePalette();
   const { invalidate, gl } = useThree();
@@ -36,6 +38,7 @@ export function SelectionMaterial({
   useEffect(() => {
     finishPulse.current?.();
     finishPulse.current = null;
+    if (!isCurrent()) return;
     pulse.current = selected && !reduced ? performance.now() : null;
     if (pulse.current !== null && material.current)
       finishPulse.current =
@@ -46,8 +49,9 @@ export function SelectionMaterial({
       finishPulse.current?.();
       finishPulse.current = null;
     };
-  }, [selected, reduced, baseEmissive, invalidate, effects]);
+  }, [selected, reduced, baseEmissive, invalidate, effects, isCurrent]);
   useFrame(() => {
+    if (!isCurrent()) return;
     if (pulse.current === null || !material.current) return;
     const viewport = gl.domElement.getBoundingClientRect();
     if (

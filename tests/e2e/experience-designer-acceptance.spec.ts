@@ -1,4 +1,5 @@
 import { openRecordTask } from './record-task-controls';
+import { expectCategoryAdded } from './configuration-assertions';
 import { metadataReviewButton, metadataSaveButton } from './metadata-controls';
 import { randomUUID } from 'node:crypto';
 import { expect, test, type Locator, type Page } from '@playwright/test';
@@ -30,7 +31,7 @@ async function createCategory(page: Page) {
   await page.goto('/settings/categories');
   await page.getByLabel('Display name').fill(name);
   await page.getByRole('button', { name: 'Add category' }).click();
-  await expect(page.getByRole('status')).toContainText('Category added.');
+  await expectCategoryAdded(page, name);
   return name;
 }
 
@@ -89,10 +90,12 @@ function inspectorFor(control: Locator) {
 }
 
 async function inspectControl(control: Locator) {
-  await control.press('Enter');
   const designer = control.locator(
     'xpath=ancestor::section[@aria-labelledby="metadata-settings-heading"]',
   );
+  const canvas = designer.getByRole('button', { name: 'Canvas', exact: true });
+  if (await canvas.isVisible()) await canvas.click();
+  await control.press('Enter');
   const tab = designer.getByRole('button', { name: 'Inspector', exact: true });
   if (await tab.isVisible()) await tab.click();
   await expect(

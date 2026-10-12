@@ -1,5 +1,51 @@
 # Application architecture
 
+Optional record previews and storage-destination maps reuse the room's logical
+code selection, camera flight and visual opening controller. Form confirmation
+resolves the latest eligible UUID through the existing picker model and never
+dispatches inventory commands. The protected layout owns a single graphics lease
+covering initialization through actual Fiber disposal completion; original
+actor/backend/privacy authority binds each renderer, with synchronous DOM/portal
+masking and explicit context across its separate root. Detail readiness is
+independent of lazy graphics and counts. See [room navigation](room-navigation.md#shared-spatial-composition-and-embedded-maps)
+for the pinned failed-initialization adapter and remaining browser acceptance.
+
+Record and relevant settings/form routes stream only generic server metadata.
+Caller-authorized cached page readers remain the only source of private names.
+Successful page slots register those names with explicit server route paths in the
+mounted Auth privacy controller; its accepted owner/navigation and privacy epochs
+control client-only document titles. Failed verification or revocation clears the
+title synchronously without replacing retained forms or recovery commands. Every
+retained head title node receives the current safe or authorized title; secondary
+Next-owned nodes remain in place, and delayed title insertions/replacements are
+reconciled without rewriting already-correct text.
+
+Retirement presets fill the existing editable free-text reason on both storage
+and site retirement forms. An optional note remains a separate draft field and
+joins the trimmed reason once, with an em dash, for both review and the existing
+command payload. A note cannot replace a required reason; the combined text uses
+the existing 2,000-character bound. Preset or note edits invalidate review and
+remain subject to the existing version, pending and unknown-outcome retry guards.
+Correction task descriptions explain record repair versus physical movement before
+selection; no lifecycle statuses, history structures or RPCs change.
+
+Explicit task selection after a known completion creates a new form instance.
+Its initial page snapshot must reach the acknowledged result version; until then
+the workspace offers a read-refresh retry rather than an older ready form. This
+version floor never rebases a mounted dirty, pending or uncertain draft. Record-page
+moves also verify current stock and the caller-authorized historical receipt;
+prior receipts remain collapsed, timestamped and immutable while the new intent
+uses a fresh coherent stock/version snapshot.
+
+When a refreshed record withdraws the selected task, the workspace retains its
+mounted draft but hides and disables fresh input/submission. Close or switch
+still requires explicit draft discard. Reintroducing a launcher does not silently
+revive that draft; explicit reentry starts a new instance. Pending and uncertain
+commands retain their exact retry instance, and committed receipts retain Done
+and read recovery. Move more rejects new intent after withdrawal, including
+withdrawal while its fresh snapshot is loading. Actor and record workspace keys
+continue to isolate identities, and server authorization remains authoritative.
+
 Published inventory form revisions, stable custom field identities and bounded custom CSV exports are specified in [published metadata](published-metadata.md).
 
 Operational timestamp rendering and the appended CSV display-zone metadata follow [shared time](shared-time.md). The protected layout supplies one browser-resolved zone after matching UTC server/initial hydration; canonical instants and datetime entry semantics remain unchanged.
@@ -48,6 +94,54 @@ Storage failures retain the current in-memory entries and native refresh/tab-clo
 
 The approved v0.1 plan and amendments govern Foundation and Inventory Core. PR3 implements the R3F room navigation surface.
 
+Record detail headings use the measured, focusable `RecordName` h1 as the shared-title transition element. Its three-line disclosure keeps that same heading node and the related accessible control; hidden measurement probes opt out of native transition naming. The optional record identity controls presentation pairing only and never grants document-title or privacy authority.
+
+Paired inventory route loading retains React's actual outgoing content through a
+stable Suspense boundary inside the canonical protected privacy wrapper, while the
+shell, privacy controller and pending owners remain live outside it. Only an
+accepted exact paired navigation under a fresh grant and supported Full motion
+owns the opaque loading promise; it stores no private DOM/data and neither delays
+the request nor owns a business task. Actual authorized visible readiness releases
+that matching navigation; cancellation withdraws presentation without acknowledging
+or canceling backend work. A second accepted navigation interrupts the unfinished
+pair and uses ordinary loading/crossfade, without promising to preserve its first
+source node or reconstructing a missing shared title. A different committed full
+route key (including a Next server redirect or canonical query) cancels only the
+presentation gate; real fallback, Link and task owners settle independently.
+Privacy revocation hides/inerts the retained subtree
+immediately. Normal accepted route exits may relinquish outgoing components, while
+same-page rechecks retain draft/business ownership and existing recovery contracts.
+See [interface standards](interface-standards.md) and [validation](validation.md)
+for supported fallback paths and the remaining native/product acceptance.
+
+Eligible application Link pairs start one controller-owned privacy target check
+before Next commits the pathname. The ticket captures the exact full route key,
+provider incarnation, original server binding, generation, server revision,
+explicit revision, callback/revocation epochs and request sequence. Inventory list
+and detail success bodies supply their explicit server route key before their
+privacy gate renders. Only the matching already-running ticket can suspend that
+incoming primary while the outgoing grant remains current. Its wait settles from
+canonical cleanup and original-binding verification, independently of visible
+RouteReady acknowledgement; a fresh matching completion can admit the target
+before pathname commit. Verification publishes the immutable ticket view, target
+key and accepted epochs together through request-ordered React state. The
+controller’s layout effect settles a still-current verified wait after that view
+commits, with another original-binding, provider and sequence check. Server
+authorization and real visible readiness remain required. Supersede, cancellation, redirect, disposal, hide and invalidation
+retire and settle the old ticket. Changed logout evidence starts distinct current-
+route recovery rather than rebasing the captured target proof.
+
+Native browser Back/Forward uses the installed Next/React eager history restore
+and is instant. The route provider observes popstate only to retire departing
+presentation, cancel a paired wait and register real authorized primary readiness.
+It creates no Navigation API preparation or target privacy ticket for traversal,
+and never intercepts navigation or patches router/history methods, lanes or events.
+URL filters, source row/anchor and scroll restore through the canonical Next/browser
+history path; current Auth and privacy verification still govern incoming content.
+The ephemeral approved origin remains available for a later application **Back to
+results** Link after native Forward. Only that accepted Link gesture may stage a
+new shared-title pair. Revocation and provider retirement still clear the origin.
+
 Inventory uses a collapsed Add item disclosure with equally styled quantity-item and individual-asset paths, examples and the existing filtered return context. The protected header exposes the verified member's full name and role through a compact native account disclosure, including at narrow widths; identity is never stored separately in browser storage.
 
 History lists summarize quantities from immutable event deltas or custody snapshots. Quantity history has null top-level endpoints: a conserved, consistent negative/positive ledger pair identifies a move and a single positive line identifies a receipt. Count corrections retain their recorded before/after/delta; zero or ambiguous transfer shapes never become invented moves. Missing or inconsistent movement deltas display Amount not recorded. Custody endpoint names use recorded labels. Older storage events only expose location IDs and current reference labels; technical event details explain this provenance and the current record name without appending it to ordinary summaries. Headings share one event vocabulary; summaries add endpoints, amounts or changed fields instead of repeating the operation.
@@ -86,8 +180,156 @@ provider would otherwise exempt that session from checking them. Sign in again t
 obtain an ordinary password session or request a new reset email. Mixed stale-email
 and password AMR also fails closed; unavailable verification never mutates the password.
 
-After a successful password update, the action signs out the local session and
-requires normal sign-in. If sign-out fails after the update commits, the UI states
+After a successful password update and confirmed caller-scoped sign-out, the action
+returns a typed password-updated/session-closed acknowledgement and a fresh opaque
+logout generation. Confirmed ordinary sign-out uses the same generation helper.
+Only confirmed local Supabase sign-out creates the versioned browser-wide HttpOnly
+cookie (SameSite=Lax, Path=/, no Domain, one-year Max-Age); configured HTTPS uses
+Secure and the `__Host-` name, while local HTTP uses a separate cookie name.
+A cookie-preparation failure is a distinct already-signed-out reminder-unavailable
+result: close the tab, rather than replaying the committed password change.
+A password-free
+client completion clears and verifies this tab's assignment batch, exact uncertain
+commands and label queues before navigating to normal sign-in. Failed cleanup keeps
+the strongest durable all-cleanup tombstone and offers cleanup retry without another
+password mutation. Auth entry and the protected shell read the current generation
+before mounting private restoration consumers, and recheck on entry/reactivation.
+Readiness is bound to pathname, full query, known server generation and the
+explicit action revision. Reactivation immediately marks verification pending.
+The protected controller always renders the opaque server route slot without
+an ancestor Suspense or accepted-content gate. Each async protected server page
+completes its existing authorization, reads, validation, `notFound()` and
+`redirect()` decisions before returning a `ProtectedPrivacyContent` success body.
+That content gate shares the controller's readiness and accepted-child retention;
+it performs no additional generation or resource read. Keep all success, empty
+and access-denied JSX branches gated. Gating the unresolved route slot itself
+lets the shell send HTTP 200 before an async missing-resource decision settles.
+Static Auth routes keep their query-aware Suspense boundary.
+Private brand/account identity, the ordinary sign-out form, navigation, telemetry
+and Settings navigation have separate content gates. The confirmed logout receipt
+owner and its distinct **Finish signing out** cleanup retry stay outside those
+gates so failed cleanup remains actionable after the private header is masked.
+The authoritative scope observer also stays outside those gates. Layout/context providers and PageArrival pass route
+children through continuously. The gated wrapper uses `display: contents` while
+accepted presentation is authorized and is hidden/inert when it is revoked.
+This preserves layout boxes and retained editable nodes. Existing
+inventory-specific unavailable boundaries and route-kind titles stay independent
+of private success content. Adding a protected page requires the same server
+checks-before-content-gate contract; see the route map and proof limits in
+[validation](validation.md#protected-page-content-gates).
+Admission readiness and accepted presentation are separate. A same-binding
+pathname/query or focus check blocks incoming children and new restoration while
+keeping accepted nodes visible and focusable, including their native focus and
+selection. Known logout, generation change or binding mismatch revokes presentation
+immediately, before storage cleanup succeeds. Unavailable/invalid generation or
+cleanup evidence masks presentation as uncertainty and retains the draft rather
+than declaring a terminal identity revocation. Hidden/inert
+owners remain mounted so an uncertain in-memory command and an ordinary logout
+action can finish without being replaced. This does not freeze internal updates
+or effects. Assignment and label bootstrap gates independently consult readiness
+before a new instance can restore storage; an unchanged accepted instance does not
+rehydrate merely because focus returned. Label persistence waits during checks.
+
+The protected layout supplies the server-verified actor, backend origin, role and
+configuration capability. After revocation, readmission requires a fresh caller-
+scoped server check of that original binding and current privacy cleanup, with no
+intervening invalidation. The logout generation alone is not identity proof.
+Different actors, inactive membership and changed privileges cannot expose or
+retarget a retained owner. Transient verification failures offer explicit retry.
+The recovery UI offers Inventory in a new tab so the current account can use a
+fresh server-authorized owner without replacing the original uncertain recovery.
+Restoring the original account and retrying can reveal its retained owner; designer
+revocation remains terminal until its existing explicit access/recovery flow runs.
+Designers erase private input DOM and gestures before paint on known revocation
+while keeping any unresolved original command in their owner. A transient privacy
+verification failure masks the existing draft and requires fresh original-binding
+verification without erasing that draft.
+
+A sign-out attempt invalidates old callbacks but grants no logout/discard
+authority. Scan keeps the exact reserved/dispatched command and durable original
+record; only verified original-binding readmission allows explicit retry with the
+same request ID and payload. There is no automatic replay or rebase, and a late
+old response stays fenced after readmission. A separate shared cleanup revision
+advances only after a verified authoritative all-wipe, including successful Auth
+observer cleanup. That confirmed cleanup clears hydrated label queues and their
+late persistence without remounting unrelated action owners. A matching generation
+cannot revive a cleared queue. Unchanged checks and attempted logout do not
+advance this revision.
+Ordinary Sign out, logout-generation comparison and privacy generation/original-
+binding reads use independent same-origin JSON POST Route Handlers
+(`/api/auth/logout`, `/api/auth/privacy-confirm` and `/api/auth/privacy-read`). They do not enter Next's Server Action queue behind
+a pending route navigation. Existing Server Action wrappers delegate to the same
+cookie-scoped logic for compatibility; other authentication actions retain their
+existing transport. The endpoints admit only a mandatory exact serialized Origin
+matching `request.nextUrl.origin`, with `Sec-Fetch-Site: same-origin` when present.
+When Next normalizes the request hostname to `localhost`, the direct Host may
+restore exactly `127.0.0.1` or `[::1]` with the request's scheme and effective port.
+Origin must then match that restored authority exclusively; normalized localhost
+is not an additional accepted origin. Malformed, duplicate, alternate loopback
+and mismatched authorities fail closed.
+They do not trust forwarded headers or the configured branch/canonical APP_ORIGIN
+for this transport check. Input is strictly shaped and bounded to 256 actual UTF-8
+stream bytes for logout/comparison and 512 bytes for privacy reads; all methods except POST are rejected and every result is private,
+no-store without CORS. Sign-out uses the caller's writable Supabase cookies and
+local session scope, without a membership gate that would strand revoked users.
+The privacy-read handler uses the canonical caller-scoped generation/identity
+service with a dedicated read-only SDK client. Its per-request fetch guard admits
+only GET `/auth/v1/user` and GET `/rest/v1/app_members` on the configured backend,
+without following redirects. It refuses token refresh and every other provider
+request before network dispatch, suppresses cookie writes, and remembers a blocked
+attempt even if the SDK subsequently preserves a still-valid bearer. An expired
+or near-expiry session that requires refresh therefore returns `unavailable`;
+ordinary session refresh followed by explicit privacy retry can recover. Writable
+Server Actions, the ordinary proxy and browser refresh retain their existing
+behavior. The proxy skips Supabase session refresh for
+precisely these three endpoint paths, so their rejected requests and read-only
+verification cannot write refresh cookies
+before handler admission. All other routes retain the existing proxy behavior.
+The browser bounds the request and strict response parsing; failure, timeout or
+abort never proves server cancellation or grants recovery-erasure authority.
+Unknown designer saves retain their original command through an unconfirmed
+logout. Confirmed all-cleanup verifies designer recovery deletion alongside scan
+and label namespaces under the existing durable cleanup marker. Deletion or
+readback failure blocks login navigation and retries cleanup only.
+This shares server-only mutation logic as described by
+[Next's data-security guide](https://nextjs.org/docs/app/guides/data-security).
+The installed Next 16.3.6 `app-call-server` dispatches Server Actions through the
+router queue; `app-router-instance` gives navigation/restore priority while other
+actions wait. The independent transport preserves the existing
+[Supabase local-session signout scope](https://supabase.com/docs/reference/javascript/auth-signout).
+Label hydration and persistence also compare their mounted revision with the live
+authoritative cleanup revision immediately before storage access. This prevents
+an old queued effect or late refresh from restoring cleared entries while React
+has yet to commit the workspace reset.
+Each tab keeps a verified generation in a separate sessionStorage key outside the
+cleanup namespaces. A new valid generation invalidates callbacks, verifies all
+cleanup, compares the exact expected generation with the current server cookie,
+then writes and reads back the tab acknowledgement before release. A changed
+generation restarts cleanup; unavailable storage, invalid markers and invalid or
+unavailable cookies block release. A matching tab acknowledgement never overrides
+an outstanding all-cleanup marker. The comparison action never writes or deletes
+the retained cookie, so one tab's completion cannot consume another tab's reminder
+or overwrite a later logout. Login and email-confirmation actions compare the
+rendered verified generation before creating a new session; mismatch returns a
+cleanup-required state, not a claim that the server verified browser erasure.
+An already authenticated member landing on login cleans/checks the tab and resumes
+the existing safe destination without another credential exchange.
+With no server reminder, only an existing valid all-cleanup marker authorizes this
+deletion; URL flags, anonymous landing and private markers never grant authority.
+The cookie is a privacy reminder, not an Auth/RLS credential or cryptographic proof.
+Server logout and browser cleanup are not atomic. A delivered reminder survives
+first-storage-read failure and page destruction without a tab tombstone. Cookie
+expiry/eviction or deliberate browser-data removal, never-delivered Set-Cookie
+headers, and inaccessible cookie plus tab storage leave no durable coordination
+guarantee; close affected tabs before signing in again. Server acknowledgement
+compares a request snapshot, so a concurrent later logout is also checked before
+new session creation and at the next protected entry/reactivation. Browser
+acceptance remains separately required for these delivery and Flight boundaries.
+The password form keeps its action-state owner outside the privacy gate when cookie writes trigger
+a server rerender, while refreshing the server-verified sessionAvailable prop.
+An unavailable/expired session hides editable fields without clearing recovery;
+only the action's genuine session-closed result permits the completion cleanup.
+If sign-out fails after the update commits, the UI states
 that the password changed and offers the existing guarded Sign out action rather
 than retrying the password change. Email-token replay rejection does not imply
 one-use password mutation: an already issued recovery JWT may remain usable through
@@ -210,6 +452,8 @@ Structural parsing runs at build/test/load time without a database. A separate l
 
 Invite-only email/password Auth; public signup and anonymous sign-in disabled. Proxy refreshes verified sessions and preserves refreshed cookie chunks and cache headers. Protected server requests verify Auth identity and current membership, never user-editable role metadata.
 
+Direct record documents settle authenticated existence in the protected layout before it returns a Suspense boundary, so missing resources can retain HTTP 404. Proxy overwrites a dedicated pathname header and explicitly matches all eight record route patterns, including image-like suffixes. This path selects an existing caller-authenticated, React request-cached reader; it grants no access. Valid documents await the full shared detail read, including its history/reference work. Flight requests retain page-owned authorization, generic metadata and streaming. Missing document inventory records use fixed unavailable copy in the root fallback without private names or IDs; the protected shell is absent there. Next 16.3.6 production fixtures establish this transport boundary; the authenticated application still requires direct missing/anonymous/recovery and held-Flight E2E certification. Blocking viewport or metadata generation alone did not preserve HTTP status under the streaming layout.
+
 Active viewers/staff may read reference data and their own active membership. Nonmembers/inactive members read nothing. RLS independently enforces access. Both application roles are denied direct writes. Inventory Core adds authorized mutation RPCs; the application still has no service-role key.
 
 Email confirmation GET only displays a form. Explicit POST verifies invite/recovery tokens and redirects to a fixed password route. Password setup requires verified Auth but not membership. Recovery responses do not reveal account existence. Server Actions retain Next origin checks; auth responses are private/no-store and token pages use no-referrer policy.
@@ -296,9 +540,9 @@ An acknowledged quantity move enters completion. Its receipt reads the exact com
 
 The verified move snapshot retains its location catalog alongside the item and balances. Pickers, destination eligibility, location names and review identity use that catalog after Move more, balance refresh or invalid-reference recovery, even before route data refreshes. A newly observed route catalog can replace it and invalidates an affected review; reverting route props cannot revive that confirmation.
 
-A bounded per-tab completion pointer stores only event/entity IDs, scoped by browser origin, backend URL, authenticated actor, item and operation. A hard reload verifies that exact history receipt before showing completion or permitting another move; it never reconstructs balances from saved input. Move more clears the pointer only after its fresh read succeeds. Unavailable/quota-exhausted storage retains in-memory success but explicitly limits reload recovery. Cleared browser data and closed-tab recovery are not guaranteed. This pointer does not persist pending or uncertain stock commands across page destruction.
+A bounded per-tab completion pointer stores only event/entity IDs, scoped by browser origin, backend URL, authenticated actor, item and operation. After a hard reload, explicitly choosing Move stock on a record page verifies that exact history receipt and a fresh authorized stock snapshot before opening a fresh form. The prior receipt remains collapsed in timestamped Last move details; opening or expanding it changes neither stock nor history. U406 supersedes the older requirement to restore mandatory completion and dismiss it through Move more after explicit record-page selection. Standalone forms still restore verified completion. Recovery never reconstructs balances from saved input. Move more on an active completion requires a successful fresh read; record-page new intent retains the historical pointer, while standalone Move more clears its matching pointer. Unavailable/quota-exhausted storage retains in-memory success but explicitly limits reload recovery. Cleared browser data and closed-tab recovery are not guaranteed. This pointer does not persist pending or uncertain stock commands across page destruction.
 
-After an acknowledged move, Done and task switching attempt to remove only the matching completion pointer. Browser read/removal failures cannot veto closing that committed task or starting Move more after its successful fresh read. An inline warning survives task closure and explains that the completed receipt may reappear after reload. Newer, different-item and malformed pointers are left untouched. Pending and uncertain commands retain their switching barriers.
+After an acknowledged move, Done and explicit task closure attempt to remove only the matching completion pointer. Selecting another record-page task directly from completion retains the historical pointer for later verified disclosure. Browser read/removal failures cannot veto closing that committed task or starting Move more after its successful fresh read. An inline warning survives task closure and explains that the completed receipt may reappear after reload. Newer, different-item and malformed pointers are left untouched. Pending and uncertain commands retain their switching barriers.
 
 Malformed completion references may be explicitly discarded after a fresh authorized balance read; this discards a browser reference to an acknowledged move and never undoes its history. Valid references whose history cannot currently be verified retain their read-retry barrier. After a lost response, authorization, actor or idempotency rejection before replay does not prove the command failed: the unresolved command stays frozen for the same identity to be retried.
 
@@ -328,6 +572,8 @@ Guided is the default camera mode, constraining both azimuth and elevation; retu
 
 ## Labels, scanning and low stock
 
+Scan-assignment batch recovery is client session state, not inventory truth. The per-tab origin/backend/actor-scoped CAS envelope holds context, compact operation snapshots, historical inspection and a finished flag, bounded to 200 entries/1 MiB UTF-8. The existing custody engine remains the sole writer. Its exact command recovery retains the original 262,144-byte bound and is reconciled before fresh mutations. Pending write-ahead, exact recovery readback, uncertain ledger, writer, terminal ledger and matching recovery cleanup preserve safe replay through interruption. Restored inspection is historical until an authorized current lifecycle/availability read succeeds; restoration never assigns stock. A protected-shell scope guard invalidates late callbacks and clears private context on account/backend changes even away from Scan. Only authoritative logout may discard uncertain commands. See [scan-assignment batches](labels-and-stock.md#scan-assignment-batches) for limits, ordering, privacy and Finish/End contracts.
+
 See [labels, scanning and stock status](labels-and-stock.md) for the durable payload, route, threshold, dashboard and export contracts. Stable location codes and asset UUIDs form label destinations; labels confer no access. The label and scan path uses ordinary authenticated application routes and the existing membership/RLS boundary. QR generation is local to the application. Camera access is user-initiated, and scan content is validated before normal application navigation. If production `APP_ORIGIN` is missing, label generation and absolute-URL scans fail closed; internal relative paths and identifier payloads remain usable.
 
 Quantity definitions may carry a nullable whole-unit reorder threshold. Low-stock state is derived from the sum of all current balances, including balances at inactive locations; it is not a second mutable inventory ledger. Dashboard, inventory filter and CSV export share this meaning. Quantity detail reads its authoritative `stockSummary` separately from editable item metadata and the metadata version baseline. Threshold changes extend existing metadata/history mutations without creating stock movement events. The database read contracts are `inventory_search_v2`, `low_stock_dashboard`, and `inventory_export_snapshot`; export snapshots are single-query, bounded to 10,000 rows, and report overflow explicitly. The low-stock CSV includes all current holdings and locations for each selected definition even when filters match a subset of holdings.
@@ -342,7 +588,25 @@ Category UUID and code are permanent. Active names are unique after case folding
 
 Inventory create, metadata update and restore RPCs take a shared advisory catalog lock after authorized receipt replay and before category/entity reads. Category lifecycle RPCs take its exclusive form. Stock-only mutations keep their entity row locks without a catalog lock. These functions reject fresh Repeatable Read and Serializable transactions; successful completed receipt replay remains available under those modes. Lock wait is bounded to two seconds. The new category RPCs declare a five-second `statement_timeout` for PostgREST to hoist before the main RPC statement; runtime certification verifies this with a delayed Data API call. The 10,000-record cap is a maximum, not a guarantee of completion before the time budget.
 
-Shared label defaults cover the current 90×50/70×35 mm size, US Letter/A4 page and QR/Code 128 format choices. The print page starts from these defaults, while each print session can choose differently. The future custom-fields engine, designer and file schema are separate work. This slice preserves inventory rows and their extension point but creates no custom-field tables or forms.
+Shared label defaults cover 90×50/70×35 mm size, US Letter/A4 page and QR/Code 128 format choices, plus nullable validated version-1 print geometry for custom sheets or one label per page. Geometry uses integer tenths of a millimetre and is independent of inventory identity. Null keeps the standard sizes. The print page starts from shared defaults, while each local print job can choose differently. The existing maintainer RPC preserves historical receipts when geometry is omitted, applies effective geometry only after the singleton/version lock, and records atomic effective before/after events. See [labels and stock](labels-and-stock.md#configurable-print-media-a307) for the exact layout schema, bounds and printing limits.
+
+## Working controls
+
+The browser reduced-motion switch records only the existing local preference. Effective reduced motion remains local OR system; storage failure retains the existing tab preference and first-paint reduced policy.
+
+Location details group room navigation, label printing, history and query-scoped CSV export in one header action navigation. The selected status remains explicit on its selector. Location-scoped inventory rows omit only the exact current location, preserving child-location and site disambiguation and item-wide quantities. Rows without the exact current-location field use two desktop columns; child/site rows keep three and the existing narrow-container layouts. Compact location counts keep matching totals and informative aggregate breakdowns; query, authorization and export contracts are unchanged.
+
+Settings Storage locations initially expands root rows only. Search shows matching rows with their ancestors in the same keyboard tree. Returning from a location setting uses its permanent code in the `selected` query to reveal its ancestors and mark the selected row with `aria-selected` (not a current-page claim); unknown selections change no data. Each Settings treeitem owns its disclosure and native link. The treeitem is the sole roving Tab stop, so focused hierarchy, expansion and selection semantics stay together. Arrow keys navigate/expand the tree, and Enter activates its native anchor once with the keyboard modifiers preserved. Pointer, middle-button and modifier clicks retain the anchor's ordinary navigation behavior; disclosure activation returns focus to its treeitem. The conventional inventory picker retains its existing independent behavior.
+
+## Readable display vocabulary
+
+Custody event titles use the shared display mapping in `features/custody/vocabulary.ts`;
+record status uses `lib/record-status.ts`. These mappings do not change persisted
+operations, identities, event snapshots, expected-version checks or retry receipts.
+Inventory CSV appends readable Type label, Status label and Custody label columns;
+low-stock CSV appends Type label and Status label. Both retain existing machine column positions and values. Clipboard support details
+carry original event/operation IDs and ISO precision without rendering them in
+ordinary receipt/history text; local timestamp displays keep the recorded `dateTime`.
 
 ## Shared screen palette and interactive transitions
 

@@ -1,7 +1,8 @@
 // @vitest-environment node
 import { describe, expect, it, vi } from 'vitest';
 import defaultVitest, { createVitestConfig } from '../../vitest.config';
-import defaultNext, { createNextConfig } from '../../next.config';
+import nextConfig, { createNextConfig } from '../../next.config';
+const defaultNext = nextConfig('phase-development-server');
 
 vi.mock('@vitejs/plugin-react', () => ({
   default: () => ({ name: 'react-config-test' }),

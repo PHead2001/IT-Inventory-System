@@ -1,5 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import http from 'node:http';
+import { randomUUID } from 'node:crypto';
 import {
   linkSync,
   mkdirSync,
@@ -23,6 +25,7 @@ import {
   prepareLocalAuthTemplates,
 } from '../scripts/local-auth-templates.mjs';
 import {
+  localAuthDockerApi,
   localDockerSocket,
   passwordPolicyConfig,
   withLocalPasswordPolicy,
@@ -87,6 +90,8 @@ test(
     const cwd = templateFixture(t);
     const script = `
     import assert from 'node:assert/strict';
+import http from 'node:http';
+import { randomUUID } from 'node:crypto';
     import { writeFileSync, statSync } from 'node:fs';
     import { join } from 'node:path';
     import { localAuthTemplateFiles, prepareLocalAuthTemplates } from ${JSON.stringify(new URL('../scripts/local-auth-templates.mjs', import.meta.url).href)};
@@ -824,6 +829,14 @@ test('wrong project, network, database port and template URL fail before any fet
     (auth) => {
       auth.HostConfig.PortBindings = { '9999/tcp': [{ HostIp: '0.0.0.0' }] };
     },
+    (auth) => {
+      auth.Config.Env = auth.Config.Env.filter(
+        (value) => !value.startsWith('GOTRUE_MAILER_TEMPLATES_INVITE='),
+      );
+    },
+    (auth) => {
+      auth.Config.Env.push(auth.Config.Env[1]);
+    },
   ]) {
     const f = probe(() => assert.fail('Unvalidated service fetched a URL'));
     f.options.docker.inspect = (name) => {
@@ -988,4 +1001,117 @@ test('remaining subsecond budget bounds the actual command and nc timeout', () =
   assert.equal(calls[0].args[calls[0].args.indexOf('-w') + 1], '1');
   assert.throws(() => docker.fetch(files[0], 0));
   assert.equal(calls.length, 1);
+});
+
+test(
+  'Docker transport enforces absolute timeout, raw byte limit and sanitized response failures',
+  { timeout: 3_000 },
+  async () => {
+    const socketPath =
+      process.platform === 'win32'
+        ? `\\\\.\\pipe\\auth-template-test-${randomUUID()}`
+        : join(tmpdir(), `auth-template-test-${randomUUID()}.sock`);
+    const server = http.createServer((request, response) => {
+      if (request.url === '/trickle') {
+        response.write('SECRET');
+        const interval = setInterval(() => response.write('x'), 10);
+        response.on('close', () => clearInterval(interval));
+      } else if (request.url === '/oversize')
+        response.end(Buffer.alloc(100, 65));
+      else if (request.url === '/http') {
+        response.statusCode = 403;
+        response.end('SECRET environment');
+      } else response.end('SECRET invalid JSON');
+    });
+    await new Promise((resolve) => server.listen(socketPath, resolve));
+    try {
+      const api = localAuthDockerApi(socketPath);
+      for (const [path, options, code] of [
+        ['/trickle', { raw: true, timeoutMs: 80 }, 'AUTH_DOCKER_TRANSPORT'],
+        ['/oversize', { raw: true, maxBytes: 32 }, 'AUTH_DOCKER_OUTPUT_LIMIT'],
+        ['/http', {}, 'AUTH_DOCKER_OPERATION'],
+        ['/invalid', {}, 'AUTH_DOCKER_RESPONSE'],
+      ]) {
+        const error = await api('GET', path, undefined, options).catch(
+          (error) => error,
+        );
+        assert.equal(error.code, code);
+        assert.doesNotMatch(String(error), /SECRET/);
+      }
+    } finally {
+      server.closeAllConnections();
+      await new Promise((resolve) => server.close(resolve));
+    }
+  },
+);
+
+test('HTTP header values cannot forge the canonical template response status', () => {
+  const body = files[0].body;
+  assert.throws(
+    () =>
+      localAuthTemplateResponse(
+        response(body, '403 Forbidden', 'X-Forged: HTTP/1.0 200 OK\r\n'),
+      ),
+    (error) => error.category === 'http-status' && error.httpStatus === 403,
+  );
+  assert.deepEqual(
+    localAuthTemplateResponse(
+      response(
+        body,
+        '200 OK',
+        'X-Forged: HTTP/1.0 503 Service Unavailable\r\n',
+      ),
+    ),
+    body,
+  );
+});
+
+test('canonical template content failure prevents run and restores the exact original policy container', async () => {
+  const original = snapshot(),
+    initial = structuredClone(original),
+    calls = [];
+  let ran = false,
+    preflightCalls = 0;
+  const api = async (method, path) => {
+    calls.push({ method, path });
+    if (path === '/containers/supabase_auth_it-inventory/json')
+      return snapshot();
+    if (path === '/containers/original-id/json')
+      return structuredClone(original);
+    if (path.endsWith('/stop?t=10')) original.State.Running = false;
+    if (path.includes('/rename?name='))
+      original.Name = '/' + path.split('name=')[1];
+    if (path === '/containers/original-id/start') original.State.Running = true;
+    if (path.startsWith('/containers/create')) return { Id: 'replacement-id' };
+    if (path === '/containers/replacement-id/json')
+      return { State: { Running: true, Health: { Status: 'healthy' } } };
+    return null;
+  };
+  const error = await withLocalPasswordPolicy(
+    async () => {
+      ran = true;
+    },
+    {
+      api,
+      verifyTemplates: async (phase) => {
+        preflightCalls++;
+        assert.equal(phase, 'password-policy-replacement');
+        const f = probe(() => Buffer.from('SECRET wrong template'));
+        await verifyLocalAuthTemplates(phase, f.options);
+      },
+    },
+  ).catch((error) => error);
+  assert.equal(preflightCalls, 1);
+  assert.match(error.message, /category=content-mismatch/);
+  assert.doesNotMatch(String(error), /SECRET/);
+  assert.equal(ran, false);
+  assert.ok(
+    calls.some(
+      (call) =>
+        call.method === 'DELETE' &&
+        call.path === '/containers/replacement-id?force=true',
+    ),
+  );
+  assert.equal(calls.at(-1).path, '/containers/original-id/json');
+  assert.deepEqual(original, initial);
 });

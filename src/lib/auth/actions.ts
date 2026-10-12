@@ -6,6 +6,16 @@ import { isActiveMember } from './membership';
 import { loginDestination } from '@/features/scan/targets';
 import { createAuthDiagnostic, observeAuthStage } from './diagnostic.server';
 import { readPasswordSession } from './password-session.server';
+import { verifyProtectedPrivacyBinding } from './protected-binding.server';
+import type { ProtectedPrivacyBinding } from './protected-binding';
+import {
+  compareLogoutGeneration,
+  mayEstablishSession,
+  readLogoutGeneration,
+  recordConfirmedLogout,
+} from './privacy-barrier.server';
+import { logoutGenerationField } from './privacy-barrier';
+import { signOutCurrentSession } from './logout.server';
 import {
   confirmationSchema,
   emailSchema,
@@ -18,6 +28,11 @@ export async function login(
   _state: AuthState,
   form: FormData,
 ): Promise<AuthState> {
+  if (!(await mayEstablishSession(form.get(logoutGenerationField))))
+    return {
+      cleanupRequired: true,
+      error: 'Clear this tab’s private saved data before signing in.',
+    };
   const parsed = loginSchema.safeParse({
     email: form.get('email'),
     password: form.get('password'),
@@ -64,11 +79,28 @@ export async function login(
     redirect(loginDestination(form.get('next')));
   });
 }
+export async function signOutSession() {
+  return signOutCurrentSession();
+}
 export async function logout() {
-  const supabase = await createSupabaseServerClient(true);
-  const { error } = await supabase.auth.signOut({ scope: 'local' });
-  if (error) throw new Error('Unable to sign out. Please try again.');
+  const result = await signOutSession();
+  if (!result.ok) throw new Error(result.message);
+  if (result.cleanupReminderUnavailable)
+    throw new Error(
+      'Signed out, but the browser cleanup reminder could not be saved. Close this tab before signing in again.',
+    );
   redirect('/login');
+}
+export async function readLogoutPrivacyGeneration() {
+  return readLogoutGeneration();
+}
+export async function readProtectedPrivacyIdentity(
+  expected: ProtectedPrivacyBinding,
+) {
+  return verifyProtectedPrivacyBinding(expected);
+}
+export async function acknowledgeLogoutPrivacyGeneration(expected: string) {
+  return compareLogoutGeneration(expected);
 }
 export async function recover(
   _state: AuthState,
@@ -90,6 +122,11 @@ export async function confirmAuth(
   _state: AuthState,
   form: FormData,
 ): Promise<AuthState> {
+  if (!(await mayEstablishSession(form.get(logoutGenerationField))))
+    return {
+      cleanupRequired: true,
+      error: 'Clear this tab’s private saved data before continuing.',
+    };
   const parsed = confirmationSchema.safeParse({
     token_hash: form.get('token_hash'),
     type: form.get('type'),
@@ -160,5 +197,11 @@ export async function setPassword(
         'Your password was updated, but sign-out failed. Sign out before continuing.',
       passwordUpdated: true,
     };
-  redirect('/login?password=updated');
+  // Browser privacy cleanup must acknowledge this confirmed logout before leaving.
+  // No password or provider/session material crosses this result boundary.
+  return {
+    passwordUpdated: true,
+    sessionClosed: true,
+    ...(await recordConfirmedLogout()),
+  };
 }

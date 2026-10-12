@@ -1,23 +1,44 @@
 'use client';
 
-import { useEffect, useSyncExternalStore } from 'react';
+import { useEffect, useId, useSyncExternalStore } from 'react';
 import { MotionConfig } from 'motion/react';
+import { cancelRouteSnapshots } from './route-motion-state';
 
 const storageKey = 'it-inventory-reduce-motion';
 const changeEvent = 'it-inventory-motion-change';
 let volatilePreference: boolean | null = null;
 
+function subscribeReadiness() {
+  return () => {};
+}
+
+function browserReady() {
+  return true;
+}
+
+function serverReady() {
+  return false;
+}
+
 function subscribe(listener: () => void) {
+  function changed() {
+    // Suppress already-running native snapshots before React's next render.
+    if (snapshot() || systemSnapshot()) {
+      document.documentElement.dataset.motion = 'reduced';
+      cancelRouteSnapshots();
+    }
+    listener();
+  }
   function onStorage(event: StorageEvent) {
     if (event.key !== storageKey && event.key !== null) return;
     volatilePreference = null;
-    listener();
+    changed();
   }
   window.addEventListener('storage', onStorage);
-  window.addEventListener(changeEvent, listener);
+  window.addEventListener(changeEvent, changed);
   return () => {
     window.removeEventListener('storage', onStorage);
-    window.removeEventListener(changeEvent, listener);
+    window.removeEventListener(changeEvent, changed);
   };
 }
 
@@ -33,8 +54,15 @@ function snapshot() {
 function subscribeSystem(listener: () => void) {
   if (typeof window.matchMedia !== 'function') return () => {};
   const media = window.matchMedia('(prefers-reduced-motion: reduce)');
-  media.addEventListener('change', listener);
-  return () => media.removeEventListener('change', listener);
+  const changed = () => {
+    if (media.matches) {
+      document.documentElement.dataset.motion = 'reduced';
+      cancelRouteSnapshots();
+    }
+    listener();
+  };
+  media.addEventListener('change', changed);
+  return () => media.removeEventListener('change', changed);
 }
 
 function systemSnapshot() {
@@ -74,7 +102,13 @@ export function MotionPreference({ children }: { children: React.ReactNode }) {
 }
 
 export function MotionToggle() {
+  const descriptionId = useId();
   const { local, system } = useMotionState();
+  const ready = useSyncExternalStore(
+    subscribeReadiness,
+    browserReady,
+    serverReady,
+  );
 
   function toggle() {
     const next = !local;
@@ -88,27 +122,36 @@ export function MotionToggle() {
   }
 
   return (
-    <button
-      type="button"
-      onClick={toggle}
-      className="experience-motion-toggle"
-      aria-pressed={local}
-      aria-label={local ? 'Use system motion setting' : 'Reduce motion locally'}
-    >
-      <span>
-        {local
-          ? 'Reduced locally'
-          : system
-            ? 'Reduced by system'
-            : 'Full motion'}
-      </span>
-      <small>
-        {local
-          ? 'Use system setting'
-          : system
-            ? 'System setting active · reduce locally'
-            : 'Reduce motion'}
-      </small>
-    </button>
+    <div className="space-y-2">
+      <button
+        type="button"
+        role={ready ? 'switch' : undefined}
+        onClick={toggle}
+        disabled={!ready}
+        className="experience-motion-toggle"
+        aria-checked={ready ? local : undefined}
+        aria-label="Reduce motion in this browser"
+        aria-describedby={descriptionId}
+      >
+        <span>Reduce motion in this browser</span>
+        <span aria-hidden="true" className="experience-motion-state">
+          <span className="experience-motion-track">
+            <span />
+          </span>
+          {!ready ? 'Loading' : local ? 'On' : 'Off'}
+        </span>
+      </button>
+      <p id={descriptionId} className="experience-muted text-sm">
+        {!ready
+          ? "Loading this browser's motion preference."
+          : local
+            ? system
+              ? 'Reduced motion is active. Your system also requires reduced motion.'
+              : 'Reduced motion is active in this browser.'
+            : system
+              ? 'Reduced motion is required by your system, even when this switch is off.'
+              : 'Full motion is active.'}
+      </p>
+    </div>
   );
 }

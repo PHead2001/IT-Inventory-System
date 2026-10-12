@@ -1,3 +1,4 @@
+vi.mock('server-only', () => ({}));
 import { fireEvent, render, screen, within } from '@testing-library/react';
 import { expect, it, vi } from 'vitest';
 import type {
@@ -115,3 +116,4 @@ it('renders one authoritative asset timeline without duplicating custody or merg
     screen.getByRole('link', { name: 'Current site (SITE-1)' }),
   ).toBeVisible();
 });
+vi.mock('server-only', () => ({}));

@@ -1,0 +1,52 @@
+function SelectiveBloom({ selection = EMPTY_ARRAY, selectionLayer = 10, lights = EMPTY_ARRAY, luminanceThreshold, luminanceSmoothing, mipmapBlur, radius, levels, resolutionScale, resolutionX, resolutionY, ref, ...liveProps }) {
+	const { scene, camera } = use(EffectComposerContext);
+	const invalidate = useThree((state) => state.invalidate);
+	const effect = useMemo(() => new SelectiveBloomEffect(scene, camera, {
+		blendFunction: 0,
+		luminanceThreshold,
+		luminanceSmoothing,
+		mipmapBlur,
+		radius,
+		levels,
+		resolutionScale,
+		resolutionX,
+		resolutionY
+	}), [
+		scene,
+		camera,
+		luminanceThreshold,
+		luminanceSmoothing,
+		mipmapBlur,
+		radius,
+		levels,
+		resolutionScale,
+		resolutionX,
+		resolutionY
+	]);
+	useLiveDefaults(effect, liveProps, LIVE_KEYS$2);
+	useSelectionSync(effect, selection, selectionLayer);
+	useEffect(() => {
+		if (lights.length === 0) {
+			console.warn("SelectiveBloom requires lights to work.");
+			return;
+		}
+		const resolvedLights = lights.map((light) => resolveRef(light)).filter((light) => light != null);
+		if (resolvedLights.length === 0) return;
+		resolvedLights.forEach((light) => addLight(light, effect));
+		invalidate();
+		return () => {
+			resolvedLights.forEach((light) => removeLight(light, effect));
+			invalidate();
+		};
+	}, [
+		effect,
+		invalidate,
+		lights,
+		selectionLayer
+	]);
+	useDispose(effect);
+	return /* @__PURE__ */ jsx("primitive", {
+		ref,
+		object: effect
+	});
+}

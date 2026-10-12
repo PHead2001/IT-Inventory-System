@@ -1,5 +1,12 @@
 'use client';
-import { useEffect, useId, useRef, useState, type RefObject } from 'react';
+import {
+  useEffect,
+  useLayoutEffect,
+  useId,
+  useRef,
+  useState,
+  type RefObject,
+} from 'react';
 import {
   Focus,
   Maximize,
@@ -12,6 +19,66 @@ import {
 import { Button } from '@/components/ui/button';
 import type { OrbitMode } from './camera-math';
 import styles from '../room-visual.module.css';
+
+type ControlsArea = {
+  left: number;
+  top: number;
+  right: number;
+  bottom: number;
+};
+export function placeRoomControls(
+  anchor: ControlsArea,
+  viewport: ControlsArea,
+  size: { width: number; height: number },
+  preferAbove: boolean,
+) {
+  const gap = 5,
+    inset = 4;
+  const leftEdge = viewport.left + inset,
+    rightEdge = viewport.right - inset;
+  const topEdge = viewport.top + inset,
+    bottomEdge = viewport.bottom - inset;
+  const width = Math.max(0, Math.min(size.width, rightEdge - leftEdge));
+  const height = Math.max(0, Math.min(size.height, bottomEdge - topEdge));
+  const clamp = (value: number, min: number, max: number) =>
+    Math.max(min, Math.min(value, max));
+  let left = clamp(anchor.right - width, leftEdge, rightEdge - width);
+  let top: number,
+    maxHeight = height;
+  let side: 'above' | 'below' | 'left' | 'right';
+  const above = Math.max(0, anchor.top - gap - topEdge);
+  const below = Math.max(0, bottomEdge - anchor.bottom - gap);
+  if (preferAbove && above >= height) {
+    side = 'above';
+    top = anchor.top - gap - height;
+  } else if (!preferAbove && below >= height) {
+    side = 'below';
+    top = anchor.bottom + gap;
+  } else if (anchor.right + gap + width <= rightEdge) {
+    side = 'right';
+    left = anchor.right + gap;
+    top = clamp(anchor.top, topEdge, bottomEdge - height);
+  } else if (anchor.left - gap - width >= leftEdge) {
+    side = 'left';
+    left = anchor.left - gap - width;
+    top = clamp(anchor.top, topEdge, bottomEdge - height);
+  } else if (below >= above) {
+    side = 'below';
+    maxHeight = Math.min(height, below);
+    top = clamp(anchor.bottom + gap, topEdge, bottomEdge - maxHeight);
+  } else {
+    side = 'above';
+    maxHeight = Math.min(height, above);
+    top = clamp(anchor.top - gap - maxHeight, topEdge, bottomEdge - maxHeight);
+  }
+  return {
+    left: clamp(left, leftEdge, rightEdge - width),
+    top: clamp(top, topEdge, bottomEdge - maxHeight),
+    width,
+    maxHeight,
+    side,
+  };
+}
 
 export type ViewCommandKind =
   | 'fit'
@@ -63,6 +130,82 @@ export function RoomToolbar({
   const localInteraction = useRef<HTMLButtonElement>(null);
   const interact = interactionRef ?? localInteraction;
   const panelId = useId();
+  // Keep the same native action nodes; only the open panel's envelope moves.
+  useLayoutEffect(() => {
+    if (!open) return;
+    let frame: number | null = null;
+    const visual = window.visualViewport;
+    const measure = () => {
+      frame = null;
+      if (!host.current || !panel.current) return;
+      const anchor = host.current.getBoundingClientRect();
+      const viewport = {
+        left: visual?.offsetLeft ?? 0,
+        top: visual?.offsetTop ?? 0,
+        right: (visual?.offsetLeft ?? 0) + (visual?.width ?? window.innerWidth),
+        bottom:
+          (visual?.offsetTop ?? 0) + (visual?.height ?? window.innerHeight),
+      };
+      const css = getComputedStyle(panel.current);
+      const width = Math.min(
+        anchor.width,
+        parseFloat(css.getPropertyValue('--room-menu-width')) || 240,
+      );
+      const height = Math.min(
+        parseFloat(css.getPropertyValue('--room-menu-height')) || 220,
+        (viewport.bottom - viewport.top) * 0.35,
+        panel.current.scrollHeight + 2,
+      );
+      const placement = placeRoomControls(
+        anchor,
+        viewport,
+        { width, height },
+        anchor.width <= 720,
+      );
+      const style = panel.current.style;
+      const values = {
+        left: placement.left - anchor.left,
+        top: placement.top - anchor.top,
+        width: placement.width,
+        maxHeight: placement.maxHeight,
+      };
+      let changed = panel.current.dataset.placement !== placement.side;
+      for (const [key, value] of Object.entries(values)) {
+        const next = `${value}px`;
+        if (
+          style.getPropertyValue(key === 'maxHeight' ? 'max-height' : key) !==
+          next
+        ) {
+          style.setProperty(key === 'maxHeight' ? 'max-height' : key, next);
+          changed = true;
+        }
+      }
+      panel.current.dataset.placement = placement.side;
+      if (changed) onOverlayChange?.();
+    };
+    const schedule = () => {
+      if (frame === null) frame = requestAnimationFrame(measure);
+    };
+    measure();
+    const observer =
+      typeof ResizeObserver === 'undefined'
+        ? null
+        : new ResizeObserver(schedule);
+    if (host.current) observer?.observe(host.current);
+    if (panel.current) observer?.observe(panel.current);
+    window.addEventListener('resize', schedule);
+    window.addEventListener('scroll', schedule, true);
+    window.visualViewport?.addEventListener('resize', schedule);
+    window.visualViewport?.addEventListener('scroll', schedule);
+    return () => {
+      if (frame !== null) cancelAnimationFrame(frame);
+      observer?.disconnect();
+      window.removeEventListener('resize', schedule);
+      window.removeEventListener('scroll', schedule, true);
+      visual?.removeEventListener('resize', schedule);
+      visual?.removeEventListener('scroll', schedule);
+    };
+  }, [open, onOverlayChange]);
   const close = (restore = true) => {
     setOpen(false);
     setHelp(false);

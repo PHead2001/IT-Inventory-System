@@ -1,6 +1,7 @@
 import room from '../../../../data/rooms/it-closet.json';
 import { openingTransform } from './opening-transform';
 import type { LabelArea, LabelPlacement, LabelRect } from './label-layout';
+import type { ExposedAnchorResult } from './exposed-anchor';
 
 export const LABEL_DIAGNOSTIC_MAX_BYTES = 112 * 1024;
 export const LABEL_DIAGNOSTIC_MAX_ENTRIES = 96;
@@ -46,7 +47,125 @@ declare global {
   interface Window {
     __roomLayoutDiagnosticsEnabled?: boolean;
     readonly __roomLabelLayoutSnapshot?: LabelLayoutSnapshot;
+    readonly __roomVisibilitySnapshot?: RoomVisibilitySnapshot;
   }
+}
+type VisibilityEntry = {
+  code: string;
+  status: ExposedAnchorResult['status'];
+  reason: string | null;
+  work: ExposedAnchorResult['stats'];
+};
+export type RoomVisibilitySnapshot = Readonly<{
+  schema: 1;
+  revision: number;
+  complete: boolean;
+  entries: VisibilityEntry[];
+}>;
+const visibilityReasons = new Set([
+  'viewport not measured',
+  'scene revision pending',
+  'cancelled',
+  'projection context belongs to another scene or camera',
+  'frame time allowance exhausted',
+  'work budget exhausted',
+  'orthographic camera required',
+  'deformed or instanced geometry requires a projection adapter',
+  'continuation frame limit reached',
+  'non-finite projected geometry',
+  'empty viewport',
+  'surface witness rejected by authoritative ray',
+  'surface proof pending',
+]);
+for (const reason of [...visibilityReasons])
+  visibilityReasons.add('fingerprint incomplete: ' + reason);
+visibilityReasons.add(
+  'fingerprint unsupported within structural limits: work budget exhausted',
+);
+/** Last measured revision only, under the existing explicit diagnostic gate.
+ * Copy fixed identities/status/work, never anchors, labels or raw error text. */
+export function createRoomVisibilityDiagnostics(target?: Window) {
+  if (target?.__roomLayoutDiagnosticsEnabled !== true) return null;
+  let snapshot: RoomVisibilitySnapshot | undefined;
+  try {
+    Object.defineProperty(target, '__roomVisibilitySnapshot', {
+      get: () => snapshot,
+      configurable: true,
+    });
+  } catch {
+    return null;
+  }
+  return {
+    publish(
+      revision: number,
+      results: { code: string; result: ExposedAnchorResult }[],
+    ) {
+      try {
+        if (
+          !Number.isSafeInteger(revision) ||
+          revision < 0 ||
+          results.length > 96
+        )
+          throw new Error('invalid-data');
+        const seen = new Set<string>();
+        const entries = results.map(({ code, result }): VisibilityEntry => {
+          if (
+            !codes.has(code) ||
+            seen.has(code) ||
+            !['visible', 'hidden', 'pending', 'unresolved'].includes(
+              result.status,
+            )
+          )
+            throw new Error('invalid-data');
+          seen.add(code);
+          const stats = result.stats;
+          const work = {
+            triangles: finite(stats.triangles),
+            overlaps: finite(stats.overlaps),
+            fragments: finite(stats.fragments),
+            operations: finite(stats.operations),
+            revisionReused: bool(stats.revisionReused),
+            rays: finite(stats.rays),
+            elapsedMilliseconds: finite(stats.elapsedMilliseconds),
+          };
+          if (
+            Object.values(work).some(
+              (value) => typeof value === 'number' && value < 0,
+            )
+          )
+            throw new Error('invalid-data');
+          return {
+            code,
+            status: result.status,
+            reason:
+              'reason' in result
+                ? visibilityReasons.has(result.reason)
+                  ? result.reason
+                  : 'unrecognized-reason'
+                : null,
+            work,
+          };
+        });
+        const candidate = {
+          schema: 1 as const,
+          revision,
+          complete: true,
+          entries,
+        };
+        if (JSON.stringify(candidate).length > 48 * 1024)
+          throw new Error('byte-bound');
+        snapshot = freeze(candidate);
+      } catch {
+        snapshot = freeze({
+          schema: 1,
+          revision:
+            Number.isSafeInteger(revision) && revision >= 0 ? revision : 0,
+          complete: false,
+          entries: [],
+        });
+      }
+    },
+  };
 }
 function finite(value: number) {
   if (!Number.isFinite(value)) throw new Error('invalid-data');

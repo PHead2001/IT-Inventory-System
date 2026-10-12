@@ -1,4 +1,11 @@
-import { Activity, StrictMode, useEffect } from 'react';
+import {
+  Activity,
+  StrictMode,
+  useEffect,
+  useLayoutEffect,
+  useCallback,
+  useState,
+} from 'react';
 import { act, render } from '@testing-library/react';
 import { expect, it, vi } from 'vitest';
 import {
@@ -8,6 +15,7 @@ import {
   Mesh,
   MeshBasicMaterial,
 } from 'three';
+import { SceneSessionContext } from './scene-budget-provider';
 import type { RoomDefinition } from '../schema';
 import { SceneEffectsProvider, useSceneEffects } from './scene-effects-context';
 import type { SceneEffectsStore } from './scene-effects-state';
@@ -98,7 +106,7 @@ it('disposes a replaced same-size room without allowing old cleanup to remove su
   expect(successor.getCasters()).toEqual([]);
 });
 
-it('cancels immediate StrictMode rehearsal retirement, then irreversibly disposes on real unmount', async () => {
+it('replaces a StrictMode rehearsal store with one fresh generation and never revives its callbacks', async () => {
   const observed: SceneEffectsStore[] = [];
   const observe = (store: SceneEffectsStore) => observed.push(store);
   const view = render(
@@ -108,20 +116,25 @@ it('cancels immediate StrictMode rehearsal retirement, then irreversibly dispose
       </SceneEffectsProvider>
     </StrictMode>,
   );
-  expect(observed).toHaveLength(2);
+  await flushRetirement();
   const original = observed[0];
-  expect(observed[1]).toBe(original);
+  const restored = observed.at(-1)!;
+  expect(new Set(observed).size).toBe(2);
+  expect(original.isDisposed()).toBe(true);
+  expect(restored).not.toBe(original);
+  expect(restored.isDisposed()).toBe(false);
   const dispose = vi.spyOn(original, 'dispose');
-  await flushRetirement();
+  const snapshot = original.getSnapshot();
   register(original);
-  expect(dispose).not.toHaveBeenCalled();
-  expect(original.getCasters()).toHaveLength(1);
-  view.unmount();
-  await flushRetirement();
-  expect(dispose).toHaveBeenCalledTimes(1);
-  register(original);
+  original.invalidateHover();
+  original.recordCapture(1);
+  expect(original.getSnapshot()).toBe(snapshot);
   expect(original.getCasters()).toEqual([]);
   expect(original.getLights()).toEqual([]);
+  view.unmount();
+  expect(restored.isDisposed()).toBe(true);
+  await flushRetirement();
+  expect(dispose).not.toHaveBeenCalled();
 });
 
 it('restores a working effects store after Activity reconnects while retired callbacks stay inert', async () => {
@@ -248,3 +261,124 @@ it('retires each Activity predecessor once and reconnects without duplicating su
   expect(final.isDisposed()).toBe(true);
   expect(disposals.get(final)).toHaveBeenCalledTimes(1);
 });
+
+it('never adopts a replacement authority wrapper after the original session is revoked', async () => {
+  let current = true;
+  const originalSession = { current: () => current };
+  const observed: SceneEffectsStore[] = [];
+  const observe = (store: SceneEffectsStore) => {
+    observed.push(store);
+    register(store);
+  };
+  const scene = (
+    mode: 'hidden' | 'visible',
+    authority = originalSession,
+    definition = room,
+  ) => (
+    <SceneSessionContext value={authority}>
+      <Activity mode={mode}>
+        <SceneEffectsProvider room={definition}>
+          <Probe observe={observe} />
+        </SceneEffectsProvider>
+      </Activity>
+    </SceneSessionContext>
+  );
+  const view = render(scene('visible'));
+  const original = observed[0];
+  const before = original.getSnapshot();
+  current = false;
+  original.recordCapture(1);
+  original.invalidateHover();
+  original.quality.sample(100, true);
+  expect(original.getSnapshot()).toBe(before);
+  expect(original.quality.evidence().pending).toBe(0);
+  view.rerender(scene('hidden'));
+  await flushRetirement();
+  const dispose = vi.spyOn(original, 'dispose');
+  view.rerender(scene('visible', { current: () => true }));
+  await flushRetirement();
+  expect(observed.at(-1)).toBe(original);
+  expect(original.isDisposed()).toBe(true);
+  expect(original.isCurrent()).toBe(false);
+  view.rerender(
+    scene('visible', { current: () => true }, { ...room, roomId: 'new' }),
+  );
+  const next = observed.at(-1)!;
+  expect(next.isCurrent()).toBe(false);
+  expect(next.getCasters()).toEqual([]);
+  view.unmount();
+  await flushRetirement();
+  expect(dispose).not.toHaveBeenCalled();
+});
+
+function LayoutRegisteredCaster({
+  observe,
+}: {
+  observe: (store: SceneEffectsStore) => void;
+}) {
+  const store = useSceneEffects();
+  useLayoutEffect(() => {
+    observe(store);
+    const root = new Group();
+    root.add(new Mesh(new BoxGeometry(2, 2, 2), new MeshBasicMaterial()));
+    return store.registerVisual('drawer', 'ITC-D01', root);
+  }, [store, observe]);
+  const [light] = useState(() => new DirectionalLight());
+  const attachLight = useCallback(
+    (element: HTMLSpanElement | null) => {
+      store.setLight('key', element ? light : null);
+    },
+    [store, light],
+  );
+  return <span ref={attachLight} />;
+}
+
+it.each(['StrictMode', 'Activity'] as const)(
+  'keeps descendant layout caster registrations after %s reconnect',
+  async (lifecycle) => {
+    const observed: SceneEffectsStore[] = [];
+    const observe = (store: SceneEffectsStore) => {
+      observed.push(store);
+    };
+    const content = (
+      <SceneEffectsProvider room={room}>
+        <LayoutRegisteredCaster observe={observe} />
+      </SceneEffectsProvider>
+    );
+    const scene = (mode: 'visible' | 'hidden') =>
+      lifecycle === 'StrictMode' ? (
+        <StrictMode>{content}</StrictMode>
+      ) : (
+        <Activity mode={mode}>{content}</Activity>
+      );
+    const view = render(scene('visible'));
+    try {
+      const original = observed[0];
+      if (lifecycle === 'Activity') {
+        view.rerender(scene('hidden'));
+        await flushRetirement();
+        expect(original.isDisposed()).toBe(true);
+        view.rerender(scene('visible'));
+      }
+      await flushRetirement();
+      const current = observed.at(-1)!;
+      expect(current.isDisposed()).toBe(false);
+      expect(current.isCurrent()).toBe(true);
+      expect(current.getCasters()).toHaveLength(1);
+      expect(current.getLights()).toHaveLength(1);
+      expect(current).not.toBe(original);
+      expect(new Set(observed).size).toBe(2);
+      expect(observed.length).toBeLessThanOrEqual(4);
+      const stale = original.getSnapshot();
+      register(original);
+      original.setBloomReady(true);
+      original.invalidateHover();
+      expect(original.getSnapshot()).toBe(stale);
+      expect(original.getCasters()).toEqual([]);
+      expect(original.getLights()).toEqual([]);
+    } finally {
+      view.unmount();
+      await flushRetirement();
+    }
+  },
+);

@@ -346,3 +346,61 @@ it('does not present ignored URL defaults as active filters', () => {
   );
   expect(container.querySelector('input[name="lowStock"]')).not.toBeChecked();
 });
+
+it('native Back and Forward restore filters together and cancel an unsent search draft', async () => {
+  const originalHref = window.location.href;
+  const first = '/inventory?q=first&type=quantity&status=active';
+  const second = '/inventory?q=second&type=asset&status=historical';
+  history.replaceState(null, '', first);
+  history.pushState(null, '', second);
+  navigation.replace.mockClear();
+  navigation.push.mockClear();
+  const { unmount } = render(
+    <SearchForm
+      params={{ q: 'second', type: 'asset', status: 'historical' }}
+      categories={[]}
+      locations={[]}
+      sites={[]}
+    />,
+  );
+  const query = screen.getByRole('textbox', { name: 'Search inventory' });
+  const type = screen.getByRole('combobox', { name: 'Tracking type' });
+  const status = screen.getByRole('combobox', { name: 'Status' });
+  const traverse = async (direction: 'back' | 'forward') => {
+    await act(async () => {
+      const popped = new Promise<void>((resolve) =>
+        window.addEventListener('popstate', () => resolve(), { once: true }),
+      );
+      history[direction]();
+      await popped;
+    });
+  };
+  try {
+    query.focus();
+    fireEvent.change(query, { target: { value: 'unsent before Back' } });
+    await traverse('back');
+    expect(window.location.pathname + window.location.search).toBe(first);
+    expect(query).toHaveValue('first');
+    expect(type).toHaveValue('quantity');
+    expect(status).toHaveValue('active');
+    expect(query).toHaveFocus();
+    fireEvent.change(query, { target: { value: 'unsent before Forward' } });
+    await traverse('forward');
+    expect(window.location.pathname + window.location.search).toBe(second);
+    expect(query).toHaveValue('second');
+    expect(type).toHaveValue('asset');
+    expect(status).toHaveValue('historical');
+    expect(screen.getByRole('textbox', { name: 'Search inventory' })).toBe(
+      query,
+    );
+    expect(query).toHaveFocus();
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 300));
+    });
+    expect(navigation.replace).not.toHaveBeenCalled();
+    expect(navigation.push).not.toHaveBeenCalled();
+  } finally {
+    unmount();
+    history.replaceState(null, '', originalHref);
+  }
+});

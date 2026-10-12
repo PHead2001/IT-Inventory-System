@@ -9,6 +9,7 @@ import {
   NoToneMapping,
   OneFactor,
   OrthographicCamera,
+  PlaneGeometry,
   Scene,
   ShaderMaterial,
   SRGBColorSpace,
@@ -24,7 +25,11 @@ import {
   createSceneBloomFrames,
 } from './scene-bloom-runtime';
 
-function setup(complete = true, supported = true) {
+function setup(
+  complete = true,
+  supported = true,
+  current: () => boolean = () => true,
+) {
   const target = new WebGLRenderTarget(2, 2),
     clearColor = new Color('red');
   const viewport = new Vector4(1, 2, 300, 200),
@@ -107,6 +112,7 @@ function setup(complete = true, supported = true) {
     rawColor,
     overlay,
     failures,
+    current,
   );
   const cleanup = runtime.attach(composer, () => supported, frames);
   const snapshot = () => ({
@@ -349,4 +355,112 @@ it('owns additive RGB resources, preserves destination alpha, never samples base
   expect(geometryDispose).toHaveBeenCalledOnce();
   expect(materialDispose).toHaveBeenCalledOnce();
   expect(textureDispose).not.toHaveBeenCalled();
+});
+
+it('makes retained renderer and shader callbacks inert at retirement and restores originals on cleanup', () => {
+  let current = true;
+  const state = setup(true, true, () => current);
+  const savedRender = state.composer.render;
+  const savedShader = state.gl.debug.onShaderError!;
+  const before = state.snapshot();
+  current = false;
+  savedRender(0.016);
+  savedShader(
+    state.renderer,
+    {} as WebGLProgram,
+    {} as WebGLShader,
+    {} as WebGLShader,
+  );
+  state.runtime.draw(new Texture(), 1);
+  expect(state.render).not.toHaveBeenCalled();
+  expect(state.gl.render).not.toHaveBeenCalled();
+  expect(state.overlay.draw).not.toHaveBeenCalled();
+  expect(state.failures).not.toHaveBeenCalled();
+  expect(state.frames).not.toHaveBeenCalled();
+  expect(state.snapshot()).toEqual(before);
+  state.cleanup();
+  state.cleanup();
+  expect(state.composer.render).toBe(state.render);
+  expect(state.gl.debug.onShaderError).toBe(state.oldShaderError);
+  savedRender(0.016);
+  savedShader(
+    state.renderer,
+    {} as WebGLProgram,
+    {} as WebGLShader,
+    {} as WebGLShader,
+  );
+  expect(state.oldShaderError).not.toHaveBeenCalled();
+});
+
+it('never probes a renderer when attaching after retirement and stops raw frames after detach', () => {
+  const state = setup();
+  state.cleanup();
+  state.gl.setRenderTarget.mockClear();
+  state.runtime.draw(new Texture(), 1);
+  expect(state.gl.render).not.toHaveBeenCalled();
+  expect(state.gl.setRenderTarget).not.toHaveBeenCalled();
+  const runtime = createSceneBloomFrames(
+    state.renderer,
+    state.scene,
+    state.camera,
+    captureRawSceneColor(state.renderer),
+    state.overlay,
+    state.failures,
+    () => false,
+  );
+  runtime.attach(state.composer, vi.fn(), state.frames)();
+  expect(state.gl.setRenderTarget).not.toHaveBeenCalled();
+  expect(state.composer.render).toBe(state.render);
+});
+
+it('releases acquired overlay geometry when material construction fails and both resources after a later setup failure', () => {
+  const geometryDispose = vi.spyOn(PlaneGeometry.prototype, 'dispose');
+  const materialDispose = vi.spyOn(ShaderMaterial.prototype, 'dispose');
+  const construct = vi
+    .spyOn(ShaderMaterial.prototype, 'setValues')
+    .mockImplementationOnce(() => {
+      throw new Error('overlay material failed');
+    });
+  expect(() => createBloomOverlay()).toThrow('overlay material failed');
+  expect(geometryDispose).toHaveBeenCalledOnce();
+  expect(materialDispose).not.toHaveBeenCalled();
+  construct.mockRestore();
+  vi.spyOn(Scene.prototype, 'add').mockImplementationOnce(() => {
+    throw new Error('overlay scene failed');
+  });
+  expect(() => createBloomOverlay()).toThrow('overlay scene failed');
+  expect(geometryDispose).toHaveBeenCalledTimes(2);
+  expect(materialDispose).toHaveBeenCalledOnce();
+  vi.restoreAllMocks();
+});
+
+it('fences overlay allocation at the original owner boundary', () => {
+  const construct = vi.spyOn(ShaderMaterial.prototype, 'setValues');
+  expect(() => createBloomOverlay(() => false)).toThrow(
+    'Retired bloom overlay owner',
+  );
+  expect(construct).not.toHaveBeenCalled();
+  vi.restoreAllMocks();
+});
+
+it('keeps a successor attachment active when old cleanup or render callbacks are retained', () => {
+  const state = setup();
+  const staleRender = state.composer.render;
+  const nextRender = vi.fn();
+  const successor = {
+    inputBuffer: new WebGLRenderTarget(2, 2),
+    render: nextRender,
+  };
+  const release = state.runtime.attach(successor, () => true, vi.fn());
+  state.cleanup();
+  successor.render(0.016);
+  staleRender(0.016);
+  state.runtime.draw(new Texture(), 1);
+  expect(nextRender).toHaveBeenCalledOnce();
+  expect(state.render).not.toHaveBeenCalled();
+  expect(state.gl.render).toHaveBeenCalledOnce();
+  expect(state.overlay.draw).toHaveBeenCalledOnce();
+  release();
+  expect(state.gl.debug.onShaderError).toBe(state.oldShaderError);
+  successor.inputBuffer.dispose();
 });

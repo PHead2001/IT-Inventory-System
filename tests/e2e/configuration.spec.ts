@@ -1,6 +1,6 @@
 import { metadataReviewButton, metadataSaveButton } from './metadata-controls';
 import { expect, test, type Page } from '@playwright/test';
-import { createClient } from '@supabase/supabase-js';
+import { withOwnedLabelDefaults } from './label-defaults-fixture';
 import fixture from '../fixtures/auth.json' with { type: 'json' };
 
 async function signIn(page: Page, role: 'staff' | 'viewer') {
@@ -42,13 +42,8 @@ test('phone Settings reviews referenced removal and shares label defaults with n
   const firstName = 'Settings ' + unique;
   const renamed = 'Renamed ' + firstName;
   const code = 'SETTINGS-' + unique;
-  const admin = createClient(
-    process.env.LOCAL_API_URL!,
-    process.env.LOCAL_SERVICE_ROLE_KEY!,
-    { auth: { persistSession: false } },
-  );
-  await signIn(page, 'staff');
-  try {
+  await withOwnedLabelDefaults(page, async (defaults) => {
+    await signIn(page, 'staff');
     await page.goto('/settings/categories');
     await expect(
       page.getByRole('heading', { name: 'Categories', level: 1 }),
@@ -128,9 +123,21 @@ test('phone Settings reviews referenced removal and shares label defaults with n
     await page
       .getByRole('combobox', { name: 'Barcode type' })
       .selectOption('code128');
+    const savedMessage = defaults.reviewSave({
+      size: '70x35',
+      page: 'A4',
+      format: 'code128',
+      // Selecting a standard size/paper explicitly clears custom geometry.
+      layout: null,
+    });
     await page.getByRole('button', { name: 'Save shared defaults' }).click();
-    await expect(page.getByRole('status')).toContainText(
-      'Label settings saved.',
+    await expect(
+      page.getByRole('status').filter({ hasText: savedMessage }),
+    ).toHaveText(savedMessage);
+    await defaults.confirmSaved();
+    await expect(page.locator('.experience-route-progress')).toHaveAttribute(
+      'data-visible',
+      'false',
     );
     await page.goto('/labels');
     await expect(
@@ -160,11 +167,5 @@ test('phone Settings reviews referenced removal and shares label defaults with n
       page.getByRole('button', { name: 'Save shared defaults' }),
     ).toHaveCount(0);
     await noHorizontalOverflow(page);
-  } finally {
-    const { error } = await admin
-      .from('label_defaults')
-      .update({ size: '90x50', page: 'letter', format: 'qr' })
-      .eq('singleton', true);
-    expect(error).toBeNull();
-  }
+  });
 });

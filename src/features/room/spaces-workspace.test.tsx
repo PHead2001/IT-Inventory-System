@@ -4,6 +4,10 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import type { LocationRef } from '../inventory/contracts-ui';
 import { spaces } from './spaces';
 import type { CameraView } from './scene/camera-view';
+import { Activity, useEffect, useState } from 'react';
+import { RouteReadyContext } from '@/components/experience/route-ready';
+import { createRouteReadiness } from '@/components/experience/route-readiness';
+import { createRoutePendingState } from '@/components/experience/route-pending-state';
 
 const focusCallbacks: Array<(code: string | null) => void> = [];
 const roomReferences: object[] = [];
@@ -15,32 +19,33 @@ vi.mock('next/dynamic', () => ({
       onCountsChange?: (show: boolean) => void;
       locationOccupancy?: import('./occupancy-contract').RoomOccupancy;
       selectedCode: string | null;
+      highlightedCodes: string[];
       onSelect: (code: string) => void;
-      focusRequest: {
-        requestId: number;
-        preserveView?: boolean;
-        fitBeforeFlight?: boolean;
-        generation?: number;
-        scope?: string;
-      };
+      focusRequest: { requestId: number; preserveView?: boolean };
       focusOnRestore: boolean;
       initialView?: CameraView | null;
       onViewChange?: (view: CameraView) => void;
       onFocusComplete?: (code: string | null) => void;
       onFocusCancel?: () => void;
       onFailure?: (message: string) => void;
+      onReady?: () => void;
       room: object;
     }) {
+      const { onReady } = props;
+      useEffect(() => {
+        onReady?.();
+      }, [onReady]);
       if (props.onFocusComplete) focusCallbacks.push(props.onFocusComplete);
       roomReferences.push(props.room);
       return (
         <div
           data-testid="scene-selection"
           data-counts={JSON.stringify(props.locationOccupancy ?? null)}
+          data-optional-counts={String(props.showCounts)}
           data-code={props.selectedCode ?? ''}
+          data-highlights={JSON.stringify(props.highlightedCodes)}
           data-focus={props.focusRequest.requestId}
           data-preserve-view={String(props.focusRequest.preserveView)}
-          data-fit-before-flight={String(props.focusRequest.fitBeforeFlight)}
           data-focus-on-restore={String(props.focusOnRestore)}
           data-initial-view={JSON.stringify(props.initialView ?? null)}
         >
@@ -83,6 +88,12 @@ vi.mock('../inventory/components/read-ui', async (importOriginal) => ({
   ),
 }));
 import { SpacesWorkspace } from './spaces-workspace';
+import { RoomCameraSnapshotProvider } from './scene/camera-snapshot-provider';
+import { PrivacyReadinessContext } from '@/components/auth/privacy-readiness';
+import {
+  assignmentEpoch,
+  readPrivacyRevocationRevision,
+} from '@/features/scan/assign-batch';
 
 const locations: LocationRef[] = [
   {
@@ -108,6 +119,24 @@ const locations: LocationRef[] = [
     code: 'ITC-B',
     name: 'B',
     breadcrumb: 'IT Closet / B',
+    active: true,
+    can_hold_inventory: true,
+    parentId: 'root',
+  },
+  {
+    id: 'rack',
+    code: 'ITC-RACK',
+    name: 'Server Rack',
+    breadcrumb: 'IT Closet / Server Rack',
+    active: true,
+    can_hold_inventory: true,
+    parentId: 'root',
+  },
+  {
+    id: 'red',
+    code: 'ITC-RED',
+    name: 'Red Container',
+    breadcrumb: 'IT Closet / Red Container',
     active: true,
     can_hold_inventory: true,
     parentId: 'root',
@@ -306,6 +335,112 @@ it('refers to the browser when the map is hidden or failed and restores map guid
   ).toBeVisible();
 });
 
+it('replaces the room selection instruction immediately and restores it after clearing', async () => {
+  let resolveContents!: (value: ReturnType<typeof response>) => void;
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(() => new Promise((resolve) => (resolveContents = resolve))),
+  );
+  const user = userEvent.setup();
+  render(
+    <SpacesWorkspace
+      backend="https://backend.example"
+      locations={locations}
+      userId="test-user"
+      initialSpace={spaces[0]}
+      initialCode={null}
+    />,
+  );
+  expect(
+    screen.getByText('Select a location in the map or browser'),
+  ).toBeVisible();
+  await user.click(
+    screen.getByRole('button', { name: 'Choose shelf 1A in scene' }),
+  );
+  expect(screen.getByText('Selected: Shelf 1A')).toBeVisible();
+  expect(
+    document.querySelector('[data-loading-shape="contents"]'),
+  ).toBeInTheDocument();
+  expect(screen.getByText('Loading contents for Shelf 1A…')).toHaveClass(
+    'sr-only',
+  );
+  const contentsAnnouncement = screen.getByText(
+    'Loading contents for Shelf 1A…',
+  );
+  expect(contentsAnnouncement).toHaveAttribute('role', 'status');
+  expect(
+    screen.getByRole('region', { name: 'Location inventory' }),
+  ).not.toContainElement(contentsAnnouncement);
+  expect(
+    screen
+      .getByText('Loading contents for Shelf 1A…')
+      .closest('[aria-busy="true"]'),
+  ).toBeNull();
+  expect(
+    screen.queryByText('Select a location in the map or browser'),
+  ).not.toBeInTheDocument();
+  expect(
+    screen.getByRole('region', { name: 'Location inventory' }),
+  ).toHaveAttribute('aria-busy', 'true');
+  resolveContents(response('Shelf stock', 'ITC-S1A'));
+  await screen.findByText('Shelf stock');
+  expect(
+    document.querySelector('[data-loading-shape="contents"]'),
+  ).not.toBeInTheDocument();
+  expect(
+    screen.getByRole('region', { name: 'Location inventory' }),
+  ).toHaveAttribute('aria-busy', 'false');
+  expect(screen.getByText('Selected: Shelf 1A')).toBeVisible();
+  await user.click(screen.getByRole('button', { name: 'Clear selection' }));
+  expect(
+    screen.getByText('Select a location in the map or browser'),
+  ).toBeVisible();
+  expect(screen.queryByText('Selected: Shelf 1A')).not.toBeInTheDocument();
+});
+
+it('keeps the selected logical label through graphics fallback and browser selection', async () => {
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(() => new Promise(() => {})),
+  );
+  const user = userEvent.setup();
+  render(
+    <SpacesWorkspace
+      backend="https://backend.example"
+      locations={locations}
+      userId="test-user"
+      initialSpace={spaces[0]}
+      initialCode="ITC-S1A"
+    />,
+  );
+  expect(screen.getByText('Selected: Shelf 1A')).toBeVisible();
+  await user.click(screen.getByRole('button', { name: 'Fail room' }));
+  expect(screen.getByText('Room view unavailable')).toBeVisible();
+  expect(screen.getByText('Selected: Shelf 1A')).toBeVisible();
+  expect(
+    screen.queryByText('Select a location in the location browser'),
+  ).not.toBeInTheDocument();
+  await user.click(
+    screen.getAllByRole('button', { name: 'Shelf 1A ITC-S1A' })[0],
+  );
+  expect(screen.getByText('Room view unavailable')).toBeVisible();
+  expect(screen.getByText('Selected: Shelf 1A')).toBeVisible();
+  await user.click(screen.getByRole('button', { name: 'Clear selection' }));
+  expect(
+    screen.getByText('Select a location in the location browser'),
+  ).toBeVisible();
+  await user.click(screen.getByRole('button', { name: 'Expand IT Closet' }));
+  await user.click(
+    screen.getAllByRole('button', { name: 'Drawer 1 ITC-D01' })[0],
+  );
+  expect(screen.getByText('Selected: Drawer 1')).toBeVisible();
+  expect(
+    screen.queryByText(
+      /Select a location in the (map or browser|location browser)/,
+    ),
+  ).not.toBeInTheDocument();
+});
+
 it('highlights immediately and ignores slow A/B/A contents responses', async () => {
   const pending: {
     code: string;
@@ -419,6 +554,71 @@ it('restores the compatible modeled-space camera after hiding and switching spac
   expect(screen.getByTestId('scene-selection')).toHaveAttribute(
     'data-focus-on-restore',
     'false',
+  );
+});
+
+it('retains the exact compatible camera across the configured one-entry route unmount and Back remount', async () => {
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async () => response('Stock')),
+  );
+  const user = userEvent.setup();
+  function OneEntryRouter() {
+    const [room, setRoom] = useState(true);
+    return (
+      <div>
+        <button onClick={() => setRoom(!room)}>
+          {room ? 'Navigate Inventory' : 'Browser Back to room'}
+        </button>
+        {room ? (
+          <SpacesWorkspace
+            backend="https://backend.example"
+            locations={locations}
+            userId="test-user"
+            initialSpace={spaces[0]}
+            initialCode={null}
+          />
+        ) : (
+          <h1>Inventory</h1>
+        )}
+      </div>
+    );
+  }
+  render(
+    <PrivacyReadinessContext
+      value={{
+        ready: true,
+        visible: true,
+        generation: 'camera-test',
+        revocationRevision: readPrivacyRevocationRevision(),
+        verifiedEpoch: assignmentEpoch(),
+      }}
+    >
+      <RoomCameraSnapshotProvider
+        actorId="test-user"
+        backend="https://backend.example"
+      >
+        <OneEntryRouter />
+      </RoomCameraSnapshotProvider>
+    </PrivacyReadinessContext>,
+  );
+  await user.click(screen.getByRole('button', { name: 'Record camera view' }));
+  const saved = screen
+    .getByTestId('room-viewer')
+    .getAttribute('data-camera-view');
+  expect(JSON.parse(saved!)).toMatchObject({ zoom: 2, mode: 'free' });
+  await user.click(screen.getByRole('button', { name: 'Navigate Inventory' }));
+  expect(screen.queryByTestId('room-viewer')).not.toBeInTheDocument();
+  await user.click(
+    screen.getByRole('button', { name: 'Browser Back to room' }),
+  );
+  expect(screen.getByTestId('scene-selection')).toHaveAttribute(
+    'data-initial-view',
+    saved!,
+  );
+  expect(screen.getByTestId('room-viewer')).toHaveAttribute(
+    'data-camera-view',
+    saved!,
   );
 });
 
@@ -624,7 +824,7 @@ it('restores URL selection on Back and refocuses a repeated selection', async ()
   );
 });
 
-it('restores a modeled selection through browser history while preserving camera intent', async () => {
+it('preserves camera history intent while restoring the modeled selection and reveal', async () => {
   window.history.replaceState(null, '', '/room?location=ITC-S1A');
   vi.stubGlobal(
     'fetch',
@@ -654,6 +854,8 @@ it('restores a modeled selection through browser history while preserving camera
     '/room?space=it-closet&location=ITC-S1A',
   );
   act(() => window.dispatchEvent(new PopStateEvent('popstate')));
+  // Audit W14 preserves Back and existing per-space camera context. A history
+  // restoration reuses that view; explicit Center selected still requests flight.
   expect(screen.getByTestId('scene-selection')).toHaveAttribute(
     'data-focus-on-restore',
     'false',
@@ -666,6 +868,128 @@ it('restores a modeled selection through browser history while preserving camera
     Number(screen.getByTestId('scene-selection').getAttribute('data-focus')),
   ).toBeGreaterThan(beforeBack);
 });
+
+it.each([
+  { initialCode: null, code: 'ITC-RACK', name: 'Server Rack', reduced: false },
+  {
+    initialCode: 'ITC-RACK',
+    code: 'ITC-RED',
+    name: 'Red Container',
+    reduced: false,
+  },
+  {
+    initialCode: 'ITC-RACK',
+    code: 'ITC-RED',
+    name: 'Red Container',
+    reduced: true,
+  },
+])(
+  'reconciles missed native history on Activity reactivation: $initialCode → $code (Reduced $reduced)',
+  async ({ initialCode, code, name, reduced }) => {
+    const initialUrl =
+      '/room?space=it-closet' + (initialCode ? '&location=' + initialCode : '');
+    window.history.replaceState(null, '', initialUrl);
+    const fetcher = vi.fn(async (url: string) => {
+      const params = new URL(url, window.location.origin).searchParams;
+      return response(
+        'Current ' + params.get('location'),
+        params.get('location')!,
+      );
+    });
+    vi.stubGlobal('fetch', fetcher);
+    const readiness = createRouteReadiness(
+      'test-user',
+      createRoutePendingState(),
+      () => {},
+    );
+    const register = vi.spyOn(readiness, 'register');
+    const workspace = (mode: 'visible' | 'hidden') => (
+      <RouteReadyContext value={readiness}>
+        <Activity mode={mode}>
+          <SpacesWorkspace
+            backend="https://backend.example"
+            locations={locations}
+            userId="test-user"
+            initialSpace={spaces[0]}
+            initialCode={initialCode}
+            initialRouteKey={initialUrl}
+          />
+        </Activity>
+      </RouteReadyContext>
+    );
+    const view = render(workspace('visible'));
+    if (initialCode) await screen.findByText('Current ' + initialCode);
+    act(() => focusCallbacks.at(-1)!(initialCode));
+    await userEvent
+      .setup()
+      .click(screen.getByRole('button', { name: 'Record camera view' }));
+    const savedView = screen
+      .getByTestId('scene-selection')
+      .getAttribute('data-initial-view');
+    const previousFocus = Number(
+      screen.getByTestId('scene-selection').getAttribute('data-focus'),
+    );
+    const staleFocus = focusCallbacks.at(-1)!;
+    view.rerender(workspace('hidden'));
+    expect(screen.getByTestId('scene-selection')).not.toBeVisible();
+    const previousCalls = fetcher.mock.calls.length;
+    // Next's eager restore can dispatch before the retained room's effects return.
+    act(() => {
+      window.history.replaceState(null, '', '/settings');
+      window.localStorage.setItem(
+        'it-inventory-reduce-motion',
+        String(reduced),
+      );
+      window.dispatchEvent(new Event('it-inventory-motion-change'));
+      window.history.replaceState(
+        null,
+        '',
+        '/room?space=it-closet&location=' + code,
+      );
+      window.dispatchEvent(new PopStateEvent('popstate'));
+    });
+    expect(fetcher).toHaveBeenCalledTimes(previousCalls);
+    const restoredUrl = window.location.href;
+    view.rerender(workspace('visible'));
+    await screen.findByText('Current ' + code);
+    expect(screen.getByText('Selected: ' + name)).toBeVisible();
+    const scene = screen.getByTestId('scene-selection');
+    expect(scene).toHaveAttribute('data-code', code);
+    expect(scene).toHaveAttribute('data-highlights', JSON.stringify([code]));
+    expect(scene).toHaveAttribute('data-initial-view', savedView);
+    expect(scene).toHaveAttribute('data-focus-on-restore', 'false');
+    expect(scene).toHaveAttribute('data-preserve-view', 'true');
+    expect(Number(scene.getAttribute('data-focus'))).toBeGreaterThan(
+      previousFocus,
+    );
+    act(() => staleFocus(initialCode));
+    expect(screen.getByTestId('room-viewer')).toHaveAttribute(
+      'data-focused-code',
+      '',
+    );
+    act(() => focusCallbacks.at(-1)!(code));
+    expect(screen.getByTestId('room-viewer')).toHaveAttribute(
+      'data-focused-code',
+      code,
+    );
+    expect(fetcher).toHaveBeenLastCalledWith(
+      expect.stringContaining('location=' + code),
+      expect.objectContaining({
+        cache: 'no-store',
+        credentials: 'same-origin',
+      }),
+    );
+    expect(register).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        routeKey: '/room?location=' + code + '&space=it-closet',
+      }),
+    );
+    expect(window.location.href).toBe(restoredUrl);
+    expect(
+      screen.getByRole('region', { name: 'Location inventory' }),
+    ).toHaveAttribute('aria-busy', 'false');
+  },
+);
 
 it('pages contents without remounting the room or delaying selection', async () => {
   window.history.replaceState(null, '', '/room?location=ITC-A');
@@ -702,6 +1026,190 @@ it('pages contents without remounting the room or delaying selection', async () 
   window.history.replaceState(null, '', '/room?location=ITC-A');
   act(() => window.dispatchEvent(new PopStateEvent('popstate')));
   expect(scene).toHaveAttribute('data-focus', focusBeforePage);
+});
+
+it('accepts the current URL over cached server props on remount and retires an interrupted contents request', async () => {
+  window.history.replaceState(
+    null,
+    '',
+    '/room?space=it-closet&location=ITC-RACK',
+  );
+  const pending: {
+    code: string;
+    signal: AbortSignal;
+    resolve: (value: ReturnType<typeof response>) => void;
+  }[] = [];
+  vi.stubGlobal(
+    'fetch',
+    vi.fn((url: string, options: { signal: AbortSignal }) => {
+      // Selected count reads are independent of the contents lifecycle under
+      // test. Keep them out of the owned interrupted-request queue.
+      if (url.startsWith('/api/room/occupancy?'))
+        return Promise.resolve({ ok: false });
+      return new Promise((resolve) => {
+        pending.push({
+          code: new URL(url, window.location.origin).searchParams.get(
+            'location',
+          )!,
+          signal: options.signal,
+          resolve,
+        });
+      });
+    }),
+  );
+  const workspace = (
+    <SpacesWorkspace
+      backend="https://backend.example"
+      locations={locations}
+      userId="test-user"
+      initialSpace={spaces[0]}
+      initialCode="ITC-RACK"
+      initialRouteKey="/room?location=ITC-RACK&space=it-closet"
+    />
+  );
+  const first = render(workspace);
+  await waitFor(() => expect(pending).toHaveLength(1));
+  first.unmount();
+  expect(pending[0].signal.aborted).toBe(true);
+  window.history.replaceState(
+    null,
+    '',
+    '/room?space=it-closet&location=ITC-RED',
+  );
+  render(workspace);
+  await waitFor(() => expect(pending.at(-1)?.code).toBe('ITC-RED'));
+  act(() => pending.at(-1)!.resolve(response('Restored red stock', 'ITC-RED')));
+  await screen.findByText('Restored red stock');
+  await act(async () => {
+    for (const request of pending.filter(
+      (request) => request.code === 'ITC-RACK',
+    ))
+      request.resolve(response('Retired rack stock', 'ITC-RACK'));
+  });
+  expect(screen.queryByText('Retired rack stock')).not.toBeInTheDocument();
+  expect(screen.getByTestId('scene-selection')).toHaveAttribute(
+    'data-code',
+    'ITC-RED',
+  );
+  expect(
+    screen.getByRole('region', { name: 'Location inventory' }),
+  ).toHaveAttribute('aria-busy', 'false');
+});
+
+it('refreshes a restored contents page without refocusing a manually adjusted camera', async () => {
+  window.history.replaceState(
+    null,
+    '',
+    '/room?space=it-closet&location=ITC-RACK',
+  );
+  const fetcher = vi.fn(async (url: string) => {
+    const page = Number(
+      new URL(url, window.location.origin).searchParams.get('page'),
+    );
+    return response('Rack page ' + page, 'ITC-RACK', page, 30);
+  });
+  vi.stubGlobal('fetch', fetcher);
+  const workspace = (mode: 'visible' | 'hidden') => (
+    <Activity mode={mode}>
+      <SpacesWorkspace
+        backend="https://backend.example"
+        locations={locations}
+        userId="test-user"
+        initialSpace={spaces[0]}
+        initialCode="ITC-RACK"
+      />
+    </Activity>
+  );
+  const view = render(workspace('visible'));
+  await screen.findByText('Rack page 1');
+  act(() => focusCallbacks.at(-1)!('ITC-RACK'));
+  await userEvent
+    .setup()
+    .click(screen.getByRole('button', { name: 'Record camera view' }));
+  const scene = screen.getByTestId('scene-selection');
+  const saved = scene.getAttribute('data-initial-view');
+  const focus = scene.getAttribute('data-focus');
+  view.rerender(workspace('hidden'));
+  act(() => {
+    window.history.replaceState(
+      null,
+      '',
+      '/room?space=it-closet&location=ITC-RACK&page=2',
+    );
+    window.dispatchEvent(new PopStateEvent('popstate'));
+  });
+  view.rerender(workspace('visible'));
+  await screen.findByText('Rack page 2');
+  expect(screen.getByText('Page 2 of 2')).toBeVisible();
+  expect(scene).toHaveAttribute('data-focus', focus);
+  expect(scene).toHaveAttribute('data-focus-on-restore', 'false');
+  expect(scene).toHaveAttribute('data-initial-view', saved);
+  expect(fetcher).toHaveBeenLastCalledWith(
+    expect.stringContaining('page=2'),
+    expect.objectContaining({ cache: 'no-store' }),
+  );
+});
+
+it('ignores another route history event while the room is departing', async () => {
+  window.history.replaceState(null, '', '/room?location=ITC-RACK');
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async () => response('Rack stock', 'ITC-RACK')),
+  );
+  render(
+    <SpacesWorkspace
+      backend="https://backend.example"
+      locations={locations}
+      userId="test-user"
+      initialSpace={spaces[0]}
+      initialCode="ITC-RACK"
+    />,
+  );
+  await screen.findByText('Rack stock');
+  act(() => {
+    window.history.replaceState(null, '', '/settings?location=ITC-RED');
+    window.dispatchEvent(new PopStateEvent('popstate'));
+  });
+  expect(screen.getByTestId('scene-selection')).toHaveAttribute(
+    'data-code',
+    'ITC-RACK',
+  );
+  expect(screen.getByText('Rack stock')).toBeVisible();
+});
+
+it('does not let a queued saved-space fallback replace a newer restored selection', async () => {
+  window.history.replaceState(null, '', '/room');
+  window.localStorage.setItem(
+    'inventory-space:test-user:' + window.location.origin,
+    'it-office',
+  );
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async () => response('Restored rack stock', 'ITC-RACK')),
+  );
+  render(
+    <SpacesWorkspace
+      backend="https://backend.example"
+      locations={locations}
+      userId="test-user"
+      initialSpace={spaces[0]}
+      initialCode={null}
+    />,
+  );
+  act(() => {
+    window.history.replaceState(
+      null,
+      '',
+      '/room?space=it-closet&location=ITC-RACK',
+    );
+    window.dispatchEvent(new PopStateEvent('popstate'));
+  });
+  await screen.findByText('Restored rack stock');
+  expect(screen.getByTestId('scene-selection')).toHaveAttribute(
+    'data-code',
+    'ITC-RACK',
+  );
+  expect(screen.getByLabelText('Space')).toHaveValue('it-closet');
 });
 
 it('rejects a successful response for the wrong user or location', async () => {
@@ -777,7 +1285,49 @@ it('explains a transport failure and retries the same selection', async () => {
   expect(fetcher).toHaveBeenCalledTimes(2);
 });
 
-it('demands selected reveal counts with the toggle off and refreshes counts and contents together on return', async () => {
+it('announces deferred occupancy outside busy geometry and replaces it with failure guidance', async () => {
+  let fail!: (error: Error) => void;
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(
+      () =>
+        new Promise((_resolve, reject) => {
+          fail = reject;
+        }),
+    ),
+  );
+  render(
+    <SpacesWorkspace
+      backend="https://backend.example"
+      locations={locations}
+      userId="test-user"
+      initialSpace={spaces[0]}
+      initialCode={null}
+    />,
+  );
+  await userEvent
+    .setup()
+    .click(screen.getByRole('button', { name: 'Toggle item counts' }));
+  const announcement = await screen.findByText('Refreshing location counts…');
+  expect(announcement.closest('[aria-busy="true"]')).toBeNull();
+  expect(
+    document.querySelector(
+      '[data-loading-shape="occupancy"] [aria-busy="true"]',
+    ),
+  ).toBeInTheDocument();
+  await act(async () => fail(new Error('private occupancy detail')));
+  await screen.findByText('Item counts unavailable. Refresh to try again.');
+  expect(
+    document.querySelector('[data-loading-shape="occupancy"]'),
+  ).not.toBeInTheDocument();
+  expect(
+    screen.queryByText('Refreshing location counts…'),
+  ).not.toBeInTheDocument();
+  expect(
+    screen.queryByText('private occupancy detail'),
+  ).not.toBeInTheDocument();
+});
+it('loads selected reveal counts with the optional overlay off and refreshes both snapshots on return', async () => {
   const user = userEvent.setup();
   const fetcher = vi.fn().mockImplementation((url: string) => {
     if (url.startsWith('/api/room/occupancy?'))
@@ -820,6 +1370,12 @@ it('demands selected reveal counts with the toggle off and refreshes counts and 
   expect(
     fetcher.mock.calls.filter(([url]) => String(url).includes('/occupancy?')),
   ).toHaveLength(1);
+  // Audit W13 requires the opened selected target's count independently of the
+  // optional all-location overlay. The overlay still starts and stays off.
+  expect(screen.getByTestId('scene-selection')).toHaveAttribute(
+    'data-optional-counts',
+    'false',
+  );
   await user.click(screen.getByRole('button', { name: 'Toggle item counts' }));
   await waitFor(() =>
     expect(screen.getByTestId('scene-selection')).toHaveAttribute(
@@ -832,7 +1388,29 @@ it('demands selected reveal counts with the toggle off and refreshes counts and 
     window.dispatchEvent(new Event('pageshow'));
   });
   await waitFor(() => expect(fetcher.mock.calls.length).toBe(before + 2));
-  await screen.findByText(/counts are a snapshot/);
+  const countsExplanation = await screen.findByText(
+    /Counts show quantity items with stock and active individual assets at each storage location\./,
+  );
+  expect(countsExplanation).toHaveAttribute('role', 'status');
+  expect(countsExplanation).toBeVisible();
+  expect(countsExplanation).toHaveTextContent(/counts are a snapshot/);
   await user.click(screen.getByRole('button', { name: 'Refresh inventory' }));
   await waitFor(() => expect(fetcher.mock.calls.length).toBe(before + 4));
+  await user.click(screen.getByRole('button', { name: 'Toggle item counts' }));
+  await waitFor(() =>
+    expect(screen.getByTestId('scene-selection')).toHaveAttribute(
+      'data-counts',
+      '{"ITC-D01":{"quantity_product_count":"1","quantity_unit_count":"31","asset_count":"2"}}',
+    ),
+  );
+  expect(countsExplanation).not.toBeInTheDocument();
+  expect(screen.getByTestId('scene-selection')).toHaveAttribute(
+    'data-optional-counts',
+    'false',
+  );
+  expect(
+    screen.queryByText(
+      'Counts show quantity items with stock and active individual assets at each storage location.',
+    ),
+  ).not.toBeInTheDocument();
 });

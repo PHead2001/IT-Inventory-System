@@ -1,6 +1,7 @@
 'use server';
 import { revalidatePath } from 'next/cache';
 import { createSupabaseServerClient } from '@/lib/supabase/server';
+import { supabaseConfig } from '@/lib/supabase/config';
 import { mayManageConfiguration } from '@/lib/auth/membership';
 import {
   configurationError,
@@ -11,13 +12,28 @@ import {
   type RemovalReview,
 } from './contracts';
 
-async function maintainerClient() {
+class ConfigurationBindingError extends Error {
+  constructor(readonly code: 'actor_changed' | 'backend_changed') {
+    super('Configuration caller binding changed');
+  }
+}
+async function maintainerClient(binding?: {
+  expectedActorId?: string;
+  expectedBackend?: string;
+}) {
+  if (
+    binding?.expectedBackend &&
+    new URL(supabaseConfig().url).origin !== binding.expectedBackend
+  )
+    throw new ConfigurationBindingError('backend_changed');
   const supabase = await createSupabaseServerClient(true);
   const {
     data: { user },
     error,
   } = await supabase.auth.getUser();
   if (error || !user) return null;
+  if (binding?.expectedActorId && binding.expectedActorId !== user.id)
+    throw new ConfigurationBindingError('actor_changed');
   const { data: member, error: memberError } = await supabase
     .from('app_members')
     .select('user_id,display_name,role,active,can_manage_configuration')
@@ -32,7 +48,7 @@ export async function submitConfiguration(
   const command = parseConfigurationCommand(input);
   if (!command) return configurationError('P1012');
   try {
-    const supabase = await maintainerClient();
+    const supabase = await maintainerClient(command);
     if (!supabase) return configurationError('P1001');
     const { data, error } = await supabase.rpc(command.operation, {
       p_request_id: command.requestId,
@@ -47,7 +63,9 @@ export async function submitConfiguration(
     revalidatePath('/dashboard');
     revalidatePath('/labels');
     return { ok: true, result: result.data };
-  } catch {
+  } catch (error) {
+    if (error instanceof ConfigurationBindingError)
+      return configurationError(error.code);
     return configurationError(undefined);
   }
 }

@@ -1,0 +1,208 @@
+import { expect, it } from 'vitest';
+import {
+  createRouteMotionState,
+  titleTarget,
+  matchesTitleListRoute,
+} from './route-motion-state';
+import { routeKey } from './route-key';
+
+const record = { kind: 'quantity' as const, id: 'quantity' };
+const holding = { domain: 'storage' as const, id: 'storage' };
+const original =
+  '/inventory?type=quantity&q=USB%20Cable&category=a&category=b#inventory-row-2';
+const rawAlias = routeKey(
+  '/inventory',
+  new URLSearchParams('type=all&status=active&q=++USB++&scopeAdjusted=true'),
+);
+
+it('generic acceptance remains closed until observer registration and clears on observer retirement', () => {
+  const state = createRouteMotionState();
+  const accept = () =>
+    state.acceptArrival(
+      '/history',
+      '/inventory',
+      0,
+      'https://inventory.invalid/inventory',
+    );
+  accept();
+  expect(state.arrivalSnapshot()).toBeNull();
+  state.supportArrival(true);
+  accept();
+  expect(state.arrivalSnapshot()).not.toBeNull();
+  state.supportArrival(false);
+  expect(state.arrivalSnapshot()).toBeNull();
+  accept();
+  expect(state.arrivalSnapshot()).toBeNull();
+});
+
+it('generic arrival requires a fresh accepted navigation and cannot reuse a retired or replaced approval', () => {
+  const state = createRouteMotionState();
+  state.supportArrival(true);
+  expect(state.arrivalSnapshot()).toBeNull();
+  state.acceptArrival(
+    '/history?category=a&category=b',
+    '/inventory?q=cable',
+    4,
+    'https://inventory.invalid/inventory',
+  );
+  const first = state.arrivalSnapshot()!;
+  expect(first).toEqual({
+    sourceKey: '/inventory?q=cable',
+    destinationKey: '/history?category=a&category=b',
+    epoch: 4,
+  });
+  state.acceptArrival(
+    '/history?category=a&category=b',
+    '/inventory?q=cable',
+    4,
+    'https://inventory.invalid/inventory',
+  );
+  const repeated = state.arrivalSnapshot();
+  expect(repeated).not.toBe(first);
+  state.finishArrival(first);
+  expect(state.arrivalSnapshot()).toBe(repeated);
+  state.finishArrival(repeated!);
+  expect(state.arrivalSnapshot()).toBeNull();
+  state.acceptArrival(
+    '/history',
+    '/inventory',
+    4,
+    'https://inventory.invalid/inventory',
+  );
+  state.suspend();
+  expect(state.arrivalSnapshot()).toBeNull();
+  state.acceptArrival(
+    '/history',
+    '/inventory',
+    4,
+    'https://inventory.invalid/inventory',
+  );
+  expect(state.arrivalSnapshot()).toBeNull();
+  state.resume();
+  state.acceptArrival(
+    'https://other.invalid/history',
+    '/inventory',
+    4,
+    'https://inventory.invalid/inventory',
+  );
+  expect(state.arrivalSnapshot()).toBeNull();
+});
+
+it('native arrival retirement preserves the approved title origin for a new application Back event', () => {
+  const state = createRouteMotionState();
+  state.supportArrival(true);
+  const target = titleTarget(record, original, holding)!;
+  state.arm(target);
+  state.acceptArrival(
+    target.detailPath,
+    target.listHref,
+    1,
+    'https://inventory.invalid/inventory',
+  );
+  state.finishArrival();
+  state.finish();
+  expect(state.arrivalSnapshot()).toBeNull();
+  expect(state.snapshot()).toBeNull();
+  expect(state.backTarget(record, original)).toEqual(target);
+  state.retire();
+  expect(state.backTarget(record, original)).toBeNull();
+});
+
+it('observer retirement withdraws active generic/title approval while preserving the approved origin', () => {
+  const state = createRouteMotionState();
+  state.supportArrival(true);
+  const target = titleTarget(record, original, holding)!;
+  state.arm(target);
+  state.acceptArrival(
+    target.detailPath,
+    target.listHref,
+    1,
+    'https://inventory.invalid/inventory',
+  );
+  state.supportArrival(false);
+  expect(state.arrivalSupportSnapshot()).toBe(false);
+  expect(state.arrivalSnapshot()).toBeNull();
+  expect(state.snapshot()).toBeNull();
+  expect(state.backTarget(record, original)).toEqual(target);
+  state.supportArrival(true);
+  expect(state.arrivalSnapshot()).toBeNull();
+  expect(state.snapshot()).toBeNull();
+});
+
+it('matches only the canonical or recorded raw results scope for an app pair', () => {
+  const target = titleTarget(
+    record,
+    '/inventory?q=USB#inventory-row-2',
+    holding,
+    rawAlias,
+  )!;
+  expect(matchesTitleListRoute(target, rawAlias)).toBe(true);
+  expect(matchesTitleListRoute(target, '/inventory?q=USB')).toBe(true);
+  expect(matchesTitleListRoute(target, '/inventory?q=USB&status=active')).toBe(
+    false,
+  );
+  expect(matchesTitleListRoute(target, rawAlias + '&unrelated=true')).toBe(
+    false,
+  );
+  const raw = routeKey('/inventory', { q: ['  USB  ', 'opaque'] });
+  const repeated = titleTarget(
+    record,
+    '/inventory?q=USB#inventory-row-2',
+    holding,
+    raw,
+  )!;
+  expect(
+    matchesTitleListRoute(
+      repeated,
+      routeKey('/inventory', { q: ['  USB  ', 'different'] }),
+    ),
+  ).toBe(false);
+});
+
+it.each([
+  '/settings',
+  'https://other.invalid/inventory',
+  '/inventory#inventory-row-2',
+])('cannot record an unsupported raw source as a list alias (%s)', (raw) => {
+  expect(
+    titleTarget(record, '/inventory?q=USB#inventory-row-2', holding, raw),
+  ).toBeNull();
+});
+
+it.each([
+  '/inventory?category=a&category=b&q=USB+Cable&type=quantity',
+  '/inventory?category=a&category=b&q=USB%20Cable&type=quantity#inventory-row-2',
+])(
+  'app Back preserves semantic query identity and the separately validated anchor (%s)',
+  (destination) => {
+    const state = createRouteMotionState();
+    const target = titleTarget(record, original, holding)!;
+    state.arm(target);
+    state.finish();
+    expect(state.snapshot()).toBeNull();
+    expect(
+      state.backTarget(
+        record,
+        destination + (destination.includes('#') ? '' : '#inventory-row-2'),
+      ),
+    ).toEqual(target);
+  },
+);
+
+it.each([
+  '/inventory?category=b&category=a&q=USB+Cable&type=quantity',
+  '/inventory?category=a&q=USB+Cable&type=quantity',
+  '/inventory?category=a&category=b&q=USB+Cable&type=asset',
+  '/inventory?category=a&category=b&q=USB+Cable&type=quantity#inventory-row-1',
+  '/inventory?category=a&category=b&q=USB+Cable&type=quantity#arbitrary',
+  'https://other.invalid/inventory?category=a&category=b&q=USB+Cable&type=quantity',
+])(
+  'app Back rejects changed filter/repeated-value semantics or an unrelated anchor/origin (%s)',
+  (destination) => {
+    const state = createRouteMotionState();
+    const target = titleTarget(record, original, holding)!;
+    state.arm(target);
+    state.finish();
+    expect(state.backTarget(record, destination)).toBeNull();
+  },
+);

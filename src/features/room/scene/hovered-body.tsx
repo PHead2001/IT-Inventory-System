@@ -1,7 +1,9 @@
 'use client';
+import { useSceneCurrent } from './scene-current';
 import { useFrame, useThree } from '@react-three/fiber';
 import {
   useEffect,
+  useCallback,
   useLayoutEffect,
   useRef,
   useSyncExternalStore,
@@ -32,11 +34,15 @@ function fineHoverSnapshot() {
   );
 }
 export function useFineHoverPointer() {
-  return useSyncExternalStore(
-    subscribeFineHover,
-    fineHoverSnapshot,
-    () => false,
+  const isCurrent = useSceneCurrent();
+  const subscribe = useCallback(
+    (listener: () => void) =>
+      subscribeFineHover(() => {
+        if (isCurrent()) listener();
+      }),
+    [isCurrent],
   );
+  return useSyncExternalStore(subscribe, fineHoverSnapshot, () => false);
 }
 
 /** Only this visual child lifts; measured parents, logical hitboxes and child nodes stay put. */
@@ -55,6 +61,7 @@ export function HoveredBody({
     finish: () => void;
   } | null>(null);
   const effects = useOptionalSceneEffects();
+  const isCurrent = useSceneCurrent(effects);
   const hoveredCode = useVisualHoverCode();
   const fine = useFineHoverPointer();
   const reduced = useEffectiveReducedMotion();
@@ -62,17 +69,17 @@ export function HoveredBody({
   const hovered =
     !!node.interaction?.selectable && node.locationCode === hoveredCode;
   useLayoutEffect(() => {
-    if (!effects || !group.current) return;
+    if (!isCurrent() || !effects || !group.current) return;
     return effects.registerVisual(
       node.id,
       node.locationCode ?? null,
       group.current,
     );
-  }, [effects, node.id, node.locationCode]);
+  }, [effects, node.id, node.locationCode, isCurrent]);
   useEffect(() => {
     motion.current?.finish();
     motion.current = null;
-    if (!group.current) return;
+    if (!isCurrent() || !group.current) return;
     const to = new Vector3(
       0,
       hovered && fine && !reduced
@@ -97,7 +104,7 @@ export function HoveredBody({
       };
     }
     invalidate();
-  }, [effects, node.id, hovered, fine, reduced, scene, invalidate]);
+  }, [effects, node.id, hovered, fine, reduced, scene, invalidate, isCurrent]);
   useEffect(
     () => () => {
       motion.current?.finish();
@@ -106,7 +113,7 @@ export function HoveredBody({
     [],
   );
   useFrame(() => {
-    if (!group.current || !motion.current) return;
+    if (!isCurrent() || !group.current || !motion.current) return;
     const current = motion.current;
     const t = Math.min(
       1,

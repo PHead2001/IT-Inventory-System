@@ -1,12 +1,18 @@
+import { CopyTechnicalDetails } from '@/components/copy-technical-details';
 import {
   historySummary,
   historyEventTitle,
   assignmentEndpointSummary,
 } from '../history-summary';
 import { RecordStatus } from '@/components/record-status';
+import { InventoryRecordLink } from '@/components/experience/record-transition';
+import {
+  inventoryHolding,
+  recordHoldingKey,
+} from '@/components/experience/route-motion-state';
 import { ShowInRoom } from '@/features/room/show-in-room';
 import { OperationalTimestamp } from '@/components/operational-time';
-import Link from 'next/link';
+import Link from '@/components/experience/route-link';
 import { Box } from 'lucide-react';
 import type { ReactNode } from 'react';
 import { countLabel } from '@/lib/count';
@@ -40,23 +46,32 @@ export function LocationCode({ code }: { code: string }) {
 }
 export function InventoryCount({
   result,
+  compact = false,
 }: {
   result: PageResult<InventoryResult>;
+  compact?: boolean;
 }) {
   return (
     <div className="experience-muted text-sm tabular-nums">
       <p>{countLabel(result.total, 'matching row')}</p>
-      {result.rows.length > 0 && (
-        <p className="mt-1 text-xs">
-          On this page: {pageInventoryCounts(result.rows)}
-        </p>
-      )}
-      {pageDistinctQuantityProducts(result.rows) > 0 && (
-        <p className="mt-1 text-xs">
-          Distinct quantity products on this page:{' '}
-          {pageDistinctQuantityProducts(result.rows)} (overlaps the row counts).
-        </p>
-      )}
+      {result.rows.length > 0 &&
+        (!compact ||
+          result.rows.length > 1 ||
+          result.total > result.rows.length) && (
+          <p className="mt-1 text-xs">
+            On this page: {pageInventoryCounts(result.rows)}
+          </p>
+        )}
+      {pageDistinctQuantityProducts(result.rows) > 0 &&
+        (!compact ||
+          result.rows.filter((row) => row.kind === 'quantity').length >
+            pageDistinctQuantityProducts(result.rows)) && (
+          <p className="mt-1 text-xs">
+            Distinct quantity products on this page:{' '}
+            {pageDistinctQuantityProducts(result.rows)} (overlaps the row
+            counts).
+          </p>
+        )}
     </div>
   );
 }
@@ -88,21 +103,35 @@ export function InventoryRows({
   fileSummaries = [],
   emptyState,
   returnTo,
+  currentLocationId,
 }: {
   rows: InventoryResult[];
   fileSummaries?: FileListSummary[];
   emptyState?: ReactNode;
   returnTo?: string;
+  currentLocationId?: string;
 }) {
   if (!rows.length)
     return (
       emptyState ?? <p className={panel}>No inventory matches these filters.</p>
     );
+  const holdingKeys = rows.map((row) =>
+    recordHoldingKey(row, inventoryHolding(row)),
+  );
+  const holdingCounts = new Map<string, number>();
+  holdingKeys.forEach((key) => {
+    if (key) holdingCounts.set(key, (holdingCounts.get(key) ?? 0) + 1);
+  });
   return (
     <ul className={`experience-surface ${styles.list}`}>
       {rows.map((row, index) => {
         const summary = fileSummaries.find(
           (item) => item.kind === row.kind && item.id === row.id,
+        );
+        const hideCurrentLocation = Boolean(
+          currentLocationId &&
+          !row.site &&
+          row.location?.id === currentLocationId,
         );
         const recordHref = inventoryRecordHref(
           row.kind,
@@ -120,7 +149,9 @@ export function InventoryRows({
             }
             className={styles.row}
           >
-            <div className={styles.rowGrid}>
+            <div
+              className={`${styles.rowGrid}${hideCurrentLocation ? ' ' + styles.rowGridWithoutLocation : ''}`}
+            >
               <div className={styles.identity}>
                 <span
                   className={styles.thumbnail}
@@ -136,9 +167,23 @@ export function InventoryRows({
                   )}
                 </span>
                 <div className="min-w-0">
-                  <Link className={styles.name} href={recordHref}>
+                  <InventoryRecordLink
+                    className={styles.name}
+                    href={recordHref}
+                    record={{ kind: row.kind, id: row.id }}
+                    holding={inventoryHolding(row)}
+                    pairable={
+                      holdingKeys[index] !== null &&
+                      holdingCounts.get(holdingKeys[index]!) === 1
+                    }
+                    returnTo={
+                      returnTo
+                        ? `${returnTo}#${inventoryRowAnchor(index)}`
+                        : undefined
+                    }
+                  >
                     {row.name}
-                  </Link>
+                  </InventoryRecordLink>
                   <p className={styles.meta}>
                     {row.categoryName} ·{' '}
                     {row.kind === 'quantity'
@@ -148,7 +193,8 @@ export function InventoryRows({
                   </p>
                   {row.kind === 'quantity' && row.itemCode && (
                     <p className={styles.meta}>
-                      Item code (SKU): {row.itemCode}
+                      Item code (SKU):{' '}
+                      <span className="experience-code">{row.itemCode}</span>
                     </p>
                   )}
                 </div>
@@ -185,30 +231,35 @@ export function InventoryRows({
                     </span>
                   )}
               </div>
-              <div className={styles.location}>
-                <span className={styles.label}>Storage / custody</span>
-                {row.site ? (
-                  <Link
-                    className="text-cyan-300 underline [overflow-wrap:anywhere]"
-                    href={`/sites/${encodeURIComponent(row.site.code)}`}
-                  >
-                    Assigned to {row.site.name} ({row.site.code}) · no room
-                    model
-                  </Link>
-                ) : row.location ? (
-                  <>
-                    {row.status === 'retired' ? 'Last recorded storage: ' : ''}
-                    <LocationLink location={row.location} />
-                  </>
-                ) : (
-                  'No positive stock or active site holding — unlocated definition'
-                )}
-              </div>
+              {!hideCurrentLocation && (
+                <div className={styles.location}>
+                  <span className={styles.label}>Storage / custody</span>
+                  {row.site ? (
+                    <Link
+                      className="text-cyan-300 underline [overflow-wrap:anywhere]"
+                      href={`/sites/${encodeURIComponent(row.site.code)}`}
+                    >
+                      Assigned to {row.site.name} ({row.site.code}) · no room
+                      model
+                    </Link>
+                  ) : row.location ? (
+                    <>
+                      {row.status === 'retired'
+                        ? 'Last recorded storage: '
+                        : ''}
+                      <LocationLink location={row.location} />
+                    </>
+                  ) : (
+                    'No positive stock or active site holding — unlocated definition'
+                  )}
+                </div>
+              )}
             </div>
             <div className={styles.footer}>
               {row.serialNumber && (
                 <span className="[overflow-wrap:anywhere]">
-                  Serial: {row.serialNumber}
+                  Serial:{' '}
+                  <span className="experience-code">{row.serialNumber}</span>
                 </span>
               )}
               {summary &&
@@ -441,7 +492,27 @@ export function HistoryList({
                       {change.field.replaceAll('_', ' ')}
                     </dt>
                     <dd className="whitespace-pre-wrap break-words text-slate-400">
-                      {change.before || 'Not set'} → {change.after || 'Not set'}
+                      {change.presentation === 'code' ? (
+                        <>
+                          <span
+                            className={
+                              change.before ? 'experience-code' : undefined
+                            }
+                          >
+                            {change.before || 'Not set'}
+                          </span>{' '}
+                          →{' '}
+                          <span
+                            className={
+                              change.after ? 'experience-code' : undefined
+                            }
+                          >
+                            {change.after || 'Not set'}
+                          </span>
+                        </>
+                      ) : (
+                        `${change.before || 'Not set'} → ${change.after || 'Not set'}`
+                      )}
                     </dd>
                   </div>
                 ))}
@@ -463,16 +534,14 @@ export function HistoryList({
               <summary className="min-h-11 cursor-pointer py-2">
                 Technical event details
               </summary>
-              <p>
-                Event: {event.kind}:{event.id}
-              </p>
-              <p>Record: {event.entityId}</p>
+              <CopyTechnicalDetails
+                details={`Event: ${event.kind}:${event.id}\nOperation type: ${event.eventType}\nRecord: ${event.entityId}\nCustody event: ${event.assignment?.eventId ?? 'None'}\nRecorded instant: ${event.at}`}
+              />
               <p>
                 Record name is the current name, not a recorded name snapshot.
               </p>
               {event.assignment && (
                 <>
-                  <p>Custody event: {event.assignment.eventId}</p>
                   <p>
                     Custody endpoint labels are recorded snapshots from this
                     event.

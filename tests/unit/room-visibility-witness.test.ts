@@ -1,5 +1,6 @@
 import { afterEach, expect, it, vi } from 'vitest';
 import type { Page } from '@playwright/test';
+import { LineSegments2 } from '../../node_modules/three-stdlib/lines/LineSegments2.js';
 import {
   BoxGeometry,
   DataTexture,
@@ -17,6 +18,7 @@ import {
 import {
   roomVisibilityWitnesses,
   roomVisibilityWitnessReport,
+  roomRayWitnessAt,
   captureRoomWitness,
   type WitnessSnapshot,
   type WitnessTriangle,
@@ -26,7 +28,10 @@ afterEach(() => {
   Reflect.deleteProperty(window, '__roomWitnessStores');
   vi.restoreAllMocks();
 });
-function capture(material: MeshBasicMaterial | MeshBasicMaterial[]) {
+function capture(
+  material: MeshBasicMaterial | MeshBasicMaterial[],
+  edges = false,
+) {
   const scene = new Scene(),
     camera = new OrthographicCamera(-2, 2, 2, -2, 0.1, 100);
   camera.position.set(0, 0, 5);
@@ -35,6 +40,13 @@ function capture(material: MeshBasicMaterial | MeshBasicMaterial[]) {
   const target = new Mesh(new BoxGeometry(), material);
   target.userData.roomHoverTarget = { code: 'DRAWER' };
   scene.add(target);
+  if (edges) {
+    const edge = new LineSegments2();
+    edge.geometry.setPositions([100, 100, 0, 101, 100, 0]);
+    edge.raycast = () => {};
+    edge.userData.roomHoverTarget = { code: 'PHANTOM' };
+    scene.add(edge);
+  }
   scene.updateMatrixWorld();
   const surface = document.createElement('div'),
     canvas = document.createElement('canvas');
@@ -61,6 +73,18 @@ function capture(material: MeshBasicMaterial | MeshBasicMaterial[]) {
 }
 it('captures all six actual BoxGeometry groups with a single material', async () => {
   expect((await capture(new MeshBasicMaterial())).triangles).toHaveLength(12);
+});
+it('excludes installed Drei edge extrusion triangles while retaining physical owner and mesh provenance', async () => {
+  const scene = await capture(new MeshBasicMaterial(), true);
+  expect(scene.triangles).toHaveLength(12);
+  expect(
+    scene.triangles.every(
+      (face) => face.code === 'DRAWER' && face.sourceMesh === 0,
+    ),
+  ).toBe(true);
+  expect(scene.meshes).toEqual([
+    { index: 0, topology: 'triangles', geometry: 'box' },
+  ]);
 });
 it('uses material indexes for actual BoxGeometry material arrays', async () => {
   const materials = Array.from(
@@ -160,6 +184,23 @@ function snapshot(
     masks: [],
   };
 }
+it('diagnostic rays independently distinguish target, opaque foreground and the actual shifted pointer', () => {
+  const scene = snapshot([
+    ...plane('DRAWER', -1, 1, 0),
+    ...plane('FRONT', -0.5, 0.5, 1),
+  ]);
+  const expected = roomVisibilityWitnesses(scene).get('DRAWER')![0];
+  expect(roomRayWitnessAt(scene, expected).code).toBe('DRAWER');
+  expect(roomRayWitnessAt(scene, { x: 200, y: 200 }).code).toBe('FRONT');
+  expect(roomRayWitnessAt(scene, { x: -1, y: 200 })).toEqual({
+    code: null,
+    distance: null,
+    inside: false,
+  });
+  expect(() => roomRayWitnessAt(scene, { x: NaN, y: 0 })).toThrow(
+    'input bound',
+  );
+});
 it('finds partially exposed edge patches even when an opaque unbound blocker hides the center', () => {
   const result = roomVisibilityWitnesses(
     snapshot([...plane('DRAWER', -1, 1, 0), ...plane(null, -0.5, 0.5, 1)]),

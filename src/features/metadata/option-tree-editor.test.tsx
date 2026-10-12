@@ -1,8 +1,16 @@
 import { useState } from 'react';
-import { describe, expect, it } from 'vitest';
-import { fireEvent, render, screen, within } from '@testing-library/react';
+import { describe, expect, it, vi } from 'vitest';
+import {
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+} from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { ChoiceDefaultEditor, OptionTreeEditor } from './option-tree-editor';
 import type { Field } from './designer-model';
+import * as designerModel from './designer-model';
 const id = (n: number) =>
   `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
 const base: Field = {
@@ -18,11 +26,21 @@ const base: Field = {
     { id: id(4), label: 'Ethernet', active: true },
   ],
 };
-function Editor({ initial = base }: { initial?: Field }) {
+function Editor({
+  initial = base,
+  publishedOptions,
+}: {
+  initial?: Field;
+  publishedOptions?: Field['options'];
+}) {
   const [field, setField] = useState(initial);
   return (
     <>
-      <OptionTreeEditor field={field} change={setField} />
+      <OptionTreeEditor
+        field={field}
+        change={setField}
+        publishedOptions={publishedOptions}
+      />
       <output data-testid="field">{JSON.stringify(field)}</output>
     </>
   );
@@ -39,6 +57,41 @@ const tools = (name: string) => {
 const current = () =>
   JSON.parse(screen.getByTestId('field').textContent!) as Field;
 describe('choice editor', () => {
+  it('keeps unchanged published ambiguity editable but flags a spelling change and cross-parent new choice', () => {
+    const initial: Field = {
+      ...base,
+      options: [
+        ...base.options,
+        { id: id(5), label: 'usb-c', active: true, parent_id: id(4) },
+      ],
+    };
+    render(
+      <Editor
+        initial={initial}
+        publishedOptions={structuredClone(initial.options)}
+      />,
+    );
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    fireEvent.change(
+      screen.getByRole('textbox', { name: 'Option name: USB-C' }),
+      { target: { value: ' USB-C ' } },
+    );
+    expect(screen.getAllByRole('alert')).toHaveLength(2);
+    fireEvent.change(
+      screen.getByRole('textbox', { name: 'Option name: USB-C' }),
+      { target: { value: 'USB-C' } },
+    );
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Add option' }));
+    fireEvent.change(
+      screen.getByRole('textbox', { name: 'Option name: New option' }),
+      { target: { value: 'usb-c' } },
+    );
+    expect(screen.getAllByRole('alert')).toHaveLength(3);
+    expect(current().options.find((option) => option.id === id(3))?.label).toBe(
+      'USB-C',
+    );
+  });
   it('discards an accidentally added blank leaf without altering other answers', () => {
     render(<Editor initial={{ ...base, default: id(3) }} />);
     fireEvent.click(screen.getByRole('button', { name: 'Add option' }));
@@ -216,6 +269,25 @@ describe('choice editor', () => {
     expect(current().options.at(-1)?.parent_id).toBe(id(1098));
     expect(screen.getByRole('button', { name: 'Add option' })).toBeDisabled();
   });
+  it('validates move destinations only while the move controls are open', () => {
+    const validate = vi.spyOn(designerModel, 'canReparent');
+    try {
+      render(<Editor />);
+      fireEvent.click(
+        screen.getByRole('button', { name: 'Add child option to USB' }),
+      );
+      expect(screen.getByLabelText('Option name: New option')).toHaveFocus();
+      expect(validate).not.toHaveBeenCalled();
+      tools('USB');
+      fireEvent.click(screen.getByRole('button', { name: 'Move to… USB' }));
+      expect(validate).toHaveBeenCalled();
+      validate.mockClear();
+      fireEvent.click(screen.getByRole('button', { name: 'Move to… USB' }));
+      expect(validate).not.toHaveBeenCalled();
+    } finally {
+      validate.mockRestore();
+    }
+  });
   it('preserves 64-level choices and disallows adding a 65th level', () => {
     const options = Array.from({ length: 64 }, (_, n) => ({
       id: id(n + 100),
@@ -301,6 +373,56 @@ it('reviews paste locally, cancels without changes and applies stable reviewed I
   ).not.toBeInTheDocument();
   fireEvent.click(screen.getByRole('button', { name: 'Undo pasted paths' }));
   expect(current().options).toEqual(base.options);
+});
+it('reviews asynchronous six-level paste input with duplicates before cancel, apply and undo', async () => {
+  const user = userEvent.setup();
+  const original = {
+    ...base,
+    options: [{ id: id(2), label: 'Existing root', active: true }],
+  };
+  render(<Editor initial={original} />);
+  const paths = [
+    'USB > USB-C > USB 3 > Gen 2 > Gen 3 > Gen 4',
+    'USB > USB-A',
+    'USB > Shared',
+    'Ethernet > Shared Ethernet',
+    'Labels > A\\>B',
+    'USB > USB-A',
+  ].join('\n');
+  const review = async () => {
+    await user.click(
+      screen.getByRole('button', { name: 'Paste option paths' }),
+    );
+    await waitFor(() =>
+      expect(screen.getByLabelText('Option paths')).toHaveFocus(),
+    );
+    await user.paste(paths);
+    expect(screen.getByLabelText('Option paths')).toHaveValue(paths);
+    await user.click(screen.getByRole('button', { name: 'Review paths' }));
+    expect(screen.getByText('Skipped identical paths (1)')).toBeVisible();
+    expect(screen.getByText('Conflicts (0)')).toBeVisible();
+    expect(current().options).toEqual(original.options);
+  };
+  await review();
+  await user.click(screen.getByRole('button', { name: 'Cancel paste' }));
+  expect(current().options).toEqual(original.options);
+  await review();
+  await user.click(screen.getByRole('button', { name: 'Apply paths' }));
+  const options = current().options;
+  expect(options).toHaveLength(13);
+  expect(options[0]).toEqual(original.options[0]);
+  const deepest = options.find((option) => option.label === 'Gen 4')!;
+  let depth = 0,
+    node: (typeof options)[number] | undefined = deepest;
+  while (node) {
+    depth++;
+    node = options.find((option) => option.id === node!.parent_id);
+  }
+  expect(depth).toBe(6);
+  expect(options.filter((option) => option.label === 'USB-A')).toHaveLength(1);
+  expect(options.some((option) => option.label === 'A>B')).toBe(true);
+  await user.click(screen.getByRole('button', { name: 'Undo pasted paths' }));
+  expect(current().options).toEqual(original.options);
 });
 it('blocks a retired matching path and refuses sibling-ambiguous restore and reparent', () => {
   render(

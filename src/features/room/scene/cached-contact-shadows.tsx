@@ -3,6 +3,7 @@
 import { useFrame, useThree } from '@react-three/fiber';
 import { useEffect, useRef } from 'react';
 import { DoubleSide, Mesh, type MeshBasicMaterial } from 'three';
+import { useSceneCurrent } from './scene-current';
 import type { RoomDefinition } from '../schema';
 import { createContactCapture, type ContactCapture } from './contact-capture';
 import { useSceneEffects } from './scene-effects-context';
@@ -22,6 +23,7 @@ export function CachedContactShadows({
 }) {
   const { gl, scene, invalidate } = useThree();
   const effects = useSceneEffects();
+  const isCurrent = useSceneCurrent(effects);
   const palette = useScenePalette();
   const paletteRevision = useScenePaletteRevision();
   const receiver = useRef<Mesh>(null);
@@ -32,6 +34,7 @@ export function CachedContactShadows({
   const readyFrames = useRef(0);
   const [width, depth, height] = room.dimensions;
   useEffect(() => {
+    if (!isCurrent()) return;
     const ownedReceiver = receiver.current;
     const ownedMaterial = material.current;
     failed.current = false;
@@ -46,6 +49,7 @@ export function CachedContactShadows({
         depth,
         height,
         SCENE_EFFECTS.shadowResolution,
+        isCurrent,
       );
       resources.current = owned;
       if (material.current) {
@@ -74,21 +78,26 @@ export function CachedContactShadows({
       }
       if (ownedReceiver) ownedReceiver.visible = false;
     };
-  }, [width, depth, height, quality, gl, invalidate, effects]);
+  }, [width, depth, height, quality, gl, invalidate, effects, isCurrent]);
   useEffect(
     () =>
       effects.subscribe(() => {
-        if (effects.getSnapshot().casterMotions > 0 && receiver.current)
+        if (
+          isCurrent() &&
+          effects.getSnapshot().casterMotions > 0 &&
+          receiver.current
+        )
           receiver.current.visible = false;
       }),
-    [effects],
+    [effects, isCurrent],
   );
   useEffect(() => {
+    if (!isCurrent()) return;
     if (receiver.current) receiver.current.visible = false;
     invalidate();
-  }, [paletteRevision, quality, invalidate]);
+  }, [paletteRevision, quality, invalidate, isCurrent]);
   useFrame(() => {
-    if (!receiver.current) return;
+    if (!isCurrent() || !receiver.current) return;
     const state = effects.getSnapshot();
     const key = contactCacheKey(effects, paletteRevision, quality);
     if (quality === 'off' || state.casterMotions > 0 || failed.current) {
@@ -132,6 +141,7 @@ export function CachedContactShadows({
     }
   }, -0.5);
   const light = palette.background.getHSL({ h: 0, s: 0, l: 0 }).l > 0.5;
+  if (!isCurrent()) return null;
   return (
     <mesh
       ref={receiver}

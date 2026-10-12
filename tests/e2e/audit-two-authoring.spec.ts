@@ -67,7 +67,7 @@ async function addOption(scope: Locator, label: string, parent?: string) {
   await input.fill(label);
 }
 
-async function pasteReview(scope: Locator, paths: string) {
+async function pasteReview(scope: Locator, paths: string, skipped: number) {
   await scope
     .getByRole('button', { name: 'Paste option paths', exact: true })
     .click();
@@ -77,9 +77,50 @@ async function pasteReview(scope: Locator, paths: string) {
   });
   await expect(paste.getByLabel('Option paths')).toBeFocused();
   await paste.getByLabel('Option paths').fill(paths);
+  await expect(paste.getByLabel('Option paths')).toHaveValue(paths);
   await paste
     .getByRole('button', { name: 'Review paths', exact: true })
     .click();
+  try {
+    await expect(
+      paste.getByRole('heading', {
+        name: `Skipped identical paths (${skipped})`,
+        exact: true,
+      }),
+    ).toBeVisible();
+  } catch {
+    // Bounded stage evidence only: no field text, credentials or page dump.
+    const stage = await scope.evaluate(
+      (element, expected) => {
+        const section = element.querySelector<HTMLElement>(
+          'section[aria-label="Paste option paths"]',
+        );
+        const textarea = section?.querySelector('textarea');
+        const review = section?.querySelector(
+          '[aria-label="Option path review"]',
+        );
+        return {
+          pasteAttached: Boolean(section),
+          inputExact: textarea?.value === expected.paths,
+          reviewAttached: Boolean(review),
+          skippedHeadingExact: Array.from(
+            review?.querySelectorAll('h5') ?? [],
+          ).some(
+            (heading) =>
+              heading.textContent?.trim() ===
+              `Skipped identical paths (${expected.skipped})`,
+          ),
+          inspectorHidden:
+            Boolean(element.closest('[hidden]')) ||
+            getComputedStyle(element).display === 'none',
+        };
+      },
+      { paths, skipped },
+    );
+    throw new Error(
+      `Option path review did not commit: ${JSON.stringify(stage)}`,
+    );
+  }
   return paste;
 }
 
@@ -125,11 +166,11 @@ test('nested paths are reviewed, cancelled, undone, published at six levels and 
     'USB > USB-C > USB 3 > Gen 2 > Gen 3 > Gen 4',
     'USB > USB-A',
     'USB > Shared',
-    'Ethernet > Shared',
+    'Ethernet > Shared Ethernet',
     'Labels > A\\>B',
     'USB > USB-A',
   ].join('\n');
-  let paste = await pasteReview(choices, paths);
+  let paste = await pasteReview(choices, paths, 1);
   await expect(
     paste.getByRole('heading', { name: 'Skipped identical paths (1)' }),
   ).toBeVisible();
@@ -148,7 +189,7 @@ test('nested paths are reviewed, cancelled, undone, published at six levels and 
   await expect(
     choices.getByLabel('Option name: Existing root', { exact: true }),
   ).toHaveValue('Existing root');
-  paste = await pasteReview(choices, paths);
+  paste = await pasteReview(choices, paths, 1);
   await paste.getByRole('button', { name: 'Apply paths', exact: true }).click();
   await expect(
     choices.getByLabel('Option name: Gen 4', { exact: true }),
@@ -165,11 +206,25 @@ test('nested paths are reviewed, cancelled, undone, published at six levels and 
   await expect(
     choices.getByLabel('Option name: Existing root', { exact: true }),
   ).toHaveValue('Existing root');
-  paste = await pasteReview(choices, paths);
+  paste = await pasteReview(choices, paths, 1);
   await paste.getByRole('button', { name: 'Apply paths', exact: true }).click();
+  // U403 now requires fresh labels to be distinguishable across parents too.
+  await choices
+    .getByLabel('Option name: Shared Ethernet', { exact: true })
+    .fill('Shared');
+  await expect(
+    choices.getByRole('alert').filter({ hasText: 'matches another choice' }),
+  ).toHaveCount(2);
+  await expect(
+    designer.getByRole('button', { name: 'Save changes', exact: true }),
+  ).toBeDisabled();
+  await choices
+    .getByLabel('Option name: Shared', { exact: true })
+    .last()
+    .fill('Shared Ethernet');
   await addOption(choices, ' shared ', 'USB');
   await expect(
-    choices.getByRole('alert').filter({ hasText: 'matches a sibling' }),
+    choices.getByRole('alert').filter({ hasText: 'matches another choice' }),
   ).toHaveCount(2);
   await expect(
     designer.getByRole('button', { name: 'Save changes', exact: true }),
@@ -196,7 +251,8 @@ test('nested paths are reviewed, cancelled, undone, published at six levels and 
   expect(depth).toBe(6);
   expect(
     field.options.filter((option) => option.label === 'Shared'),
-  ).toHaveLength(2);
+  ).toHaveLength(1);
+  expect(choice('Shared Ethernet').parent_id).toBe(choice('Ethernet').id);
   const originalIds = field.options.map((option) => option.id).sort();
 
   await page.goto('/inventory/quantity/new');
@@ -528,8 +584,9 @@ test('flat choice authoring rejects Unicode/case/space siblings and restores a r
     await addOption(dialog, 'Café');
     await addOption(dialog, ' CAFE\u0301 ');
     await expect(
-      dialog.getByRole('alert').filter({ hasText: 'matches a sibling' }),
+      dialog.getByRole('alert').filter({ hasText: 'matches another choice' }),
     ).toHaveCount(2);
+    await expect(dialog.locator('input[aria-invalid="true"]')).toHaveCount(2);
     await dialog
       .getByRole('button', { name: 'Add to form', exact: true })
       .click();
@@ -541,7 +598,7 @@ test('flat choice authoring rejects Unicode/case/space siblings and restores a r
       }),
     ).toHaveCount(0);
     await expect(
-      dialog.getByRole('alert').filter({ hasText: 'matches a sibling' }),
+      dialog.getByRole('alert').filter({ hasText: 'matches another choice' }),
     ).toHaveCount(2);
     const duplicate = dialog
       .getByRole('textbox', { name: 'Option name:  CAFE\u0301 ', exact: true })
@@ -549,7 +606,7 @@ test('flat choice authoring rejects Unicode/case/space siblings and restores a r
     await duplicate.locator('summary').click();
     await duplicate.getByRole('button', { name: /Retire option/ }).click();
     await expect(
-      dialog.getByRole('alert').filter({ hasText: 'matches a sibling' }),
+      dialog.getByRole('alert').filter({ hasText: 'matches another choice' }),
     ).toHaveCount(0);
     await finishField(dialog);
   }
@@ -563,7 +620,7 @@ test('flat choice authoring rejects Unicode/case/space siblings and restores a r
     await duplicate.locator('summary').click();
     await duplicate.getByRole('button', { name: /Restore option/ }).click();
     await expect(inspector.getByRole('status')).toContainText(
-      'an active sibling has the same name',
+      'an active choice in this field has the same name',
     );
     await expect(duplicate).toContainText('Retired');
     await duplicate.getByRole('textbox').fill('Café alternate');

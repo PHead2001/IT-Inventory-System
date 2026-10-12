@@ -336,3 +336,52 @@ it('restores renderer state after a mid-blur exception and does not retain sourc
     'Disposed room contact capture',
   );
 });
+
+it('makes retained contact capture and compile callbacks inert after original-session retirement and disposes exactly once', () => {
+  let current = true;
+  const capture = createContactCapture(100, 100, 96, 512, () => current);
+  const fake = renderer();
+  const store = createSceneEffectsStore('room:1');
+  const parent = new Group();
+  parent.add(new Mesh(new BoxGeometry(), new MeshBasicMaterial()));
+  store.registerVisual('drawer', 'ITC-D01', parent);
+  let compile!: MeshDepthMaterial['onBeforeCompile'];
+  const callbacks: { shaderError: WebGLRenderer['debug']['onShaderError'] } = {
+    shaderError: null,
+  };
+  fake.gl.render.mockImplementationOnce((scene) => {
+    compile = ((scene.children[0] as Mesh).material as MeshDepthMaterial)
+      .onBeforeCompile;
+    callbacks.shaderError = fake.gl.debug.onShaderError;
+  });
+  capture.capture(fake.typed, store.getCasters(), new Color());
+  const targetDispose = vi.spyOn(WebGLRenderTarget.prototype, 'dispose');
+  current = false;
+  fake.gl.render.mockClear();
+  fake.gl.setRenderTarget.mockClear();
+  const before = fake.state();
+  const shader = {
+    uniforms: {},
+    vertexShader: ShaderLib.depth.vertexShader,
+    fragmentShader: ShaderLib.depth.fragmentShader,
+  } as Parameters<MeshDepthMaterial['onBeforeCompile']>[0];
+  const fragment = shader.fragmentShader;
+  compile(shader, fake.typed);
+  callbacks.shaderError?.(
+    {} as WebGLRenderingContext,
+    {} as Parameters<NonNullable<WebGLRenderer['debug']['onShaderError']>>[1],
+    {} as WebGLShader,
+    {} as WebGLShader,
+  );
+  capture.capture(fake.typed, store.getCasters(), new Color());
+  expect(shader.fragmentShader).toBe(fragment);
+  expect(shader.uniforms).toEqual({});
+  expect(fake.gl.render).not.toHaveBeenCalled();
+  expect(fake.gl.setRenderTarget).not.toHaveBeenCalled();
+  expect(fake.state()).toEqual(before);
+  capture.dispose();
+  capture.dispose();
+  expect(targetDispose).toHaveBeenCalledTimes(2);
+  compile(shader, fake.typed);
+  expect(shader.uniforms).toEqual({});
+});

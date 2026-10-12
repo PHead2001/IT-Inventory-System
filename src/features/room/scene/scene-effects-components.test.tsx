@@ -488,3 +488,42 @@ it('disposes a successful capture lifetime when a same-sized room replaces the e
   expect(oldResource.dispose).toHaveBeenCalledOnce();
   expect(state.resource.dispose).toHaveBeenCalledOnce();
 });
+
+it('retained hover and contact frame callbacks cannot move, capture, invalidate or publish after store retirement', () => {
+  state.store.reconcileHover('ITC-D01', true);
+  const hovered = render(hover());
+  const savedHover = state.frame!;
+  const visual = state.group!;
+  const resting = visual.position.clone();
+  state.store.dispose();
+  invalidate.mockClear();
+  const before = state.store.getSnapshot();
+  now = 200;
+  act(savedHover);
+  expect(visual.position.equals(resting)).toBe(true);
+  expect(state.store.getSnapshot()).toBe(before);
+  expect(invalidate).not.toHaveBeenCalled();
+  hovered.unmount();
+  state.store = createSceneEffectsStore('contacts');
+  const group = new Group();
+  group.add(new Mesh(new BoxGeometry(1, 1, 1), new MeshBasicMaterial()));
+  state.store.registerVisual('drawer', 'ITC-D01', group);
+  const contacts = render(
+    <CachedContactShadows room={room} quality="standard" />,
+  );
+  const savedCapture = state.frame!;
+  state.store.dispose();
+  invalidate.mockClear();
+  canvas.dataset.contactStatus = 'retired';
+  act(() => {
+    savedCapture();
+    savedCapture();
+  });
+  expect(state.resource.capture).not.toHaveBeenCalled();
+  expect(invalidate).not.toHaveBeenCalled();
+  expect(canvas.dataset.contactStatus).toBe('retired');
+  contacts.unmount();
+  expect(state.resource.dispose).toHaveBeenCalledOnce();
+  act(savedCapture);
+  expect(state.resource.capture).not.toHaveBeenCalled();
+});

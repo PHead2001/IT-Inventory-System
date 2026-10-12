@@ -1,6 +1,7 @@
 'use client';
+import { useRouteRouter as useRouter } from '@/components/experience/route-pending';
 import { useId, useState, useSyncExternalStore } from 'react';
-import { useRouter } from 'next/navigation';
+
 import { Button } from '@/components/ui/button';
 import { field, panel } from '@/features/inventory/components/read-ui';
 import {

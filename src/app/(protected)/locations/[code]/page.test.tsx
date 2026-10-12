@@ -1,4 +1,15 @@
-import { render, screen } from '@testing-library/react';
+// Protected page readiness receives the same mocked request actor as its reads.
+vi.mock('server-only', () => ({}));
+vi.mock('@/lib/auth/session.server', () => ({
+  requireMember: async () => ({
+    member: {
+      user_id: 'route-test-actor',
+      role: 'staff',
+      can_manage_configuration: true,
+    },
+  }),
+}));
+import { render, screen, within } from '@testing-library/react';
 import { expect, it, vi } from 'vitest';
 const m = vi.hoisted(() => ({ inventory: vi.fn(), redirect: vi.fn() }));
 const location = {
@@ -45,10 +56,16 @@ it('shows selected normalized scope and matching CSV, retaining filters and rese
     'href',
     '/locations/ITO?q=Cable',
   );
-  expect(screen.getByText(/Current scope: All statuses/)).toBeVisible();
+  expect(screen.queryByText(/Current scope:/)).not.toBeInTheDocument();
+  const actions = screen.getByRole('navigation', { name: 'Location actions' });
+  expect(within(actions).getAllByRole('link')).toHaveLength(4);
   expect(
-    screen.getByRole('link', { name: 'Download location inventory CSV' }),
-  ).toHaveAttribute(
+    within(actions).getByRole('link', { name: 'Print label' }),
+  ).toHaveAttribute('href', '/labels?location=ITO');
+  expect(
+    within(actions).getByRole('link', { name: 'History' }),
+  ).toHaveAttribute('href', '/history?location=ITO');
+  expect(screen.getByRole('link', { name: 'Export' })).toHaveAttribute(
     'href',
     '/api/exports/inventory?q=Cable&status=all&location=ITO&displayTimeZone=UTC',
   );
@@ -62,3 +79,4 @@ it('shows selected normalized scope and matching CSV, retaining filters and rese
     screen.getByRole('link', { name: /IT Office \/ General Storage/ }),
   ).not.toHaveTextContent('IT Office /');
 });
+vi.mock('server-only', () => ({}));

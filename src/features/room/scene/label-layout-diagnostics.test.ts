@@ -2,11 +2,111 @@ import { expect, it } from 'vitest';
 import { layoutLabels, type LabelRect } from './label-layout';
 import {
   createLabelLayoutDiagnostics,
+  createRoomVisibilityDiagnostics,
   LABEL_DIAGNOSTIC_MAX_BYTES,
   LABEL_DIAGNOSTIC_MAX_ENTRIES,
 } from './label-layout-diagnostics';
+import type { ExposedAnchorResult } from './exposed-anchor';
 
 const viewport = { left: 0, top: 0, right: 375, bottom: 500 };
+const visibilityWork = {
+  triangles: 12,
+  overlaps: 0,
+  fragments: 0,
+  operations: 4,
+  revisionReused: false,
+  rays: 1,
+  elapsedMilliseconds: 0.5,
+};
+it('visibility observation is opt-in, copies current statuses/work, and replaces the preceding revision', () => {
+  const off = {} as Window;
+  expect(createRoomVisibilityDiagnostics(off)).toBeNull();
+  expect(Object.keys(off)).toEqual([]);
+  const target = { __roomLayoutDiagnosticsEnabled: true } as Window;
+  const capture = createRoomVisibilityDiagnostics(target)!;
+  const result = {
+    status: 'pending' as const,
+    reason: 'frame time allowance exhausted',
+    stats: { ...visibilityWork },
+  };
+  capture.publish(7, [{ code: 'ITC-S1A', result }]);
+  result.stats.rays = 99;
+  expect(target.__roomVisibilitySnapshot).toMatchObject({
+    revision: 7,
+    complete: true,
+    entries: [
+      {
+        code: 'ITC-S1A',
+        status: 'pending',
+        reason: 'frame time allowance exhausted',
+        work: visibilityWork,
+      },
+    ],
+  });
+  expect(
+    Object.isFrozen(target.__roomVisibilitySnapshot!.entries[0].work),
+  ).toBe(true);
+  capture.publish(8, [
+    { code: 'ITC-S1B', result: { status: 'hidden', stats: visibilityWork } },
+  ]);
+  expect(
+    target.__roomVisibilitySnapshot!.entries.map((entry) => entry.code),
+  ).toEqual(['ITC-S1B']);
+});
+it('visibility diagnostics redact unknown reasons/extra data and refuse noncanonical identities or invalid work', () => {
+  const target = { __roomLayoutDiagnosticsEnabled: true } as Window;
+  const capture = createRoomVisibilityDiagnostics(target)!;
+  capture.publish(1, [
+    {
+      code: 'ITC-S1A',
+      result: {
+        status: 'unresolved',
+        reason: 'SECRET inventory value',
+        stats: visibilityWork,
+        privateValue: 'SECRET',
+      } as ExposedAnchorResult,
+    },
+  ]);
+  expect(target.__roomVisibilitySnapshot!.entries[0].reason).toBe(
+    'unrecognized-reason',
+  );
+  expect(JSON.stringify(target.__roomVisibilitySnapshot)).not.toContain(
+    'SECRET',
+  );
+  for (const entries of [
+    [{ code: 'SECRET', result: { status: 'hidden', stats: visibilityWork } }],
+    [
+      {
+        code: 'ITC-S1A',
+        result: { status: 'hidden', stats: { ...visibilityWork, rays: NaN } },
+      },
+    ],
+    [
+      {
+        code: 'ITC-S1A',
+        result: {
+          status: 'hidden',
+          stats: { ...visibilityWork, elapsedMilliseconds: -1 },
+        },
+      },
+    ],
+    Array.from({ length: 97 }, () => ({
+      code: 'ITC-S1A',
+      result: { status: 'hidden', stats: visibilityWork },
+    })),
+  ]) {
+    capture.publish(
+      2,
+      entries as { code: string; result: ExposedAnchorResult }[],
+    );
+    expect(target.__roomVisibilitySnapshot).toEqual({
+      schema: 1,
+      revision: 2,
+      complete: false,
+      entries: [],
+    });
+  }
+});
 const input = (): LabelRect => ({
   id: 'shelf-1a',
   locationCode: 'ITC-S1A',

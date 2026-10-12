@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   BoxGeometry,
   Group,
@@ -30,6 +30,13 @@ function fixture() {
 }
 const viewport = { left: 0, top: 0, right: 320, bottom: 320 };
 describe('exposed location anchors', () => {
+  // These cases prove geometry, not the frame deadline. The compatibility
+  // helper reports pending work as null, so a host scheduling pause must not
+  // masquerade as a hidden face. Runtime/budget-resumption tests keep 8ms.
+  beforeEach(() => {
+    vi.spyOn(performance, 'now').mockReturnValue(0);
+  });
+  afterEach(() => vi.restoreAllMocks());
   it.each([
     { cameraPosition: [0, 0, -20], preferred: [0, 0, 1] },
     { cameraPosition: [10, -12, -20], preferred: [0, 0, 0] },

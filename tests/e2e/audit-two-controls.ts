@@ -6,15 +6,8 @@ import { chooseLocation } from './location-picker';
 import { metadataReviewButton, metadataSaveButton } from './metadata-controls';
 import { openRecordTask } from './record-task-controls';
 
-/** A client-side result link can update its URL before the task launcher mounts. */
+/** Use the canonical task helper's attachment/actionability contract on revisit. */
 export async function auditOpenMetadataTask(page: Page, formName: string) {
-  const form = page.getByRole('form', { name: formName, exact: true });
-  const launcher = page
-    .getByRole('region', { name: 'Record tasks' })
-    .getByRole('button', { name: 'Edit details', exact: true });
-  await expect
-    .poll(async () => (await form.isVisible()) || (await launcher.isVisible()))
-    .toBe(true);
   return openRecordTask(page, formName);
 }
 
@@ -53,7 +46,10 @@ export async function auditCategory(page: Page) {
   await page.goto('/settings/categories');
   await page.getByLabel('Display name').fill(name);
   await page.getByRole('button', { name: 'Add category' }).click();
-  await expect(page.getByRole('status')).toContainText('Category added.');
+  const added = `Category added: ${name}.`;
+  await expect(page.getByRole('status').filter({ hasText: added })).toHaveText(
+    added,
+  );
   await page.goto('/settings/forms');
   await page.getByRole('link', { name, exact: true }).click();
   await expect(
@@ -71,6 +67,7 @@ export async function auditCreateRecord(
   kind: 'quantity' | 'asset',
   category: string,
   name: string,
+  identifier?: string,
 ) {
   await page.goto(`/inventory/${kind === 'asset' ? 'assets' : 'quantity'}/new`);
   const form = page.getByRole('form', {
@@ -82,6 +79,12 @@ export async function auditCreateRecord(
     .getByLabel('Category', { exact: true })
     .selectOption({ label: category });
   await form.getByLabel('Manufacturer', { exact: true }).fill('Original maker');
+  if (identifier)
+    await form
+      .getByLabel(kind === 'asset' ? 'Asset tag' : 'Item code (SKU)', {
+        exact: true,
+      })
+      .fill(identifier);
   if (kind === 'asset')
     await chooseLocation(form, 'Current location', 'ITC-RED');
   await metadataReviewButton(form).click();

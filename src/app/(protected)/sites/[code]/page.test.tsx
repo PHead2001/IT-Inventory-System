@@ -1,3 +1,4 @@
+vi.mock('server-only', () => ({}));
 import { render, screen } from '@testing-library/react';
 import { beforeEach, expect, it, vi } from 'vitest';
 import SitePage from './page';
@@ -182,3 +183,4 @@ it('labels a quantity count correction at its recorded site without movement or 
   expect(row).not.toHaveTextContent('No destination');
   expect(row).not.toHaveTextContent('5 units');
 });
+vi.mock('server-only', () => ({}));

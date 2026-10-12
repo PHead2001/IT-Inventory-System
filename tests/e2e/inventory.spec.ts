@@ -1,3 +1,12 @@
+import { randomUUID } from 'node:crypto';
+import { expectPrivateTitleExcluded } from '../helpers/private-title';
+import { interfaceTest, interfaceLogin } from './interface-fixtures';
+import { withinViewport } from './viewport-controls';
+import {
+  acceptanceCommand,
+  acceptanceFixtures,
+  acceptanceLogin,
+} from './audit-three-acceptance-fixtures';
 import {
   beginNewRecordTransaction,
   expectStableReceiptAction,
@@ -25,6 +34,47 @@ async function choose(form: Locator, label: string, code: string) {
 }
 async function openForm(page: Page, name: string) {
   return openRecordTask(page, name);
+}
+async function savedMoveCompletion(page: Page) {
+  const entityId = new URL(page.url()).pathname.split('/').at(-1)!;
+  const entries = await page.evaluate(
+    (entityId) =>
+      Object.keys(sessionStorage)
+        .filter(
+          (key) =>
+            key.startsWith('it-inventory-move-completion:v1:') &&
+            key.endsWith(`:${entityId}:quantity_move`),
+        )
+        .map((key) => ({ key, raw: sessionStorage.getItem(key)! })),
+    entityId,
+  );
+  expect(entries).toHaveLength(1);
+  const pointer = JSON.parse(entries[0].raw) as {
+    entityId: string;
+    eventId: string;
+  };
+  expect(pointer.entityId).toBe(entityId);
+  expect(Object.keys(pointer).sort()).toEqual(['entityId', 'eventId']);
+  return { ...entries[0], pointer };
+}
+async function openRecordHistory(
+  page: Page,
+  name: 'View all item history' | 'View all asset history',
+) {
+  const link = page.getByRole('link', { name, exact: true });
+  const href = await link.getAttribute('href');
+  expect(href).toBeTruthy();
+  const target = new URL(href!, page.url()).href;
+  await link.click();
+  await expect(page).toHaveURL(target);
+  // The outgoing detail timeline remains usable during same-binding admission.
+  // Its event headings/disclosures also exist on the incoming history page.
+  await expect(
+    page.getByRole('heading', { name: 'Inventory history', exact: true }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole('form', { name: 'Filter history' }),
+  ).toBeVisible();
 }
 async function confirm(form: Locator, name: string) {
   if (
@@ -165,6 +215,12 @@ test('empty normalized edits leave history unchanged, Receive defaults once, and
       .getByLabel('Reason (required)')
       .fill('Second holding fixture');
     await confirm(receive, 'Receive stock');
+    // Confirm clicks dispatch the action; wait for its committed result before
+    // a new document reads the holdings used to choose the next Receive default.
+    await expect(
+      receive.getByRole('status').filter({ hasText: 'Saved successfully.' }),
+    ).toBeVisible();
+    await version(page, 2);
     await page.goto(detailUrl);
     const multiple = await openForm(page, 'Receive stock');
     await expect(
@@ -317,7 +373,7 @@ test('a saved event link survives more than one page of newer history and later 
   }
 });
 
-test('quantity move rejects an overdraw and retains committed receipt through data refresh and reload', async ({
+test('quantity move rejects an overdraw and retains its historical receipt when explicit selection opens a fresh move after reload', async ({
   page,
 }) => {
   test.setTimeout(90_000);
@@ -371,24 +427,68 @@ test('quantity move rejects an overdraw and retains committed receipt through da
       'After this move: Red Container 1 unit; Black Container 1 unit',
     );
     await expect(form.getByRole('status')).toBeFocused();
+    const committedAt = await form
+      .getByRole('status')
+      .locator('time')
+      .getAttribute('datetime');
+    const saved = await savedMoveCompletion(page);
     await form.getByRole('button', { name: 'Refresh balances' }).click();
     await expect(form.getByRole('status')).toContainText('move completed');
     await expect(
       form.getByRole('button', { name: 'Review move stock' }),
     ).toHaveCount(0);
+    await expectStableReceiptAction(page, 'Move more');
     await page.reload();
     form = await openForm(page, 'Move stock');
+    await expect(form.getByLabel('Quantity to move')).toHaveValue('');
+    await expect(
+      form.getByRole('combobox', {
+        name: 'Destination location',
+        exact: true,
+      }),
+    ).toHaveText(/^Select a location/);
+    await expect(
+      form.getByRole('button', { name: 'Review move stock' }),
+    ).toBeEnabled();
+    await expect(form.getByRole('button', { name: 'Move more' })).toHaveCount(
+      0,
+    );
     await expect(
       form.getByText('Previous move receipt', { exact: true }),
-    ).toBeVisible();
-    await expect(form.locator('time')).toBeVisible();
-    await expect(form.getByRole('status')).toContainText(
+    ).toHaveCount(0);
+    const lastMove = form.locator('details').filter({
+      has: page.locator('summary').filter({ hasText: /^Last move/ }),
+    });
+    const lastMoveSummary = lastMove.locator(':scope > summary');
+    await expect(lastMove).not.toHaveAttribute('open');
+    await expect(lastMoveSummary.locator(':scope > time')).toHaveAttribute(
+      'datetime',
+      committedAt!,
+    );
+    await lastMoveSummary.click();
+    await expect(lastMove).toContainText(
+      'Moved 1 unit from Red Container to Black Container',
+    );
+    await expect(lastMove).toContainText(
       'After this move: Red Container 1 unit; Black Container 1 unit',
     );
-    await expectStableReceiptAction(page, 'Move more');
+    expect(await savedMoveCompletion(page)).toEqual(saved);
     await version(page, 2);
-    await beginNewRecordTransaction(page, 'Move more');
-    await expect(form.getByLabel('Quantity to move')).toHaveValue('');
+    await expect(
+      page.getByRole('heading', {
+        name: 'Current stock — 2 available in storage',
+      }),
+    ).toBeVisible();
+    const originalMove = page
+      .getByRole('heading', { name: 'Physically moved', exact: true })
+      .locator('xpath=ancestor::li[1]');
+    await expect(originalMove).toHaveCount(1);
+    await expect(
+      originalMove.locator(
+        `a[href="/history/events/quantity/${saved.pointer.eventId}"]`,
+      ),
+    ).toHaveCount(1);
+    await lastMoveSummary.click();
     await choose(form, 'Source location', 'ITC-RED');
     await choose(form, 'Destination location', 'ITC-BLACK');
     await form.getByLabel('Quantity to move').fill('1');
@@ -413,7 +513,7 @@ test('quantity move rejects an overdraw and retains committed receipt through da
     await expect(
       form.getByText('Previous move receipt', { exact: true }),
     ).toHaveCount(0);
-    await page.getByRole('link', { name: 'View all item history' }).click();
+    await openRecordHistory(page, 'View all item history');
     await expect(
       page.getByRole('heading', { name: 'Physically moved', exact: true }),
     ).toHaveCount(2);
@@ -480,7 +580,7 @@ test('a separate authenticated writer changes stock after move review and reject
       form.getByRole('button', { name: 'Confirm move stock' }),
     ).toHaveCount(0);
     await page.reload();
-    await page.getByRole('link', { name: 'View all item history' }).click();
+    await openRecordHistory(page, 'View all item history');
     await expect(
       page.getByRole('heading', { name: 'Physically moved', exact: true }),
     ).toHaveCount(0);
@@ -583,7 +683,7 @@ test('a real committed move with a lost response retries the original command on
     expect(commands).toHaveLength(2);
     expect(commands[1]).toBe(commands[0]);
     await version(page, 2);
-    await page.getByRole('link', { name: 'View all item history' }).click();
+    await openRecordHistory(page, 'View all item history');
     await expect(
       page.getByRole('heading', { name: 'Physically moved', exact: true }),
     ).toHaveCount(1);
@@ -641,7 +741,7 @@ test('archiving stocked quantity clears every location in one reviewed operation
   await expect(page.getByText(/Quantity item/).first()).toBeVisible();
   await expectRecordStatus(page, 'archived');
   await expectRecordVersion(page, 3);
-  await page.getByRole('link', { name: 'View all item history' }).click();
+  await openRecordHistory(page, 'View all item history');
   const event = page.locator('li').filter({
     has: page.getByRole('heading', { name: 'Quantity item archived' }),
   });
@@ -758,9 +858,52 @@ test('quantity core persists multi-location receives, partial and all transfers,
   await expect(movedHistory).toContainText('5 → 8 units (+3)');
   await expect(movedHistory).not.toContainText('Amount not recorded');
   await expect(movedHistory).not.toContainText('No recorded source');
+  const committedAt = await form
+    .getByRole('status')
+    .locator('time')
+    .getAttribute('datetime');
+  const saved = await savedMoveCompletion(page);
   await page.reload();
   form = await openForm(page, 'Move stock');
-  await form.getByRole('button', { name: 'Move more' }).click();
+  await expect(form.getByLabel('Quantity to move')).toHaveValue('');
+  await expect(
+    form.getByRole('combobox', {
+      name: 'Destination location',
+      exact: true,
+    }),
+  ).toHaveText(/^Select a location/);
+  await expect(
+    form.getByRole('button', { name: 'Review move stock' }),
+  ).toBeEnabled();
+  await expect(form.getByRole('button', { name: 'Move more' })).toHaveCount(0);
+  const lastMove = form
+    .locator('details')
+    .filter({ has: page.locator('summary').filter({ hasText: /^Last move/ }) });
+  const lastMoveSummary = lastMove.locator(':scope > summary');
+  await expect(lastMove).not.toHaveAttribute('open');
+  await expect(lastMoveSummary.locator(':scope > time')).toHaveAttribute(
+    'datetime',
+    committedAt!,
+  );
+  await lastMoveSummary.click();
+  await expect(lastMove).toContainText('Moved 3 units from 1A to 1B');
+  await expect(lastMove).toContainText(
+    'After this move: 1A 7 units; 1B 8 units',
+  );
+  expect(await savedMoveCompletion(page)).toEqual(saved);
+  await version(page, 3);
+  await expect(
+    page.getByRole('heading', {
+      name: 'Current stock — 15 available in storage',
+    }),
+  ).toBeVisible();
+  await expect(movedHistory).toHaveCount(1);
+  await expect(
+    movedHistory.locator(
+      `a[href="/history/events/quantity/${saved.pointer.eventId}"]`,
+    ),
+  ).toHaveCount(1);
+  await lastMoveSummary.click();
   await choose(form, 'Source location', 'ITC-S1A');
   await choose(form, 'Destination location', 'ITC-S1C');
   await form.getByLabel('Move All from this source location').check();
@@ -864,7 +1007,7 @@ test('quantity core persists multi-location receives, partial and all transfers,
       name: 'Current stock — 0 available in storage',
     }),
   ).toBeVisible();
-  await page.getByRole('link', { name: 'View all item history' }).click();
+  await openRecordHistory(page, 'View all item history');
   await expect(
     page.getByRole('heading', { name: 'Stock received', exact: true }),
   ).toBeVisible();
@@ -997,7 +1140,7 @@ test('serialized core allows duplicate serials and persists distinct moves, corr
       })
       .getByText(/Managed switch/),
   ).toBeVisible();
-  await page.getByRole('link', { name: 'View all asset history' }).click();
+  await openRecordHistory(page, 'View all asset history');
   await expect(
     page.getByRole('heading', { name: 'Physically moved', exact: true }),
   ).toHaveCount(1);
@@ -1097,7 +1240,7 @@ test('overlapping two-page edits renew field choices after further races and vie
       name: /^(Receive stock|Move stock|Edit details)$/,
     }),
   ).toHaveCount(0);
-  await page.getByRole('link', { name: 'View all item history' }).click();
+  await openRecordHistory(page, 'View all item history');
   await expect(
     page.getByRole('heading', { name: 'Details updated', exact: true }),
   ).toHaveCount(4);
@@ -1107,3 +1250,263 @@ test('overlapping two-page edits renew field choices after further races and vie
     page.getByRole('form', { name: 'Add quantity item' }),
   ).toHaveCount(0);
 });
+
+test('ambiguous Receive preserves an edited destination after real stale refresh', async ({
+  page,
+}) => {
+  test.setTimeout(120_000);
+  const owned = await acceptanceFixtures();
+  try {
+    await acceptanceLogin(page);
+    const red = await owned.location('ITC-RED'),
+      black = await owned.location('ITC-BLACK');
+    const itemId = await owned.quantity(
+      `Ambiguous Receive ${owned.suffix}`,
+      red,
+      2,
+    );
+    await acceptanceCommand(owned.caller, 'quantity_receive', {
+      item_id: itemId,
+      expected_version: 1,
+      location_id: black,
+      quantity: 1,
+      reason: 'Second owned holding',
+    });
+    await page.goto(`/inventory/quantity/${itemId}`);
+    const form = await openRecordTask(page, 'Receive stock');
+    await expect(
+      form.getByRole('combobox', { name: 'Receive at', exact: true }),
+    ).toHaveText(/Select a location/);
+    await chooseLocation(form, 'Receive at', 'ITC-CLEAR');
+    await form.getByLabel('Quantity to receive').fill('3');
+    await form
+      .getByLabel('Reason (required)')
+      .fill('Chosen destination must survive the stale refresh');
+    await form
+      .getByRole('button', { name: 'Review receive stock', exact: true })
+      .click();
+    await acceptanceCommand(owned.caller, 'quantity_receive', {
+      item_id: itemId,
+      expected_version: 2,
+      location_id: red,
+      quantity: 1,
+      reason: 'Independent real balance change',
+    });
+    await form
+      .getByRole('button', { name: 'Confirm receive stock', exact: true })
+      .click();
+    await expect(form.getByRole('alert')).toContainText(/changed/);
+    await form
+      .getByRole('button', { name: 'Refresh latest record', exact: true })
+      .click();
+    await expect(
+      form.getByRole('combobox', { name: 'Receive at', exact: true }),
+    ).toContainText('Clear Container');
+    await expect(form.getByLabel('Quantity to receive')).toHaveValue('3');
+    await expect(
+      form.getByRole('button', { name: 'Confirm receive stock', exact: true }),
+    ).toHaveCount(0);
+  } finally {
+    await owned.cleanup();
+  }
+});
+
+test('inventory search location picker exposes keyboard paths and stays framed on a narrow viewport', async ({
+  page,
+}) => {
+  await login(page);
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto('/inventory');
+  const form = page.getByRole('form', {
+    name: 'Search inventory',
+    exact: true,
+  });
+  await form.getByRole('button', { name: 'More filters', exact: true }).click();
+  const trigger = form.getByLabel('Location', { exact: true });
+  await trigger.click();
+  const search = form.getByRole('combobox', { name: 'Search locations' });
+  await expect(search).toBeFocused();
+  await withinViewport(search);
+  const pickerTree = form.getByRole('tree', { name: 'Location', exact: true });
+  await withinViewport(pickerTree);
+  await search.press('Home');
+  await expect(search).toHaveAttribute(
+    'aria-activedescendant',
+    (await pickerTree
+      .getByRole('treeitem', { name: 'All locations, no location filter' })
+      .getAttribute('id'))!,
+  );
+  await search.press('ArrowDown');
+  await expect(search).toHaveAttribute(
+    'aria-activedescendant',
+    (await pickerTree.getByRole('treeitem').nth(1).getAttribute('id'))!,
+  );
+  const pickerRoot = pickerTree.getByRole('treeitem', { name: /, ITC$/ });
+  await pickerRoot.press('ArrowRight');
+  await expect(pickerRoot).toHaveAttribute('aria-expanded', 'true');
+  await search.fill('ITC-D07');
+  const option = form.getByRole('option', { name: /, ITC-D07$/ });
+  await expect(option).toBeVisible();
+  await withinViewport(option);
+  await search.press('Enter');
+  await expect(trigger).toBeFocused();
+  await expect(trigger).toContainText('ITC-D07');
+  await expect(page).toHaveURL(
+    (url) => url.searchParams.get('location') === 'ITC-D07',
+  );
+  await trigger.click();
+  await expect(search).toBeFocused();
+  await search.press('Escape');
+  await expect(trigger).toBeFocused();
+  await expect(search).toHaveCount(0);
+  expect(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth <= innerWidth,
+    ),
+  ).toBe(true);
+});
+
+interfaceTest(
+  'missing resources keep direct transport status and private-safe identity with client recovery',
+  async ({ page, browser }, info) => {
+    await interfaceLogin(page);
+    const missingId = randomUUID();
+    const missingCode = 'MISSING-' + randomUUID();
+    const unknownPath = '/audit-three-missing-' + randomUUID();
+    for (const [path, heading, privateIdentity] of [
+      [unknownPath, 'Page not found', unknownPath.slice(1)],
+      [
+        '/inventory/quantity/' + missingId,
+        'Inventory record unavailable',
+        missingId,
+      ],
+      [
+        '/inventory/assets/' + missingId,
+        'Inventory record unavailable',
+        missingId,
+      ],
+      ['/locations/' + missingCode, 'Page not found', missingCode],
+      ['/sites/' + missingCode, 'Page not found', missingCode],
+      ['/settings/sites/' + missingCode, 'Page not found', missingCode],
+      ['/settings/locations/' + missingCode, 'Page not found', missingCode],
+      ['/settings/forms/' + missingId, 'Page not found', missingId],
+      [
+        '/sites/' + missingCode + '/open/quantity',
+        'Page not found',
+        missingCode,
+      ],
+    ]) {
+      const response = await page.goto(path);
+      expect(
+        response!.status(),
+        `Direct missing-resource status for ${path}`,
+      ).toBe(404);
+      await expect(
+        page.getByRole('heading', { name: heading, exact: true }),
+      ).toBeVisible();
+      const mainDiagnostic = await page.getByRole('main').evaluateAll((mains) =>
+        mains.map((main) => ({
+          id: main.id,
+          className: main.className,
+          headings: Array.from(main.querySelectorAll('h1')).map(
+            (heading) => heading.textContent,
+          ),
+        })),
+      );
+      await expect(
+        page.getByRole('main'),
+        `Direct missing-resource main landmark for ${path}: ${JSON.stringify(mainDiagnostic)}`,
+      ).toHaveCount(1);
+      await expect(page).toHaveTitle(/IT Inventory/);
+      await expectPrivateTitleExcluded(page, privateIdentity);
+      await page.screenshot({
+        path: info.outputPath(
+          `missing-${path.includes('quantity') ? 'quantity' : path.includes('assets') ? 'asset' : 'route'}.png`,
+        ),
+        fullPage: true,
+      });
+      const recoveryDocuments: string[] = [];
+      const observeRecovery = (request: import('@playwright/test').Request) => {
+        if (
+          request.isNavigationRequest() &&
+          request.resourceType() === 'document'
+        )
+          recoveryDocuments.push('document');
+      };
+      if (heading === 'Inventory record unavailable')
+        page.on('request', observeRecovery);
+      try {
+        await page
+          .getByRole('link', { name: 'Search inventory', exact: true })
+          .click();
+        await expect(page).toHaveURL(/\/inventory$/);
+        await expect(page).toHaveTitle('Inventory · IT Inventory');
+        const inventoryPrimary = page.locator('[data-route-ready]').filter({
+          has: page.getByRole('heading', { name: 'Inventory', exact: true }),
+        });
+        await expect(inventoryPrimary).toHaveCount(1);
+        await expect(
+          inventoryPrimary.getByRole('heading', {
+            name: 'Inventory',
+            exact: true,
+          }),
+        ).toBeVisible();
+        await expect(
+          inventoryPrimary.getByRole('textbox', {
+            name: 'Search inventory',
+            exact: true,
+          }),
+        ).toBeVisible();
+        await expect(page.getByRole('main')).toHaveCount(1);
+        await expect(
+          page.getByRole('heading', { name: heading, exact: true }),
+        ).toHaveCount(0);
+      } finally {
+        page.off('request', observeRecovery);
+      }
+      if (heading === 'Inventory record unavailable')
+        expect(recoveryDocuments).toHaveLength(0);
+    }
+    const malformed = '/inventory/quantity/missing.jpg';
+    const malformedResponse = await page.request.get(malformed, {
+      headers: {
+        'user-agent': '',
+        'x-inventory-document-path': '/inventory/quantity/new',
+      },
+      maxRedirects: 0,
+    });
+    expect(malformedResponse.status()).toBe(404);
+    const anonymous = await browser.newContext();
+    try {
+      const denied = await anonymous.request.get(
+        new URL(malformed, page.url()).href,
+        {
+          headers: {
+            'user-agent': '',
+            'x-inventory-document-path': '/inventory/quantity/new',
+          },
+          maxRedirects: 0,
+        },
+      );
+      expect(denied.status()).toBe(307);
+      expect(denied.headers().location).toMatch(/^\/login(?:\?|$)/);
+      expect(await denied.text()).not.toContain('Inventory record unavailable');
+    } finally {
+      await anonymous.close();
+    }
+    for (const [path, title] of [
+      ['/scan', 'Scan'],
+      ['/labels', 'Labels'],
+      ['/history', 'History'],
+    ]) {
+      await page.goto(path);
+      await expect(page).toHaveTitle(`${title} · IT Inventory`);
+    }
+    const icon = page.locator('link[rel="icon"]').first();
+    const iconResponse = await page.request.get(
+      (await icon.getAttribute('href'))!,
+    );
+    expect(iconResponse.ok()).toBe(true);
+    expect(iconResponse.headers()['content-type']).toMatch(/image/);
+  },
+);

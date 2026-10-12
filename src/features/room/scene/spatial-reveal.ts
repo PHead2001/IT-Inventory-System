@@ -1,17 +1,15 @@
 import type { RoomDefinition, RoomNode } from '../schema';
 import type { RoomBinding } from '../bindings';
-import { SCENE_EFFECTS } from './scene-effects-state';
 
 export const SPATIAL_MOTION = Object.freeze({
   flightMs: 750,
   revealMs: 400,
-  intensity: SCENE_EFFECTS.intensity,
 });
 export type FocusRequest = Readonly<{
   code: string | null;
   requestId: number;
-  scope: string;
-  generation: number;
+  scope?: string;
+  generation?: number;
   fitBeforeFlight?: boolean;
   preserveView?: boolean;
 }>;
@@ -115,13 +113,7 @@ export type SpatialRevealController = ReturnType<
 
 export function revealOffset(node: RoomNode): [number, number, number] {
   const offset = node.visual?.reveal?.offset;
-  return offset
-    ? (offset.map((value) => value * SPATIAL_MOTION.intensity) as [
-        number,
-        number,
-        number,
-      ])
-    : [0, 0, 0];
+  return offset ? [...offset] : [0, 0, 0];
 }
 
 /** Separate camera envelope: never alter resting logical bindings or focus points. */

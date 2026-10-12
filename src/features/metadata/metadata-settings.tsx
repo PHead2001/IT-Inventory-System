@@ -1,5 +1,11 @@
 'use client';
+import { useRouteTask } from '@/components/experience/route-pending';
+import { useRouteRouter as useRouter } from '@/components/experience/route-pending';
+
+import { useRouteActionResult } from '@/components/experience/route-pending';
 import { OperationalTimestamp } from '@/components/operational-time';
+import { usePrivacyRevocationRevision } from '@/components/auth/privacy-readiness';
+import { readPrivacyRevocationRevision } from '@/features/scan/assign-batch';
 import {
   useCallback,
   useEffect,
@@ -7,10 +13,9 @@ import {
   useMemo,
   useRef,
   useState,
-  useTransition,
   type ReactNode,
 } from 'react';
-import { useRouter } from 'next/navigation';
+
 import { Button } from '@/components/ui/button';
 import { useEffectiveReducedMotion } from '@/components/experience/motion-preference';
 import { motion } from 'motion/react';
@@ -45,6 +50,7 @@ import { MetadataFormPreview } from './metadata-form';
 import { RecoveryLibrary } from './recovery-library';
 import { controlKinds, kindLabel } from './effective-controls';
 import styles from './designer.module.css';
+import { useDesignerViewport } from './designer-viewport';
 import { controlLayoutStyle } from './control-layout';
 import { FieldSettings, makeField } from './field-settings';
 import { AddFieldDialog } from './add-field-dialog';
@@ -76,6 +82,7 @@ import {
   sectionEditBlockReason,
   newId,
   widths,
+  selectTypes,
   type Control,
   type Field,
 } from './designer-model';
@@ -485,6 +492,7 @@ function SortableControl({
   hidden,
   children,
   onClick,
+  onSelect,
   canReceive,
 }: {
   id: string;
@@ -496,6 +504,7 @@ function SortableControl({
   hidden: boolean;
   children: (handleRef: HandleRef) => ReactNode;
   onClick: () => void;
+  onSelect: () => void;
   canReceive: (controlId: string) => boolean;
 }) {
   const { ref, handleRef, isDragging } = useSortable({
@@ -515,8 +524,17 @@ function SortableControl({
       data-selected={selected}
       data-hidden={hidden}
       tabIndex={0}
+      role="group"
       style={style}
-      onClick={onClick}
+      onClick={(event) => {
+        onClick();
+        if (
+          !(event.target as HTMLElement).closest(
+            'button, input, select, textarea',
+          )
+        )
+          onSelect();
+      }}
       onFocus={onClick}
       aria-label={`Select ${name} control`}
       onKeyDown={(event) => {
@@ -525,7 +543,7 @@ function SortableControl({
           ['Enter', ' '].includes(event.key)
         ) {
           event.preventDefault();
-          onClick();
+          onSelect();
         }
       }}
       className={`${styles.control} relative min-w-0 rounded border p-2 text-sm ${selected ? 'border-cyan-400' : 'border-transparent'} ${isDragging ? 'opacity-40' : ''}`}
@@ -533,6 +551,15 @@ function SortableControl({
       <div
         className={`min-w-0 space-y-2 rounded ${selected ? 'bg-cyan-400/[0.04] shadow-[0_8px_22px_-12px_rgba(34,211,238,0.9)]' : ''}`}
       >
+        <button
+          type="button"
+          aria-label={`Inspect ${name} settings`}
+          aria-pressed={selected}
+          className="min-h-11 rounded border border-slate-600 px-2 text-cyan-200"
+          onClick={onSelect}
+        >
+          Settings
+        </button>
         {children(handleRef)}
       </div>
     </div>
@@ -585,8 +612,14 @@ export function MetadataSettings({
   memberId: string;
   selectedCategoryId?: string;
 }) {
+  const observeRouteActionResult = useRouteActionResult();
   const router = useRouter();
+  const revocationRevision = usePrivacyRevocationRevision();
+  const initialRevocation = useRef(readPrivacyRevocationRevision());
   const reducedMotion = useEffectiveReducedMotion();
+  const toolbarRef = useRef<HTMLDivElement>(null);
+  const panesRef = useRef<HTMLDivElement>(null);
+  const inspectorRef = useRef<HTMLElement>(null);
   const pendingDesignerFocus = useRef<number | null>(null);
   const focusIntent = useRef(0);
   const cancelDesignerFocus = useCallback(() => {
@@ -628,12 +661,14 @@ export function MetadataSettings({
   const [publishedBaseline, setPublishedBaseline] = useState(
     selected?.published_revision_id ?? '',
   );
-  const publishedSnapshot = useRef({
+  // Adopt committed publications immediately; refreshed props may still describe
+  // the prior revision and must not restore obsolete choice or field provenance.
+  const [publishedSnapshot, setPublishedSnapshot] = useState(() => ({
     id: selected?.published_revision_id ?? '',
     definition: copy(
       selected?.published_definition ?? { fields: [], layout: [] },
     ),
-  });
+  }));
   const [reviewSnapshot, setReviewSnapshot] =
     useState<PublicationReviewSnapshot | null>(null);
   const previewDetails = useRef<HTMLDetailsElement>(null);
@@ -668,7 +703,7 @@ export function MetadataSettings({
     'none' | 'durable' | 'memory'
   >('none');
   const [blockedAccessMessage, setBlockedAccessMessage] = useState('');
-  const [pending, startTransition] = useTransition();
+  const [pending, startTask] = useRouteTask();
   const [operationPending, setOperationPending] = useState(false);
   const [recovery, setRecovery] = useState<DesignerRecovery | null>(null);
   const [recoveryLoadedScope, setRecoveryLoadedScope] = useState<string | null>(
@@ -678,6 +713,11 @@ export function MetadataSettings({
   const [identityStatus, setIdentityStatus] = useState<
     'verified' | 'checking' | 'blocked' | 'retry'
   >('verified');
+  useDesignerViewport(
+    toolbarRef,
+    panesRef,
+    !!definition && !recovery && identityStatus !== 'blocked',
+  );
   useEffect(() => {
     const dialog = recoveryToolsRef.current;
     if (!dialog) return;
@@ -757,6 +797,9 @@ export function MetadataSettings({
   const [removeDestinationId, setRemoveDestinationId] = useState('');
   const removeDialogRef = useRef<HTMLDialogElement>(null);
   const [selectedFieldId, setSelectedFieldId] = useState<string | null>(null);
+  useEffect(() => {
+    if (inspectorRef.current) inspectorRef.current.scrollTop = 0;
+  }, [selectedFieldId, selectedControlId, selectedSectionId]);
   const dndBaseline = useRef<MetadataDefinition | null>(null);
   const [draggingControlId, setDraggingControlId] = useState<string | null>(
     null,
@@ -836,7 +879,9 @@ export function MetadataSettings({
     setBlockedAccessMessage('Verifying the original actor’s access…');
     const check = ++identityCheck.current;
     try {
-      const result = await verifyMetadataDesignerIdentity(memberId);
+      const result = await observeRouteActionResult(
+        verifyMetadataDesignerIdentity(memberId),
+      );
       if (check !== identityCheck.current) return;
       if (!result.ok) {
         setBlockedAccessMessage(
@@ -867,6 +912,9 @@ export function MetadataSettings({
       setOperationPending(false);
     }
   };
+  useLayoutEffect(() => {
+    if (initialRevocation.current !== revocationRevision) denyIdentity();
+  }, [revocationRevision, denyIdentity]);
   useEffect(() => {
     definitionRef.current = definition;
   }, [definition]);
@@ -892,7 +940,7 @@ export function MetadataSettings({
   const recoveryScope = `${memberId}:${categoryId}`;
   const issues = definition
     ? [
-        ...designerIssues(definition),
+        ...designerIssues(definition, publishedSnapshot.definition),
         ...Object.entries(configErrors)
           .filter(([id]) => definition.fields.some((field) => field.id === id))
           .map(([, message]) => message)
@@ -908,7 +956,9 @@ export function MetadataSettings({
       identityInFlight.current = true;
       const check = ++identityCheck.current;
       try {
-        const result = await verifyMetadataDesignerIdentity(memberId);
+        const result = await observeRouteActionResult(
+          verifyMetadataDesignerIdentity(memberId),
+        );
         if (
           !mounted ||
           terminalDenied.current ||
@@ -940,7 +990,7 @@ export function MetadataSettings({
       window.removeEventListener('focus', verify);
       document.removeEventListener('visibilitychange', onVisible);
     };
-  }, [denyIdentity, memberId]);
+  }, [denyIdentity, memberId, observeRouteActionResult]);
   useEffect(() => {
     let active = true;
     completeDesignerNavigation(memberId, categoryId);
@@ -1086,10 +1136,10 @@ export function MetadataSettings({
     setDraftId(nextDraftId);
     setPublishedBaseline(publishedId);
     if (selected?.published_revision_id === publishedId)
-      publishedSnapshot.current = {
+      setPublishedSnapshot({
         id: publishedId,
         definition: copy(selected.published_definition),
-      };
+      });
     setReceipt(null);
     setSaveReview(null);
     setSavePayload(null);
@@ -1149,7 +1199,9 @@ export function MetadataSettings({
           return {
             result,
             identity: result.ok
-              ? await verifyMetadataDesignerIdentity(memberId)
+              ? await observeRouteActionResult(
+                  verifyMetadataDesignerIdentity(memberId),
+                )
               : null,
           };
         })(),
@@ -1278,14 +1330,16 @@ export function MetadataSettings({
     const requestId = receipt?.key === key ? receipt.id : newId();
     setReceipt({ key, id: requestId });
     setMessage('');
-    startTransition(async () => {
+    startTask(async () => {
       try {
-        const response = await submitMetadataDraft({
-          operation,
-          requestId,
-          expectedActorId: memberId,
-          payload,
-        });
+        const response = await observeRouteActionResult(
+          submitMetadataDraft({
+            operation,
+            requestId,
+            expectedActorId: memberId,
+            payload,
+          }),
+        );
         if (
           terminalDenied.current ||
           categorySession.current !== submittedSession ||
@@ -1315,12 +1369,7 @@ export function MetadataSettings({
         } else if (operation === 'metadata_draft_discard') {
           clearDesignerRecovery(memberId, submittedCategory);
           setRecovery(null);
-          reset(
-            selected.published_definition,
-            '0',
-            selected.published_revision_id,
-            null,
-          );
+          reset(publishedSnapshot.definition, '0', publishedSnapshot.id, null);
           setMessage('Saved draft discarded.');
         } else {
           clearDesignerRecovery(memberId, submittedCategory);
@@ -1328,6 +1377,10 @@ export function MetadataSettings({
           setDraftVersion('0');
           setDraftId(null);
           setPublishedBaseline(String(response.data.published_revision_id));
+          setPublishedSnapshot({
+            id: String(response.data.published_revision_id),
+            definition: copy(definition as MetadataDefinition),
+          });
           setSaved(JSON.stringify(definition));
           setMessage(
             'Published form revision ' + String(response.data.version) + '.',
@@ -1425,21 +1478,23 @@ export function MetadataSettings({
     const submittedReview: PublicationReviewSnapshot = {
       proposal: copy(payload.definition as MetadataDefinition),
       baseline:
-        publishedSnapshot.current.id ===
+        publishedSnapshot.id ===
         String(payload.expected_published_revision_id ?? '')
-          ? copy(publishedSnapshot.current.definition)
+          ? copy(publishedSnapshot.definition)
           : null,
       expectedPublishedRevisionId: String(
         payload.expected_published_revision_id ?? '',
       ),
     };
-    startTransition(async () => {
+    startTask(async () => {
       try {
-        const result = await saveMetadataForm({
-          requestId,
-          expectedActorId: memberId,
-          payload,
-        });
+        const result = await observeRouteActionResult(
+          saveMetadataForm({
+            requestId,
+            expectedActorId: memberId,
+            payload,
+          }),
+        );
         if (
           terminalDenied.current ||
           submittedSession !== categorySession.current ||
@@ -1489,10 +1544,10 @@ export function MetadataSettings({
         setDraftId(null);
         setDraftVersion('0');
         setPublishedBaseline(String(result.data.published_revision_id));
-        publishedSnapshot.current = {
+        setPublishedSnapshot({
           id: String(result.data.published_revision_id),
           definition: copy(payload.definition as MetadataDefinition),
-        };
+        });
         setSaved(JSON.stringify(definition));
         setHistory([]);
         setMessage(
@@ -1557,6 +1612,7 @@ export function MetadataSettings({
     setSelectedSectionId(section?.id ?? null);
     setSelectedFieldId(control?.field_id ?? null);
     setMobilePanel('inspector');
+    if (inspectorRef.current) inspectorRef.current.scrollTop = 0;
     scheduleDesignerFocus(() => {
       const control = document.querySelector<HTMLElement>(
         `[data-control-id="${controlId}"]`,
@@ -1565,17 +1621,19 @@ export function MetadataSettings({
         '[data-testid="designer-canvas"]',
       );
       // Responsive CSS decides which destination is visible; do not duplicate its breakpoint.
-      const element =
-        canvas && getComputedStyle(canvas).display === 'none'
-          ? document.querySelector<HTMLElement>(
-              '[data-designer-inspector-heading]',
-            )
-          : control;
+      const phone =
+        (canvas && getComputedStyle(canvas).display === 'none') ||
+        panesRef.current?.dataset.designerFlow === 'true';
+      const element = phone
+        ? document.querySelector<HTMLElement>(
+            '[data-designer-inspector-heading]',
+          )
+        : control;
       element?.scrollIntoView?.({
-        block: 'nearest',
+        block: phone ? 'start' : 'nearest',
         behavior: reducedMotion ? 'instant' : 'smooth',
       });
-      element?.focus();
+      element?.focus({ preventScroll: true });
     });
   };
   const addField = (field: Field, sectionId: string) => {
@@ -1596,7 +1654,7 @@ export function MetadataSettings({
     if (
       definition &&
       window.confirm(
-        selected?.published_definition.fields.some((field) => field.id === id)
+        publishedSnapshot.definition.fields.some((field) => field.id === id)
           ? 'Retire this field from the new revision? Earlier revisions and stored values are preserved. Save changes will review the impact.'
           : 'Discard this unpublished field and its placement from your local edits?',
       )
@@ -1854,9 +1912,10 @@ export function MetadataSettings({
             </div>
           )}
           <div
+            ref={toolbarRef}
             role="toolbar"
             aria-label="Form designer"
-            className="flex flex-wrap items-center gap-2 rounded-lg border border-cyan-500/30 bg-slate-950 p-2 min-[1024px]:sticky min-[1024px]:top-20 min-[1024px]:z-10"
+            className={`${styles.toolbar} flex flex-wrap items-center gap-2 rounded-lg border border-cyan-500/30 bg-slate-950 p-2 min-[1024px]:sticky min-[1024px]:top-20 min-[1024px]:z-10`}
           >
             <label className="min-w-0 flex-1 basis-44 text-xs text-slate-400">
               Category form
@@ -2364,7 +2423,7 @@ export function MetadataSettings({
                   lastEditingFocus.current = event.target as HTMLElement;
               }}
               disabled={editorLocked}
-              className="min-w-0 space-y-4 lg:[&_input]:scroll-mt-56 lg:[&_button]:scroll-mt-56 lg:[&_select]:scroll-mt-56 lg:[&_textarea]:scroll-mt-56 lg:[&_[data-control-id]]:scroll-mt-56"
+              className="min-w-0 space-y-4"
             >
               <nav
                 className="flex flex-wrap gap-2 min-[1152px]:hidden"
@@ -2485,8 +2544,9 @@ export function MetadataSettings({
                 }}
               >
                 <div
+                  ref={panesRef}
                   data-testid="designer-panes"
-                  className="grid min-w-0 gap-4 min-[1152px]:grid-cols-[minmax(10rem,1fr)_minmax(0,2.5fr)_minmax(13rem,1fr)]"
+                  className={`${styles.panes} grid min-w-0 gap-4`}
                 >
                   <div
                     data-testid="designer-library"
@@ -2523,6 +2583,21 @@ export function MetadataSettings({
                                 setSelectedControlId(null);
                                 setSelectedSectionId(null);
                                 setMobilePanel('inspector');
+                                if (inspectorRef.current)
+                                  inspectorRef.current.scrollTop = 0;
+                                scheduleDesignerFocus(() => {
+                                  const heading =
+                                    inspectorRef.current?.querySelector<HTMLElement>(
+                                      '[data-designer-inspector-heading]',
+                                    );
+                                  heading?.scrollIntoView?.({
+                                    block: 'start',
+                                    behavior: reducedMotion
+                                      ? 'instant'
+                                      : 'smooth',
+                                  });
+                                  heading?.focus({ preventScroll: true });
+                                });
                               }
                             }}
                           >
@@ -2827,7 +2902,10 @@ export function MetadataSettings({
                                       setSelectedFieldId(
                                         control.field_id ?? null,
                                       );
+                                      if (inspectorRef.current)
+                                        inspectorRef.current.scrollTop = 0;
                                     }}
+                                    onSelect={() => selectPlacement(control.id)}
                                     style={controlLayoutStyle(
                                       control.width,
                                       field?.type === 'boolean',
@@ -2963,8 +3041,9 @@ export function MetadataSettings({
                     ))}
                   </div>
                   <aside
+                    ref={inspectorRef}
                     data-testid="designer-inspector"
-                    className={`${mobilePanel === 'inspector' ? '' : 'hidden'} min-w-0 space-y-3 min-[1152px]:block`}
+                    className={`${styles.inspector} ${mobilePanel === 'inspector' ? '' : 'hidden'} min-w-0 space-y-3 min-[1152px]:block`}
                     aria-label="Designer inspector"
                   >
                     <h3
@@ -2983,9 +3062,64 @@ export function MetadataSettings({
                           {fieldName(selectedField)} ·{' '}
                           {fieldTypeInfo[selectedField.type].name}
                         </h3>
+                        <nav
+                          aria-label="Selected field settings"
+                          className="mb-3 flex flex-wrap gap-2"
+                        >
+                          {(['Basics', 'Choices', 'Appearance'] as const)
+                            .filter(
+                              (area) =>
+                                area !== 'Choices' ||
+                                selectTypes.includes(selectedField.type),
+                            )
+                            .map((area) => (
+                              <Button
+                                key={area}
+                                type="button"
+                                variant="outline"
+                                onClick={() => {
+                                  const inspector = inspectorRef.current;
+                                  const section =
+                                    inspector?.querySelector<HTMLElement>(
+                                      `section[aria-label="${area}"]`,
+                                    );
+                                  if (!inspector || !section) return;
+                                  if (
+                                    panesRef.current?.dataset.designerFlow ===
+                                    'true'
+                                  )
+                                    section.scrollIntoView?.({
+                                      block: 'start',
+                                      behavior: reducedMotion
+                                        ? 'instant'
+                                        : 'smooth',
+                                    });
+                                  else
+                                    inspector.scrollTo({
+                                      top:
+                                        inspector.scrollTop +
+                                        section.getBoundingClientRect().top -
+                                        inspector.getBoundingClientRect().top -
+                                        16,
+                                      behavior: reducedMotion
+                                        ? 'instant'
+                                        : 'smooth',
+                                    });
+                                  section.focus({ preventScroll: true });
+                                }}
+                              >
+                                {area === 'Appearance' ? 'Layout' : area}
+                              </Button>
+                            ))}
+                        </nav>
                         <FieldSettings
                           key={`${selectedField.id}:${inspectorRevision}`}
                           field={selectedField}
+                          publishedOptions={
+                            publishedSnapshot.definition.fields.find(
+                              (item) => item.id === selectedField.id,
+                            )?.options
+                          }
                           autoFocus={false}
                           revisionOptionCount={definition.fields.reduce(
                             (total, field) => total + field.options.length,
@@ -2993,7 +3127,7 @@ export function MetadataSettings({
                           )}
                           change={updateField}
                           published={Boolean(
-                            selected?.published_definition.fields.some(
+                            publishedSnapshot.definition.fields.some(
                               (item) => item.id === selectedField.id,
                             ),
                           )}
@@ -3097,7 +3231,7 @@ export function MetadataSettings({
                               <FieldAdvanced
                                 field={selectedField}
                                 published={Boolean(
-                                  selected?.published_definition.fields.some(
+                                  publishedSnapshot.definition.fields.some(
                                     (item) => item.id === selectedField.id,
                                   ),
                                 )}

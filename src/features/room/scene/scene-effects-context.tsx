@@ -4,11 +4,11 @@ import {
   useContext,
   useId,
   useLayoutEffect,
-  useRef,
   useState,
   useSyncExternalStore,
   type ReactNode,
 } from 'react';
+import { SceneSessionContext } from './scene-budget-provider';
 import type { RoomDefinition } from '../schema';
 import {
   createSceneEffectsStore,
@@ -23,32 +23,35 @@ export function SceneEffectsProvider({
   room: RoomDefinition;
   children: ReactNode;
 }) {
+  const supplied = useContext(SceneSessionContext);
+  const [owner] = useState(() => supplied);
   const id = useId();
   const [session, setSession] = useState(() => ({
     room,
     generation: 0,
-    store: createSceneEffectsStore(`${id}:0:${room.roomId}`),
+    store: createSceneEffectsStore(`${id}:0:${room.roomId}`, owner.current),
   }));
   if (session.room !== room) {
     const generation = session.generation + 1;
     setSession({
       room,
       generation,
-      store: createSceneEffectsStore(`${id}:${generation}:${room.roomId}`),
+      store: createSceneEffectsStore(
+        `${id}:${generation}:${room.roomId}`,
+        owner.current,
+      ),
     });
   }
-  const retirements = useRef(new Map<SceneEffectsStore, object>());
   useLayoutEffect(() => {
     const store = session.store;
-    const pending = retirements.current;
-    // React's immediate StrictMode replay reacquires the same committed store.
-    pending.delete(store);
-    if (store.isDisposed()) {
-      // Activity can reconnect retained state after its old store was retired.
-      // Never revive it or replace a newer room/store from a stale setup.
+    if (store.isDisposed() && owner.current()) {
+      // Descendant layout effects reconnect before this parent setup in both
+      // StrictMode and Activity. Publish a fresh context generation so those
+      // effects rerun against a usable store; never reopen their retired owner.
       // eslint-disable-next-line react-hooks/set-state-in-effect -- Reconnect must replace an irreversibly disposed external store before paint.
       setSession((current) => {
         if (
+          !owner.current() ||
           current.store !== store ||
           current.room !== session.room ||
           !current.store.isDisposed()
@@ -60,20 +63,15 @@ export function SceneEffectsProvider({
           generation,
           store: createSceneEffectsStore(
             `${id}:${generation}:${current.room.roomId}`,
+            owner.current,
           ),
         };
       });
     }
     return () => {
-      const retirement = {};
-      pending.set(store, retirement);
-      queueMicrotask(() => {
-        if (pending.get(store) !== retirement) return;
-        pending.delete(store);
-        if (!store.isDisposed()) store.dispose();
-      });
+      if (!store.isDisposed()) store.dispose();
     };
-  }, [id, session.room, session.store]);
+  }, [id, session.room, session.store, owner]);
   return <EffectsContext value={session.store}>{children}</EffectsContext>;
 }
 export function useOptionalSceneEffects() {

@@ -1,0 +1,212 @@
+// IT Inventory's narrowly scoped lifetime patch of upstream EffectComposer.
+// Copyright (c) 2020 react-spring. MIT; see LICENSE and README.md beside this payload.
+var inventoryOwnerCurrent = () => true;
+var inventoryPublishedRefs = /* @__PURE__ */ new WeakMap();
+function useInventoryOwnedRef(ref, record, value) {
+  useLayoutEffect(() => {
+    if (!ref || !record || !record.current()) return;
+    const token = {};
+    inventoryPublishedRefs.set(ref, token);
+    let cleanup;
+    if (typeof ref === "function") cleanup = ref(value);
+    else ref.current = value;
+    return () => {
+      // A retained cleanup cannot clear a newer publication of this same ref.
+      if (inventoryPublishedRefs.get(ref) !== token) return;
+      inventoryPublishedRefs.delete(ref);
+      if (typeof cleanup === "function") cleanup();
+      else if (typeof ref === "function") ref(null);
+      else if (ref.current === value) ref.current = null;
+    };
+  }, [ref, record, value]);
+}
+function inventoryDisposeGenerated(pass) {
+  if (!generatedPasses.has(pass)) return;
+  generatedPasses.delete(pass);
+  disposePassWithoutEffects(pass);
+}
+function inventoryBuildPasses(nodes, camera, mergeMode, current) {
+  const passes = [];
+  try {
+    for (let i = 0; i < nodes.length; i++) {
+      if (!current()) break;
+      const node = nodes[i];
+      if (node instanceof Effect) {
+        const effects = [node];
+        let convolution = isConvolution(node), mainUv = hasMainUv(node);
+        if (mergeMode !== "none") {
+          let next;
+          while ((next = nodes[i + 1]) instanceof Effect) {
+            const nextConvolution = isConvolution(next), nextMainUv = hasMainUv(next);
+            if (mergeMode === "auto" && (convolution && nextConvolution || convolution && nextMainUv || mainUv && nextConvolution)) break;
+            effects.push(next);
+            convolution ||= nextConvolution;
+            mainUv ||= nextMainUv;
+            i++;
+          }
+        }
+        if (!current()) break;
+        const pass = new EffectPass(camera, ...effects);
+        generatedPasses.add(pass);
+        passes.push(pass);
+      } else if (node instanceof Pass) passes.push(node);
+    }
+    return passes;
+  } catch (error) {
+    for (const pass of passes) {
+      try { inventoryDisposeGenerated(pass); } catch { /* Continue owned rollback. */ }
+    }
+    throw error;
+  }
+}
+var EffectComposer = /* @__PURE__ */ memo(function EffectComposer({ children, camera: _camera, scene: _scene, resolutionScale, enabled = true, renderPriority = 1, autoClear = true, autoRenderToScreen = true, depthBuffer, enableNormalPass, stencilBuffer, multisampling = 8, frameBufferType = HalfFloatType, renderPass = defaultRenderPass, mergeMode = "auto", ref, ownerCurrent = inventoryOwnerCurrent }) {
+  const { gl, scene: defaultScene, camera: defaultCamera } = useThree();
+  const scene = _scene || defaultScene, camera = _camera || defaultCamera;
+  const [composerState, setComposerState] = useState(null);
+  const [, rebuild] = useReducer((count) => count + 1, 0);
+  const generation = useRef(0);
+  const component = useRef({ live: true });
+  useLayoutEffect(() => {
+    component.current.live = true;
+    return () => { component.current.live = false; };
+  }, []);
+  useEffect(() => {
+    const current = () => component.current.live && ownerCurrent();
+    if (!current()) return;
+    const record = { composer: null, normalPass: null, downSamplingPass: null, retired: false, initial: [], cleanups: new Set(), id: ++generation.current, current: () => !record.retired && current() };
+    let autoGuard = false, toneGuard = false;
+    const requireCurrent = () => { if (!record.current()) throw new Error("Retired composer owner"); };
+    const release = () => {
+      if (record.retired) return;
+      record.retired = true;
+      let failure;
+      const attempt = (action) => { try { action(); } catch (error) { failure ??= error; } };
+      for (const cleanup of [...record.cleanups]) attempt(cleanup);
+      for (const pass of record.initial.splice(0)) {
+        attempt(() => record.composer?.removePass(pass));
+        attempt(() => pass.dispose());
+      }
+      attempt(() => record.composer?.dispose());
+      if (toneGuard) attempt(() => toneMappingGuard.release(gl));
+      if (autoGuard) attempt(() => autoClearGuard.release(gl));
+      return failure;
+    };
+    try {
+      requireCurrent();
+      gl.getSize(glSize);
+      requireCurrent();
+      autoClearGuard.acquire(gl, false); autoGuard = true;
+      requireCurrent();
+      record.composer = new EffectComposer$1(gl, { depthBuffer, stencilBuffer, multisampling, frameBufferType });
+      requireCurrent();
+      record.composer.autoRenderToScreen = autoRenderToScreen;
+      const addOwnedPass = (create) => {
+        requireCurrent();
+        const pass = create();
+        record.initial.push(pass);
+        requireCurrent();
+        record.composer.addPass(pass);
+        return pass;
+      };
+      addOwnedPass(() => renderPass(scene, camera));
+      if (enableNormalPass) {
+        record.normalPass = addOwnedPass(() => new NormalPass(scene, camera));
+        requireCurrent(); record.normalPass.enabled = false;
+        if (resolutionScale !== void 0) {
+          record.downSamplingPass = addOwnedPass(() => new DepthDownsamplingPass({ normalBuffer: record.normalPass.texture, resolutionScale }));
+          requireCurrent(); record.downSamplingPass.enabled = false;
+        }
+      }
+      requireCurrent(); record.composer.setSize(glSize.width, glSize.height);
+      requireCurrent(); toneMappingGuard.acquire(gl, NoToneMapping); toneGuard = true;
+      requireCurrent(); gl.toneMapping = NoToneMapping;
+      requireCurrent(); setComposerState(record);
+    } catch (error) {
+      release();
+      if (current()) throw error;
+      return;
+    }
+    return () => { const failure = release(); if (failure) throw failure; };
+  }, [camera, gl, depthBuffer, stencilBuffer, multisampling, frameBufferType, autoRenderToScreen, renderPass, scene, enableNormalPass, resolutionScale, ownerCurrent]);
+  const appliedSizeRef = useRef({ width: -1, height: -1, pixelRatio: -1 });
+  useFrame((_, delta) => {
+    if (!enabled || !composerState?.current()) return;
+    const { composer } = composerState;
+    gl.getSize(glSize);
+    if (!composerState.current()) return;
+    const pixelRatio = gl.getPixelRatio(), applied = appliedSizeRef.current;
+    if (glSize.width !== applied.width || glSize.height !== applied.height || pixelRatio !== applied.pixelRatio) {
+      if (!composerState.current()) return;
+      composer.setSize(glSize.width, glSize.height);
+      applied.width = glSize.width; applied.height = glSize.height; applied.pixelRatio = pixelRatio;
+    }
+    if (!composerState.current()) return;
+    const previous = gl.autoClear;
+    gl.autoClear = autoClear;
+    try {
+      if (!composerState.current()) return;
+      if (stencilBuffer && !autoClear) gl.clearStencil();
+      if (composerState.current()) composer.render(delta);
+    } finally { gl.autoClear = previous; }
+  }, enabled ? renderPriority : 0);
+  const group = useRef(null), nodesRef = useRef([]);
+  const [nodesVersion, setNodesVersion] = useState(0);
+  useLayoutEffect(() => {
+    if (!composerState?.current() || !group.current) return;
+    const nodes = readGroupChildren(group.current, (object) => object instanceof Effect || object instanceof Pass);
+    if (composerState.current() && updateIfChanged(nodesRef, nodes)) setNodesVersion((version) => version + 1);
+  });
+  useLayoutEffect(() => {
+    if (!composerState?.current()) return;
+    const { composer, normalPass, downSamplingPass } = composerState;
+    let passes = [], cleaned = false;
+    const cleanup = () => {
+      if (cleaned) return;
+      cleaned = true;
+      composerState.cleanups.delete(cleanup);
+      let failure;
+      for (const pass of passes) {
+        try { composer.removePass(pass); } catch (error) { failure ??= error; }
+        try { inventoryDisposeGenerated(pass); } catch (error) { failure ??= error; }
+      }
+      if (!composerState.retired) {
+        if (normalPass) normalPass.enabled = false;
+        if (downSamplingPass) downSamplingPass.enabled = false;
+      }
+      if (failure) throw failure;
+    };
+    composerState.cleanups.add(cleanup);
+    try {
+      passes = inventoryBuildPasses(nodesRef.current, camera, mergeMode, composerState.current);
+      if (!composerState.current()) { cleanup(); return; }
+      if (passes.some((pass) => groupPasses.has(pass))) {
+        if (!composerState.current()) { cleanup(); return; }
+        const pass = new CopyPass(); generatedPasses.add(pass); passes.push(pass);
+      }
+      for (const pass of passes) {
+        if (!composerState.current()) { cleanup(); return; }
+        composer.addPass(pass);
+      }
+      if (passes.length && composerState.current()) {
+        if (normalPass) normalPass.enabled = true;
+        if (downSamplingPass) downSamplingPass.enabled = true;
+      }
+      return cleanup;
+    } catch (error) { try { cleanup(); } catch { /* Preserve the setup failure. */ } throw error; }
+  }, [composerState, nodesVersion, camera, mergeMode]);
+  const requestRebuild = useCallback(() => { if (composerState?.current()) rebuild(); }, [composerState]);
+  const state = useMemo(() => composerState ? {
+    composer: composerState.composer, normalPass: composerState.normalPass, downSamplingPass: composerState.downSamplingPass,
+    resolutionScale, camera, scene, requestRebuild, autoClear,
+    ownerCurrent: ownerCurrent === inventoryOwnerCurrent ? void 0 : composerState.current
+  } : null, [composerState, resolutionScale, camera, scene, requestRebuild, autoClear, ownerCurrent]);
+  useInventoryOwnedRef(ref, composerState, composerState?.composer);
+  if (!state || !composerState.current()) return null;
+  return /* @__PURE__ */ jsx(EffectComposerContext.Provider, {
+    value: state,
+    children: /* @__PURE__ */ jsx("group", {
+      key: ownerCurrent === inventoryOwnerCurrent ? void 0 : composerState.id,
+      ref: group, children
+    })
+  });
+});

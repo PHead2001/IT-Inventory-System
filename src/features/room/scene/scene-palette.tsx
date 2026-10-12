@@ -11,6 +11,7 @@ import {
 import { useThree } from '@react-three/fiber';
 import { Edges } from '@react-three/drei';
 import { Color, type Light } from 'three';
+import { useSceneCurrent } from './scene-current';
 import { useOptionalSceneEffects } from './scene-effects-context';
 
 const paletteTokens = {
@@ -53,19 +54,25 @@ export function readScenePalette(element: Element): ScenePalette {
 }
 
 export function useLiveScenePalette(element: Element) {
+  const effects = useOptionalSceneEffects();
+  const isCurrent = useSceneCurrent(effects);
   const [state, setState] = useState(() => ({
-    palette: readScenePalette(element),
+    palette: isCurrent()
+      ? readScenePalette(element)
+      : (Object.fromEntries(
+          Object.keys(paletteTokens).map((key) => [key, new Color()]),
+        ) as ScenePalette),
     revision: 0,
   }));
   useEffect(() => {
     let disposed = false;
     let queued = false;
     const refresh = () => {
-      if (queued || disposed) return;
+      if (!isCurrent() || queued || disposed) return;
       queued = true;
       queueMicrotask(() => {
         queued = false;
-        if (disposed) return;
+        if (disposed || !isCurrent()) return;
         let next: ScenePalette;
         try {
           next = readScenePalette(element);
@@ -89,6 +96,7 @@ export function useLiveScenePalette(element: Element) {
         });
       });
     };
+    if (!isCurrent()) return;
     const observer = new MutationObserver(refresh);
     observer.observe(document.documentElement, {
       attributes: true,
@@ -104,16 +112,18 @@ export function useLiveScenePalette(element: Element) {
       observer.disconnect();
       media?.removeEventListener('change', refresh);
     };
-  }, [element]);
+  }, [element, isCurrent]);
   return state;
 }
 
 export function ScenePaletteProvider({ children }: { children: ReactNode }) {
   const { gl, invalidate } = useThree();
   const state = useLiveScenePalette(gl.domElement);
+  const effects = useOptionalSceneEffects();
+  const isCurrent = useSceneCurrent(effects);
   useEffect(() => {
-    invalidate();
-  }, [state.revision, invalidate]);
+    if (isCurrent()) invalidate();
+  }, [state.revision, invalidate, isCurrent]);
   return <PaletteContext value={state}>{children}</PaletteContext>;
 }
 

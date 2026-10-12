@@ -21,6 +21,9 @@ export function createVitestConfig(
       environment: 'jsdom',
       setupFiles: ['./tests/setup.ts'],
       include: ['src/**/*.test.{ts,tsx}', 'tests/unit/**/*.test.{ts,tsx,mjs}'],
+      // Execute the actual pinned wrapper under Vitest; instrument its lower GPU
+      // boundary without replacing the package entry or externalizing its hooks.
+      server: { deps: { inline: ['@react-three/postprocessing'] } },
       clearMocks: true,
     },
   });

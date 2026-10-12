@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { expect, test, type APIRequestContext } from '@playwright/test';
 import { createClient } from '@supabase/supabase-js';
 import fixture from '../fixtures/auth.json' with { type: 'json' };
@@ -97,8 +98,12 @@ test('anonymous public 404 Overview recovery preserves its destination through s
   page,
 }) => {
   await page.goto('/audit3-missing-' + crypto.randomUUID());
+  const recoveryDocument = await page.evaluate(() => performance.timeOrigin);
   await page.getByRole('link', { name: 'Open Overview', exact: true }).click();
   await expect(page).toHaveURL(/\/login\?next=%2Fdashboard$/);
+  expect(await page.evaluate(() => performance.timeOrigin)).not.toBe(
+    recoveryDocument,
+  );
   await page.getByLabel('Email', { exact: true }).fill(fixtureEmails.viewer);
   await page.getByLabel('Password', { exact: true }).fill(fixturePassword);
   await page.getByRole('button', { name: 'Sign in', exact: true }).click();
@@ -343,8 +348,35 @@ test('ordinary password changes require the current password and end the local s
         .getByLabel('Password', { exact: true })
         .fill(fixturePassword + '-new');
       await page.getByLabel('Confirm password').fill(fixturePassword + '-new');
+      const authCookieCount = async () =>
+        (await page.context().cookies()).filter((cookie) =>
+          /^sb-.*-auth-token(?:\.\d+)?$/.test(cookie.name),
+        ).length;
+      expect(await authCookieCount()).toBeGreaterThan(0);
+      await page.evaluate(() => {
+        const evidence = { cleanups: 0 };
+        (
+          window as Window & { passwordLogoutEvidence?: typeof evidence }
+        ).passwordLogoutEvidence = evidence;
+        window.addEventListener('assignment-scope-invalidated', () => {
+          evidence.cleanups += 1;
+        });
+      });
       await page.getByRole('button', { name: 'Set password' }).click();
       await expect(page).toHaveURL(/\/login\?password=updated$/);
+      // The real action deletes cookies and re-renders the password page Flight.
+      // Reaching this URL with a cleanup signal proves the client result owner survived.
+      expect(await authCookieCount()).toBe(0);
+      expect(
+        await page.evaluate(
+          () =>
+            (
+              window as Window & {
+                passwordLogoutEvidence?: { cleanups: number };
+              }
+            ).passwordLogoutEvidence?.cleanups ?? 0,
+        ),
+      ).toBeGreaterThan(0);
       await page.getByLabel('Email', { exact: true }).fill(email);
       await page
         .getByLabel('Password', { exact: true })
@@ -375,4 +407,21 @@ test('recovery exchanges token once and keeps a fixed destination', async ({
   await expect(
     page.getByRole('form', { name: 'Continue securely' }).getByRole('alert'),
   ).toContainText('expired or has already been used');
+});
+
+test('anonymous missing asset navigation masks resource identity behind sign-in', async ({
+  browser,
+}) => {
+  const anonymous = await browser.newContext();
+  try {
+    const visitor = await anonymous.newPage();
+    await visitor.goto('/inventory/assets/' + randomUUID());
+    await expect(visitor).toHaveURL(/\/login/);
+    await expect(visitor).toHaveTitle(/Sign in.*IT Inventory/);
+    await expect(
+      visitor.getByRole('heading', { name: 'Inventory record unavailable' }),
+    ).toHaveCount(0);
+  } finally {
+    await anonymous.close();
+  }
 });

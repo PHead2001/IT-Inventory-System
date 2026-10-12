@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { act, render } from '@testing-library/react';
-import { OrthographicCamera, Vector3 } from 'three';
+import { MathUtils, OrthographicCamera, Vector3 } from 'three';
 import rawRoom from '../../../../data/rooms/it-closet.json';
 import { roomSchema } from '../schema';
 import { buildRoomBindings } from '../bindings';
@@ -9,6 +9,7 @@ import {
   type FocusRequest,
 } from './spatial-reveal';
 import { CameraRig } from './room-scene';
+import { SceneSessionContext } from './scene-budget-provider';
 import {
   LabelLayoutProvider,
   createRoomLabelRegistry,
@@ -16,8 +17,14 @@ import {
 
 const mocks = vi.hoisted(() => ({
   state: null as unknown,
-  control: null as unknown,
   frame: null as (() => void) | null,
+  control: null as unknown,
+  orbit: null as {
+    enabled: boolean;
+    onStart: () => void;
+    onChange: () => void;
+    onEnd: () => void;
+  } | null,
 }));
 vi.mock('@react-three/fiber', () => ({
   useThree: () => mocks.state,
@@ -29,7 +36,8 @@ vi.mock('./safe-canvas', () => ({ SafeCanvas: () => null }));
 vi.mock('@react-three/drei', async () => {
   const { forwardRef, useImperativeHandle } = await import('react');
   return {
-    OrbitControls: forwardRef(function MockControls(_props, ref) {
+    OrbitControls: forwardRef(function MockControls(props, ref) {
+      mocks.orbit = props as NonNullable<typeof mocks.orbit>;
       useImperativeHandle(ref, () => mocks.control);
       return null;
     }),
@@ -66,9 +74,10 @@ beforeEach(() => {
     invalidate: vi.fn(),
   };
   mocks.control = control;
+  mocks.orbit = null;
 });
 afterEach(() => vi.restoreAllMocks());
-function harness() {
+function harness(onViewChange = vi.fn()) {
   const registry = createRoomLabelRegistry(vi.fn());
   const props = {
     room,
@@ -82,6 +91,7 @@ function harness() {
     onFocusComplete: vi.fn(),
     onReady: vi.fn(),
     onFailure: vi.fn(),
+    onViewChange,
     orbitMode: 'free' as const,
     manualGesture: { current: { active: false, lastMotionAt: 0 } },
     active: false,
@@ -99,11 +109,15 @@ function harness() {
     id: number,
     kind: 'fit' | 'zoom-in' = 'fit',
     restored = false,
+    orbitMode: 'free' | 'guided' = 'free',
+    active = false,
   ) {
     return (
       <LabelLayoutProvider registry={registry}>
         <CameraRig
           {...props}
+          orbitMode={orbitMode}
+          active={active}
           command={{ id, kind }}
           initialView={restored ? initialView : undefined}
         />
@@ -111,6 +125,122 @@ function harness() {
     );
   };
 }
+it('allows captured camera publication after a same-session pause but blocks the retired session after replacement A/B/A', () => {
+  size.width = 375;
+  size.height = 400;
+  const publish = vi.fn();
+  const ui = harness(publish);
+  let ready = true;
+  let retired = false;
+  const original = { current: () => ready && !retired };
+  const replacement = { current: () => true };
+  const wrap = (session = original) => (
+    <SceneSessionContext value={session}>{ui(0)}</SceneSessionContext>
+  );
+  const view = render(wrap());
+  const capturedEnd = mocks.orbit!.onEnd;
+  publish.mockClear();
+  ready = false;
+  act(() => capturedEnd());
+  expect(publish).not.toHaveBeenCalled();
+  ready = true;
+  act(() => capturedEnd());
+  expect(publish).toHaveBeenCalledOnce();
+  retired = true;
+  view.rerender(wrap(replacement));
+  view.rerender(wrap({ current: () => true }));
+  publish.mockClear();
+  act(() => capturedEnd());
+  expect(publish).not.toHaveBeenCalled();
+  view.unmount();
+});
+function expectCanonicalFirstFrame() {
+  const offset = camera.position.clone().sub(control.target);
+  expect(Math.atan2(offset.x, offset.z)).toBeCloseTo(
+    MathUtils.degToRad(room.camera.azimuthDegrees),
+  );
+  expect(Math.asin(offset.y / offset.length())).toBeCloseTo(
+    MathUtils.degToRad(room.camera.elevationDegrees),
+  );
+  expect(camera.zoom).toBeGreaterThan(0);
+  expect(camera.zoom).not.toBe(3);
+  expect(Number.isFinite(camera.zoom)).toBe(true);
+}
+it.each([0, NaN, Infinity])(
+  'retains the latest orbit mode through width %s and fits the canonical first frame before applying it',
+  (width) => {
+    size.width = width;
+    const ui = harness(),
+      view = render(ui(0, 'fit', false, 'free'));
+    const original = camera.position.clone();
+    view.rerender(ui(0, 'fit', false, 'guided'));
+    expect(camera.position).toEqual(original);
+    expect(camera.zoom).toBe(3);
+    expect(control.update).not.toHaveBeenCalled();
+    expect(
+      (mocks.state as { gl: { domElement: HTMLCanvasElement } }).gl.domElement
+        .dataset.cameraView,
+    ).toBeUndefined();
+    size.width = 375;
+    size.height = 400;
+    view.rerender(ui(0, 'fit', false, 'guided'));
+    expectCanonicalFirstFrame();
+    const stored = JSON.parse(
+      (mocks.state as { gl: { domElement: HTMLCanvasElement } }).gl.domElement
+        .dataset.cameraView!,
+    );
+    expect(stored.mode).toBe('guided');
+    const fitted = camera.zoom;
+    camera.zoom *= 1.4;
+    size.width = 400;
+    view.rerender(ui(0, 'fit', false, 'guided'));
+    expect(camera.zoom).toBeCloseTo(fitted * 1.4);
+  },
+);
+it('ignores a gesture before measurement and preserves the first fit before later manual interaction', () => {
+  const ui = harness(),
+    view = render(ui(0, 'fit', false, 'free', true));
+  expect(mocks.orbit!.enabled).toBe(false);
+  act(() => {
+    mocks.orbit!.onStart();
+    mocks.orbit!.onChange();
+    mocks.orbit!.onEnd();
+  });
+  expect(control.update).not.toHaveBeenCalled();
+  expect(camera.zoom).toBe(3);
+  size.width = 375;
+  size.height = 400;
+  view.rerender(ui(0, 'fit', false, 'free', true));
+  expect(mocks.orbit!.enabled).toBe(true);
+  expectCanonicalFirstFrame();
+  const fitted = camera.zoom;
+  act(() => {
+    mocks.orbit!.onStart();
+    camera.zoom *= 1.4;
+    mocks.orbit!.onChange();
+    mocks.orbit!.onEnd();
+  });
+  size.width = 400;
+  view.rerender(ui(0, 'fit', false, 'free', true));
+  expect(camera.zoom).toBeCloseTo(fitted * 1.4);
+});
+it('applies the newest pending zoom after the canonical first fit despite a pending mode change', () => {
+  const ui = harness(),
+    view = render(ui(1, 'fit', false, 'free'));
+  view.rerender(ui(2, 'zoom-in', false, 'guided'));
+  expect(camera.zoom).toBe(3);
+  expect(control.update).not.toHaveBeenCalled();
+  size.width = 375;
+  size.height = 400;
+  view.rerender(ui(2, 'zoom-in', false, 'guided'));
+  expectCanonicalFirstFrame();
+  const fitted = control.minZoom / room.camera.zoomLimits[0];
+  expect(camera.zoom).toBeCloseTo(fitted * 1.2);
+  const count = control.update.mock.calls.length;
+  view.rerender(ui(2, 'zoom-in', false, 'guided'));
+  expect(camera.zoom).toBeCloseTo(fitted * 1.2);
+  expect(control.update).toHaveBeenCalledTimes(count);
+});
 it('defers the newest Fit command until measurement without consuming it or poisoning camera state', () => {
   const ui = harness(),
     view = render(ui(1));
@@ -195,6 +325,46 @@ const spatialRequest = (
     generation,
     requestId: 0,
   });
+it.each(['idle', 'flight'])(
+  'same-owner provider wrapper churn preserves the %s controller until actual unmount',
+  (phase) => {
+    let now = 0;
+    vi.spyOn(performance, 'now').mockImplementation(() => now);
+    const { ui, reveal, complete } = spatialHarness();
+    const dispose = vi.spyOn(reveal, 'dispose');
+    const request = spatialRequest(phase === 'flight' ? 'ITC-D01' : null, 1);
+    const wrap = () => (
+      <SceneSessionContext value={{ current: () => true }}>
+        {ui(request)}
+      </SceneSessionContext>
+    );
+    const view = render(wrap());
+    act(() => mocks.frame!());
+    act(() => mocks.frame!());
+    now = 200;
+    act(() => mocks.frame!());
+    expect(reveal.getSnapshot().phase).toBe(
+      phase === 'flight' ? 'flying' : 'idle',
+    );
+    view.rerender(wrap());
+    view.rerender(wrap());
+    expect(dispose).not.toHaveBeenCalled();
+    expect(reveal.getSnapshot().phase).toBe(
+      phase === 'flight' ? 'flying' : 'idle',
+    );
+    if (phase === 'flight') {
+      now = 751;
+      act(() => mocks.frame!());
+      expect(complete).toHaveBeenCalledWith(
+        'ITC-D01',
+        expect.objectContaining({ generation: 1 }),
+      );
+      expect(reveal.getSnapshot().phase).toBe('revealing');
+    }
+    view.unmount();
+    expect(dispose).toHaveBeenCalledOnce();
+  },
+);
 it.each([null, 'MISSING'])(
   'an in-flight camera cannot snap or complete after replacement with %s',
   (code) => {

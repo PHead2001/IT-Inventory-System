@@ -43,8 +43,13 @@ export function editSummary(input: {
 }) {
   const { baseline, intent, definition } = input;
   const previous = initialCore(baseline, []);
-  const rows: { key: string; label: string; before: string; after: string }[] =
-    [];
+  const rows: {
+    key: string;
+    label: string;
+    before: string;
+    after: string;
+    codeValues?: { before: boolean; after: boolean };
+  }[] = [];
   const coreValue = (key: string, value: unknown) =>
     key === 'category_id'
       ? (input.categories.find((category) => category.id === value)?.name ??
@@ -74,6 +79,14 @@ export function editSummary(input: {
     rows.push({
       key,
       label: metadataLabels[key],
+      ...(['asset_tag', 'serial_number', 'item_code'].includes(key)
+        ? {
+            codeValues: {
+              before: typeof before === 'string' && before !== '',
+              after: typeof after === 'string' && after !== '',
+            },
+          }
+        : {}),
       before: coreValue(key, before),
       after: after === null ? 'Cleared (unanswered)' : coreValue(key, after),
     });

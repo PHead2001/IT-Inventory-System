@@ -37,7 +37,9 @@ export type EffectsSnapshot = Readonly<{
 }>;
 
 /** Demand gaps are never samples. The owner supplies only adjacent active frames. */
-export function createEffectsQualityMonitor() {
+export function createEffectsQualityMonitor(
+  current: () => boolean = () => true,
+) {
   let warmup = SCENE_EFFECTS.startupActiveFrames;
   let samples: number[] = [];
   let badWindows = 0;
@@ -47,7 +49,7 @@ export function createEffectsQualityMonitor() {
   let disposed = false;
   return {
     sample(ms: number, eligible: boolean) {
-      if (disposed) return disabled;
+      if (disposed || !current()) return disabled;
       if (disabled || !eligible || !Number.isFinite(ms) || ms <= 0)
         return disabled;
       if (warmup > 0) {
@@ -66,11 +68,11 @@ export function createEffectsQualityMonitor() {
       return disabled;
     },
     resetWindow() {
-      if (disposed) return;
+      if (disposed || !current()) return;
       samples = [];
     },
     restartWarmup() {
-      if (disposed) return;
+      if (disposed || !current()) return;
       warmup = SCENE_EFFECTS.startupActiveFrames;
       samples = [];
     },
@@ -110,13 +112,16 @@ function actualVisualMesh(object: Object3D): object is Mesh {
 }
 
 /** One scene-session owner; refs and animation bookkeeping never enter inventory state. */
-export function createSceneEffectsStore(sceneGeneration: string) {
+export function createSceneEffectsStore(
+  sceneGeneration: string,
+  sessionCurrent: () => boolean = () => true,
+) {
   const meshes = new Map<string, EffectMesh[]>();
   const lights = new Map<string, Light>();
   const motions = new Map<string, { nodeId: string; hover: boolean }>();
   const activities = new Set<string>();
   const listeners = new Set<() => void>();
-  const quality = createEffectsQualityMonitor();
+  const quality = createEffectsQualityMonitor(() => isCurrent());
   let snapshot: EffectsSnapshot = Object.freeze({
     revision: 0,
     geometryRevision: 0,
@@ -132,8 +137,9 @@ export function createSceneEffectsStore(sceneGeneration: string) {
     captureMs: null,
   });
   let disposed = false;
+  const isCurrent = () => !disposed && sessionCurrent();
   const publish = (patch: Partial<EffectsSnapshot>) => {
-    if (disposed) return;
+    if (!isCurrent()) return;
     snapshot = Object.freeze({
       ...snapshot,
       ...patch,
@@ -147,9 +153,10 @@ export function createSceneEffectsStore(sceneGeneration: string) {
     sceneGeneration,
     quality,
     isDisposed: () => disposed,
+    isCurrent,
     getSnapshot: () => snapshot,
     subscribe(listener: () => void) {
-      if (disposed) return () => {};
+      if (!isCurrent()) return () => {};
       listeners.add(listener);
       return () => {
         listeners.delete(listener);
@@ -160,7 +167,7 @@ export function createSceneEffectsStore(sceneGeneration: string) {
       locationCode: string | null,
       root: Object3D,
     ) {
-      if (disposed) return () => {};
+      if (!isCurrent()) return () => {};
       const entries: EffectMesh[] = [];
       root.traverse((object) => {
         if (actualVisualMesh(object))
@@ -188,7 +195,7 @@ export function createSceneEffectsStore(sceneGeneration: string) {
       };
     },
     setLight(key: string, light: Light | null) {
-      if (disposed) return;
+      if (!isCurrent()) return;
       if (lights.get(key) === light || (!light && !lights.has(key))) return;
       if (light) lights.set(key, light);
       else lights.delete(key);
@@ -197,7 +204,7 @@ export function createSceneEffectsStore(sceneGeneration: string) {
     getLights: () => [...lights.values()],
     getCasters: () => [...meshes.values()].flat(),
     selectedMeshes(code: string | null, highlighted: ReadonlySet<string>) {
-      if (!code) return [];
+      if (!isCurrent() || !code) return [];
       return [...meshes.values()]
         .flat()
         .filter(
@@ -211,6 +218,7 @@ export function createSceneEffectsStore(sceneGeneration: string) {
     reconcileHover(actualCode: string | null, refresh: boolean) {
       // A visual-only latch prevents the lifted edge from oscillating. Actual
       // surface identification, tooltip visibility and click eligibility stay separate.
+      if (!isCurrent()) return;
       const next =
         refresh || snapshot.hoverCode === null
           ? actualCode
@@ -224,7 +232,7 @@ export function createSceneEffectsStore(sceneGeneration: string) {
       publish({ hoverEpoch: snapshot.hoverEpoch + 1 });
     },
     beginCasterMotion(key: string, nodeId: string, hover = false) {
-      if (disposed) return () => {};
+      if (!isCurrent()) return () => {};
       const identity = { nodeId, hover };
       motions.set(key, identity);
       const otherGeometry = !hover || ownerCode(nodeId) !== snapshot.hoverCode;
@@ -243,7 +251,7 @@ export function createSceneEffectsStore(sceneGeneration: string) {
       };
     },
     beginActivity(key: string) {
-      if (disposed) return () => {};
+      if (!isCurrent()) return () => {};
       activities.add(key);
       publish({ activities: activities.size });
       return () => {
@@ -258,7 +266,7 @@ export function createSceneEffectsStore(sceneGeneration: string) {
       if (snapshot.bloomReady !== ready) publish({ bloomReady: ready });
     },
     recordFrame(ms: number, eligible: boolean) {
-      if (disposed) return;
+      if (!isCurrent()) return;
       if (quality.sample(ms, eligible)) this.failBloom('sustained-frame-time');
     },
     recordCapture(ms: number) {

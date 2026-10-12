@@ -1,20 +1,94 @@
 // @vitest-environment node
 import { afterEach, expect, it, vi } from 'vitest';
 import { NextRequest } from 'next/server';
+import { unstable_doesMiddlewareMatch } from 'next/experimental/testing/server';
 import type { CookieMethodsServer } from '@supabase/ssr';
 vi.mock('server-only', () => ({}));
-const sdk = vi.hoisted(() => ({ createServerClient: vi.fn() }));
-vi.mock('@supabase/ssr', () => sdk);
-vi.mock('./lib/supabase/config', () => ({
-  supabaseConfig: () => ({
+const sdk = vi.hoisted(() => ({
+  createServerClient: vi.fn(),
+  config: vi.fn(() => ({
     url: 'http://localhost:54321',
     key: 'public-test-key',
-  }),
+  })),
 }));
-import { proxy } from './proxy';
+vi.mock('@supabase/ssr', () => sdk);
+vi.mock('./lib/supabase/config', () => ({
+  supabaseConfig: sdk.config,
+}));
+import { proxy, config } from './proxy';
 afterEach(() => {
   vi.unstubAllEnvs();
   vi.restoreAllMocks();
+});
+it.each([
+  '/inventory/quantity/missing.jpg',
+  '/inventory/assets/missing.svg',
+  '/locations/missing.png',
+  '/sites/missing.webp',
+  '/settings/sites/missing.gif',
+  '/settings/locations/missing.jpeg',
+  '/settings/forms/missing.jpg',
+  '/sites/missing.jpg/open/asset',
+])('matches and replaces spoofed document identity for %s', async (path) => {
+  expect(
+    unstable_doesMiddlewareMatch({ config, nextConfig: {}, url: path }),
+  ).toBe(true);
+  sdk.createServerClient.mockReturnValue({
+    auth: { getClaims: async () => ({ data: null, error: null }) },
+  });
+  const response = await proxy(
+    new NextRequest(`http://localhost:3000${path}?ignored=1`, {
+      headers: { 'x-inventory-document-path': '/inventory/quantity/new' },
+    }),
+  );
+  expect(
+    response.headers.get('x-middleware-request-x-inventory-document-path'),
+  ).toBe(path);
+});
+it.each([
+  '/api/auth/logout',
+  '/api/auth/privacy-confirm',
+  '/api/auth/privacy-read',
+])(
+  'defers every %s cookie/provider operation to admitted handler requests',
+  async (path) => {
+    for (const method of ['GET', 'POST']) {
+      const request = new NextRequest(
+        `https://actual-preview.example${path}?ignored=1`,
+        {
+          method,
+          headers: {
+            cookie: 'session.0=original',
+            origin: 'https://evil.example',
+            'sec-fetch-site': 'cross-site',
+          },
+        },
+      );
+      const read = vi.spyOn(request.cookies, 'getAll');
+      const response = await proxy(request);
+      expect(sdk.config).not.toHaveBeenCalled();
+      expect(sdk.createServerClient).not.toHaveBeenCalled();
+      expect(read).not.toHaveBeenCalled();
+      expect(response.headers.has('set-cookie')).toBe(false);
+      expect(request.headers.get('cookie')).toBe('session.0=original');
+      expect(response.headers.get('cache-control')).toBe('private, no-store');
+    }
+  },
+);
+it.each([
+  '/api/auth/logout/extra',
+  '/api/auth/privacy-confirmation',
+  '/api/auth/privacy-read/extra',
+  '/api/auth/privacy-reader',
+  '/auth/confirm',
+  '/api/room/contents',
+])('retains claims refresh for other routes including %s', async (path) => {
+  const claims = vi.fn().mockResolvedValue({ data: null, error: null });
+  sdk.createServerClient.mockReturnValue({ auth: { getClaims: claims } });
+  await proxy(new NextRequest(`https://actual-preview.example${path}`));
+  expect(sdk.config).toHaveBeenCalledOnce();
+  expect(sdk.createServerClient).toHaveBeenCalledOnce();
+  expect(claims).toHaveBeenCalledOnce();
 });
 it('preserves refreshed cookie chunks and cache headers across writes', async () => {
   sdk.createServerClient.mockImplementation(
