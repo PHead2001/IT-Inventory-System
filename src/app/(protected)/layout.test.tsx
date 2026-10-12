@@ -124,7 +124,7 @@ afterEach(() => {
 });
 
 it('renders protected missing-page recovery inside the actual shell with one main and skip-link target', async () => {
-  render(await ApplicationLayout({ children: <ProtectedNotFound /> }));
+  render(await ApplicationLayout({ children: await ProtectedNotFound() }));
   await screen.findByRole('heading', { name: 'Page not found' });
   expect(screen.getAllByRole('main')).toHaveLength(1);
   const main = screen.getByRole('main');

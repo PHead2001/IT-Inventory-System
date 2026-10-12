@@ -131,6 +131,7 @@ export type RoomSceneProps = {
   canFocusSelected: boolean;
   onRequestFocus(): void;
   initialView?: CameraView | null;
+  initialViewReady?: boolean;
   onViewChange?: (view: CameraView) => void;
 };
 type ViewCommand = {
@@ -764,6 +765,7 @@ export function CameraRig({
   onReady,
   onFailure,
   initialView,
+  initialViewReady = true,
   focusOnRestore,
   onViewChange,
   command,
@@ -784,6 +786,7 @@ export function CameraRig({
   | 'onReady'
   | 'onFailure'
   | 'initialView'
+  | 'initialViewReady'
   | 'focusOnRestore'
   | 'onViewChange'
 > & {
@@ -1050,6 +1053,10 @@ export function CameraRig({
     )
       return;
     const freshRoom = initializedRoom.current !== room;
+    // A withheld snapshot is not an authorized empty snapshot. Do not consume
+    // the first measured frame or publish its default pose before restoration
+    // and its committed writer are available. An existing camera stays intact.
+    if (freshRoom && !initialViewReady) return;
     if (freshRoom && initializedRoom.current !== null)
       initialFrame.current.reset();
     const initialAction = initialFrame.current.measure(
@@ -1123,6 +1130,7 @@ export function CameraRig({
     invalidate,
     writeTelemetry,
     initialView,
+    initialViewReady,
     focusOnRestore,
     focusRequest,
     emitView,
@@ -1270,6 +1278,7 @@ export function CameraRig({
     invalidate();
   }, [
     focusRequest,
+    initialViewReady,
     focusRequest.requestId,
     focusRequest.code,
     bindings,
@@ -1364,6 +1373,7 @@ export function CameraRig({
     invalidate();
   }, [
     command,
+    initialViewReady,
     camera,
     size.width,
     size.height,
@@ -1381,7 +1391,7 @@ export function CameraRig({
       animation.current = null;
       return;
     }
-    if (!ready.current) {
+    if (!ready.current && initializedRoom.current === room) {
       if (renderedOnce.current && gl.info.render.calls > 0) {
         ready.current = true;
         setSceneCommitted(true);

@@ -29,6 +29,7 @@ it.each([
   '/settings/locations/missing.jpeg',
   '/settings/forms/missing.jpg',
   '/sites/missing.jpg/open/asset',
+  '/inventory/quantity/missing.jpg/extra.svg',
 ])('matches and replaces spoofed document identity for %s', async (path) => {
   expect(
     unstable_doesMiddlewareMatch({ config, nextConfig: {}, url: path }),
@@ -44,7 +45,50 @@ it.each([
   expect(
     response.headers.get('x-middleware-request-x-inventory-document-path'),
   ).toBe(path);
+  expect(sdk.config).toHaveBeenCalledOnce();
+  expect(sdk.createServerClient).toHaveBeenCalledOnce();
+  expect(response.headers.get('cache-control')).toBe('private, no-store');
 });
+it.each([
+  '/missing.jpg',
+  '/missing.svg',
+  '/images/missing.png',
+  '/images/missing.jpeg',
+  '/images/missing.gif',
+  '/images/missing.webp',
+  '/locations-archive/missing.png',
+  '/_next/static/missing.js',
+  '/_next/image?url=%2Fmissing.jpg&w=16&q=75',
+  '/favicon.ico',
+])(
+  'normalizes public %s fallback identity without Auth or cache-policy changes',
+  async (path) => {
+    expect(
+      unstable_doesMiddlewareMatch({ config, nextConfig: {}, url: path }),
+    ).toBe(true);
+    const request = new NextRequest(`http://localhost:3000${path}`, {
+      headers: {
+        'x-inventory-document-path': '/inventory/quantity/missing.jpg',
+        'x-inventory-return': '/inventory/assets/missing.jpg',
+        cookie: 'session.0=original',
+      },
+    });
+    const read = vi.spyOn(request.cookies, 'getAll');
+    const response = await proxy(request);
+    expect(
+      response.headers.get('x-middleware-request-x-inventory-document-path'),
+    ).toBe(request.nextUrl.pathname);
+    expect(
+      response.headers.get('x-middleware-request-x-inventory-return'),
+    ).toBe('');
+    expect(sdk.config).not.toHaveBeenCalled();
+    expect(sdk.createServerClient).not.toHaveBeenCalled();
+    expect(read).not.toHaveBeenCalled();
+    expect(request.headers.get('cookie')).toBe('session.0=original');
+    expect(response.headers.has('set-cookie')).toBe(false);
+    expect(response.headers.has('cache-control')).toBe(false);
+  },
+);
 it.each([
   '/api/auth/logout',
   '/api/auth/privacy-confirm',

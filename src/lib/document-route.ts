@@ -1,4 +1,4 @@
-// Proxy overwrites this header on matched routes, including every record route.
+// Proxy overwrites this header on every path, including public image-like 404s.
 // It is a route selector, never an authorization grant.
 export const documentPathHeader = 'x-inventory-document-path';
 

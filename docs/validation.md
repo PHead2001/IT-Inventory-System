@@ -772,6 +772,43 @@ record names or UUIDs. Authorized successful D304 routes have named titles as
 described above; their missing-resource branches retain these privacy checks.
 Keep real direct missing-resource document requests (including their HTTP 404
 status), anonymous access checks, and client navigation evidence distinct.
+Fallback unit regressions hold the membership guard and separately reject login
+and inactive-member access before returning protected/inventory bodies or
+inventory-specific metadata. The inventory browser journey retains the full
+anonymous redirect-body assertion for image-like quantity and asset paths with
+a forged document selector. Those actual responses must exclude inventory
+fallback identity; mocked guard tests alone do not establish Next serialization.
+Proxy matcher regressions also cover formerly excluded public image and internal
+asset paths: URL-derived selectors replace forged headers without Auth/cookie
+reads or asset cache-policy changes. Protected image-like record paths retain
+their claims refresh and private/no-store response. The inventory browser journey
+checks anonymous and authenticated generic missing JPEG/SVG responses with forged
+inventory headers: HTTP 404, generic fallback identity and no requested UUID.
+The scoped compiled fixture reproduced the forged-selector redirect/private
+fallback on generic JPEG/SVG URLs before broad normalization, then returned
+generic 404s for anonymous and authorized requests afterward. Its real public
+SVG retained `public, max-age=0`; its Next chunk retained public immutable caching.
+The updated focused boundary batch passed 107 tests in eight files. This fixture
+uses simulated membership; final application CI remains the actual Auth/browser
+proof.
+The scoped installed-Next production fixture reproduced fallback identity in
+both login and inactive-member 307 response bodies before the guard, then excluded
+body and metadata markers after it. Both builds used one build worker; guarded
+browser probes retained public/authenticated 404, one main, zero-document client
+recovery, query navigation, native Back/Forward, a formerly missing record becoming
+valid and Flight delivery before the delayed read completed. The focused fallback,
+layout, admission, session and proxy batch passed 93 tests in eight files; canonical
+typechecking and scoped lint/format checks passed. These working-tree checks do
+not certify actual application Supabase/browser responses or replace final-SHA
+application CI and independent review.
+The two retained pristine-site and mapped-location journeys include failure-only
+input handoff diagnostics. A 128-entry buffer records allowlisted field identity,
+focus/input delivery, value lengths/match booleans, native transition milestones
+and matching site-draft write sequences. Raw values, identifiers and action bodies
+are excluded. The observer preserves native transition/storage results and errors;
+four focused tests cover its bounds, privacy, scoping and restoration. It logs once
+on journey failure without extra waits, input retries or altered assertions. This
+is diagnostic coverage for the unresolved input-loss flakes, not a proven fix.
 The navigation-workflow E2E uses a clearly synthetic navigation-boundary fixture: a real
 owned inventory NextLink receives the server's real missing-record RSC response
 through a scoped non-prefetch request rewrite. It requires unavailable content,

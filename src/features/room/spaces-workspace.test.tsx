@@ -1150,6 +1150,70 @@ it('refreshes a restored contents page without refocusing a manually adjusted ca
   );
 });
 
+it.each([
+  {
+    from: '/room?space=missing',
+    to: '/room?space=it-closet',
+    initial: 'The requested space is unavailable. Showing IT Closet instead.',
+    expected: null,
+  },
+  {
+    from: '/room?space=it-closet',
+    to: '/room?space=missing',
+    initial: null,
+    expected: 'The requested space is unavailable. Showing IT Closet instead.',
+  },
+  {
+    from: '/room?space=it-closet',
+    to: '/room?space=it-closet&location=ITC-MISSING',
+    initial: null,
+    expected:
+      'The requested location is unavailable in this space. Choose a location below.',
+  },
+  {
+    from: '/room?space=it-closet&location=ITC-MISSING',
+    to: '/room?space=it-closet',
+    initial:
+      'The requested location is unavailable in this space. Choose a location below.',
+    expected: null,
+  },
+])(
+  'reconciles fallback notices on retained history: $from → $to',
+  async ({ from, to, initial, expected }) => {
+    window.history.replaceState(null, '', from);
+    const workspace = (mode: 'visible' | 'hidden') => (
+      <Activity mode={mode}>
+        <SpacesWorkspace
+          backend="https://backend.example"
+          locations={locations}
+          userId="test-user"
+          initialSpace={spaces[0]}
+          initialCode={null}
+          initialRouteKey={from}
+          initialNotice={initial}
+        />
+      </Activity>
+    );
+    const view = render(workspace('visible'));
+    if (initial) await screen.findByText(initial);
+    view.rerender(workspace('hidden'));
+    act(() => {
+      window.history.replaceState(null, '', to);
+      window.dispatchEvent(new PopStateEvent('popstate'));
+    });
+    view.rerender(workspace('visible'));
+    if (expected) expect(await screen.findByText(expected)).toBeVisible();
+    else
+      await waitFor(() =>
+        expect(
+          screen.queryByText(/The requested (space|location) is unavailable/),
+        ).not.toBeInTheDocument(),
+      );
+    expect(screen.getByLabelText('Space')).toHaveValue('it-closet');
+    expect(window.location.pathname + window.location.search).toBe(to);
+  },
+);
+
 it('ignores another route history event while the room is departing', async () => {
   window.history.replaceState(null, '', '/room?location=ITC-RACK');
   vi.stubGlobal(

@@ -204,6 +204,7 @@ export function useRoomCameraSnapshot(
   }, [scope]);
   return {
     present: context !== null,
+    ready: context === null || (permitted && binding?.scope === scope),
     view: permitted ? snapshot.view : null,
     write: binding?.scope === scope ? binding.write : deniedWrite,
   };

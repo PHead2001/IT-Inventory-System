@@ -7,7 +7,7 @@ import { requireMember } from '@/lib/auth/session.server';
 import { getLocations } from '@/features/inventory/queries.server';
 import { parseRoomLocation } from '@/features/room/navigation';
 import {
-  availableSpaces,
+  roomSelectionNotice,
   resolveSpace,
   spaceLocations,
 } from '@/features/room/spaces';
@@ -46,15 +46,13 @@ export default async function RoomPage({
     ? code
     : null;
   const page = Number(params.page);
-  const fallbackNotice =
-    params.space &&
-    !availableSpaces(locations).some((entry) => entry.id === params.space)
-      ? 'The requested space is unavailable. Showing ' +
-        space.name +
-        ' instead.'
-      : params.location && !selectedCode
-        ? 'The requested location is unavailable in this space. Choose a location below.'
-        : null;
+  const fallbackNotice = roomSelectionNotice(
+    locations,
+    space,
+    params.space,
+    params.location,
+    selectedCode,
+  );
   return (
     <ProtectedPrivacyContent>
       <>

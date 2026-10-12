@@ -10,12 +10,24 @@ import {
 } from './spatial-reveal';
 import { CameraRig } from './room-scene';
 import { SceneSessionContext } from './scene-budget-provider';
+import { PrivacyReadinessContext } from '@/components/auth/privacy-readiness';
+import {
+  assignmentEpoch,
+  readPrivacyRevocationRevision,
+  revokePrivatePresentation,
+} from '@/features/scan/assign-batch';
+import {
+  RoomCameraSnapshotProvider,
+  useRoomCameraSnapshot,
+} from './camera-snapshot-provider';
+import type { CameraView } from './camera-view';
 import {
   LabelLayoutProvider,
   createRoomLabelRegistry,
 } from './label-layout-runtime';
 
 const mocks = vi.hoisted(() => ({
+  reduced: undefined as boolean | undefined,
   state: null as unknown,
   frame: null as (() => void) | null,
   control: null as unknown,
@@ -26,6 +38,19 @@ const mocks = vi.hoisted(() => ({
     onEnd: () => void;
   } | null,
 }));
+vi.mock('@/components/experience/motion-preference', async (importOriginal) => {
+  const actual =
+    await importOriginal<
+      typeof import('@/components/experience/motion-preference')
+    >();
+  return {
+    ...actual,
+    useEffectiveReducedMotion: () => {
+      const reduced = actual.useEffectiveReducedMotion();
+      return mocks.reduced ?? reduced;
+    },
+  };
+});
 vi.mock('@react-three/fiber', () => ({
   useThree: () => mocks.state,
   useFrame: (callback: () => void) => {
@@ -54,6 +79,7 @@ let control: {
 };
 beforeEach(() => {
   window.localStorage.clear();
+  mocks.reduced = undefined;
   camera = new OrthographicCamera(-1, 1, 1, -1, 0.1, 3000);
   camera.position.set(200, 250, 350);
   camera.zoom = 3;
@@ -77,6 +103,210 @@ beforeEach(() => {
   mocks.orbit = null;
 });
 afterEach(() => vi.restoreAllMocks());
+
+const savedPose: CameraView = {
+  position: [210, 260, 360],
+  target: [20, 30, -40],
+  zoom: 2,
+  mode: 'free',
+};
+function restorationHarness() {
+  const registry = createRoomLabelRegistry(vi.fn());
+  const complete = vi.fn();
+  const onReady = vi.fn();
+  const bindings = buildRoomBindings(room);
+  let snapshot: ReturnType<typeof useRoomCameraSnapshot>;
+  function Scene({
+    mounted,
+    selected,
+  }: {
+    mounted: boolean;
+    selected: boolean;
+  }) {
+    snapshot = useRoomCameraSnapshot(
+      'closet',
+      'actor',
+      'https://backend.example',
+    );
+    return mounted ? (
+      <LabelLayoutProvider registry={registry}>
+        <CameraRig
+          room={room}
+          bindings={bindings}
+          initialView={snapshot.view}
+          initialViewReady={snapshot.ready}
+          onViewChange={snapshot.write}
+          focusRequest={{
+            code: selected ? 'ITC-S1A' : null,
+            requestId: selected ? 1 : 0,
+          }}
+          focusOnRestore={selected}
+          onFocusComplete={complete}
+          onReady={onReady}
+          onFailure={vi.fn()}
+          command={{ id: 0, kind: 'fit' }}
+          orbitMode="free"
+          manualGesture={{ current: { active: false, lastMotionAt: 0 } }}
+          active={false}
+          selectionGesture={{ current: { suppressSelection: false } }}
+          onDraggingChange={vi.fn()}
+          onPassiveDrag={vi.fn()}
+        />
+      </LabelLayoutProvider>
+    ) : null;
+  }
+  return {
+    complete,
+    onReady,
+    snapshot: () => snapshot,
+    ui: (
+      ready: boolean,
+      mounted: boolean,
+      selected = false,
+      generation = 'generation',
+    ) => (
+      <PrivacyReadinessContext
+        value={{
+          ready,
+          visible: true,
+          generation,
+          revocationRevision: readPrivacyRevocationRevision(),
+          verifiedEpoch: ready ? assignmentEpoch() : undefined,
+        }}
+      >
+        <RoomCameraSnapshotProvider
+          actorId="actor"
+          backend="https://backend.example"
+        >
+          <Scene mounted={mounted} selected={selected} />
+        </RoomCameraSnapshotProvider>
+      </PrivacyReadinessContext>
+    ),
+  };
+}
+it.each([false, true])(
+  'waits for the provider restore grant before initializing a saved camera (selected=%s)',
+  (selected) => {
+    mocks.reduced = true;
+    size.width = 375;
+    size.height = 400;
+    const rig = restorationHarness();
+    const view = render(rig.ui(true, false));
+    act(() => {
+      expect(rig.snapshot().write(savedPose)).toBe(true);
+    });
+    view.rerender(rig.ui(false, true, selected));
+    expect(camera.position.toArray()).toEqual([200, 250, 350]);
+    expect(control.update).not.toHaveBeenCalled();
+    expect(rig.complete).not.toHaveBeenCalled();
+    act(() => {
+      mocks.frame!();
+      mocks.frame!();
+    });
+    expect(rig.onReady).not.toHaveBeenCalled();
+    expect(rig.complete).not.toHaveBeenCalled();
+    view.rerender(rig.ui(true, true, selected));
+    expect(camera.position.toArray()).toEqual(savedPose.position);
+    expect(control.target.toArray()).toEqual(savedPose.target);
+    expect(rig.onReady).not.toHaveBeenCalled();
+    expect(rig.complete).not.toHaveBeenCalled();
+    act(() => mocks.frame!());
+    expect(rig.onReady).not.toHaveBeenCalled();
+    act(() => mocks.frame!());
+    expect(rig.onReady).toHaveBeenCalledOnce();
+    if (selected) {
+      const target = [8, 80.5, -18];
+      expect(control.target.toArray()).toEqual(target);
+      expect(camera.position.clone().sub(control.target).toArray()).toEqual([
+        190, 230, 400,
+      ]);
+      expect(rig.complete).toHaveBeenLastCalledWith(
+        'ITC-S1A',
+        expect.objectContaining({ code: 'ITC-S1A', requestId: 1 }),
+      );
+      expect(rig.snapshot().view!.target).toEqual(target);
+    } else {
+      expect(camera.position.toArray()).toEqual(savedPose.position);
+      expect(control.target.toArray()).toEqual(savedPose.target);
+      expect(camera.zoom).toBe(savedPose.zoom);
+      expect(rig.snapshot().view).toEqual(savedPose);
+    }
+    const initialized = camera.position.toArray();
+    view.rerender(rig.ui(false, true, selected));
+    expect(camera.position.toArray()).toEqual(initialized);
+    view.rerender(rig.ui(true, true, selected));
+    expect(camera.position.toArray()).toEqual(initialized);
+  },
+);
+it('keeps a snapshot-withheld rig unready and does not revive its retired renderer session', () => {
+  size.width = 375;
+  size.height = 400;
+  const rig = restorationHarness();
+  let current = true;
+  const session = { current: () => current };
+  const wrap = (ready: boolean, mounted: boolean, owner = session) => (
+    <SceneSessionContext value={owner}>
+      {rig.ui(ready, mounted, true)}
+    </SceneSessionContext>
+  );
+  const view = render(wrap(true, false));
+  act(() => {
+    expect(rig.snapshot().write(savedPose)).toBe(true);
+  });
+  view.rerender(wrap(false, true));
+  const capturedFrame = mocks.frame!;
+  const capturedEnd = mocks.orbit!.onEnd;
+  act(() => {
+    capturedFrame();
+    capturedFrame();
+    capturedEnd();
+  });
+  expect(rig.onReady).not.toHaveBeenCalled();
+  expect(control.update).not.toHaveBeenCalled();
+  current = false;
+  view.rerender(wrap(true, true, { current: () => true }));
+  expect(camera.position.toArray()).toEqual(savedPose.position);
+  act(() => {
+    mocks.frame!();
+    mocks.frame!();
+    capturedEnd();
+  });
+  expect(rig.onReady).not.toHaveBeenCalled();
+  expect(rig.complete).not.toHaveBeenCalled();
+  expect(rig.snapshot().view).toEqual(savedPose);
+});
+it.each(['empty', 'revoked', 'session'] as const)(
+  'initializes an authorized canonical frame with %s saved state',
+  (state) => {
+    mocks.reduced = true;
+    size.width = 375;
+    size.height = 400;
+    const rig = restorationHarness();
+    const view = render(rig.ui(true, false));
+    if (state !== 'empty')
+      act(() => {
+        rig.snapshot().write(savedPose);
+      });
+    const oldWrite = rig.snapshot().write;
+    view.rerender(rig.ui(false, true));
+    expect(control.update).not.toHaveBeenCalled();
+    if (state === 'revoked') act(() => revokePrivatePresentation());
+    view.rerender(
+      rig.ui(
+        true,
+        true,
+        false,
+        state === 'session' ? 'next-session' : 'generation',
+      ),
+    );
+    expectCanonicalFirstFrame();
+    expect(camera.position.toArray()).not.toEqual(savedPose.position);
+    expect(rig.snapshot().view!.position).toEqual(camera.position.toArray());
+    act(() => {
+      expect(oldWrite(savedPose)).toBe(false);
+    });
+  },
+);
 function harness(onViewChange = vi.fn()) {
   const registry = createRoomLabelRegistry(vi.fn());
   const props = {

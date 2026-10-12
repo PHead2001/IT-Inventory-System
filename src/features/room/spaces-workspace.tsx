@@ -55,6 +55,7 @@ import {
   availableSpaces,
   containingSpace,
   resolveSpace,
+  roomSelectionNotice,
   spaces,
   spaceLocations,
   spaceRoom,
@@ -306,6 +307,16 @@ export function SpacesWorkspace({
         code: initialCode,
         page: initialPage,
       });
+      const params = new URLSearchParams(window.location.search);
+      setNotice(
+        roomSelectionNotice(
+          locations,
+          next.space,
+          params.get('space'),
+          params.get('location'),
+          next.code,
+        ),
+      );
       if (
         next.space.id !== selectionRef.current.space.id ||
         next.code !== selectionRef.current.code
@@ -684,6 +695,7 @@ export function SpacesWorkspace({
                         ]),
                       )}
                       initialView={initialView}
+                      initialViewReady={layoutCamera.ready}
                       onViewChange={(view) => {
                         if (layoutCamera.present) {
                           layoutCamera.write(view);

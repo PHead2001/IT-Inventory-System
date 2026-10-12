@@ -14,6 +14,17 @@ An aggregate remains the selected location. Highlighted inventory-bearing descen
 
 ## Geometry and camera
 
+A new camera waits for the layout snapshot's authorized read and committed writer
+before consuming its first measured frame. Pending verification is distinct from
+an authorized empty snapshot: saved pans restore exactly, while an empty snapshot
+uses canonical framing. An explicit selected-location focus request runs only
+after applying that saved baseline and the scene's confirmed render. History
+restoration preserves camera intent. Readiness requires an
+initialized room under its original current renderer session; a withheld snapshot
+or replacement context wrapper cannot trigger the ready callback. A same-session
+recheck preserves an already initialized camera;
+the snapshot provider continues to deny writes and retire stale owners as before.
+
 The strict Zod room contract is validated without a database at build/test/load time. Binding-to-seeded-location validation stays in the local Supabase integration gate. The production build needs no live Supabase.
 
 `buildRoomBindings` resolves parent translations and Z rotations into world room XYZ inches. Interaction focus points are parent-local; optional hitbox centers and label anchors are node-local. Camera focus prefers a location's primary binding regardless of node order, falling back to a non-primary binding for aggregates. Aggregate focus defaults to descendant geometry bounds. Groups have logical bindings but no scene interaction targets: select aggregates through the conventional picker. The schema rejects selectable group targets instead of accepting targets the renderer cannot handle. Nonselectable group focus metadata remains supported. The renderer alone converts through `coordinates.ts`: room [X,Y,Z] becomes Three [X,Z,-Y].
@@ -49,7 +60,7 @@ Navigation, page return, window focus and visibility restoration refresh enabled
 The Spaces workspace reconciles the current `/room` URL when its history listener
 attaches, including remounts and React Activity reactivation. Native Back/Forward
 may restore the URL before that listener exists; cached initial props cannot
-override the restored space, location, page or route-readiness key. Reconciliation
+override the restored space, location, page, fallback notice or route-readiness key. Reconciliation
 does not rewrite history. Changed locations receive a fresh focus/reveal token
 while preserving the restored camera view; unchanged locations and page-only
 restores keep the current camera intent and token. Explicit selection and Center
