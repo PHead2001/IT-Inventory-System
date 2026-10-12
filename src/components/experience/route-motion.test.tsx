@@ -36,6 +36,9 @@ import {
   InventoryRecordLink,
   RecordTitle,
 } from './record-transition';
+import { RouteContentIdentityContext } from './route-content-identity';
+import { routeKey } from './route-key';
+import { PairedRouteLoadingContext } from './paired-route-loading';
 import {
   cancelRouteSnapshots,
   createRouteMotionState,
@@ -169,11 +172,13 @@ function List({
   holdings = [firstHolding, initiatingHolding],
   pairable = true,
   anchored = true,
+  listHref = '/inventory',
 }: {
   wrongRecord?: boolean;
   holdings?: HoldingIdentity[];
   pairable?: boolean;
   anchored?: boolean;
+  listHref?: string;
 }) {
   return (
     <ul>
@@ -187,7 +192,7 @@ function List({
               pairable={pairable}
               href={detailPath}
               returnTo={
-                anchored ? `/inventory#inventory-row-${ordinal}` : undefined
+                anchored ? `${listHref}#inventory-row-${ordinal}` : undefined
               }
             >
               Cable row {ordinal}
@@ -198,11 +203,11 @@ function List({
     </ul>
   );
 }
-function Detail() {
+function Detail({ returnHref = returnTo }: { returnHref?: string }) {
   return (
     <>
       <RecordTitle record={record}>Cable title</RecordTitle>
-      <InventoryBackLink record={record} href={returnTo}>
+      <InventoryBackLink record={record} href={returnHref}>
         Back to results
       </InventoryBackLink>
     </>
@@ -347,6 +352,110 @@ it('names only the initiating holding and the authorized matching title until ac
   Reflect.deleteProperty(document, 'getAnimations');
 });
 
+it('keeps title scope bound to admitted content through a live destination URL and rejects a different admitted query scope', () => {
+  const content = (listHref: string) =>
+    view(
+      <RouteContentIdentityContext value={{ pathname: '/inventory', listHref }}>
+        <List />
+      </RouteContentIdentityContext>,
+    );
+  const rendered = render(content('/inventory'));
+  const source = screen.getByRole('link', { name: 'Cable row 2' });
+  fireEvent.click(source);
+  const name = source.getAttribute('data-test-transition-name');
+  expect(name).toMatch(/^inventory-title-/);
+  runtime.pathname = detailPath;
+  rendered.rerender(content('/inventory'));
+  expect(screen.getByRole('link', { name: 'Cable row 2' })).toBe(source);
+  expect(source).toHaveAttribute('data-test-transition-name', name);
+  rendered.rerender(content('/inventory?type=asset'));
+  expect(screen.getByRole('link', { name: 'Cable row 2' })).toBe(source);
+  expect(source).not.toHaveAttribute('data-test-transition-name');
+});
+
+it.each([true, false])(
+  'matches reordered full-query values forward and Back with exactly one holding name (captured identity=%s)',
+  (captured) => {
+    const rawList = '/inventory?q=cable&type=quantity&page=2';
+    const reordered = '/inventory?page=2&type=quantity&q=cable';
+    const rawBack = `${rawList}#inventory-row-2`;
+    let loading: React.ContextType<typeof PairedRouteLoadingContext>;
+    function CaptureLoading() {
+      const current = useContext(PairedRouteLoadingContext);
+      useLayoutEffect(() => {
+        loading = current;
+      }, [current]);
+      return null;
+    }
+    const content = (scope: string, child: ReactNode) => {
+      const url = new URL(scope, location.origin);
+      return view(
+        <>
+          <CaptureLoading />
+          {captured ? (
+            <RouteContentIdentityContext
+              value={{
+                pathname: url.pathname,
+                listHref: routeKey(url.pathname, url.searchParams),
+              }}
+            >
+              {child}
+            </RouteContentIdentityContext>
+          ) : (
+            child
+          )}
+        </>,
+      );
+    };
+    runtime.query = 'page=2&type=quantity&q=cable';
+    const rendered = render(content(reordered, <List listHref={rawList} />));
+    const source = screen.getByRole('link', { name: 'Cable row 2' });
+    fireEvent.click(source);
+    const forwardName = source.getAttribute('data-test-transition-name');
+    expect(forwardName).toMatch(/^inventory-title-/);
+    expect(
+      document.querySelectorAll('[data-test-transition-name]'),
+    ).toHaveLength(1);
+    runtime.pathname = detailPath;
+    runtime.query = '';
+    rendered.rerender(content(detailPath, <Detail returnHref={rawBack} />));
+    expect(screen.getByRole('heading')).toHaveAttribute(
+      'data-test-transition-name',
+      forwardName,
+    );
+    // This title-only adapter has no primary RouteReady wrapper.
+    act(() => loading!.store.ready(detailPath));
+    const back = screen.getByRole('link', { name: 'Back to results' });
+    expect(back).toHaveAttribute('href', rawBack);
+    fireEvent.click(back);
+    const backName = screen
+      .getByRole('heading')
+      .getAttribute('data-test-transition-name');
+    expect(backName).toMatch(/^inventory-title-/);
+    expect(backName).not.toBe(forwardName);
+    runtime.pathname = '/inventory';
+    runtime.query = 'type=quantity&page=2&q=cable';
+    rendered.rerender(content(reordered, <List listHref={reordered} />));
+    expect(screen.getByRole('link', { name: 'Cable row 2' })).toHaveAttribute(
+      'data-test-transition-name',
+      backName,
+    );
+    expect(
+      document.querySelectorAll('[data-test-transition-name]'),
+    ).toHaveLength(1);
+    runtime.query = 'page=2&type=quantity&q=other';
+    rendered.rerender(
+      content(
+        '/inventory?page=2&type=quantity&q=other',
+        <List listHref={rawList} />,
+      ),
+    );
+    expect(
+      document.querySelectorAll('[data-test-transition-name]'),
+    ).toHaveLength(0);
+  },
+);
+
 it('first native Back names the remembered initiating ordinal on an unanchored results entry without changing history', () => {
   const originalHref = location.href;
   window.history.replaceState(null, '', '/inventory');
@@ -382,10 +491,28 @@ it('first native Back names the remembered initiating ordinal on an unanchored r
 });
 
 it('app Back reuses the approved holding and scope, and a changed record falls back', () => {
-  const { rerender } = render(view(<List />));
+  let loading: React.ContextType<typeof PairedRouteLoadingContext>;
+  function CaptureLoading() {
+    const current = useContext(PairedRouteLoadingContext);
+    useLayoutEffect(() => {
+      loading = current;
+    }, [current]);
+    return null;
+  }
+  const { rerender } = render(
+    view(
+      <>
+        <CaptureLoading />
+        <List />
+      </>,
+    ),
+  );
   fireEvent.click(screen.getByRole('link', { name: 'Cable row 2' }));
   runtime.pathname = detailPath;
   rerender(view(<Detail />));
+  // This title-only fixture has no RouteReady wrapper. Explicitly settle its
+  // simulated primary before Back; actual readiness is covered by paired-route.
+  act(() => loading!.store.ready(detailPath));
   runtime.boundaries = [];
   fireEvent.click(screen.getByRole('link', { name: 'Back to results' }));
   const sourceName = screen
@@ -396,6 +523,7 @@ it('app Back reuses the approved holding and scope, and a changed record falls b
   expect(
     runtime.boundaries.filter((boundary) => boundary.name === sourceName),
   ).toHaveLength(2);
+  act(() => loading!.store.ready('/inventory'));
   runtime.pathname = detailPath;
   rerender(view(<Detail />));
   fireEvent.click(screen.getByRole('link', { name: 'Back to results' }));

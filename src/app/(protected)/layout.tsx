@@ -7,7 +7,7 @@ import { speedInsightsEnabled } from '@/features/telemetry/speed-insights';
 import { MotionPreference } from '@/components/experience/motion-preference';
 import { AccountIdentity } from '@/components/experience/account-identity';
 import { Navigation } from '@/components/experience/navigation';
-import { PageArrival } from '@/components/experience/page-arrival';
+import { ProtectedRouteArrival } from '@/components/experience/protected-route-arrival';
 import { RouteMotionProvider } from '@/components/experience/route-motion';
 import { OperationalTimeProvider } from '@/components/operational-time';
 import { AssignmentScopeGuard } from '@/features/scan/assignment-scope-guard';
@@ -80,7 +80,7 @@ export default async function ApplicationLayout({
                   className="experience-main"
                   tabIndex={-1}
                 >
-                  <PageArrival>{children}</PageArrival>
+                  <ProtectedRouteArrival>{children}</ProtectedRouteArrival>
                 </main>
               </div>
               <ProtectedPrivacyContent>

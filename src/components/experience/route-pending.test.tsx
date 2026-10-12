@@ -171,6 +171,27 @@ it('reports real streamed fallback lifetime, including retained loading after Ba
   expect(state.snapshot().pending).toBe(false);
 });
 
+it('announces an actual slow Suspense fallback once alongside shared progress', async () => {
+  const work = deferred();
+  const state = createRoutePendingState();
+  const view = render(
+    <Harness state={state}>
+      <Suspense fallback={<RouteLoading />}>
+        <Content
+          read={() => {
+            throw work.promise;
+          }}
+        />
+      </Suspense>
+    </Harness>,
+  );
+  await waitFor(() =>
+    expect(progress()).toHaveAttribute('data-visible', 'true'),
+  );
+  expect(screen.getAllByRole('status')).toHaveLength(1);
+  view.unmount();
+});
+
 it('reduced motion exposes static work immediately and completes immediately on readiness', async () => {
   runtime.reduced = true;
   const work = deferred();

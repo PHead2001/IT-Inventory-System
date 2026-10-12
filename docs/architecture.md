@@ -48,6 +48,24 @@ Storage failures retain the current in-memory entries and native refresh/tab-clo
 
 The approved v0.1 plan and amendments govern Foundation and Inventory Core. PR3 implements the R3F room navigation surface.
 
+Paired inventory route loading retains React's actual outgoing content through a
+stable Suspense boundary inside the canonical protected privacy wrapper, while the
+shell, privacy controller and pending owners remain live outside it. Only an
+accepted exact paired navigation under a fresh grant and supported Full motion
+owns the opaque loading promise; it stores no private DOM/data and neither delays
+the request nor owns a business task. Actual authorized visible readiness releases
+that matching navigation; cancellation withdraws presentation without acknowledging
+or canceling backend work. A second accepted navigation interrupts the unfinished
+pair and uses ordinary loading/crossfade, without promising to preserve its first
+source node or reconstructing a missing shared title. A different committed full
+route key (including a Next server redirect or canonical query) cancels only the
+presentation gate; real fallback, Link and task owners settle independently.
+Privacy revocation hides/inerts the retained subtree
+immediately. Normal accepted route exits may relinquish outgoing components, while
+same-page rechecks retain draft/business ownership and existing recovery contracts.
+See [interface standards](interface-standards.md) and [validation](validation.md)
+for supported fallback paths and the remaining native/product acceptance.
+
 Inventory uses a collapsed Add item disclosure with equally styled quantity-item and individual-asset paths, examples and the existing filtered return context. The protected header exposes the verified member's full name and role through a compact native account disclosure, including at narrow widths; identity is never stored separately in browser storage.
 
 History lists summarize quantities from immutable event deltas or custody snapshots. Quantity history has null top-level endpoints: a conserved, consistent negative/positive ledger pair identifies a move and a single positive line identifies a receipt. Count corrections retain their recorded before/after/delta; zero or ambiguous transfer shapes never become invented moves. Missing or inconsistent movement deltas display Amount not recorded. Custody endpoint names use recorded labels. Older storage events only expose location IDs and current reference labels; technical event details explain this provenance and the current record name without appending it to ordinary summaries. Headings share one event vocabulary; summaries add endpoints, amounts or changed fields instead of repeating the operation.

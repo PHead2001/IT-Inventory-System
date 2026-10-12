@@ -120,6 +120,57 @@ authenticated real-browser journeys, dirty/error/focus sibling workflows and
 independent review remain required before accepting the route subset of D303.2.
 Panels/receipts/disclosures remain pending U406 integration. W09 source and
 journeys are being implemented, with readiness/overlap acceptance still pending.
+
+The partial W08 route-loading tests in `src/app/(protected)/loading.test.tsx`
+mount actual Suspense fallbacks for Inventory/records, History/events, Labels, new
+inventory records and category-form routes. They prove one loading status alongside delayed top
+progress, actual reveal/readiness, retained Back waits, overlapping fallback
+owners, retirement and unrelated pending work. `loading-skeleton.test.tsx` covers
+local/system reduction, hidden-page shimmer/reveal cancellation and retained
+content/focus without delayed errors. The duplicate announcement regression first
+failed against the existing plain route fallback (two status regions), then
+passed after opaque owner election. jsdom readiness geometry is supplied explicitly;
+these tests do not prove streamed Next loading boundaries, native title pairing,
+layout stability or populated visual quality. The existing delayed RSC/browser
+journeys remain separate runtime acceptance and the remaining W08 feature waits are unported.
+
+`paired-route-loading.test.tsx` uses actual React Suspense/StrictMode to prove the
+same outgoing node/draft survives a legitimate held pair, plus real primary reveal,
+app Back, native Back cancellation, supersede, errors, reduction, provider retirement,
+fresh-grant fencing and same-page draft/focus preservation. Its pathname/query
+adapter updates inside React's route transition; a global pathname mutation would
+incorrectly force an urgent keyed remount and is not a supported router simulation.
+An accepted route exit may unmount its outgoing owner after revocation while its
+replacement remains hidden; a baseline ordinary loading fallback demonstrates that
+same owner relinquishment. Existing canonical privacy tests retain strict same-page
+business/retry ownership and prove deferred revocation/recovery. Interrupted
+paired navigation explicitly falls back to ordinary loading/crossfade: the real
+privacy-controller regression proves the second destination can reveal or be
+canceled, and late first/second primaries cannot replay over the current route.
+The installed Next `RedirectBoundary` is exercised through an isolated router
+context adapter for an untracked replacement and a query-only Back redirect;
+the latter preserves an unrelated real pending registration. The route-key
+effect cancels a mismatched presentation gate without manufacturing readiness.
+These are React/isolated-boundary checks, not a complete Next LayoutRouter or
+streamed Flight test. None of these jsdom tests establishes native snapshot pairing.
+
+The native route-motion browser case now authors a real server-primary delay after
+early Flight fallback bytes, rather than holding a complete HTTP response. The
+`route-primary-delay.ts` fixture refuses hosted/nondefault endpoints and scheduling
+overrides before SQL. Only canonical loopback API 54321/database 54322 and the
+single-worker exclusive route-motion phase are accepted. A transaction acquires
+`quantity_items` ACCESS EXCLUSIVE only after the owned source screen is rendered;
+an independent local connection observes blocked primary reads. Acquisition,
+statement and idle-transaction timeouts are session/transaction scoped; finally
+rolls back and closes both connections. This changes no data or schema. A separate
+authenticated bounded Flight reader observes fallback bytes while the actual browser
+request streams normally; neither headers nor body are attached. The held source
+must remain the same visible node, with live progress and no fallback/native capture,
+before release and the existing exact native title/Back assertions. Fixture/scheduling
+guards have unit coverage. These authored cases have not been executed in this
+bounded integration cycle. They require the canonical disposable stack/production
+Next build and cannot run against a hosted preview. Hosted proof uses ordinary slow
+routes and native observation without this local lock fixture.
 The decisive actual-React regression first reproduced async-action entanglement:
 a replacement caller rendered Ready while native pending remained behind a
 departed caller's unresolved action. It now passes with per-invocation promise

@@ -31,12 +31,18 @@ export function CanvasFreeRouteContent({
 }
 
 /** Next owns the transition and server commit; never retain outgoing children. */
-export function PageArrival({ children }: { children: React.ReactNode }) {
-  const pathname = usePathname();
+export function PageArrival({
+  children,
+  pathname,
+}: {
+  children: React.ReactNode;
+  pathname: string | null;
+}) {
+  const livePathname = usePathname();
   const { enabled, cancelIfInvalid, finishAfterSnapshot } = useRouteMotion();
   // Omitting the WHOLE ancestor boundary is necessary: naming the canvas `none`
   // would still include its pixels in an ancestor's snapshot.
-  const animate = enabled && pathname !== '/room';
+  const animate = enabled && pathname !== '/room' && livePathname !== '/room';
   return (
     <ViewTransition
       key={pathname}

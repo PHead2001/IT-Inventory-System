@@ -45,14 +45,14 @@ it('leaves the commit to React and preserves drafts on query/refresh updates', (
   const animate = vi.fn();
   Element.prototype.animate = animate;
   const { rerender } = render(
-    <PageArrival>
+    <PageArrival pathname={route.pathname}>
       <PersistentForm />
     </PageArrival>,
   );
   const input = screen.getByRole('textbox', { name: 'Unsaved note' });
   fireEvent.change(input, { target: { value: 'draft' } });
   rerender(
-    <PageArrival>
+    <PageArrival pathname={route.pathname}>
       <PersistentForm />
     </PageArrival>,
   );
@@ -77,7 +77,7 @@ it.each([
     route.pathname = pathname;
     route.enabled = enabled;
     render(
-      <PageArrival>
+      <PageArrival pathname={route.pathname}>
         <p>Live content</p>
       </PageArrival>,
     );
@@ -89,3 +89,36 @@ it.each([
     expect(screen.getByText('Live content')).toBeVisible();
   },
 );
+
+it('a live path recheck cannot remount an accepted page or enable snapshots of a retained room ancestor', () => {
+  const view = render(
+    <PageArrival pathname="/inventory">
+      <PersistentForm />
+    </PageArrival>,
+  );
+  const input = screen.getByRole('textbox');
+  fireEvent.change(input, { target: { value: 'accepted draft' } });
+  route.pathname = '/room';
+  view.rerender(
+    <PageArrival pathname="/inventory">
+      <PersistentForm />
+    </PageArrival>,
+  );
+  expect(screen.getByRole('textbox')).toBe(input);
+  expect(input).toHaveValue('accepted draft');
+  expect(mounts).toBe(1);
+  expect(route.boundaries.at(-1)).toMatchObject({
+    enter: 'none',
+    exit: 'none',
+  });
+  route.pathname = '/inventory';
+  view.rerender(
+    <PageArrival pathname="/room">
+      <p>Retained room canvas ancestor</p>
+    </PageArrival>,
+  );
+  expect(route.boundaries.at(-1)).toMatchObject({
+    enter: 'none',
+    exit: 'none',
+  });
+});

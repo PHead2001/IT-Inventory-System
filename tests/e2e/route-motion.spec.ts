@@ -1,4 +1,5 @@
-import { expect, test, type Page } from '@playwright/test';
+import { expect, test, type Page, type Request } from '@playwright/test';
+import { withHeldQuantityPrimary } from './route-primary-delay';
 import { createClient } from '@supabase/supabase-js';
 import fixture from '../fixtures/auth.json' with { type: 'json' };
 import { withDisposablePasswordAccount } from './disposable-password-account';
@@ -171,6 +172,44 @@ async function resetProof(page: Page) {
     p.replacements = [];
     p.cls = 0;
   });
+}
+
+/** An independent authenticated Flight reader proves early fallback bytes while
+ * the actual browser request streams normally and its database read is held.
+ * Headers/body stay in memory and are never attached or logged. */
+async function earlyQuantityFallback(request: Request) {
+  const target = new URL(request.url());
+  expect(['localhost', '127.0.0.1']).toContain(target.hostname);
+  expect(target.port).toBe('3000');
+  const controller = new AbortController();
+  const deadline = setTimeout(() => controller.abort(), 1500);
+  let reader: ReadableStreamDefaultReader<Uint8Array> | undefined;
+  try {
+    const response = await fetch(target, {
+      headers: await request.allHeaders(),
+      signal: controller.signal,
+    });
+    expect(response.ok).toBe(true);
+    expect(response.headers.get('content-type')).toContain('text/x-component');
+    reader = response.body!.getReader();
+    const decoder = new TextDecoder();
+    let text = '',
+      bytes = 0;
+    while (!text.includes('Loading quantity record')) {
+      const next = await reader.read();
+      if (next.done)
+        throw new Error('Primary stream ended before a fallback was observed.');
+      bytes += next.value.byteLength;
+      if (bytes > 512 * 1024)
+        throw new Error('Fallback probe exceeded its bounded byte limit.');
+      text += decoder.decode(next.value, { stream: true });
+    }
+    return { fallbackBeforePrimaryRelease: true, streamedBytes: bytes };
+  } finally {
+    clearTimeout(deadline);
+    controller.abort();
+    await reader?.cancel().catch(() => {});
+  }
 }
 
 /** Owned actor only; no shared Staff permissions or hosted fixture mutation. */
@@ -706,13 +745,57 @@ for (const width of [1280, 390]) {
       body: await page.screenshot(),
       contentType: 'image/png',
     });
+    const sourceNode = await row.elementHandle();
+    expect(sourceNode).not.toBeNull();
     await row.focus();
-    await page.keyboard.press('Enter');
+    const streaming = await withHeldQuantityPrimary(info, async (held) => {
+      const requested = page.waitForRequest(
+        (request) =>
+          new URL(request.url()).pathname ===
+            `/inventory/quantity/${record.id}` &&
+          request.headers().rsc === '1' &&
+          !request.headers()['next-router-prefetch'],
+        { timeout: 1000 },
+      );
+      try {
+        await page.keyboard.press('Enter');
+        const fallback = earlyQuantityFallback(await requested);
+        void fallback.catch(() => {});
+        await expect
+          .poll(held.blockedReads, { timeout: 1000, intervals: [25, 50, 100] })
+          .toBeGreaterThan(0);
+        const streamed = await fallback;
+        await expect(routeProgress(page)).toHaveAttribute(
+          'data-visible',
+          'true',
+          { timeout: 750 },
+        );
+        expect(
+          await sourceNode!.evaluate(
+            (node) => node.isConnected && node.getClientRects().length > 0,
+          ),
+        ).toBe(true);
+        expect(
+          await sourceNode!.evaluate(
+            (node) => node === document.querySelector('#inventory-row-2 a'),
+          ),
+        ).toBe(true);
+        expect(await page.locator('[data-loading-shape]').count()).toBe(0);
+        expect((await proof(page)).transitions).toHaveLength(0);
+        return streamed;
+      } finally {
+        await held.release();
+      }
+    });
     await expect(
       page.getByRole('heading', { name, exact: true }),
     ).toBeVisible();
     await settled(page);
     const forward = await proof(page);
+    await info.attach('primary-data-delayed-after-fallback-stream', {
+      body: JSON.stringify(streaming),
+      contentType: 'application/json',
+    });
     const shared = forward.transitions.flatMap((entry) =>
       entry.old.filter(
         (old) =>

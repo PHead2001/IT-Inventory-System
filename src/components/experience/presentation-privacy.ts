@@ -13,3 +13,18 @@ export function freshPresentationGrant(
     privacy.verifiedEpoch === assignmentEpoch()
   );
 }
+
+/** A previously verified original binding may stay visible during its ordinary
+ * recheck. Live revisions are read at use time, never inferred from a URL. */
+export function retainedPresentationGrantCurrent(
+  privacy: ReturnType<typeof usePrivacyReadiness>,
+  accepted: { revision: number; epoch: number } | null,
+) {
+  return (
+    (privacy.visible ?? privacy.ready) &&
+    privacy.revocationRevision === readPrivacyRevocationRevision() &&
+    accepted?.revision === privacy.revocationRevision &&
+    accepted?.epoch === assignmentEpoch() &&
+    (!privacy.ready || privacy.verifiedEpoch === accepted.epoch)
+  );
+}

@@ -187,6 +187,11 @@ Dirty guards and modified gestures never enter that transaction. Retirement affe
 only title metadata, preserving pending tasks, progress and ordinary navigation.
 Missing/ambiguous/pre-capture pairs use the normal route crossfade. Separate
 streaming commits consume the intent and cannot reconstruct the old private tree.
+An accepted navigation that interrupts an unfinished paired load cancels that pair
+and uses ordinary loading/crossfade for the new destination. It does not promise
+that the original source node survives every interrupted route. Next-owned server
+redirects remain unrestricted; a committed destination/query mismatch cancels only
+the presentation gate, never acknowledges primary readiness or cancels actual work.
 
 React owns shared pairing and capture. A narrow `onShare` adapter replaces the
 exact named native group effect: it reads browser-captured source geometry,
@@ -225,8 +230,17 @@ draft: Link pending, tracked imperative router operations, real action promises 
 mounted local fallback/request UI contribute registrations. A 150 ms timer only
 reveals pending work; it never declares completion. Reduced motion makes pending
 static and completion immediate. Required protected auth/title/primary data resolve
-in the same reveal boundary; there is no protected loading fallback replacing the
-paired outgoing title. Server-issued actor/full-query ready markers acknowledge
+in the same reveal boundary. A stable unkeyed Suspense boundary sits inside the
+canonical privacy content wrapper around pathname-keyed PageArrival; privacy,
+progress and provider controllers remain outside it. Inventory/list/detail loading
+fallbacks suspend into that stable boundary only for a current accepted paired
+navigation with the exact destination, opaque title/navigation owner, provider and
+pending generation, a fresh original-binding grant and supported Full motion.
+That navigation allocates one cached promise before rendering. React retains the
+actual outgoing content until the authorized incoming title/primary data reveals;
+the gate stores no private children, titles or DOM. Direct, unpaired, Reduced and
+unsupported loading shows the ordinary shape-matched skeleton. All intermediate
+inventory loading boundaries honor the gate. Server-issued actor/full-query ready markers acknowledge
 only connected visible matching content, and only close native history tokens.
 Refresh completion remains tied to real React work. Activity reactivation runs the
 marker layout effect again; presentation epochs alone never fabricate readiness.
@@ -244,6 +258,35 @@ Completion releases presentation after its UI commit; it never completes another
 owner's task or a route refresh. Synchronous router errors still reach the original
 caller, including existing Retry recovery. Actual browser readiness and native
 overlap remain required before W09 acceptance.
+
+The partial W08 route port uses decorative content-shaped skeletons for Inventory,
+record pages, History/events, Labels, new inventory records and category-form routes.
+One polite nonvisual fallback status sits outside the busy geometry. Mounted
+fallbacks register only their own real Suspense lifetime with W09; an opaque
+fallback owner elects one announcement and suppresses the duplicate top status.
+Fallback retirement neither acknowledges route readiness nor finishes another
+request. Shimmer is static until hydration and suppressed in Reduced motion or a
+hidden page. The optional local-content reveal never delays data/focus/errors;
+hidden-page reveals are canceled without replay. No feature request uses that
+primitive in this route-only port.
+
+The paired-loading gate withdraws on supersede, Back cancellation, error, privacy
+revocation, reduction and provider retirement. Only the existing visible authorized
+readiness protocol releases a matching completed destination; animation completion
+and timers cannot declare readiness. Cancellation retires presentation rather than
+resolving a request, discarding drafts or changing retry identity. Canonical privacy
+fencing outside Suspense immediately hides/inerts retained content. A same-page
+recheck preserves the existing draft owner. An explicitly accepted route exit may
+relinquish its outgoing owner normally, including while its replacement remains
+hidden; this is not a request acknowledgement or permission to reveal late content.
+
+The isolated native Next experiment established the retention/pairing mechanism,
+not product acceptance. The application integration still needs real delayed-primary
+forward/Back, privacy, room/canvas and production-runtime proof.
+Room, files, contents, occupancy, inspection and label-result waits remain a
+separate port. Populated desktop/390 px Full/Reduced inspection, layout-shift
+measurements and native route proof are still required; unit geometry does not
+certify the final visual match or D303.2.
 
 The 13 existing imperative router modules are scan-panel, settings-panel,
 custody management-form, custody activity-filter, custody-change-form,

@@ -15,12 +15,11 @@ import {
   usePrivacyReadiness,
   usePrivacyRevocationRevision,
 } from '@/components/auth/privacy-readiness';
+import { subscribePrivacyRevocation } from '@/features/scan/assign-batch';
 import {
-  assignmentEpoch,
-  readPrivacyRevocationRevision,
-  subscribePrivacyRevocation,
-} from '@/features/scan/assign-batch';
-import { freshPresentationGrant } from './presentation-privacy';
+  freshPresentationGrant,
+  retainedPresentationGrantCurrent,
+} from './presentation-privacy';
 import { flushSync } from 'react-dom';
 import { usePathname, useSearchParams } from 'next/navigation';
 import { createSupabaseBrowserClient } from '@/lib/supabase/browser';
@@ -30,6 +29,11 @@ import { createRoutePendingState } from './route-pending-state';
 import { createRoutePendingOwners } from './route-pending-owners';
 import { createRouteReadiness } from './route-readiness';
 import { RouteReadyContext } from './route-ready';
+import { createPairedRouteLoading } from './paired-route-loading-state';
+import {
+  PairedRouteLoadingContext,
+  supportsPairedRouteLoading,
+} from './paired-route-loading';
 import { routeKey } from './route-key';
 import {
   RoutePendingContext,
@@ -47,6 +51,7 @@ const RouteMotionContext = createContext<{
   listHref: string;
   pending: ReturnType<typeof createRoutePendingState>;
   readiness: ReturnType<typeof createRouteReadiness>;
+  loading: ReturnType<typeof createPairedRouteLoading>;
   lifecycleRef: { current: boolean };
   providerToken: symbol;
   withdrawGrant: () => void;
@@ -83,6 +88,7 @@ export function useInvalidateRouteMotion() {
     )
       return;
     context.withdrawGrant();
+    context.loading.cancel();
     context.pending.cancel(true);
     context.readiness.close();
     invalidateRouteMotion(context?.state);
@@ -98,6 +104,7 @@ export function RouteMotionProvider({
 }) {
   const privacy = usePrivacyReadiness();
   const privacyRevision = usePrivacyRevocationRevision();
+  const latestPrivacy = useRef(privacy);
   const mountedActor = useRef(actorId);
   const suspended = useRef(true);
   const acceptedGrant = useRef<{ revision: number; epoch: number } | null>(
@@ -115,8 +122,10 @@ export function RouteMotionProvider({
   });
   const lifecycleRef = useRef(true);
   const [providerToken] = useState(() => Symbol());
+  const [loading] = useState(() => createPairedRouteLoading(pending));
   const [readiness] = useState(() => {
     const value = createRouteReadiness(actorId, pending, (key) => {
+      loading.ready(key);
       const intent = state.snapshot();
       if (!intent) return;
       const destination = new URL(key, location.origin);
@@ -163,11 +172,36 @@ export function RouteMotionProvider({
           !state.valid()
         )
           return;
+        const interruptedPair = loading.snapshot() !== null;
+        loading.cancel();
         readiness.cancel();
         const target = state.acceptNavigation(href, pending.snapshot().epoch);
         // Pair approval lives only inside this accepted Link event. Plain detail
         // links/router calls retire an older origin instead of reusing its holding.
-        if (target) flushSync(() => state.arm(target));
+        // A second accepted navigation retires the unfinished pair. Its original
+        // source may already be leaving; use ordinary loading/crossfade instead
+        // of claiming another shared-title source or blocking a server redirect.
+        if (interruptedPair) cancelRouteSnapshots();
+        if (target && !interruptedPair)
+          flushSync(() => {
+            state.arm(target);
+            const intent = state.snapshot();
+            const url = new URL(href, location.origin);
+            const list = new URL(target.listHref, location.origin);
+            const pairedDestination =
+              url.pathname === target.detailPath ||
+              routeKey(url.pathname, url.searchParams) ===
+                routeKey(list.pathname, list.searchParams);
+            if (
+              intent &&
+              pairedDestination &&
+              freshPresentationGrant(latestPrivacy.current) &&
+              !suspended.current &&
+              supportsPairedRouteLoading() &&
+              document.documentElement.dataset.motion === 'full'
+            )
+              loading.arm(intent.name, href, pending.snapshot().epoch);
+          });
         else state.retire();
       },
       terminal: () => {
@@ -180,12 +214,13 @@ export function RouteMotionProvider({
         // Generic route failure retires presentation, not verified actor eligibility.
         // An already-invalid access scope is never re-enabled here.
         cancelRouteSnapshots();
+        loading.cancel();
         state.retire();
         pending.cancel();
         readiness.cancel();
       },
     }),
-    [pending, state, readiness, owners, lifecycleRef, providerToken],
+    [pending, state, readiness, loading, owners, lifecycleRef, providerToken],
   );
   const pendingSnapshot = useSyncExternalStore(
     pending.subscribe,
@@ -195,6 +230,10 @@ export function RouteMotionProvider({
   const pathname = usePathname();
   const query = useSearchParams();
   const listHref = pathname + (query?.size ? `?${query}` : '');
+  const committedRouteKey = routeKey(
+    pathname ?? '',
+    query ?? new URLSearchParams(),
+  );
   const reduced = useEffectiveReducedMotion();
   useInsertionEffect(() => {
     lifecycleRef.current = true;
@@ -207,6 +246,7 @@ export function RouteMotionProvider({
       acceptedGrant.current = null;
       // Invalidate the store generation before cancellation can invoke apply.
       state.suspend();
+      loading.cancel();
       pending.suspend();
       readiness.suspend();
       cancelRouteSnapshots();
@@ -224,6 +264,7 @@ export function RouteMotionProvider({
         document.documentElement.dataset.routeMotionPrivate = 'false';
         suspended.current = true;
         acceptedGrant.current = null;
+        loading.cancel();
         pending.cancel(true);
         readiness.close();
         invalidateRouteMotion(state);
@@ -243,6 +284,7 @@ export function RouteMotionProvider({
         acceptedGrant.current = null;
       }
       pending.cancel(true, false);
+      loading.cancel(false);
       owners.dispose();
       readiness.close();
       if (ownsDocument) {
@@ -250,8 +292,18 @@ export function RouteMotionProvider({
         invalidateRouteMotion(state, false);
       } else state.invalidate(false);
     };
-  }, [state, pending, scope, readiness, owners, lifecycleRef, providerToken]);
+  }, [
+    state,
+    pending,
+    scope,
+    readiness,
+    loading,
+    owners,
+    lifecycleRef,
+    providerToken,
+  ]);
   useLayoutEffect(() => {
+    latestPrivacy.current = privacy;
     if (!lifecycleRef.current || currentRouteProvider !== providerToken) return;
     if (mountedActor.current === actorId && freshPresentationGrant(privacy)) {
       if (suspended.current && state.resume()) {
@@ -271,15 +323,14 @@ export function RouteMotionProvider({
       !privacy.ready &&
       privacy.visible === true &&
       !suspended.current &&
-      privacy.revocationRevision === readPrivacyRevocationRevision() &&
       state.valid() &&
-      acceptedGrant.current?.revision === privacy.revocationRevision &&
-      acceptedGrant.current?.epoch === assignmentEpoch()
+      retainedPresentationGrantCurrent(privacy, acceptedGrant.current)
     )) {
       document.documentElement.dataset.routeMotionPrivate = 'false';
       suspended.current = true;
       acceptedGrant.current = null;
       state.suspend();
+      loading.cancel();
       pending.suspend();
       readiness.suspend();
       cancelRouteSnapshots();
@@ -291,6 +342,7 @@ export function RouteMotionProvider({
     state,
     pending,
     readiness,
+    loading,
     providerToken,
   ]);
   useEffect(() => {
@@ -305,6 +357,7 @@ export function RouteMotionProvider({
       document.documentElement.dataset.routeMotionPrivate = 'false';
       suspended.current = true;
       acceptedGrant.current = null;
+      loading.cancel();
       pending.cancel(true);
       readiness.close();
       invalidateRouteMotion(state);
@@ -317,6 +370,7 @@ export function RouteMotionProvider({
       },
     );
     const pop = () => {
+      loading.cancel();
       pending.cancel();
       readiness.cancel();
       flushSync(() => {
@@ -325,6 +379,15 @@ export function RouteMotionProvider({
           pathname ?? '',
           location.pathname + location.search + location.hash,
         );
+        const intent = state.snapshot();
+        if (
+          intent &&
+          freshPresentationGrant(latestPrivacy.current) &&
+          !suspended.current &&
+          supportsPairedRouteLoading() &&
+          document.documentElement.dataset.motion === 'full'
+        )
+          loading.arm(intent.name, location.href, pending.snapshot().epoch);
       });
       readiness.history();
     };
@@ -340,19 +403,33 @@ export function RouteMotionProvider({
     pathname,
     pending,
     readiness,
+    loading,
     lifecycleRef,
     providerToken,
   ]);
+  useEffect(() => {
+    // Next may redirect through its own router, without an accepted Link event.
+    // A different committed route cancels only this presentation wait; actual
+    // fallback, Link and task registrations still require their own settlement.
+    // Depend on the route key, never on arming: L must not cancel A before Next
+    // has committed A's pathname/query context.
+    const owner = loading.snapshot();
+    if (owner && owner.destination !== committedRouteKey) {
+      loading.cancel();
+      state.finish(owner.name);
+    }
+  }, [committedRouteKey, loading, state]);
   useEffect(() => {
     if (
       reduced &&
       lifecycleRef.current &&
       currentRouteProvider === providerToken
     ) {
+      loading.cancel();
       state.finish();
       cancelRouteSnapshots();
     }
-  }, [state, reduced, lifecycleRef, providerToken]);
+  }, [state, loading, reduced, lifecycleRef, providerToken]);
   return (
     <RouteMotionContext.Provider
       value={{
@@ -361,6 +438,7 @@ export function RouteMotionProvider({
         listHref,
         pending,
         readiness,
+        loading,
         lifecycleRef,
         providerToken,
         withdrawGrant: () => {
@@ -381,7 +459,27 @@ export function RouteMotionProvider({
         ))}
         <RouteProgress />
         <RouteReadyContext.Provider value={readiness}>
-          {children}
+          <PairedRouteLoadingContext.Provider
+            value={{
+              store: loading,
+              valid: (owner) =>
+                lifecycleRef.current &&
+                currentRouteProvider === providerToken &&
+                loading.snapshot() === owner &&
+                pending.current(owner.epoch) &&
+                state.valid() &&
+                mountedActor.current === actorId &&
+                !suspended.current &&
+                retainedPresentationGrantCurrent(
+                  privacy,
+                  acceptedGrant.current,
+                ) &&
+                state.snapshot()?.name === owner.name &&
+                document.documentElement.dataset.routeMotionPrivate === 'true',
+            }}
+          >
+            {children}
+          </PairedRouteLoadingContext.Provider>
         </RouteReadyContext.Provider>
       </RoutePendingContext.Provider>
     </RouteMotionContext.Provider>

@@ -24,6 +24,10 @@ import {
   type PendingOwner,
 } from './route-pending-owners';
 import { observeRouteActionResult } from './route-action-result';
+import {
+  LoadingSkeleton,
+  type LoadingShape,
+} from '@/components/ui/loading-skeleton';
 
 export type RoutePendingState = ReturnType<typeof createRoutePendingState>;
 export type RouteTransitionAction = (action: () => void) => void;
@@ -39,13 +43,14 @@ type Scope = {
 };
 export const RoutePendingContext = createContext<Scope | null>(null);
 const emptySubscribe = () => () => {};
-const idle = { epoch: 0, pending: false, delayed: false };
+const idle = { epoch: 0, pending: false, delayed: false, announcement: null };
 const idleSnapshot = () => idle;
 
 /** Register only genuine mounted pending UI; URL changes do not imply readiness. */
 export function useReportRoutePending(
   pending: boolean,
   retainAcrossBack = false,
+  announcement?: symbol,
 ) {
   const scope = useContext(RoutePendingContext);
   const snapshot = useSyncExternalStore(
@@ -55,8 +60,9 @@ export function useReportRoutePending(
   );
   const epoch = retainAcrossBack ? snapshot.epoch : undefined;
   useLayoutEffect(() => {
-    if (pending) return scope?.state.register();
-  }, [scope, pending, epoch]);
+    if (pending) return scope?.state.register(epoch, announcement);
+  }, [scope, pending, epoch, announcement]);
+  return !scope || snapshot.announcement === announcement || !snapshot.pending;
 }
 
 /** A retired runner is replaced without remounting the page or any drafts. */
@@ -121,8 +127,11 @@ export function RouteProgress() {
       data-static={reduced}
       aria-hidden={!visible}
     >
-      <span role={visible ? 'status' : undefined} className="sr-only">
-        Opening requested content…
+      <span
+        role={visible && !snapshot.announcement ? 'status' : undefined}
+        className="sr-only"
+      >
+        {snapshot.announcement ? '' : 'Opening requested content…'}
       </span>
       <span className="experience-route-progress-bar" aria-hidden="true" />
     </div>
@@ -329,12 +338,24 @@ export function useRouteActionResult() {
 }
 
 /** Suitable as a real Suspense/loading fallback, with no old page or private cache. */
-export function RouteLoading() {
-  useReportRoutePending(true, true);
+export function RouteLoading({
+  shape = 'rows',
+  label = 'Opening requested content…',
+  rows,
+}: {
+  shape?: LoadingShape;
+  label?: string;
+  rows?: number;
+} = {}) {
+  const [owner] = useState(() => Symbol());
+  const announce = useReportRoutePending(true, true, owner);
   return (
-    <div className="experience-route-loading" role="status" aria-busy="true">
-      Opening requested content…
-    </div>
+    <LoadingSkeleton
+      shape={shape}
+      label={label}
+      rows={rows}
+      announce={announce}
+    />
   );
 }
 

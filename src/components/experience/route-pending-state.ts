@@ -5,11 +5,24 @@ export function createRoutePendingState() {
   let suspended = false;
   let delayed = false;
   let timer: ReturnType<typeof setTimeout> | undefined;
-  const registrations = new Set<symbol>();
+  const registrations = new Map<symbol, symbol | undefined>();
   const listeners = new Set<() => void>();
-  let snapshot = { epoch, pending: false, delayed: false };
+  let snapshot = {
+    epoch,
+    pending: false,
+    delayed: false,
+    announcement: null as symbol | null,
+  };
   const notify = () => {
-    snapshot = { epoch, pending: registrations.size > 0, delayed };
+    snapshot = {
+      epoch,
+      pending: registrations.size > 0,
+      delayed,
+      announcement:
+        Array.from(registrations.values()).find(
+          (owner) => owner !== undefined,
+        ) ?? null,
+    };
     listeners.forEach((listener) => listener());
   };
   const clearTimer = () => {
@@ -24,10 +37,11 @@ export function createRoutePendingState() {
         listeners.delete(listener);
       };
     },
-    register: (generation = epoch) => {
+    // An opaque fallback owner elects one status; it carries no route/actor data.
+    register: (generation = epoch, announcement?: symbol) => {
       if (!open || suspended || generation !== epoch) return () => {};
       const token = Symbol();
-      registrations.add(token);
+      registrations.set(token, announcement);
       if (registrations.size === 1) {
         timer = setTimeout(() => {
           timer = undefined;
@@ -59,7 +73,13 @@ export function createRoutePendingState() {
       delayed = false;
       clearTimer();
       if (notifyListeners) notify();
-      else snapshot = { epoch, pending: false, delayed: false };
+      else
+        snapshot = {
+          epoch,
+          pending: false,
+          delayed: false,
+          announcement: null,
+        };
     },
     suspend: () => {
       if (suspended) return;

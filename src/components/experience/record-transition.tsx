@@ -1,6 +1,6 @@
 'use client';
 
-import { ViewTransition } from 'react';
+import { ViewTransition, useContext } from 'react';
 import Link from '@/components/experience/route-link';
 import { useRouteMotion } from './route-motion';
 import {
@@ -10,9 +10,17 @@ import {
   type RecordIdentity,
 } from './route-motion-state';
 import { sharedTitleMotion } from './shared-title-motion';
+import { RouteContentIdentityContext } from './route-content-identity';
+import { routeKey } from './route-key';
 
 function sameRecord(intent: RecordIdentity | null, record: RecordIdentity) {
   return intent?.kind === record.kind && intent.id === record.id;
+}
+
+function listRouteKey(href: string | undefined) {
+  if (!href) return null;
+  const url = new URL(href, 'https://inventory.invalid');
+  return routeKey(url.pathname, url.searchParams);
 }
 
 export function InventoryRecordLink({
@@ -41,15 +49,18 @@ export function InventoryRecordLink({
     finishAfterSnapshot,
     current,
   } = useRouteMotion();
+  const contentIdentity = useContext(RouteContentIdentityContext);
   const target =
     returnTo && pairable ? titleTarget(record, returnTo, holding) : null;
+  const targetListKey = target ? listRouteKey(target.listHref) : null;
   const matches =
     intent &&
     target &&
     sameRecord(intent, record) &&
     sameHolding(intent.holding, target.holding) &&
-    intent.listHref === target.listHref &&
-    listHref === target.listHref;
+    listRouteKey(intent.listHref) === targetListKey &&
+    listRouteKey(contentIdentity ? contentIdentity.listHref : listHref) ===
+      targetListKey;
   return (
     <ViewTransition
       default="none"
@@ -90,7 +101,11 @@ export function RecordTitle({
 }) {
   const { intent, validNow, pathname, finishAfterSnapshot, current } =
     useRouteMotion();
-  const matches = sameRecord(intent, record) && pathname === intent?.detailPath;
+  const contentIdentity = useContext(RouteContentIdentityContext);
+  const matches =
+    sameRecord(intent, record) &&
+    (contentIdentity ? contentIdentity.pathname : pathname) ===
+      intent?.detailPath;
   return (
     <ViewTransition
       default="none"

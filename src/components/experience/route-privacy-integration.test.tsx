@@ -6,7 +6,12 @@ import {
   screen,
   waitFor,
 } from '@testing-library/react';
-import { useContext, useInsertionEffect, useLayoutEffect } from 'react';
+import {
+  Suspense,
+  useContext,
+  useInsertionEffect,
+  useLayoutEffect,
+} from 'react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { ProtectedPrivacyBoundary } from '@/components/auth/auth-privacy';
 import { ProtectedPrivacyContent } from '@/components/auth/privacy-content';
@@ -23,7 +28,11 @@ import {
   useRouteMotion,
   useInvalidateRouteMotion,
 } from './route-motion';
-import { RoutePendingContext, useRouteTask } from './route-pending';
+import {
+  RouteLoading,
+  RoutePendingContext,
+  useRouteTask,
+} from './route-pending';
 import { RouteReady, RouteReadyContext } from './route-ready';
 import { observeRouteActionResult } from './route-action-result';
 import { titleTarget } from './route-motion-state';
@@ -214,6 +223,83 @@ it('passes the opaque route slot while deferred initial verification keeps prese
   expect(controls.motion.enabled).toBe(true);
   expect(document.documentElement.dataset.routeMotionPrivate).toBe('true');
   expect(businessMounts).toBe(1);
+});
+
+it('admits a mounted opaque route fallback only under the fresh privacy grant and never treats its geometry as ready content', async () => {
+  const check = deferred<LogoutPrivacyGeneration>();
+  const content = deferred<void>();
+  let contentReady = false;
+  runtime.read.mockReturnValueOnce(check.promise);
+  function DelayedPage() {
+    if (!contentReady) throw content.promise;
+    return (
+      <ProtectedPrivacyContent>
+        <RouteReady
+          actorId="staff"
+          routeKey="/inventory"
+          contentIdentity="authorized-primary"
+        >
+          <h1>Private inventory</h1>
+        </RouteReady>
+      </ProtectedPrivacyContent>
+    );
+  }
+  const view = render(
+    <ProtectedPrivacyBoundary
+      serverGeneration={{ status: 'absent' }}
+      binding={binding}
+    >
+      <RouteMotionProvider actorId="staff">
+        <Controls />
+        <Suspense
+          fallback={
+            <RouteLoading shape="inventory" label="Loading inventory…" />
+          }
+        >
+          <DelayedPage />
+        </Suspense>
+      </RouteMotionProvider>
+    </ProtectedPrivacyBoundary>,
+  );
+  expect(
+    view.container.querySelector('[data-loading-shape="inventory"]'),
+  ).not.toBeNull();
+  expect(view.container.querySelector('[data-route-ready]')).toBeNull();
+  expect(document.documentElement.dataset.routeMotionPrivate).toBe('false');
+  expect(controls.scope.state.snapshot().pending).toBe(false);
+  controls.readiness.history();
+  expect(controls.scope.state.snapshot().pending).toBe(false);
+  await act(async () => {
+    check.resolve({ status: 'absent' });
+    await check.promise;
+  });
+  await waitFor(() =>
+    expect(controls.scope.state.snapshot().pending).toBe(true),
+  );
+  expect(document.documentElement.dataset.routeMotionPrivate).toBe('true');
+  expect(screen.queryByRole('heading')).toBeNull();
+  const recovery = deferred<LogoutPrivacyGeneration>();
+  runtime.read.mockReturnValueOnce(recovery.promise);
+  act(() => revokePrivatePresentation());
+  expect(controls.scope.state.snapshot().pending).toBe(false);
+  expect(document.documentElement.dataset.routeMotionPrivate).toBe('false');
+  await act(async () => {
+    contentReady = true;
+    content.resolve();
+    await content.promise;
+  });
+  expect(
+    screen.queryByRole('heading', { name: 'Private inventory' }),
+  ).toBeNull();
+  expect(controls.scope.state.snapshot().pending).toBe(false);
+  expect(document.documentElement.dataset.routeMotionPrivate).toBe('false');
+  await act(async () => {
+    recovery.resolve({ status: 'absent' });
+    await recovery.promise;
+  });
+  await screen.findByRole('heading', { name: 'Private inventory' });
+  expect(controls.scope.state.snapshot().pending).toBe(false);
+  expect(document.documentElement.dataset.routeMotionPrivate).toBe('true');
 });
 
 it('keeps a same-binding ordinary recheck visible with the original field, focus, selection and actual business busy owner', async () => {
