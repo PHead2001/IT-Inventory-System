@@ -63,6 +63,15 @@ test('local mapped storage rename keeps keyboard focus, corrects sibling collisi
     await name.fill(collisionName);
     await expect(name).toHaveValue(collisionName);
     let submittedNameMatches = false;
+    let submittedNameEvidence: {
+      matchesDisplayed: boolean;
+      matchesOriginal: boolean;
+      matchesTrimmed: boolean;
+      matchesLocation: boolean;
+      hasRequestId: boolean;
+      hasExpectedActorId: boolean;
+      hasPayloadObject: boolean;
+    } | null = null;
     const submitted = page.waitForRequest((request) => {
       if (
         request.method() !== 'POST' ||
@@ -78,6 +87,20 @@ test('local mapped storage rename keeps keyboard focus, corrects sibling collisi
         if (!Array.isArray(args) || args[0]?.operation !== 'location_rename')
           return false;
         submittedNameMatches = args[0].payload?.name === collisionName;
+        // Diagnose stale UI versus normalization without retaining private names
+        // or the action body in a failure artifact.
+        submittedNameEvidence = {
+          matchesDisplayed: submittedNameMatches,
+          matchesOriginal: args[0].payload?.name === before.data!.name,
+          matchesTrimmed: args[0].payload?.name === collisionName.trim(),
+          matchesLocation: args[0].payload?.location_id === before.data!.id,
+          hasRequestId: typeof args[0].requestId === 'string',
+          hasExpectedActorId: typeof args[0].expectedActorId === 'string',
+          hasPayloadObject:
+            args[0].payload !== null &&
+            typeof args[0].payload === 'object' &&
+            !Array.isArray(args[0].payload),
+        };
         return true;
       } catch {
         return false;
@@ -87,9 +110,19 @@ test('local mapped storage rename keeps keyboard focus, corrects sibling collisi
       submitted,
       form.getByRole('button', { name: 'Save name', exact: true }).click(),
     ]);
+    const evidence = {
+      submitted: submittedNameEvidence,
+      displayedStillMatches: (await name.inputValue()) === collisionName,
+    };
+    if (!submittedNameMatches)
+      await info.attach('rename-command-shape', {
+        body: JSON.stringify(evidence),
+        contentType: 'application/json',
+      });
     expect(
       submittedNameMatches,
-      'The actual rename action must submit the displayed sibling-collision name',
+      'The actual rename action must submit the displayed sibling-collision name: ' +
+        JSON.stringify(evidence),
     ).toBe(true);
     await expect(form.getByRole('status')).toContainText(
       'Another active location with the same parent already uses that name',

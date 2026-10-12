@@ -1,6 +1,9 @@
 import { expect, it, vi } from 'vitest';
 import { createBuildProvenance } from '../../src/features/build-info/provenance';
+import { computeCacheBustingSearchParam } from 'next/dist/shared/lib/router/utils/cache-busting-search-param.js';
+import { defaultConfig } from 'next/dist/server/config-shared.js';
 import {
+  settingsFlightRequest,
   assertLocalBuildSnapshot,
   localBackend,
   guardedFetch,
@@ -8,6 +11,32 @@ import {
   readBoundedFlight,
   maxFlightBytes,
 } from '../helpers/compiled-settings-contract.mjs';
+
+it('sends the Settings Flight cache key required by installed Next without following redirects', async () => {
+  expect(defaultConfig.experimental.validateRSCRequestHeaders).toBe(true);
+  const { url, init } = await settingsFlightRequest(
+    'http://127.0.0.1:40200',
+    'synthetic=caller',
+  );
+  const headers = new Headers(init.headers);
+  const expectedHash = await computeCacheBustingSearchParam(
+    headers.get('next-router-prefetch') ?? undefined,
+    headers.get('next-router-segment-prefetch') ?? undefined,
+    headers.get('next-router-state-tree') ?? undefined,
+    headers.get('next-url') ?? undefined,
+  );
+  // Missing is null, while this complete non-prefetch request requires ''.
+  expect(new URL('/settings', url.origin).searchParams.get('_rsc')).not.toBe(
+    expectedHash,
+  );
+  expect(url.searchParams.get('_rsc')).toBe(expectedHash);
+  expect(url.origin).toBe('http://127.0.0.1:40200');
+  expect(url.pathname).toBe('/settings');
+  expect(headers.get('rsc')).toBe('1');
+  expect(headers.get('accept')).toBe('text/x-component');
+  expect(headers.get('cookie')).toBe('synthetic=caller');
+  expect(init.redirect).toBe('error');
+});
 
 const expected = {
   environment: 'Local',

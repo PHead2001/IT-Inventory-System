@@ -115,7 +115,8 @@ test('real logout survives a first cleanup read failure and a hard reload before
   expect(isLogoutGeneration(receipt.logoutGeneration)).toBe(true);
   await expect(
     page.getByRole('alert').filter({
-      hasText: /could not clear|cannot be verified/,
+      hasText:
+        /^Signed out, but this tab could not clear its private saved data\./,
     }),
   ).toBeVisible();
   await expect

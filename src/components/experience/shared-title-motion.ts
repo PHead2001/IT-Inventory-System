@@ -7,6 +7,15 @@ function pixels(value: unknown) {
   return Number.isFinite(number) && number > 0 ? number : null;
 }
 
+function milliseconds(value: string) {
+  // CSS optimization may serialize 200ms as .2s; WAAPI accepts milliseconds.
+  const time = /^([+-]?(?:\d+(?:\.\d+)?|\.\d+)(?:e[+-]?\d+)?)(ms|s)$/i.exec(
+    value.trim(),
+  );
+  if (!time) return NaN;
+  return Number(time[1]) * (time[2].toLowerCase() === 's' ? 1000 : 1);
+}
+
 function translation(value: unknown) {
   if (typeof value !== 'string') return null;
   const matrix = new DOMMatrixReadOnly(value === 'none' ? undefined : value);
@@ -81,7 +90,7 @@ export function sharedTitleMotion(
       scaleY <= 0
     )
       throw new Error('Unsupported snapshot scale');
-    const duration = Number.parseFloat(
+    const duration = milliseconds(
       getComputedStyle(document.documentElement).getPropertyValue(
         '--motion-route',
       ),

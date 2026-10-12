@@ -698,7 +698,15 @@ runtime environment before startup and again between requests. Requests to any
 other backend are rejected before transport. Both servers close before reporting;
 the parent revokes only its own viewer session in cleanup. No second build or
 public probe route is introduced. The request uses `RSC: 1` and
-`Accept: text/x-component`; status/content type and a 512 KiB raw-stream cap are
+`Accept: text/x-component`; the pinned installed Next router helper computes the
+matching `_rsc` query parameter from those actual request headers before transport.
+Installed Next 16.3.6 validates this parameter even when its expected hash is empty:
+omitting `_rsc` supplies null and triggers a 307 before rendering. The focused
+regression first reproduced that mismatch, then passed with the canonical request.
+Redirects remain refused. This source and regression evidence establishes the
+request correction; attribution of the observed CI redirect and confirmation of
+the corrected compiled probe still require an actual compiled browser CI rerun.
+Status/content type and a 512 KiB raw-stream cap are
 checked before parsing only bounded JSON data records. A narrow recognizer finds
 the exact static BuildInfo host section and checks its literal rendered children
 and time property. It ignores import/debug rows and unrelated provenance props,

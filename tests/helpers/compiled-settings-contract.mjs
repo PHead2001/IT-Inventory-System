@@ -1,4 +1,15 @@
 import assert from 'node:assert/strict';
+import { setCacheBustingSearchParam } from 'next/dist/client/components/router-reducer/set-cache-busting-search-param.js';
+
+/** Match the installed Next router's Flight request contract before transport. */
+export async function settingsFlightRequest(origin, cookie) {
+  const url = new URL('/settings', origin);
+  const headers = { cookie, RSC: '1', Accept: 'text/x-component' };
+  // Next 16 validates this hash even when no routing/prefetch headers are sent.
+  // Its canonical empty hash is ?_rsc; absence triggers a 307 before rendering.
+  await setCacheBustingSearchParam(url, headers);
+  return { url, init: { headers, redirect: 'error' } };
+}
 
 /** APP_ENV is an input token; the compiled snapshot contains its display label. */
 export function assertLocalBuildSnapshot(expected) {

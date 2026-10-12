@@ -11,6 +11,7 @@ let frames: Array<Record<string, unknown>>;
 let destination: { width: string; height: string; transform: string };
 let animate: ReturnType<typeof vi.fn>;
 let skip: ReturnType<typeof vi.fn>;
+let durationToken: string;
 
 it('holds captured geometry without inheriting its paused state into native image fades', () => {
   const css = readFileSync('src/app/globals.css', 'utf8');
@@ -31,6 +32,7 @@ it('holds captured geometry without inheriting its paused state into native imag
 });
 
 beforeEach(() => {
+  durationToken = '200ms';
   frames = [
     {
       offset: 0,
@@ -81,7 +83,7 @@ beforeEach(() => {
     return {
       getPropertyValue: (property: string) =>
         property === '--motion-route'
-          ? '200ms'
+          ? durationToken
           : 'cubic-bezier(0.2, 0.8, 0.2, 1)',
     };
   });
@@ -108,6 +110,41 @@ beforeEach(() => {
     },
   );
 });
+
+it.each(['0.2s', '.2s', ' 200ms ', '2e-1s'])(
+  'converts the CSS time %s to the 200ms WAAPI duration',
+  (token) => {
+    durationToken = token;
+    sharedTitleMotion({ name }, () => true);
+    expect(animate).toHaveBeenCalledWith(
+      expect.any(Array),
+      expect.objectContaining({ duration: 200 }),
+    );
+    expect(skip).not.toHaveBeenCalled();
+  },
+);
+
+it.each([
+  '200',
+  '200seconds',
+  '200 ms',
+  '200.ms',
+  'NaNms',
+  'Infinitys',
+  '1e999s',
+  '0ms',
+  '-1ms',
+  '251ms',
+  '0.251s',
+])(
+  'rejects invalid or out-of-bounds CSS timing %s without starting replacement motion',
+  (token) => {
+    durationToken = token;
+    sharedTitleMotion({ name }, () => true);
+    expect(animate).not.toHaveBeenCalled();
+    expect(skip).toHaveBeenCalled();
+  },
+);
 afterEach(() => {
   vi.unstubAllGlobals();
   Reflect.deleteProperty(document, 'activeViewTransition');

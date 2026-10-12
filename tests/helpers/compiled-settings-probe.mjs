@@ -5,6 +5,7 @@ import {
   guardedFetch,
   assertServedBuild,
   readBoundedFlight,
+  settingsFlightRequest,
 } from './compiled-settings-contract.mjs';
 import { classifyProbeFailure } from './compiled-probe-diagnostic.mjs';
 
@@ -39,10 +40,8 @@ process.once('message', async ({ expected, cookie, api }) => {
     origin = `http://127.0.0.1:${server.address().port}`;
     for (let request = 0; request < 2; request++) {
       stage = `request-${request + 1}`;
-      const response = await fetch(`${origin}/settings`, {
-        headers: { cookie, RSC: '1', Accept: 'text/x-component' },
-        redirect: 'error',
-      });
+      const { url, init } = await settingsFlightRequest(origin, cookie);
+      const response = await fetch(url, init);
       stage = `response-${request + 1}`;
       const flight = await readBoundedFlight(response);
       stage = `tree-${request + 1}`;

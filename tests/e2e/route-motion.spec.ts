@@ -191,22 +191,59 @@ async function resetProof(page: Page) {
 
 /** A paired image fade must release the native transition, so the next real
  * navigation can capture. No animation is started, resumed or skipped here. */
-async function completedTitlePair(page: Page) {
-  await settled(page);
-  const paired = (await proof(page)).transitions.filter((entry) =>
+async function completedTitlePair(
+  page: Page,
+  preserveProof?: (observed: Proof) => Promise<void>,
+) {
+  let settlementError: unknown;
+  try {
+    await settled(page);
+  } catch (error) {
+    settlementError = error;
+  }
+  const observed = await proof(page);
+  await preserveProof?.(observed);
+  const paired = observed.transitions.filter((entry) =>
     entry.old.some(
       (old) =>
         old.name.startsWith('inventory-title-') &&
         entry.next.some((next) => next.name === old.name),
     ),
   );
-  expect(paired).toHaveLength(1);
-  expect(paired[0]).toMatchObject({ ready: true, finished: true });
-  expect(paired[0].finishRejected).not.toBe(true);
-  expect(Number.isFinite(paired[0].completionMs)).toBe(true);
-  expect(paired[0].completionMs!).toBeGreaterThanOrEqual(0);
+  const tags = (captures: Capture[]) =>
+    captures
+      .slice(0, 6)
+      .map(({ tag }) =>
+        ['A', 'H1', 'DIV', 'MAIN', 'SPAN', 'CANVAS'].includes(tag)
+          ? tag
+          : 'other',
+      );
+  // CI artifact quotas must not erase the failure's bounded, non-private facts.
+  const diagnostic =
+    'Native title pairing: ' +
+    JSON.stringify({
+      transitions: observed.transitions.length,
+      pairs: paired.length,
+      replacements: observed.replacements.length,
+      entries: observed.transitions.slice(0, 6).map((entry) => ({
+        ready: entry.ready,
+        finished: entry.finished,
+        rejected: entry.finishRejected === true,
+        oldCount: entry.old.length,
+        nextCount: entry.next.length,
+        oldTags: tags(entry.old),
+        nextTags: tags(entry.next),
+      })),
+    });
+  if (settlementError) throw new Error(diagnostic, { cause: settlementError });
+  expect(paired, diagnostic).toHaveLength(1);
+  expect(paired[0], diagnostic).toMatchObject({ ready: true, finished: true });
+  expect(paired[0].finishRejected, diagnostic).not.toBe(true);
+  expect(Number.isFinite(paired[0].completionMs), diagnostic).toBe(true);
+  expect(paired[0].completionMs!, diagnostic).toBeGreaterThanOrEqual(0);
   // Motion is 200ms; leave bounded scheduler headroom, never a native timeout.
-  expect(paired[0].completionMs!).toBeLessThan(1500);
+  expect(paired[0].completionMs!, diagnostic).toBeLessThan(1500);
+  return observed;
 }
 
 /** A separate full-route Flight reader proves fallback bytes while the actual
@@ -865,8 +902,13 @@ for (const width of [1280, 390]) {
     await expect(
       page.getByRole('heading', { name, exact: true }),
     ).toBeVisible();
-    await completedTitlePair(page);
-    const forward = await proof(page);
+    const forward = await completedTitlePair(page, async (observed) => {
+      // Preserve evidence after the same bounded wait, including its failure.
+      await info.attach('forward-native-route-proof', {
+        body: JSON.stringify(observed),
+        contentType: 'application/json',
+      });
+    });
     await info.attach('primary-data-delayed-after-fallback-stream', {
       body: JSON.stringify(streaming),
       contentType: 'application/json',
@@ -878,11 +920,6 @@ for (const width of [1280, 390]) {
           entry.next.some((next) => next.name === old.name),
       ),
     );
-    // Preserve passive native evidence even when pairing fails before Back.
-    await info.attach('forward-native-route-proof', {
-      body: JSON.stringify(forward),
-      contentType: 'application/json',
-    });
     expect(shared).toHaveLength(1);
     expect(forward.replacements).toHaveLength(1);
     for (const replacement of forward.replacements) {
