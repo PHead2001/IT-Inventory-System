@@ -918,6 +918,31 @@ checks every JSX return branch of every protected server page, including future
 pages. This structural guard supplements runtime proof; it does not establish
 HTTP status, database authorization, delivered Flight or visual acceptance.
 
+Direct record documents additionally await membership and the existing
+request-cached caller read before the shell. Their shared protected layout
+resolves to `DocumentAdmission`, which throws a generic missing result only
+during document SSR, above every shell/Suspense boundary. Throwing from the
+shared server layout instead caches a rejected layout node: a recovery Link can
+commit its URL, title and successful Flight while the old root 404 body remains.
+Browser rendering always delegates missing/auth decisions to the destination
+page; the initial document flag cannot suppress later valid records or reset
+retained shell state. Invalid site opening kinds use the same document flag;
+authorization redirects and read failures still propagate normally.
+
+The DB-free installed-Next production fixture reproduced that stale body, then
+verified document 404 (including encoded identifiers/trailing slash), hydrated
+missing UI, query-only missing navigation, visible Link recovery with zero
+documents, native Back/Forward, and a formerly missing record becoming valid
+after another page-owned 404. A denied fixture read redirected before shell
+rendering, and Flight headers arrived before the delayed page read completed.
+These framework checks do not establish real Supabase authorization or hosted
+application acceptance. The inventory E2E requires a visible Inventory heading
+and search control inside its matching primary, one main, and removal of the
+missing heading in addition to URL/title/404 and inventory zero-document checks.
+The fixture also observed that `router.refresh()` at the same missing URL does
+not reset Next's root HTTP fallback; this change does not fix that separate
+framework behavior, and the missing UI offers destination recovery links.
+
 The scoped production fixture used installed Next.js 16.3.6/React 19.2.8, a
 delayed async `notFound()`, the actual privacy components and PageArrival, and
 private shell/body probes that throw if mounted before readiness. The old

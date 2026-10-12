@@ -1,6 +1,5 @@
 import 'server-only';
 import { headers } from 'next/headers';
-import { notFound } from 'next/navigation';
 import { documentPathHeader, documentRecordRoute } from '@/lib/document-route';
 import { readQuantityPage } from './inventory/quantity/[id]/read.server';
 import { readAssetPage } from './inventory/assets/[id]/read.server';
@@ -13,12 +12,14 @@ import { readSiteOpeningPage } from './sites/[code]/open/[kind]/read.server';
 
 // Called after requireMember and before the layout returns any Suspense boundary.
 // Flight retains page-owned authorization and streaming. Documents share the
-// page's React request cache; no existence result survives a request.
+// page's React request cache; only a generic missing flag reaches the SSR gate.
+// Resolve this layout's RSC node even on failure: rejecting a shared layout with
+// notFound caches its failure across otherwise successful client navigation.
 export async function admitDocumentRecord() {
   const request = await headers();
-  if (request.get('rsc') === '1') return;
+  if (request.get('rsc') === '1') return false;
   const route = documentRecordRoute(request.get(documentPathHeader) ?? '');
-  if (!route) return;
+  if (!route) return false;
   const { prefix, key, kind } = route;
   let record: unknown;
   switch (prefix) {
@@ -34,7 +35,7 @@ export async function admitDocumentRecord() {
     case '/sites':
       if (kind === undefined) record = await readSitePage(key);
       else {
-        if (kind !== 'quantity' && kind !== 'asset') notFound();
+        if (kind !== 'quantity' && kind !== 'asset') return true;
         record = (await readSiteOpeningPage(key)).site;
       }
       break;
@@ -48,5 +49,5 @@ export async function admitDocumentRecord() {
       record = await readCategoryFormPage(key);
       break;
   }
-  if (record == null) notFound();
+  return record == null;
 }

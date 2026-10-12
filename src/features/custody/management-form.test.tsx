@@ -4,7 +4,10 @@ import {
   render,
   screen,
   waitFor,
+  within,
 } from '@testing-library/react';
+import { hydrateRoot } from 'react-dom/client';
+import { renderToString } from 'react-dom/server';
 import { beforeEach, expect, it, vi } from 'vitest';
 import { LocationManagementForm, SiteManagementForm } from './management-form';
 import { submitCustody } from './actions';
@@ -42,6 +45,136 @@ beforeEach(() => {
   vi.stubEnv('NEXT_PUBLIC_SUPABASE_URL', 'https://site-test.supabase.co');
   sessionStorage.clear();
   window.history.replaceState(null, '', '/settings/sites');
+});
+
+it('withholds location editing until its owning consumer hydrates, then submits the first displayed edit', async () => {
+  vi.mocked(submitCustody).mockResolvedValue({
+    ok: false,
+    code: 'P1007',
+    message: 'Choose another name.',
+  });
+  const view = <LocationManagementForm location={area} actorId={id(8)} />;
+  const container = document.createElement('div');
+  container.innerHTML = renderToString(view);
+  document.body.appendChild(container);
+  const controls = within(container);
+  let root: ReturnType<typeof hydrateRoot> | undefined;
+  try {
+    expect(controls.getByLabelText('Name')).toBeDisabled();
+    expect(controls.getByRole('button', { name: 'Save name' })).toBeDisabled();
+    expect(controls.getByRole('button', { name: 'Cancel' })).toBeDisabled();
+    await act(async () => {
+      root = hydrateRoot(container, view);
+    });
+    const name = controls.getByLabelText('Name');
+    expect(name).toBeEnabled();
+    const user = userEvent.setup();
+    await user.clear(name);
+    await user.type(name, ' First hydrated name ');
+    expect(name).toHaveValue(' First hydrated name ');
+    await user.click(controls.getByRole('button', { name: 'Save name' }));
+    expect(submitCustody).toHaveBeenCalledWith(
+      expect.objectContaining({
+        operation: 'location_rename',
+        payload: expect.objectContaining({ name: ' First hydrated name ' }),
+      }),
+    );
+  } finally {
+    await act(async () => root?.unmount());
+    container.remove();
+  }
+});
+
+it('withholds site editing through owning hydration and draft restoration, then retains every first edit', async () => {
+  const seed = render(<SiteManagementForm actorId={id(8)} />);
+  fireEvent.change(screen.getByLabelText('Name'), {
+    target: { value: 'Recovered site' },
+  });
+  fireEvent.change(screen.getByLabelText('Permanent code'), {
+    target: { value: 'RECOVERED-SITE' },
+  });
+  fireEvent.change(screen.getByLabelText('Notes (optional)'), {
+    target: { value: 'Recovered notes' },
+  });
+  const stored = sessionStorage.getItem(sessionStorage.key(0)!);
+  seed.unmount();
+  const view = <SiteManagementForm actorId={id(8)} />;
+  const container = document.createElement('div');
+  container.innerHTML = renderToString(view);
+  document.body.appendChild(container);
+  const controls = within(container);
+  let root: ReturnType<typeof hydrateRoot> | undefined;
+  try {
+    for (const label of ['Name', 'Permanent code', 'Notes (optional)'])
+      expect(controls.getByLabelText(label)).toBeDisabled();
+    expect(controls.getByRole('button', { name: 'Save site' })).toBeDisabled();
+    expect(sessionStorage.getItem(sessionStorage.key(0)!)).toBe(stored);
+    await act(async () => {
+      root = hydrateRoot(container, view);
+    });
+    for (const [label, value] of [
+      ['Name', 'Recovered site'],
+      ['Permanent code', 'RECOVERED-SITE'],
+      ['Notes (optional)', 'Recovered notes'],
+    ]) {
+      expect(controls.getByLabelText(label)).toBeEnabled();
+      expect(controls.getByLabelText(label)).toHaveValue(value);
+    }
+    const user = userEvent.setup();
+    for (const [label, value] of [
+      ['Name', 'First hydrated site'],
+      ['Permanent code', 'FIRST-HYDRATED'],
+      ['Notes (optional)', 'First hydrated notes'],
+    ]) {
+      const input = controls.getByLabelText(label);
+      await user.click(input);
+      await user.keyboard('{Control>}a{/Control}');
+      await user.keyboard(value);
+    }
+    const envelope = JSON.parse(
+      sessionStorage.getItem(sessionStorage.key(0)!)!,
+    );
+    expect(envelope).toMatchObject({
+      status: 'editing',
+      values: {
+        name: 'First hydrated site',
+        code: 'FIRST-HYDRATED',
+        notes: 'First hydrated notes',
+      },
+    });
+    expect(submitCustody).not.toHaveBeenCalled();
+  } finally {
+    await act(async () => root?.unmount());
+    container.remove();
+  }
+});
+
+it('keeps site editing closed after failed draft restoration and enables the original draft only after retry', async () => {
+  const seed = render(<SiteManagementForm actorId={id(8)} />);
+  fireEvent.change(screen.getByLabelText('Name'), {
+    target: { value: 'Preserved recovery' },
+  });
+  const key = sessionStorage.key(0)!;
+  const original = sessionStorage.getItem(key)!;
+  seed.unmount();
+  const invalid = JSON.stringify({ ...JSON.parse(original), version: 999 });
+  sessionStorage.setItem(key, invalid);
+  render(<SiteManagementForm actorId={id(8)} />);
+  expect(screen.getByRole('alert')).toHaveTextContent(
+    'Saved site recovery is unavailable or incompatible',
+  );
+  for (const label of ['Name', 'Permanent code', 'Notes (optional)'])
+    expect(screen.getByLabelText(label)).toBeDisabled();
+  expect(screen.getByRole('button', { name: 'Save site' })).toBeDisabled();
+  expect(sessionStorage.getItem(key)).toBe(invalid);
+  expect(submitCustody).not.toHaveBeenCalled();
+  sessionStorage.setItem(key, original);
+  await userEvent
+    .setup()
+    .click(screen.getByRole('button', { name: 'Retry site recovery' }));
+  expect(screen.getByLabelText('Name')).toBeEnabled();
+  expect(screen.getByLabelText('Name')).toHaveValue('Preserved recovery');
+  expect(sessionStorage.getItem(key)).toBe(original);
 });
 
 it('leaves no recovery slots after repeated pristine create visits and still creates a site', async () => {

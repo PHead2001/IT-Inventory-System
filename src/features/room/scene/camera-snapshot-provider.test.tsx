@@ -1,5 +1,5 @@
 import { act, fireEvent, render, screen } from '@testing-library/react';
-import { useContext, useLayoutEffect } from 'react';
+import { Activity, useContext, useLayoutEffect } from 'react';
 import { expect, it } from 'vitest';
 import { PrivacyReadinessContext } from '@/components/auth/privacy-readiness';
 import {
@@ -107,6 +107,74 @@ it('does not rerender the layout or unrelated context consumers on camera public
   expect(unrelatedCommits).toBe(before);
 });
 
+it('keeps a scene callback writable across same-owner renders and camera publications', () => {
+  let write!: (view: CameraView) => boolean;
+  const capture = (callback: typeof write) => {
+    write = callback;
+  };
+  const page = render(fixture(<Probe capture={capture} />));
+  // Canvas has its own React root. Its last committed callback can outlive
+  // a workspace render until the scene's passive effects receive new props.
+  const sceneWrite = write;
+  act(() => {
+    expect(sceneWrite(pose)).toBe(true);
+  });
+  page.rerender(fixture(<Probe capture={capture} />));
+  const panned = { ...pose, target: [12, 3, 4] as CameraView['target'] };
+  act(() => {
+    expect(sceneWrite(panned)).toBe(true);
+  });
+  expect(write).toBe(sceneWrite);
+  expect(
+    JSON.parse(screen.getByLabelText('Saved camera').textContent!),
+  ).toEqual(panned);
+  page.rerender(fixture(<Probe keyName="other-room" capture={capture} />));
+  act(() => {
+    expect(sceneWrite(pose)).toBe(false);
+  });
+  expect(screen.getByLabelText('Saved camera')).toHaveTextContent('null');
+  page.rerender(fixture(<Probe capture={capture} />));
+  expect(
+    JSON.parse(screen.getByLabelText('Saved camera').textContent!),
+  ).toEqual(panned);
+  act(() => {
+    expect(sceneWrite(pose)).toBe(false);
+  });
+});
+
+it('mints a new scene writer after Activity restores layout effects without reviving the hidden writer', () => {
+  let write!: (view: CameraView) => boolean;
+  const capture = (callback: typeof write) => {
+    write = callback;
+  };
+  const content = (mode: 'visible' | 'hidden') =>
+    fixture(
+      <Activity mode={mode}>
+        <Probe capture={capture} />
+      </Activity>,
+    );
+  const page = render(content('visible'));
+  const old = write;
+  act(() => {
+    expect(old(pose)).toBe(true);
+  });
+  page.rerender(content('hidden'));
+  act(() => {
+    expect(old(pose)).toBe(false);
+  });
+  page.rerender(content('visible'));
+  act(() => {
+    expect(old(pose)).toBe(false);
+    expect(write({ ...pose, zoom: 4 })).toBe(true);
+  });
+  expect(
+    JSON.parse(screen.getByLabelText('Saved camera').textContent!),
+  ).toEqual({
+    ...pose,
+    zoom: 4,
+  });
+});
+
 it.each([
   'actor',
   'backend',
@@ -202,5 +270,31 @@ it('retains stored data through an ordinary visible recheck but denies new resto
   );
   act(() => {
     expect(old(pose)).toBe(false);
+  });
+});
+
+it('withholds a remounted scene snapshot during a recheck and restores the exact pose when verified', () => {
+  let write!: (view: CameraView) => boolean;
+  const capture = (callback: typeof write) => {
+    write = callback;
+  };
+  const page = render(fixture(<Probe capture={capture} />));
+  fireEvent.click(screen.getByRole('button', { name: 'Record camera' }));
+  const old = write;
+  page.rerender(fixture(<p>Unmodeled space</p>, { ready: false }));
+  page.rerender(fixture(<Probe capture={capture} />, { ready: false }));
+  const pending = write;
+  expect(screen.getByLabelText('Saved camera')).toHaveTextContent('null');
+  act(() => {
+    expect(pending({ ...pose, target: [9, 9, 9] })).toBe(false);
+  });
+  page.rerender(fixture(<Probe capture={capture} />));
+  expect(
+    JSON.parse(screen.getByLabelText('Saved camera').textContent!),
+  ).toEqual(pose);
+  act(() => {
+    expect(old(pose)).toBe(false);
+    expect(pending(pose)).toBe(false);
+    expect(write(pose)).toBe(true);
   });
 });

@@ -138,6 +138,7 @@ export function RoomCameraSnapshotProvider({
 
 const emptySubscribe = () => () => {};
 const emptySnapshot = () => emptyCameraSnapshot;
+const deniedWrite: (view: CameraView) => boolean = () => false;
 export function useRoomCameraSnapshot(
   key: string | null,
   actorId: string,
@@ -167,16 +168,37 @@ export function useRoomCameraSnapshot(
     liveGrant(authority) &&
     cameraAuthorityKey(authority) === cameraAuthorityKey(snapshot.authority),
   );
-  const descriptor = Object.freeze({});
-  useLayoutEffect(() =>
-    permitted && authority && key
-      ? store?.bind(descriptor, key, cameraAuthorityKey(authority))
-      : undefined,
+  const authorityKey = authority ? cameraAuthorityKey(authority) : null;
+  const scope = useMemo(
+    () => ({
+      store,
+      key,
+      authorityKey,
+      incarnation: snapshot.incarnation,
+      permitted,
+    }),
+    [store, key, authorityKey, snapshot.incarnation, permitted],
   );
-  const write = (view: CameraView) => store?.write(descriptor, view) ?? false;
+  const [binding, setBinding] = useState<{
+    scope: typeof scope;
+    write: (view: CameraView) => boolean;
+  } | null>(null);
+  useLayoutEffect(() => {
+    if (!scope.permitted || !scope.store || !scope.key || !scope.authorityKey)
+      return;
+    const descriptor = Object.freeze({});
+    const ownerStore = scope.store;
+    const retire = ownerStore.bind(descriptor, scope.key, scope.authorityKey);
+    // Canvas commits independently. Keep its writer alive across ordinary
+    // workspace renders, but mint a new immutable owner after every effect
+    // lifecycle (including Activity restoration) and authority/key change.
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- Publish the committed external-store owner; render cannot authorize a writer.
+    setBinding({ scope, write: (view) => ownerStore.write(descriptor, view) });
+    return retire;
+  }, [scope]);
   return {
     present: context !== null,
     view: permitted ? snapshot.view : null,
-    write,
+    write: binding?.scope === scope ? binding.write : deniedWrite,
   };
 }
