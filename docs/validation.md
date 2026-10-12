@@ -705,6 +705,22 @@ record names or UUIDs. Authorized successful D304 routes have named titles as
 described above; their missing-resource branches retain these privacy checks.
 Keep real direct missing-resource document requests (including their HTTP 404
 status), anonymous access checks, and client navigation evidence distinct.
+Fallback unit regressions hold the membership guard and separately reject login
+and inactive-member access before returning protected/inventory bodies or
+inventory-specific metadata. The inventory browser journey retains the full
+anonymous redirect-body assertion for image-like quantity and asset paths with
+a forged document selector. Those actual responses must exclude inventory
+fallback identity; mocked guard tests alone do not establish Next serialization.
+The scoped installed-Next production fixture reproduced fallback identity in
+both login and inactive-member 307 response bodies before the guard, then excluded
+body and metadata markers after it. Both builds used one build worker; guarded
+browser probes retained public/authenticated 404, one main, zero-document client
+recovery, query navigation, native Back/Forward, a formerly missing record becoming
+valid and Flight delivery before the delayed read completed. The focused fallback,
+layout, admission, session and proxy batch passed 93 tests in eight files; canonical
+typechecking and scoped lint/format checks passed. These working-tree checks do
+not certify actual application Supabase/browser responses or replace final-SHA
+application CI and independent review.
 The navigation-workflow E2E uses a clearly synthetic navigation-boundary fixture: a real
 owned inventory NextLink receives the server's real missing-record RSC response
 through a scoped non-prefetch request rewrite. It requires unavailable content,

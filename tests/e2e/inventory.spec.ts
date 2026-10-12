@@ -1478,19 +1478,26 @@ interfaceTest(
     expect(malformedResponse.status()).toBe(404);
     const anonymous = await browser.newContext();
     try {
-      const denied = await anonymous.request.get(
-        new URL(malformed, page.url()).href,
-        {
-          headers: {
-            'user-agent': '',
-            'x-inventory-document-path': '/inventory/quantity/new',
+      for (const anonymousPath of [
+        malformed,
+        '/inventory/assets/missing.jpg',
+      ]) {
+        const denied = await anonymous.request.get(
+          new URL(anonymousPath, page.url()).href,
+          {
+            headers: {
+              'user-agent': '',
+              'x-inventory-document-path': '/inventory/quantity/new',
+            },
+            maxRedirects: 0,
           },
-          maxRedirects: 0,
-        },
-      );
-      expect(denied.status()).toBe(307);
-      expect(denied.headers().location).toMatch(/^\/login(?:\?|$)/);
-      expect(await denied.text()).not.toContain('Inventory record unavailable');
+        );
+        expect(denied.status()).toBe(307);
+        expect(denied.headers().location).toMatch(/^\/login(?:\?|$)/);
+        expect(await denied.text()).not.toContain(
+          'Inventory record unavailable',
+        );
+      }
     } finally {
       await anonymous.close();
     }
