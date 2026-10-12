@@ -2,6 +2,33 @@
 
 ## Spatial composition source slice
 
+`tests/e2e/spatial-composition.spec.ts` adds the following authored browser
+journeys using the existing loopback-only owned fixtures and audited cleanup.
+The spec is exclusive under the existing scheduling policy. Its observation
+helper reads the installed Fiber scenes and existing WebGL contexts; it never
+sets camera/mesh state or replaces the application path. Screenshots are emitted
+for visual review when the journeys actually execute.
+
+| Scope | Authored real-browser evidence                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| ----- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| A302  | Actual modal/label staging; Cancel preserves destination, quantity and reason; Use location does not submit; explicit map and conventional Receive confirmations persist the same destination UUID; graphics preemption, detached prior canvas and resumed detail map; committed-context samples include detached contexts awaiting teardown. Actual browser context loss keeps the keyboard picker usable; an owned unmodeled destination preserves the draft and recorded location. |
+| A303  | Asset, quantity and location record readiness precedes optional graphics. Small initial viewport tests the near-region lazy boundary; phone-height captures follow. Multiple positive quantity holdings require explicit choice and changing it updates the actual compact scene. An owned unmodeled closet child keeps recorded context and Spaces links on all three surfaces without canvas/count reads.                                                                           |
+| W13   | Full and Reduced journeys inspect actual rendered drawer/container/shelf reveal-group transforms, visible selected count text against the uncached occupancy response with the optional overlay off, screenshots, and reversal to resting transforms after Clear selection.                                                                                                                                                                                                           |
+| W14   | Actual installed renderer and controlled browser clock prove Full flight before reveal, newer selection retirement, toolbar input cancellation and Reduced complete endpoints. The existing trusted-pointer interruption journey in `room.spec.ts` retains its interaction assertions and now waits through the complete 750/400 ms sequence.                                                                                                                                         |
+
+These journeys are authored, not executed browser acceptance. Typechecking,
+scoped lint/format and Playwright discovery establish source validity only.
+Committed-renderer observations do not certify overlap during renderer
+initialization before its first Fiber commit, GPU performance or visual quality.
+Run the real backend/WebGL journeys, inspect their captures, and complete the
+final-candidate gates before marking these matrix scopes accepted. W15/W16
+remain later work.
+Authentication revocation, stale occupancy retirement and ineligible destination
+choices retain their focused unit/component coverage; the nine new browser
+journeys do not establish those additional browser boundaries. The picker-only
+POST counter observes server-action transport, and the unchanged persisted
+record version independently checks that no inventory write occurred.
+
 W13/W14/A302/A303 focused coverage includes immutable focus precedence and
 interruption, 750/400 ms completion ordering, Reduced endpoints, measured-rest
 binding preservation, selected exact counts with the optional overlay off, map

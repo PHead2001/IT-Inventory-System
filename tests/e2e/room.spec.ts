@@ -1804,7 +1804,7 @@ test('manual pointer movement interrupts an in-flight selected-location focus', 
     .click();
   const displaced = await camera(page);
   const completedBefore = Number(await viewer.getAttribute('data-focus-count'));
-  // CI input delivery can exceed the whole 300 ms animation. Control elapsed
+  // CI input delivery can exceed the whole 750 ms flight. Control elapsed
   // time, while still exercising the real focus button and trusted pointer drag.
   await page.clock.pauseAt(await page.evaluate(() => Date.now() + 10_000));
   await toolbar.getByRole('button', { name: 'Center selected' }).click();
@@ -1824,7 +1824,7 @@ test('manual pointer movement interrupts an in-flight selected-location focus', 
   await page.mouse.up({ button: 'right' });
   const stopped = await camera(page);
   expect(stopped.target).not.toEqual(inFlight.target);
-  await page.clock.runFor(400);
+  await page.clock.runFor(1200);
   near((await camera(page)).target, stopped.target);
   expect(Number(await viewer.getAttribute('data-focus-count'))).toBe(
     completedBefore,
@@ -1832,7 +1832,7 @@ test('manual pointer movement interrupts an in-flight selected-location focus', 
   await expect(viewer).toHaveAttribute('data-selected-code', 'ITC-D01');
   // A subsequent uninterrupted request must still complete under the same clock.
   await toolbar.getByRole('button', { name: 'Center selected' }).click();
-  await page.clock.runFor(400);
+  await page.clock.runFor(1200);
   await expect(viewer).toHaveAttribute(
     'data-focus-count',
     String(completedBefore + 1),
