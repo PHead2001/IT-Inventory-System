@@ -21,6 +21,21 @@ import {
 } from './quantity-flight-probe';
 
 type Capture = { name: string; tag: string; canvas: boolean; shell: boolean };
+type DocumentDepartureProbe = {
+  read: () => {
+    sourceKey: string | null;
+    sourceURL: string;
+    event: {
+      navigationType: NavigationType;
+      sameDocument: boolean;
+      sourceKey: string | null;
+      sourceURL: string;
+      trusted: boolean;
+      signalAborted: boolean;
+    } | null;
+  };
+  cleanup: () => void;
+};
 type Proof = {
   transitions: Array<{
     old: Capture[];
@@ -1063,6 +1078,9 @@ for (const width of [1280, 390]) {
       back?: Proof;
       lateDelivery?: Proof;
       appBack?: Proof;
+      canceledDeparture?: Awaited<
+        ReturnType<typeof verifyCanceledDocumentScroll>
+      >;
     } = {};
     try {
       await resetProof(page);
@@ -1101,6 +1119,10 @@ for (const width of [1280, 390]) {
       pendingNativeProof.lateDelivery = await proof(page);
       expect(pendingNativeProof.lateDelivery.transitions).toHaveLength(0);
       expect(pendingNativeProof.lateDelivery.replacements).toHaveLength(0);
+      pendingNativeProof.canceledDeparture = await verifyCanceledDocumentScroll(
+        page,
+        name,
+      );
       await resetProof(page);
       await page.getByRole('link', { name: 'Back to results' }).click();
       await expect(page).toHaveURL(
@@ -1301,6 +1323,176 @@ async function holdRouteWork(page: Page, pathname: string, action = false) {
 }
 const routeProgress = (page: Page) =>
   page.locator('.experience-route-progress');
+
+/** Exercise the native beforeunload platform path, without an app/router
+ * interception, synthetic abort, or fabricated readiness/checkpoint. */
+async function verifyCanceledDocumentScroll(page: Page, name: string) {
+  const viewport = page.viewportSize()!;
+  const heading = page.getByRole('heading', { name, exact: true });
+  const originalHeading = await heading.elementHandle();
+  expect(originalHeading).not.toBeNull();
+  const source = await page.evaluate(() => ({
+    key: navigation.currentEntry?.key ?? null,
+    url: location.href,
+  }));
+  expect(source.key).not.toBeNull();
+  try {
+    await page.setViewportSize({ width: viewport.width, height: 300 });
+    expect(
+      await page.evaluate(
+        () => document.documentElement.scrollHeight - window.innerHeight,
+      ),
+    ).toBeGreaterThan(200);
+    await page.keyboard.press('Home');
+    await expect.poll(() => page.evaluate(() => window.scrollY)).toBe(0);
+    await page.mouse.move(viewport.width / 2, 150);
+    await page.mouse.wheel(0, 100);
+    await expect.poll(() => page.evaluate(() => window.scrollY)).toBe(100);
+    await page.evaluate(() => {
+      const probeWindow = window as Window & {
+        documentDepartureProbe?: DocumentDepartureProbe;
+      };
+      let observed:
+        | { event: NavigateEvent; sourceKey: string | null; sourceURL: string }
+        | undefined;
+      const link = document.createElement('a');
+      link.id = 'test-native-document-departure';
+      link.textContent = 'Test native document departure';
+      link.href = new URL('/dashboard', location.href).href;
+      link.style.cssText =
+        'position:fixed;right:16px;bottom:16px;z-index:2147483647;background:white;color:black;padding:8px';
+      const observe = (event: NavigateEvent) => {
+        if (event.destination.url !== link.href) return;
+        observed = {
+          event,
+          sourceKey: navigation.currentEntry?.key ?? null,
+          sourceURL: location.href,
+        };
+      };
+      const beforeUnload = (event: BeforeUnloadEvent) => {
+        event.preventDefault();
+        event.returnValue = '';
+      };
+      navigation.addEventListener('navigate', observe);
+      window.addEventListener('beforeunload', beforeUnload);
+      document.body.append(link);
+      probeWindow.documentDepartureProbe = {
+        read: () => ({
+          sourceKey: navigation.currentEntry?.key ?? null,
+          sourceURL: location.href,
+          event: observed
+            ? {
+                navigationType: observed.event.navigationType,
+                sameDocument: observed.event.destination.sameDocument,
+                sourceKey: observed.sourceKey,
+                sourceURL: observed.sourceURL,
+                trusted: observed.event.isTrusted,
+                signalAborted: observed.event.signal.aborted,
+              }
+            : null,
+        }),
+        cleanup: () => {
+          navigation.removeEventListener('navigate', observe);
+          window.removeEventListener('beforeunload', beforeUnload);
+          link.remove();
+          delete probeWindow.documentDepartureProbe;
+        },
+      };
+    });
+    const dialogReady = page.waitForEvent('dialog');
+    const clicked = page
+      .getByRole('link', {
+        name: 'Test native document departure',
+        exact: true,
+      })
+      .click({ noWaitAfter: true });
+    void clicked.catch(() => {});
+    const dialog = await dialogReady;
+    try {
+      expect(dialog.type()).toBe('beforeunload');
+    } finally {
+      await dialog.dismiss();
+    }
+    await clicked;
+    const canceled = await page.evaluate(() =>
+      (
+        window as Window & {
+          documentDepartureProbe?: DocumentDepartureProbe;
+        }
+      ).documentDepartureProbe!.read(),
+    );
+    expect(canceled).toMatchObject({
+      sourceKey: source.key,
+      sourceURL: source.url,
+    });
+    expect(canceled.event).toMatchObject({
+      navigationType: 'push',
+      sameDocument: false,
+      sourceKey: source.key,
+      sourceURL: source.url,
+      trusted: true,
+    });
+    // Record the real signal state, rather than depending on a universal abort
+    // event after Stay. Neither the probe nor the app intercepts this departure.
+    await expect(page).toHaveURL(source.url);
+    expect(
+      await originalHeading!.evaluate(
+        (node) => node.isConnected && node === document.querySelector('h1'),
+      ),
+    ).toBe(true);
+    await page.evaluate(() =>
+      (
+        window as Window & { documentDepartureProbe?: DocumentDepartureProbe }
+      ).documentDepartureProbe!.cleanup(),
+    );
+    await page.mouse.move(viewport.width / 2, 150);
+    await page.mouse.wheel(0, 100);
+    await expect.poll(() => page.evaluate(() => window.scrollY)).toBe(200);
+    await resetProof(page);
+    await page.goBack();
+    await expect(
+      page.getByRole('heading', { name: 'Inventory', exact: true }),
+    ).toBeVisible();
+    await expect(routeProgress(page)).toHaveAttribute('data-visible', 'false');
+    await settled(page);
+    const nativeBack = await proof(page);
+    expect(nativeBack.transitions).toHaveLength(0);
+    expect(nativeBack.replacements).toHaveLength(0);
+    await resetProof(page);
+    await page.goForward();
+    await expect(page).toHaveURL(source.url);
+    await expect(heading).toBeVisible();
+    await expect(routeProgress(page)).toHaveAttribute('data-visible', 'false');
+    await expect(page.locator('html')).toHaveAttribute(
+      'data-route-motion-private',
+      'true',
+    );
+    await expect.poll(() => page.evaluate(() => window.scrollY)).toBe(200);
+    expect(await page.evaluate(() => navigation.currentEntry?.key)).toBe(
+      source.key,
+    );
+    await settled(page);
+    const nativeForward = await proof(page);
+    expect(nativeForward.transitions).toHaveLength(0);
+    expect(nativeForward.replacements).toHaveLength(0);
+    return {
+      canceled,
+      sourceScroll: 100,
+      latestScroll: 200,
+      nativeBack,
+      nativeForward,
+    };
+  } finally {
+    await page
+      .evaluate(() =>
+        (
+          window as Window & { documentDepartureProbe?: DocumentDepartureProbe }
+        ).documentDepartureProbe?.cleanup(),
+      )
+      .catch(() => {});
+    await page.setViewportSize(viewport);
+  }
+}
 
 async function holdRoomContents(page: Page, code: string, fail = false) {
   let release!: () => void;

@@ -89,11 +89,16 @@ function fixture() {
     url: string,
     type = 'traverse',
     signal = new AbortController().signal,
+    destination: { sameDocument?: boolean } = { sameDocument: true },
   ) {
     const event = new Event('navigate', { cancelable: true });
     Object.assign(event, {
       navigationType: type,
-      destination: { key, url: location.origin + url },
+      destination: {
+        key,
+        url: new URL(url, location.origin).href,
+        ...destination,
+      },
       signal,
     });
     navigation.dispatchEvent(event);
@@ -433,6 +438,85 @@ it('an aborted dirty-leave attempt resumes capture on its unchanged authorized s
   });
 });
 
+it.each(['/another-document', 'https://other.example/elsewhere'])(
+  'cross-document Stay keeps capturing newer source scroll without abort or entry change (%s)',
+  (url) => {
+    const f = fixture();
+    f.offset(728);
+    const controller = new AbortController();
+    const abort = vi.spyOn(controller.signal, 'addEventListener');
+    const entryChanged = vi.fn();
+    f.navigation.addEventListener('currententrychange', entryChanged);
+    const event = f.navigate('', url, 'push', controller.signal, {
+      sameDocument: false,
+    });
+    expect(event.defaultPrevented).toBe(false);
+    // Native beforeunload Stay can leave both the signal and entry untouched.
+    f.offset(610);
+    expect(controller.signal.aborted).toBe(false);
+    expect(entryChanged).not.toHaveBeenCalled();
+    expect(f.scrollTo).not.toHaveBeenCalled();
+    detail(f, 610);
+    f.navigate('list-one', '/inventory?q=x#row');
+    f.collapse();
+    f.commit('list-one', '/inventory?q=x#row');
+    f.permission.ready = true;
+    f.reveal();
+    expect(f.scrollTo).toHaveBeenCalledExactlyOnceWith({
+      left: 0,
+      top: 610,
+      behavior: 'instant',
+    });
+    expect(abort).not.toHaveBeenCalled();
+  },
+);
+
+it('an explicitly missing sameDocument flag cannot prove a retained-document departure freeze', () => {
+  const f = fixture();
+  f.offset(728);
+  f.navigate('', '/unknown', 'push', new AbortController().signal, {
+    sameDocument: undefined,
+  });
+  detail(f, 610);
+  f.navigate('list-one', '/inventory?q=x#row');
+  f.collapse();
+  f.commit('list-one', '/inventory?q=x#row');
+  f.permission.ready = true;
+  f.reveal();
+  expect(f.scrollTo).toHaveBeenCalledExactlyOnceWith({
+    left: 0,
+    top: 610,
+    behavior: 'instant',
+  });
+});
+
+it('a cross-document attempt retires an older same-document abort owner without disturbing newer traversal', () => {
+  const f = fixture();
+  detail(f);
+  const old = new AbortController();
+  const remove = vi.spyOn(old.signal, 'removeEventListener');
+  f.navigate('list-one', '/inventory?q=x#row', 'traverse', old.signal);
+  f.navigate('', '/another-document', 'push', new AbortController().signal, {
+    sameDocument: false,
+  });
+  expect(remove).toHaveBeenCalledWith('abort', expect.any(Function));
+  f.offset(350);
+  f.move('other', '/other');
+  f.reveal();
+  f.offset(0);
+  f.navigate('detail', '/inventory/assets/a');
+  old.abort();
+  f.collapse();
+  f.commit('detail', '/inventory/assets/a');
+  f.permission.ready = true;
+  f.reveal();
+  expect(f.scrollTo).toHaveBeenCalledExactlyOnceWith({
+    left: 0,
+    top: 350,
+    behavior: 'instant',
+  });
+});
+
 it('an abort during a temporary privacy check waits for fresh source readiness before capturing', () => {
   const f = fixture();
   f.offset(728);
@@ -630,7 +714,11 @@ it('reattaches effects with fresh observer ownership and keeps old callbacks ine
   const stale = new Event('navigate');
   Object.assign(stale, {
     navigationType: 'push',
-    destination: { key: '', url: location.origin + '/other' },
+    destination: {
+      key: '',
+      url: location.origin + '/other',
+      sameDocument: true,
+    },
   });
   f.navigate('list-one', '/inventory?q=x#row');
   oldNavigate(stale);

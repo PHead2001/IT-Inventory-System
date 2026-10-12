@@ -102,7 +102,7 @@ function authorityCommitFixture() {
       const event = new Event('navigate');
       Object.assign(event, {
         navigationType: type,
-        destination: { key, url: location.origin + url },
+        destination: { key, url: location.origin + url, sameDocument: true },
       });
       navigation.dispatchEvent(event);
       history.replaceState(null, '', url);
@@ -218,7 +218,7 @@ it.each(['privacy-first', 'readiness-first'])(
         const event = new Event('navigate');
         Object.assign(event, {
           navigationType: type,
-          destination: { key, url: location.origin + url },
+          destination: { key, url: location.origin + url, sameDocument: true },
         });
         navigation.dispatchEvent(event);
       });

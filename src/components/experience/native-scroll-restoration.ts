@@ -167,6 +167,16 @@ export function createNativeScrollRestoration(
     const event = raw as NavigateEvent;
     const url = exactURL(event.destination?.url ?? null);
     const entry = current();
+    if (event.destination?.sameDocument !== true) {
+      // A native beforeunload Stay may emit neither abort nor entry change.
+      // Only retained-document navigation needs a departure freeze. Keep the
+      // authorized current source capturing until the browser actually leaves.
+      pending = undefined;
+      departing = false;
+      associated = undefined;
+      reconcile();
+      return;
+    }
     // Next updates its own state with a same-entry, same-URL replace after
     // traversal. URL coincidence on another entry cannot preserve the token.
     if (

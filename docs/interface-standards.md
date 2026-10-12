@@ -198,7 +198,13 @@ before scrolling; a shorter final page clamps naturally without retries. User
 wheel/touch/pointer/mouse/scroll-key input or a new navigation cancels the pending restore;
 ordinary scroll events cannot cancel it because document collapse also emits them.
 Only Next's exact same-entry/same-URL replacement preserves a pending restore.
-A single listener on the current navigation attempt's AbortSignal releases a
+Only an explicitly same-document destination starts a departure freeze or native
+restore token. A true cross-document attempt leaves current-source capture active
+under the existing fresh-grant and canonical-primary checks until the document
+actually leaves. Choosing Stay in a native beforeunload prompt therefore needs no
+synthetic abort or entry-change evidence to preserve later source scroll. A missing
+sameDocument flag cannot prove a retained-document departure. A single listener on
+the current same-document navigation attempt's AbortSignal releases a
 cancelled departure freeze only while its original history entry, exact URL and
 authority remain current. Resuming capture still requires the existing fresh
 privacy grant and canonical visible primary. A commit, new attempt, authority

@@ -262,7 +262,14 @@ the user's later offset; one owned AbortSignal listener is retired on supersede,
 commit, authority change, detach and disposal. Delayed aborts cannot cancel newer
 pending restoration or reauthorize retired callbacks, and temporary privacy checks
 still wait for a fresh grant and real primary. These paths do not prevent browser
-input, intercept navigation or rely on a global navigation-error event.
+input, intercept navigation or rely on a global navigation-error event. Explicit
+same-document fixtures retain those freeze/abort regressions. Cross-document
+same-origin and external destinations instead leave authorized current-source
+capture active: choosing Stay with neither signal abort nor entry change must
+preserve a newer offset for a later real native traversal. Missing sameDocument
+proof cannot start a departure freeze; superseded same-document abort callbacks
+cannot interfere with a subsequent traversal. These are coordinator regressions,
+not proof of a real browser's beforeunload dialog or hosted document lifecycle.
 `native-scroll-restoration.integration.test.tsx` mounts the real
 route provider and canonical readiness owner to exercise hidden same-authority
 privacy collapse, both admission orders and real revocation notifications. Three
