@@ -459,12 +459,13 @@ test('quantity move rejects an overdraw and retains its historical receipt when 
     const lastMove = form.locator('details').filter({
       has: page.locator('summary').filter({ hasText: /^Last move/ }),
     });
+    const lastMoveSummary = lastMove.locator(':scope > summary');
     await expect(lastMove).not.toHaveAttribute('open');
-    await expect(lastMove.locator('summary time')).toHaveAttribute(
+    await expect(lastMoveSummary.locator(':scope > time')).toHaveAttribute(
       'datetime',
       committedAt!,
     );
-    await lastMove.locator('summary').click();
+    await lastMoveSummary.click();
     await expect(lastMove).toContainText(
       'Moved 1 unit from Red Container to Black Container',
     );
@@ -487,7 +488,7 @@ test('quantity move rejects an overdraw and retains its historical receipt when 
         `a[href="/history/events/quantity/${saved.pointer.eventId}"]`,
       ),
     ).toHaveCount(1);
-    await lastMove.locator('summary').click();
+    await lastMoveSummary.click();
     await choose(form, 'Source location', 'ITC-RED');
     await choose(form, 'Destination location', 'ITC-BLACK');
     await form.getByLabel('Quantity to move').fill('1');
@@ -878,12 +879,13 @@ test('quantity core persists multi-location receives, partial and all transfers,
   const lastMove = form
     .locator('details')
     .filter({ has: page.locator('summary').filter({ hasText: /^Last move/ }) });
+  const lastMoveSummary = lastMove.locator(':scope > summary');
   await expect(lastMove).not.toHaveAttribute('open');
-  await expect(lastMove.locator('summary time')).toHaveAttribute(
+  await expect(lastMoveSummary.locator(':scope > time')).toHaveAttribute(
     'datetime',
     committedAt!,
   );
-  await lastMove.locator('summary').click();
+  await lastMoveSummary.click();
   await expect(lastMove).toContainText('Moved 3 units from 1A to 1B');
   await expect(lastMove).toContainText(
     'After this move: 1A 7 units; 1B 8 units',
@@ -901,7 +903,7 @@ test('quantity core persists multi-location receives, partial and all transfers,
       `a[href="/history/events/quantity/${saved.pointer.eventId}"]`,
     ),
   ).toHaveCount(1);
-  await lastMove.locator('summary').click();
+  await lastMoveSummary.click();
   await choose(form, 'Source location', 'ITC-S1A');
   await choose(form, 'Destination location', 'ITC-S1C');
   await form.getByLabel('Move All from this source location').check();
