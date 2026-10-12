@@ -1404,7 +1404,19 @@ interfaceTest(
       await expect(
         page.getByRole('heading', { name: heading, exact: true }),
       ).toBeVisible();
-      await expect(page.getByRole('main')).toHaveCount(1);
+      const mainDiagnostic = await page.getByRole('main').evaluateAll((mains) =>
+        mains.map((main) => ({
+          id: main.id,
+          className: main.className,
+          headings: Array.from(main.querySelectorAll('h1')).map(
+            (heading) => heading.textContent,
+          ),
+        })),
+      );
+      await expect(
+        page.getByRole('main'),
+        `Direct missing-resource main landmark for ${path}: ${JSON.stringify(mainDiagnostic)}`,
+      ).toHaveCount(1);
       await expect(page).toHaveTitle(/IT Inventory/);
       await expectPrivateTitleExcluded(page, privateIdentity);
       await page.screenshot({

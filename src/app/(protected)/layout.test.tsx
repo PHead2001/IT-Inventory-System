@@ -93,6 +93,9 @@ vi.mock('@/features/telemetry/private-speed-insights', () => ({
   PrivateSpeedInsights: () => <span data-testid="private-speed-insights" />,
 }));
 import ApplicationLayout from './layout';
+import ProtectedNotFound, {
+  metadata as protectedNotFoundMetadata,
+} from './not-found';
 import { DocumentAdmission } from './document-admission';
 import { ProtectedPrivacyBoundary } from '@/components/auth/auth-privacy';
 import { ProtectedPrivacyContent } from '@/components/auth/privacy-content';
@@ -118,6 +121,32 @@ afterEach(() => {
   cleanup();
   vi.restoreAllMocks();
   vi.unstubAllEnvs();
+});
+
+it('renders protected missing-page recovery inside the actual shell with one main and skip-link target', async () => {
+  render(await ApplicationLayout({ children: <ProtectedNotFound /> }));
+  await screen.findByRole('heading', { name: 'Page not found' });
+  expect(screen.getAllByRole('main')).toHaveLength(1);
+  const main = screen.getByRole('main');
+  expect(main).toHaveAttribute('id', 'main-content');
+  expect(main).toHaveClass('experience-main');
+  expect(document.querySelectorAll('#main-content')).toHaveLength(1);
+  expect(main).toContainElement(
+    screen.getByRole('heading', { name: 'Page not found' }),
+  );
+  expect(screen.getByRole('link', { name: 'Skip to content' })).toHaveAttribute(
+    'href',
+    '#main-content',
+  );
+  expect(
+    screen.getByRole('link', { name: 'Search inventory' }),
+  ).toHaveAttribute('href', '/inventory');
+  expect(protectedNotFoundMetadata).toEqual({
+    title: { absolute: 'Page not found · IT Inventory' },
+  });
+  expect(documentBoundary.member.mock.invocationCallOrder[0]).toBeLessThan(
+    documentBoundary.admission.mock.invocationCallOrder[0],
+  );
 });
 
 it('keeps the unique confirmed logout completion retry usable in the actual protected shell', async () => {
