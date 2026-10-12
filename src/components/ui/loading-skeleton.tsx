@@ -1,11 +1,12 @@
 'use client';
 
-import { useEffect, useRef, type ReactNode } from 'react';
+import { useEffect, useRef, type ReactNode, type RefObject } from 'react';
 import { useEffectiveReducedMotion } from '@/components/experience/motion-preference';
 import styles from './loading-skeleton.module.css';
 
 export type LoadingShape =
   | 'rows'
+  | 'queue-row'
   | 'files'
   | 'fields'
   | 'inventory'
@@ -165,6 +166,8 @@ export function LoadingSkeleton({
             </div>
           ) : shape === 'fields' || shape === 'inspection' ? (
             <Fields count={count} />
+          ) : shape === 'queue-row' ? (
+            <Block className={styles.description} />
           ) : shape === 'occupancy' ? (
             <Block className={styles.counter} />
           ) : (
@@ -184,6 +187,7 @@ export function LoadingReveal({
   className = '',
   announcement,
   announcementActive = busy,
+  motionReady = true,
 }: {
   busy: boolean;
   reveal?: boolean;
@@ -191,9 +195,40 @@ export function LoadingReveal({
   className?: string;
   announcement?: string;
   announcementActive?: boolean;
+  motionReady?: boolean;
 }) {
-  const reduced = useEffectiveReducedMotion();
   const host = useRef<HTMLDivElement>(null);
+  return (
+    <>
+      {announcement && (
+        <LoadingAnnouncement label={announcement} active={announcementActive} />
+      )}
+      <div ref={host} className={className} aria-busy={busy}>
+        {children}
+      </div>
+      {motionReady && <RevealMotion host={host} busy={busy} reveal={reveal} />}
+    </>
+  );
+}
+
+/** Motion admission does not change the host or remount its private children. */
+function fullMotion() {
+  return (
+    document.documentElement.dataset.motion === 'full' &&
+    typeof window.matchMedia === 'function' &&
+    !window.matchMedia('(prefers-reduced-motion: reduce)').matches
+  );
+}
+
+function RevealMotion({
+  host,
+  busy,
+  reveal,
+}: {
+  host: RefObject<HTMLDivElement | null>;
+  busy: boolean;
+  reveal: boolean;
+}) {
   const wasBusy = useRef(busy);
   const animation = useRef<Animation | null>(null);
   useEffect(() => {
@@ -203,7 +238,7 @@ export function LoadingReveal({
       wasBusy.current &&
       !busy &&
       reveal &&
-      !reduced &&
+      fullMotion() &&
       document.visibilityState === 'visible' &&
       typeof host.current?.animate === 'function'
     )
@@ -213,25 +248,30 @@ export function LoadingReveal({
       );
     wasBusy.current = busy;
     return () => animation.current?.cancel();
-  }, [busy, reduced, reveal]);
+  }, [busy, reveal, host]);
   useEffect(() => {
     const pause = () => {
-      if (document.visibilityState !== 'visible') {
+      if (document.visibilityState !== 'visible' || !fullMotion()) {
         animation.current?.cancel();
         animation.current = null;
       }
     };
+    const media =
+      typeof window.matchMedia === 'function'
+        ? window.matchMedia('(prefers-reduced-motion: reduce)')
+        : null;
+    const observer = new MutationObserver(pause);
+    observer.observe(document.documentElement, {
+      attributes: true,
+      attributeFilter: ['data-motion'],
+    });
+    media?.addEventListener('change', pause);
     document.addEventListener('visibilitychange', pause);
-    return () => document.removeEventListener('visibilitychange', pause);
+    return () => {
+      observer.disconnect();
+      media?.removeEventListener('change', pause);
+      document.removeEventListener('visibilitychange', pause);
+    };
   }, []);
-  return (
-    <>
-      {announcement && (
-        <LoadingAnnouncement label={announcement} active={announcementActive} />
-      )}
-      <div ref={host} className={className} aria-busy={busy}>
-        {children}
-      </div>
-    </>
-  );
+  return null;
 }

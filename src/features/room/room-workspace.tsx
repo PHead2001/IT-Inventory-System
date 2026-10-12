@@ -2,6 +2,10 @@
 import { useRouteTransition } from '@/components/experience/route-pending';
 import { useRouteRouter as useRouter } from '@/components/experience/route-pending';
 import dynamic from 'next/dynamic';
+import {
+  LoadingReveal,
+  LoadingSkeleton,
+} from '@/components/ui/loading-skeleton';
 import Link from '@/components/experience/route-link';
 
 import {
@@ -20,7 +24,13 @@ import { roomHref } from './navigation';
 
 const RoomScene = dynamic(() => import('./scene/room-scene'), {
   ssr: false,
-  loading: () => <p className="p-6 text-slate-400">Loading room renderer…</p>,
+  loading: () => (
+    <LoadingSkeleton
+      shape="room"
+      label="Loading room renderer…"
+      announce={false}
+    />
+  ),
 });
 const control =
   'min-h-11 rounded-md border border-slate-600 px-3 py-2 text-sm disabled:opacity-50';
@@ -168,24 +178,34 @@ export function RoomWorkspace({
             {failure ? (
               fallback
             ) : (
-              <SceneBoundary fallback={fallback} onFailure={onFailure}>
-                <RoomScene
-                  room={stableRoom}
-                  locationNames={Object.fromEntries(
-                    locations.map((location) => [location.code, location.name]),
-                  )}
-                  bindings={bindings}
-                  selectedCode={selectedCode}
-                  highlightedCodes={highlightedCodes}
-                  focusRequest={focusRequest}
-                  onSelect={select}
-                  onReady={onReady}
-                  onFailure={onFailure}
-                  onFocusComplete={onFocusComplete}
-                  canFocusSelected={bound && !pending}
-                  onRequestFocus={requestFocus}
-                />
-              </SceneBoundary>
+              <LoadingReveal
+                busy={!ready}
+                reveal={!failure}
+                announcement="Loading room renderer…"
+                announcementActive={!ready && !failure}
+              >
+                <SceneBoundary fallback={fallback} onFailure={onFailure}>
+                  <RoomScene
+                    room={stableRoom}
+                    locationNames={Object.fromEntries(
+                      locations.map((location) => [
+                        location.code,
+                        location.name,
+                      ]),
+                    )}
+                    bindings={bindings}
+                    selectedCode={selectedCode}
+                    highlightedCodes={highlightedCodes}
+                    focusRequest={focusRequest}
+                    onSelect={select}
+                    onReady={onReady}
+                    onFailure={onFailure}
+                    onFocusComplete={onFocusComplete}
+                    canFocusSelected={bound && !pending}
+                    onRequestFocus={requestFocus}
+                  />
+                </SceneBoundary>
+              </LoadingReveal>
             )}
           </div>
         )}

@@ -1,5 +1,10 @@
 'use client';
 import dynamic from 'next/dynamic';
+import {
+  LoadingAnnouncement,
+  LoadingReveal,
+  LoadingSkeleton,
+} from '@/components/ui/loading-skeleton';
 import Link from '@/components/experience/route-link';
 import { RouteReady } from '@/components/experience/route-ready';
 import { routeKey } from '@/components/experience/route-key';
@@ -51,7 +56,9 @@ import {
 
 const RoomScene = dynamic(() => import('./scene/room-scene'), {
   ssr: false,
-  loading: () => <p className="p-6">Loading room…</p>,
+  loading: () => (
+    <LoadingSkeleton shape="room" label="Loading room…" announce={false} />
+  ),
 });
 type Selection = { space: Space; code: string | null; page: number };
 function parsedPage(value: string | null) {
@@ -141,6 +148,7 @@ export function SpacesWorkspace({
   const [visible, setVisible] = useState(true);
   const [showCounts, setShowCounts] = useState(false);
   const [sceneError, setSceneError] = useState<string | null>(null);
+  const [readySceneSpace, setReadySceneSpace] = useState<string | null>(null);
   const [notice, setNotice] = useState(initialNotice);
   const [focusTick, setFocusTick] = useState(0);
   const [focusEpoch, setFocusEpoch] = useState(0);
@@ -511,7 +519,17 @@ export function SpacesWorkspace({
       </CanvasFreeRouteContent>
       {showCounts && room && visible && (
         <div className="flex flex-wrap items-center gap-3 text-sm">
-          <p role="status">
+          {occupancy.status === 'loading' && (
+            <LoadingSkeleton
+              shape="occupancy"
+              label="Refreshing location counts…"
+              announce={false}
+            />
+          )}
+          <p
+            role="status"
+            className={occupancy.status === 'loading' ? 'sr-only' : undefined}
+          >
             {occupancy.status === 'loading'
               ? 'Refreshing location counts…'
               : occupancy.status === 'error'
@@ -557,73 +575,89 @@ export function SpacesWorkspace({
                   </p>
                   <button
                     className="mt-3 min-h-11 text-cyan-300 underline"
-                    onClick={() => setSceneError(null)}
+                    onClick={() => {
+                      setSceneError(null);
+                      setReadySceneSpace(null);
+                    }}
                   >
                     Retry room
                   </button>
                 </div>
               ) : (
-                <SceneBoundary
-                  key={selection.space.id}
-                  onFailure={() =>
-                    setSceneError('The room renderer could not start.')
+                <LoadingReveal
+                  busy={
+                    readySceneSpace !== selection.space.id ||
+                    (showCounts && occupancy.status === 'loading')
                   }
+                  reveal={!sceneError && occupancy.status !== 'error'}
+                  announcement="Loading room…"
+                  announcementActive={readySceneSpace !== selection.space.id}
                 >
-                  <RoomScene
+                  <SceneBoundary
                     key={selection.space.id}
-                    room={room}
-                    showCounts={showCounts}
-                    onCountsChange={(show) => {
-                      setShowCounts(show);
-                      setRetryTick((tick) => tick + 1);
-                    }}
-                    locationOccupancy={occupancy.counts}
-                    locationNames={Object.fromEntries(
-                      locations.map((location) => [
-                        location.code,
-                        location.name,
-                      ]),
-                    )}
-                    initialView={initialView}
-                    onViewChange={(view) => {
-                      if (viewKey) {
-                        setCameraViews((current) => {
-                          if (
-                            JSON.stringify(current.get(viewKey)) ===
-                            JSON.stringify(view)
-                          )
-                            return current;
-                          return new Map(current).set(viewKey, view);
-                        });
-                      }
-                    }}
-                    bindings={bindings}
-                    selectedCode={selection.code}
-                    highlightedCodes={highlightedCodes}
-                    focusRequest={focusRequest}
-                    focusOnRestore={focusOnRestore && bound}
-                    onSelect={selectCode}
-                    onReady={() => {}}
-                    onFailure={setSceneError}
-                    onFocusComplete={(code) => {
-                      if (activeFocusIdentity.current !== focusIdentity) return;
-                      setFocusOnRestore(false);
-                      setFocusCompletion((current) => ({
-                        scope: focusScope,
-                        request: focusIdentity,
-                        code,
-                        count:
-                          current.scope === focusScope ? current.count + 1 : 1,
-                      }));
-                    }}
-                    onFocusCancel={cancelFocus}
-                    canFocusSelected={bound}
-                    onRequestFocus={() => {
-                      setFocusOnRestore(true);
-                      setFocusTick((tick) => tick + 1);
-                    }}
-                  />
-                </SceneBoundary>
+                    onFailure={() =>
+                      setSceneError('The room renderer could not start.')
+                    }
+                  >
+                    <RoomScene
+                      key={selection.space.id}
+                      room={room}
+                      showCounts={showCounts}
+                      onCountsChange={(show) => {
+                        setShowCounts(show);
+                        setRetryTick((tick) => tick + 1);
+                      }}
+                      locationOccupancy={occupancy.counts}
+                      locationNames={Object.fromEntries(
+                        locations.map((location) => [
+                          location.code,
+                          location.name,
+                        ]),
+                      )}
+                      initialView={initialView}
+                      onViewChange={(view) => {
+                        if (viewKey) {
+                          setCameraViews((current) => {
+                            if (
+                              JSON.stringify(current.get(viewKey)) ===
+                              JSON.stringify(view)
+                            )
+                              return current;
+                            return new Map(current).set(viewKey, view);
+                          });
+                        }
+                      }}
+                      bindings={bindings}
+                      selectedCode={selection.code}
+                      highlightedCodes={highlightedCodes}
+                      focusRequest={focusRequest}
+                      focusOnRestore={focusOnRestore && bound}
+                      onSelect={selectCode}
+                      onReady={() => setReadySceneSpace(selection.space.id)}
+                      onFailure={setSceneError}
+                      onFocusComplete={(code) => {
+                        if (activeFocusIdentity.current !== focusIdentity)
+                          return;
+                        setFocusOnRestore(false);
+                        setFocusCompletion((current) => ({
+                          scope: focusScope,
+                          request: focusIdentity,
+                          code,
+                          count:
+                            current.scope === focusScope
+                              ? current.count + 1
+                              : 1,
+                        }));
+                      }}
+                      onFocusCancel={cancelFocus}
+                      canFocusSelected={bound}
+                      onRequestFocus={() => {
+                        setFocusOnRestore(true);
+                        setFocusTick((tick) => tick + 1);
+                      }}
+                    />
+                  </SceneBoundary>
+                </LoadingReveal>
               )}
             </div>
           ) : !room ? (
@@ -644,6 +678,10 @@ export function SpacesWorkspace({
             ready={!selection.code || Boolean(result || error)}
           >
             <CanvasFreeRouteContent>
+              <LoadingAnnouncement
+                label={`Loading contents for ${selected?.name ?? 'selected location'}…`}
+                active={loading}
+              />
               <section
                 aria-label="Location inventory"
                 aria-busy={loading}
@@ -698,10 +736,11 @@ export function SpacesWorkspace({
                   </div>
                 )}
                 {loading && (
-                  <p role="status" className={styles.contentsState}>
-                    Loading contents for {selected?.name ?? 'selected location'}
-                    …
-                  </p>
+                  <LoadingSkeleton
+                    shape="contents"
+                    announce={false}
+                    label={`Loading contents for ${selected?.name ?? 'selected location'}…`}
+                  />
                 )}
                 {error && (
                   <div role="alert" className={styles.contentsError}>

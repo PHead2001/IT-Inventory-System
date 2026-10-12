@@ -1,4 +1,8 @@
 'use client';
+import {
+  LoadingReveal,
+  LoadingSkeleton,
+} from '@/components/ui/loading-skeleton';
 import { useRouteTask } from '@/components/experience/route-pending';
 import { useRouteRouter as useRouter } from '@/components/experience/route-pending';
 
@@ -2694,7 +2698,9 @@ export function MetadataForm({
           values remain visible.
         </p>
       )}
-      {formLoading && <p role="status">Loading category form…</p>}
+      {formLoading && (
+        <LoadingSkeleton shape="fields" label="Loading category form…" />
+      )}
       {formLoadError && !form && (
         <div role="alert">
           {formLoadError}{' '}
@@ -2710,196 +2716,207 @@ export function MetadataForm({
       {!form && !formLoading && !formLoadError && (
         <p role="alert">The selected category has no published form.</p>
       )}
-      <fieldset
-        hidden={!!terminalDraft || (!creating && state?.ok === true)}
-        disabled={
-          taskCompleted ||
-          (!creating && state?.ok === true) ||
-          (editRecoveryEnabled && (!editReady || editBlocked)) ||
-          (recoveryEnabled &&
-            (recoveryBlocked || !!terminalDraft || !!storedEditing)) ||
-          pending ||
-          uncertain ||
-          actorStale ||
-          schemaStale ||
-          schemaConflictPending ||
-          !!schemaRefreshError ||
-          recordBlocked ||
-          refreshNeeded
-        }
-        className="min-w-0 w-full max-w-full space-y-5"
+      <LoadingReveal
+        busy={formLoading}
+        reveal={!!form && !formLoadError}
+        motionReady={!actorStale && recoveryReady && editReady}
       >
-        {definition?.layout
-          .filter((section) =>
-            section.controls.some((control) =>
-              controlVisible(definition, section, control, kind),
-            ),
-          )
-          .map((section) => (
-            <section
-              key={section.id}
-              className="min-w-0 space-y-3 border-t border-cyan-100/15 pt-4 first:border-0 first:pt-0"
-            >
-              <h3 className="break-words text-lg font-semibold">
-                {section.label}
-              </h3>
-              <div className="flex flex-wrap gap-3">
-                {section.controls
-                  .filter((control) =>
-                    controlVisible(definition, section, control, kind),
-                  )
-                  .map((control) => {
-                    const content =
-                      control.kind === 'field' ? (
-                        customControl(control.field_id ?? '')
-                      ) : control.kind === 'builtin' ? (
-                        builtin(control.builtin ?? '')
-                      ) : (
-                        <p className="break-words whitespace-pre-wrap text-sm text-slate-400">
-                          {control.help}
-                        </p>
+        <fieldset
+          hidden={!!terminalDraft || (!creating && state?.ok === true)}
+          disabled={
+            taskCompleted ||
+            (!creating && state?.ok === true) ||
+            (editRecoveryEnabled && (!editReady || editBlocked)) ||
+            (recoveryEnabled &&
+              (recoveryBlocked || !!terminalDraft || !!storedEditing)) ||
+            pending ||
+            uncertain ||
+            actorStale ||
+            schemaStale ||
+            schemaConflictPending ||
+            !!schemaRefreshError ||
+            recordBlocked ||
+            refreshNeeded
+          }
+          className="min-w-0 w-full max-w-full space-y-5"
+        >
+          {definition?.layout
+            .filter((section) =>
+              section.controls.some((control) =>
+                controlVisible(definition, section, control, kind),
+              ),
+            )
+            .map((section) => (
+              <section
+                key={section.id}
+                className="min-w-0 space-y-3 border-t border-cyan-100/15 pt-4 first:border-0 first:pt-0"
+              >
+                <h3 className="break-words text-lg font-semibold">
+                  {section.label}
+                </h3>
+                <div className="flex flex-wrap gap-3">
+                  {section.controls
+                    .filter((control) =>
+                      controlVisible(definition, section, control, kind),
+                    )
+                    .map((control) => {
+                      const content =
+                        control.kind === 'field' ? (
+                          customControl(control.field_id ?? '')
+                        ) : control.kind === 'builtin' ? (
+                          builtin(control.builtin ?? '')
+                        ) : (
+                          <p className="break-words whitespace-pre-wrap text-sm text-slate-400">
+                            {control.help}
+                          </p>
+                        );
+                      if (!content) return null;
+                      const booleanShort =
+                        control.kind === 'field' &&
+                        applicable.some(
+                          (value) =>
+                            value.id === control.field_id &&
+                            value.type === 'boolean',
+                        ) &&
+                        (control.width === 'Auto' ||
+                          control.width === 3 ||
+                          control.width === 4);
+                      return (
+                        <div
+                          key={control.id}
+                          style={controlLayoutStyle(
+                            control.width,
+                            booleanShort,
+                          )}
+                          className="min-w-0 break-words"
+                        >
+                          {content}
+                        </div>
                       );
-                    if (!content) return null;
-                    const booleanShort =
-                      control.kind === 'field' &&
-                      applicable.some(
-                        (value) =>
-                          value.id === control.field_id &&
-                          value.type === 'boolean',
-                      ) &&
-                      (control.width === 'Auto' ||
-                        control.width === 3 ||
-                        control.width === 4);
-                    return (
-                      <div
-                        key={control.id}
-                        style={controlLayoutStyle(control.width, booleanShort)}
-                        className="min-w-0 break-words"
-                      >
-                        {content}
-                      </div>
-                    );
-                  })}
-              </div>
-            </section>
-          ))}
-        {creating && !preview && !openingSite && kind === 'quantity' && (
-          <div className="space-y-3">
-            <label htmlFor={`${scopeId}-metadata-initial-quantity`}>
-              Initial quantity
-              <RequiredMark />
-            </label>
-            <Input
-              id={`${scopeId}-metadata-initial-quantity`}
-              aria-label="Initial quantity"
-              {...validation.props(`${scopeId}-metadata-initial-quantity`)}
-              type="number"
-              min={0}
-              max={2147483647}
-              required
-              value={core.initial_quantity}
-              onChange={(event) =>
-                updateCore('initial_quantity', event.target.value)
-              }
-            />
-            {validation.error(`${scopeId}-metadata-initial-quantity`)}
-            {Number(core.initial_quantity) > 0 && (
-              <LocationPicker
-                id={`${scopeId}-metadata-initial-location`}
-                label="Initial location"
-                locations={locations}
-                mode="destination"
-                value={core.initial_location_id}
+                    })}
+                </div>
+              </section>
+            ))}
+          {creating && !preview && !openingSite && kind === 'quantity' && (
+            <div className="space-y-3">
+              <label htmlFor={`${scopeId}-metadata-initial-quantity`}>
+                Initial quantity
+                <RequiredMark />
+              </label>
+              <Input
+                id={`${scopeId}-metadata-initial-quantity`}
+                aria-label="Initial quantity"
+                {...validation.props(`${scopeId}-metadata-initial-quantity`)}
+                type="number"
+                min={0}
+                max={2147483647}
                 required
-                error={
-                  validation.issues.find(
-                    (issue) =>
-                      issue.id === `${scopeId}-metadata-initial-location`,
-                  )?.message
-                }
-                onValueChange={(value) =>
-                  updateCore('initial_location_id', value)
+                value={core.initial_quantity}
+                onChange={(event) =>
+                  updateCore('initial_quantity', event.target.value)
                 }
               />
-            )}
-          </div>
-        )}
-        {creating && !preview && !openingSite && kind === 'asset' && (
-          <LocationPicker
-            id={`${scopeId}-metadata-location`}
-            label="Current location"
-            locations={locations}
-            mode="destination"
-            value={core.location_id}
-            required
-            error={
-              validation.issues.find(
-                (issue) => issue.id === `${scopeId}-metadata-location`,
-              )?.message
-            }
-            onValueChange={(value) => updateCore('location_id', value)}
-          />
-        )}
-        {creating && !preview && openingSite && (
-          <div className="space-y-3 rounded border border-slate-700 p-4">
-            <p className="font-medium">
-              Opening holding at {openingSite.name} ({openingSite.code})
-            </p>
-            <p className="text-sm text-slate-400">
-              This creates a current assignment without inventing a past closet
-              issue or historical date.
-            </p>
-            {kind === 'quantity' && (
-              <label className="block space-y-2">
-                Units already at this site
-                <RequiredMark />
-                <Input
-                  id={`${scopeId}-metadata-opening-quantity`}
-                  aria-label="Units already at this site"
-                  {...validation.props(`${scopeId}-metadata-opening-quantity`)}
-                  type="number"
-                  min={1}
-                  max={2147483647}
-                  step={1}
+              {validation.error(`${scopeId}-metadata-initial-quantity`)}
+              {Number(core.initial_quantity) > 0 && (
+                <LocationPicker
+                  id={`${scopeId}-metadata-initial-location`}
+                  label="Initial location"
+                  locations={locations}
+                  mode="destination"
+                  value={core.initial_location_id}
                   required
-                  value={openingQuantity}
+                  error={
+                    validation.issues.find(
+                      (issue) =>
+                        issue.id === `${scopeId}-metadata-initial-location`,
+                    )?.message
+                  }
+                  onValueChange={(value) =>
+                    updateCore('initial_location_id', value)
+                  }
+                />
+              )}
+            </div>
+          )}
+          {creating && !preview && !openingSite && kind === 'asset' && (
+            <LocationPicker
+              id={`${scopeId}-metadata-location`}
+              label="Current location"
+              locations={locations}
+              mode="destination"
+              value={core.location_id}
+              required
+              error={
+                validation.issues.find(
+                  (issue) => issue.id === `${scopeId}-metadata-location`,
+                )?.message
+              }
+              onValueChange={(value) => updateCore('location_id', value)}
+            />
+          )}
+          {creating && !preview && openingSite && (
+            <div className="space-y-3 rounded border border-slate-700 p-4">
+              <p className="font-medium">
+                Opening holding at {openingSite.name} ({openingSite.code})
+              </p>
+              <p className="text-sm text-slate-400">
+                This creates a current assignment without inventing a past
+                closet issue or historical date.
+              </p>
+              {kind === 'quantity' && (
+                <label className="block space-y-2">
+                  Units already at this site
+                  <RequiredMark />
+                  <Input
+                    id={`${scopeId}-metadata-opening-quantity`}
+                    aria-label="Units already at this site"
+                    {...validation.props(
+                      `${scopeId}-metadata-opening-quantity`,
+                    )}
+                    type="number"
+                    min={1}
+                    max={2147483647}
+                    step={1}
+                    required
+                    value={openingQuantity}
+                    onChange={(event) => {
+                      persistInputs({ openingQuantity: event.target.value });
+                      setOpeningQuantity(event.target.value);
+                      setReview(false);
+                    }}
+                  />
+                  {validation.error(`${scopeId}-metadata-opening-quantity`)}
+                </label>
+              )}
+              <label className="block space-y-2">
+                Reason (optional)
+                <textarea
+                  className={fieldClass}
+                  maxLength={2000}
+                  value={openingReason}
                   onChange={(event) => {
-                    persistInputs({ openingQuantity: event.target.value });
-                    setOpeningQuantity(event.target.value);
+                    persistInputs({ openingReason: event.target.value });
+                    setOpeningReason(event.target.value);
                     setReview(false);
                   }}
                 />
-                {validation.error(`${scopeId}-metadata-opening-quantity`)}
               </label>
-            )}
-            <label className="block space-y-2">
-              Reason (optional)
-              <textarea
-                className={fieldClass}
-                maxLength={2000}
-                value={openingReason}
-                onChange={(event) => {
-                  persistInputs({ openingReason: event.target.value });
-                  setOpeningReason(event.target.value);
-                  setReview(false);
-                }}
-              />
-            </label>
-            <label className="block space-y-2">
-              Reference (optional)
-              <Input
-                maxLength={200}
-                value={openingReference}
-                onChange={(event) => {
-                  persistInputs({ openingReference: event.target.value });
-                  setOpeningReference(event.target.value);
-                  setReview(false);
-                }}
-              />
-            </label>
-          </div>
-        )}
-      </fieldset>
+              <label className="block space-y-2">
+                Reference (optional)
+                <Input
+                  maxLength={200}
+                  value={openingReference}
+                  onChange={(event) => {
+                    persistInputs({ openingReference: event.target.value });
+                    setOpeningReference(event.target.value);
+                    setReview(false);
+                  }}
+                />
+              </label>
+            </div>
+          )}
+        </fieldset>
+      </LoadingReveal>
       <ValidationSummary issues={validation.issues} />
       {!preview &&
         !terminalDraft &&

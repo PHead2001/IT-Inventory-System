@@ -2,8 +2,10 @@ import { act, fireEvent, render, screen } from '@testing-library/react';
 import { renderToString } from 'react-dom/server';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { LoadingReveal, LoadingSkeleton } from './loading-skeleton';
+import { MotionPreference } from '@/components/experience/motion-preference';
 
 beforeEach(() => {
+  document.documentElement.dataset.motion = 'full';
   localStorage.removeItem('it-inventory-reduce-motion');
   window.dispatchEvent(
     new StorageEvent('storage', { key: 'it-inventory-reduce-motion' }),
@@ -15,6 +17,7 @@ beforeEach(() => {
   }));
 });
 afterEach(() => {
+  delete document.documentElement.dataset.motion;
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
   localStorage.removeItem('it-inventory-reduce-motion');
@@ -82,30 +85,34 @@ it('responds immediately to local and system reduced motion and pauses hidden-ta
   expect(host).toHaveAttribute('data-active', 'true');
 });
 
-it('fades only a resolved wait while preserving mounted content and keyboard focus', () => {
+it('fades only a resolved wait while preserving mounted content and keyboard focus', async () => {
   const cancel = vi.fn();
   const animate = vi.fn(() => ({ cancel }));
   const original = HTMLElement.prototype.animate;
   HTMLElement.prototype.animate = animate as unknown as typeof original;
   try {
     const { rerender, unmount } = render(
-      <LoadingReveal busy>
-        <input aria-label="Retained input" defaultValue="Draft" />
-      </LoadingReveal>,
+      <MotionPreference>
+        <LoadingReveal busy>
+          <input aria-label="Retained input" defaultValue="Draft" />
+        </LoadingReveal>
+      </MotionPreference>,
     );
     const input = screen.getByLabelText('Retained input');
     input.focus();
     expect(animate).not.toHaveBeenCalled();
     rerender(
-      <LoadingReveal busy={false}>
-        <input aria-label="Retained input" defaultValue="Draft" />
-      </LoadingReveal>,
+      <MotionPreference>
+        <LoadingReveal busy={false}>
+          <input aria-label="Retained input" defaultValue="Draft" />
+        </LoadingReveal>
+      </MotionPreference>,
     );
     expect(screen.getByLabelText('Retained input')).toBe(input);
     expect(input).toHaveFocus();
     expect(input).toHaveValue('Draft');
     expect(animate).toHaveBeenCalledOnce();
-    act(() => {
+    await act(async () => {
       localStorage.setItem('it-inventory-reduce-motion', 'true');
       window.dispatchEvent(
         new StorageEvent('storage', { key: 'it-inventory-reduce-motion' }),
@@ -113,17 +120,170 @@ it('fades only a resolved wait while preserving mounted content and keyboard foc
     });
     expect(cancel).toHaveBeenCalled();
     rerender(
-      <LoadingReveal busy>
-        <input aria-label="Retained input" />
-      </LoadingReveal>,
+      <MotionPreference>
+        <LoadingReveal busy>
+          <input aria-label="Retained input" />
+        </LoadingReveal>
+      </MotionPreference>,
     );
     rerender(
-      <LoadingReveal busy={false}>
-        <input aria-label="Retained input" />
-      </LoadingReveal>,
+      <MotionPreference>
+        <LoadingReveal busy={false}>
+          <input aria-label="Retained input" />
+        </LoadingReveal>
+      </MotionPreference>,
     );
     expect(animate).toHaveBeenCalledOnce();
     unmount();
+  } finally {
+    HTMLElement.prototype.animate = original;
+  }
+});
+
+it('admits motion separately without reading storage or remounting retained children', () => {
+  const get = vi.spyOn(Storage.prototype, 'getItem');
+  const original = HTMLElement.prototype.animate;
+  const cancel = vi.fn();
+  const animate = vi.fn(() => ({ cancel }));
+  HTMLElement.prototype.animate = animate as unknown as typeof original;
+  try {
+    const content = (motionReady: boolean, busy: boolean) => (
+      <LoadingReveal motionReady={motionReady} busy={busy}>
+        <input aria-label="Scoped draft" defaultValue="Retained" />
+      </LoadingReveal>
+    );
+    const { rerender, unmount } = render(content(false, true));
+    const input = screen.getByLabelText('Scoped draft');
+    input.focus();
+    expect(get).not.toHaveBeenCalled();
+    rerender(content(false, false));
+    expect(get).not.toHaveBeenCalled();
+    rerender(content(true, false));
+    expect(animate).not.toHaveBeenCalled();
+    expect(screen.getByLabelText('Scoped draft')).toBe(input);
+    expect(input).toHaveFocus();
+    expect(input).toHaveValue('Retained');
+    rerender(content(true, true));
+    rerender(content(true, false));
+    expect(animate).toHaveBeenCalledOnce();
+    get.mockClear();
+    rerender(content(false, false));
+    expect(cancel).toHaveBeenCalled();
+    expect(get).not.toHaveBeenCalled();
+    expect(screen.getByLabelText('Scoped draft')).toBe(input);
+    expect(input).toHaveFocus();
+    rerender(content(true, false));
+    expect(animate).toHaveBeenCalledOnce();
+    rerender(content(true, true));
+    rerender(content(true, false));
+    const beforeUnmount = cancel.mock.calls.length;
+    unmount();
+    expect(cancel.mock.calls.length).toBeGreaterThan(beforeUnmount);
+  } finally {
+    HTMLElement.prototype.animate = original;
+  }
+});
+
+it.each([undefined, 'reduced', 'unknown'])(
+  'keeps resolved content static for motion mode %s',
+  (mode) => {
+    if (mode === undefined) delete document.documentElement.dataset.motion;
+    else document.documentElement.dataset.motion = mode;
+    const original = HTMLElement.prototype.animate;
+    const animate = vi.fn();
+    HTMLElement.prototype.animate = animate as unknown as typeof original;
+    try {
+      const view = render(
+        <LoadingReveal busy>
+          <p>Current record</p>
+        </LoadingReveal>,
+      );
+      view.rerender(
+        <LoadingReveal busy={false}>
+          <p>Current record</p>
+        </LoadingReveal>,
+      );
+      expect(screen.getByText('Current record')).toBeVisible();
+      expect(animate).not.toHaveBeenCalled();
+    } finally {
+      HTMLElement.prototype.animate = original;
+    }
+  },
+);
+
+it('cancels a live reveal for system reduced motion without reading preferences from storage', () => {
+  let matches = false;
+  const listeners = new Set<() => void>();
+  vi.stubGlobal('matchMedia', () => ({
+    get matches() {
+      return matches;
+    },
+    addEventListener: (_: string, listener: () => void) =>
+      listeners.add(listener),
+    removeEventListener: (_: string, listener: () => void) =>
+      listeners.delete(listener),
+  }));
+  const original = HTMLElement.prototype.animate;
+  const cancel = vi.fn();
+  const animate = vi.fn(() => ({ cancel }));
+  HTMLElement.prototype.animate = animate as unknown as typeof original;
+  const get = vi.spyOn(Storage.prototype, 'getItem');
+  try {
+    const view = render(
+      <LoadingReveal busy>
+        <p>Current record</p>
+      </LoadingReveal>,
+    );
+    view.rerender(
+      <LoadingReveal busy={false}>
+        <p>Current record</p>
+      </LoadingReveal>,
+    );
+    expect(animate).toHaveBeenCalledOnce();
+    act(() => {
+      matches = true;
+      listeners.forEach((listener) => listener());
+    });
+    expect(cancel).toHaveBeenCalled();
+    view.rerender(
+      <LoadingReveal busy>
+        <p>Current record</p>
+      </LoadingReveal>,
+    );
+    view.rerender(
+      <LoadingReveal busy={false}>
+        <p>Current record</p>
+      </LoadingReveal>,
+    );
+    expect(animate).toHaveBeenCalledOnce();
+    expect(get).not.toHaveBeenCalled();
+  } finally {
+    HTMLElement.prototype.animate = original;
+  }
+});
+
+it('cancels an active reveal when the canonical motion mode becomes unknown', async () => {
+  const original = HTMLElement.prototype.animate;
+  const cancel = vi.fn();
+  const animate = vi.fn(() => ({ cancel }));
+  HTMLElement.prototype.animate = animate as unknown as typeof original;
+  try {
+    const view = render(
+      <LoadingReveal busy>
+        <p>Current record</p>
+      </LoadingReveal>,
+    );
+    view.rerender(
+      <LoadingReveal busy={false}>
+        <p>Current record</p>
+      </LoadingReveal>,
+    );
+    expect(animate).toHaveBeenCalledOnce();
+    await act(async () => {
+      delete document.documentElement.dataset.motion;
+    });
+    expect(cancel).toHaveBeenCalled();
+    expect(screen.getByText('Current record')).toBeVisible();
   } finally {
     HTMLElement.prototype.animate = original;
   }

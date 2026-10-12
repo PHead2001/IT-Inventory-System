@@ -1,6 +1,6 @@
 import { act, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { Suspense, useEffect, useState } from 'react';
+import { Suspense, useEffect, useState, type ReactNode } from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { expectedLocations } from '../../../tests/fixtures/reference';
 import type { LocationRef } from '../inventory/contracts-ui';
@@ -12,16 +12,19 @@ const mocks = vi.hoisted(() => ({
   sceneProps: null as RoomSceneProps | null,
   throwScene: false,
   autoReady: true,
+  loadingRenderer: false,
 }));
 vi.mock('next/navigation', () => ({ useRouter: () => ({ push: mocks.push }) }));
 vi.mock('next/dynamic', () => ({
-  default: () =>
+  default: (_loader: unknown, options: { loading: () => ReactNode }) =>
     function TestScene(props: RoomSceneProps) {
       mocks.sceneProps = props;
       const { onReady } = props;
+      const loadingRenderer = mocks.loadingRenderer;
       useEffect(() => {
-        if (mocks.autoReady) onReady();
-      }, [onReady]);
+        if (mocks.autoReady && !loadingRenderer) onReady();
+      }, [onReady, loadingRenderer]);
+      if (mocks.loadingRenderer) return options.loading();
       if (mocks.throwScene) throw new Error('Test renderer failed');
       return (
         <div data-testid="scene-contract">
@@ -99,9 +102,26 @@ beforeEach(() => {
   mocks.sceneProps = null;
   mocks.throwScene = false;
   mocks.autoReady = true;
+  mocks.loadingRenderer = false;
 });
 
 describe('room application and scene contract', () => {
+  it('keeps location browsing and server inventory usable while the renderer chunk loads', () => {
+    mocks.loadingRenderer = true;
+    const view = render(workspace('ITC-S1A'));
+    expect(
+      document.querySelector('[data-loading-shape="room"]'),
+    ).toBeInTheDocument();
+    expect(screen.getByText('Loading room renderer…')).toHaveClass('sr-only');
+    expect(screen.getByLabelText('Select location')).toBeEnabled();
+    expect(screen.getByText('Server inventory for ITC-S1A')).toBeVisible();
+    mocks.loadingRenderer = false;
+    view.rerender(workspace('ITC-S1A'));
+    expect(
+      document.querySelector('[data-loading-shape="room"]'),
+    ).not.toBeInTheDocument();
+    expect(screen.getByText('Server inventory for ITC-S1A')).toBeVisible();
+  });
   it('keeps scene, picker and server panel on one authoritative selection while navigation is pending', async () => {
     const user = userEvent.setup();
     let finish!: () => void;

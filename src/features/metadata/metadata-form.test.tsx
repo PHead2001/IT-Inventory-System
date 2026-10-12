@@ -149,6 +149,39 @@ const props = {
   item,
 };
 describe('published metadata form', () => {
+  it('replaces a deferred category form skeleton with retry guidance and then actual fields', async () => {
+    let finish!: (value: Awaited<ReturnType<typeof fetchCategoryForm>>) => void;
+    vi.mocked(fetchCategoryForm).mockReturnValueOnce(
+      new Promise((resolve) => {
+        finish = resolve;
+      }),
+    );
+    render(<MetadataForm {...props} forms={{}} />);
+    const status = await screen.findByText('Loading category form…');
+    expect(status).toHaveClass('sr-only');
+    expect(
+      document.querySelector('[data-loading-shape="fields"]'),
+    ).toBeInTheDocument();
+    await act(async () =>
+      finish({ ok: false, message: 'Form unavailable. Retry.' }),
+    );
+    expect(
+      document.querySelector('[data-loading-shape="fields"]'),
+    ).not.toBeInTheDocument();
+    expect(screen.getByRole('alert')).toHaveTextContent(
+      'Form unavailable. Retry.',
+    );
+    vi.mocked(fetchCategoryForm).mockResolvedValueOnce({
+      ok: true,
+      form: form(),
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Retry form load' }));
+    await screen.findByLabelText('Name');
+    expect(
+      document.querySelector('[data-loading-shape="fields"]'),
+    ).not.toBeInTheDocument();
+    expect(submitInventory).not.toHaveBeenCalled();
+  });
   beforeEach(() => {
     vi.resetAllMocks();
     sessionStorage.clear();

@@ -1,4 +1,9 @@
 'use client';
+import {
+  LoadingAnnouncement,
+  LoadingReveal,
+  LoadingSkeleton,
+} from '@/components/ui/loading-skeleton';
 
 import { useRouteActionResult } from '@/components/experience/route-pending';
 import { RecordStatus } from '@/components/record-status';
@@ -1469,6 +1474,10 @@ function AssignmentFields({
           }}
         />
       )}
+      <LoadingAnnouncement
+        label="Inspecting equipment…"
+        active={state.phase === 'lookup' || restoring}
+      />
       <form
         className={panel + ' space-y-3'}
         aria-label="Inspect equipment"
@@ -1520,14 +1529,11 @@ function AssignmentFields({
             : 'Skip inspection / review'}
         </Button>
         {(state.phase === 'lookup' || restoring) && (
-          <div role="status" className="space-y-3">
-            <p>Inspecting equipment…</p>
-            <div aria-hidden="true" className="space-y-3">
-              <div className="h-6 w-2/3 rounded bg-slate-700" />
-              <div className="h-12 rounded bg-slate-800" />
-              <div className="h-12 rounded bg-slate-800" />
-            </div>
-          </div>
+          <LoadingSkeleton
+            shape="inspection"
+            label="Inspecting equipment…"
+            announce={false}
+          />
         )}
         <label className="space-y-2">
           Lookup method
@@ -1588,207 +1594,214 @@ function AssignmentFields({
           {state.message}
         </p>
       )}
-      {state.matches.length > 0 && (
-        <ul
-          className={panel + ' space-y-2'}
-          aria-label="Choose inventory record"
-          ref={chooserRef}
-          tabIndex={-1}
-        >
-          {state.matches.map((match) => (
-            <li key={match.path}>
-              <Button
-                variant="outline"
-                type="button"
-                onClick={() => {
-                  if (!alive() || resolving.current || submitting.current)
-                    return;
-                  cancelRef.current?.focus();
-                  resetReceiptRead();
-                  resolving.current = true;
-                  const token = ++generation.current;
-                  dispatch({ type: 'lookup', generation: token });
-                  void inspect(match, token).finally(() => {
-                    if (alive() && token === generation.current)
-                      resolving.current = false;
-                  });
-                }}
-              >
-                {match.label} ·{' '}
-                {match.kind === 'quantity'
-                  ? 'Quantity item'
-                  : match.kind === 'location'
-                    ? 'Location'
-                    : 'Individual asset'}{' '}
-                · <RecordStatus status={match.state} />
-              </Button>
-            </li>
-          ))}
-        </ul>
-      )}
-      {state.search && (
-        <nav
-          aria-label="Assignment candidate pages"
-          className={panel + ' flex flex-wrap items-center gap-3'}
-        >
-          <p className="text-sm">
-            Page {state.search.page} · {state.search.total} matching inventory
-            records · {state.search.pageSize} per page
-          </p>
-          <Button
-            type="button"
-            variant="outline"
-            disabled={busy || !ready || state.search.page <= 1}
-            onClick={() => {
-              if (state.search)
-                void lookup(
-                  state.search.query,
-                  'search',
-                  state.search.page - 1,
-                  true,
-                );
-            }}
+      <LoadingReveal
+        busy={state.phase === 'lookup' || restoring}
+        reveal={state.matches.length > 0 || !!candidate}
+        motionReady={privacy.ready && freshReady}
+      >
+        {state.matches.length > 0 && (
+          <ul
+            className={panel + ' space-y-2'}
+            aria-label="Choose inventory record"
+            ref={chooserRef}
+            tabIndex={-1}
           >
-            Previous candidates
-          </Button>
-          <Button
-            type="button"
-            variant="outline"
-            disabled={
-              busy ||
-              !freshReady ||
-              state.search.page >= 100000 ||
-              state.search.page * state.search.pageSize >= state.search.total
-            }
-            onClick={() => {
-              if (state.search)
-                void lookup(
-                  state.search.query,
-                  'search',
-                  state.search.page + 1,
-                  true,
-                );
-            }}
+            {state.matches.map((match) => (
+              <li key={match.path}>
+                <Button
+                  variant="outline"
+                  type="button"
+                  onClick={() => {
+                    if (!alive() || resolving.current || submitting.current)
+                      return;
+                    cancelRef.current?.focus();
+                    resetReceiptRead();
+                    resolving.current = true;
+                    const token = ++generation.current;
+                    dispatch({ type: 'lookup', generation: token });
+                    void inspect(match, token).finally(() => {
+                      if (alive() && token === generation.current)
+                        resolving.current = false;
+                    });
+                  }}
+                >
+                  {match.label} ·{' '}
+                  {match.kind === 'quantity'
+                    ? 'Quantity item'
+                    : match.kind === 'location'
+                      ? 'Location'
+                      : 'Individual asset'}{' '}
+                  · <RecordStatus status={match.state} />
+                </Button>
+              </li>
+            ))}
+          </ul>
+        )}
+        {state.search && (
+          <nav
+            aria-label="Assignment candidate pages"
+            className={panel + ' flex flex-wrap items-center gap-3'}
           >
-            Next candidates
-          </Button>
-          {state.search.page >= 100000 &&
-            state.search.total > state.search.page * state.search.pageSize && (
-              <p>
-                Refine the search to reach the remaining records within the
-                candidate page limit.
-              </p>
-            )}
-        </nav>
-      )}
-      {candidate && (
-        <section
-          aria-label="Review assignment"
-          ref={reviewRef}
-          tabIndex={-1}
-          className={panel + ' space-y-3'}
-        >
-          <h2 className="break-words text-lg font-semibold">
-            {candidate.name}
-          </h2>
-          <p className="break-words text-sm">
-            {candidate.kind === 'quantity'
-              ? 'Quantity item'
-              : 'Individual asset'}{' '}
-            ·{' '}
-            <span className="experience-code">
-              {candidate.identifier || 'No display identifier'}
-            </span>{' '}
-            · <RecordStatus status={candidate.status} />
-          </p>
-          <p>
-            Destination: {state.context?.siteName}
-            {state.context?.reference
-              ? ` · Ticket ${state.context.reference}`
-              : ''}
-          </p>
-          <fieldset
-            disabled={unresolved || state.phase === 'conflict'}
-            className="space-y-3"
-          >
-            <label className="block space-y-2">
-              Storage source
-              <select
-                aria-label="Storage source"
-                className={field}
-                value={state.sourceId}
-                onChange={(e) => editReview({ sourceId: e.target.value })}
-              >
-                <option value="">Choose source</option>
-                {candidate.sources.map((source) => (
-                  <option key={source.id} value={source.id}>
-                    {source.name} · {source.quantity} available
-                    {!source.active ? ' · inactive source' : ''}
-                  </option>
-                ))}
-              </select>
-            </label>
-            {candidate.kind === 'quantity' && (
-              <label className="block space-y-2">
-                Units to assign
-                <Input
-                  aria-label="Units to assign"
-                  type="number"
-                  min={1}
-                  max={
-                    candidate.sources.find((row) => row.id === state.sourceId)
-                      ?.quantity ?? 2147483647
-                  }
-                  step={1}
-                  value={state.units}
-                  onChange={(e) => editReview({ units: e.target.value })}
-                />
-              </label>
-            )}
-          </fieldset>
-          {problem && (
-            <p role="note" className="text-sm text-amber-200">
-              {problem}
+            <p className="text-sm">
+              Page {state.search.page} · {state.search.total} matching inventory
+              records · {state.search.pageSize} per page
             </p>
-          )}
-          {candidate.currentSite && (
-            <p>Current custody: {candidate.currentSite}</p>
-          )}
-          <div className="flex flex-wrap gap-3">
             <Button
               type="button"
-              disabled={
-                !freshReady ||
-                state.phase === 'pending' ||
-                (state.phase !== 'unknown' &&
-                  (!!problem || state.phase !== 'review'))
-              }
-              onClick={() => void confirm()}
+              variant="outline"
+              disabled={busy || !ready || state.search.page <= 1}
+              onClick={() => {
+                if (state.search)
+                  void lookup(
+                    state.search.query,
+                    'search',
+                    state.search.page - 1,
+                    true,
+                  );
+              }}
             >
-              {state.phase === 'pending'
-                ? 'Assigning…'
-                : state.phase === 'unknown'
-                  ? 'Retry same assignment'
-                  : 'Confirm assign'}
+              Previous candidates
             </Button>
-            {state.phase === 'conflict' && (
-              <Button
-                variant="outline"
-                type="button"
-                onClick={refreshInspection}
-              >
-                Inspect current state
-              </Button>
-            )}
-            <Link
-              className="inline-flex min-h-11 items-center text-cyan-300 underline"
-              href={candidate.path}
+            <Button
+              type="button"
+              variant="outline"
+              disabled={
+                busy ||
+                !freshReady ||
+                state.search.page >= 100000 ||
+                state.search.page * state.search.pageSize >= state.search.total
+              }
+              onClick={() => {
+                if (state.search)
+                  void lookup(
+                    state.search.query,
+                    'search',
+                    state.search.page + 1,
+                    true,
+                  );
+              }}
             >
-              Open inventory record
-            </Link>
-          </div>
-        </section>
-      )}
+              Next candidates
+            </Button>
+            {state.search.page >= 100000 &&
+              state.search.total >
+                state.search.page * state.search.pageSize && (
+                <p>
+                  Refine the search to reach the remaining records within the
+                  candidate page limit.
+                </p>
+              )}
+          </nav>
+        )}
+        {candidate && (
+          <section
+            aria-label="Review assignment"
+            ref={reviewRef}
+            tabIndex={-1}
+            className={panel + ' space-y-3'}
+          >
+            <h2 className="break-words text-lg font-semibold">
+              {candidate.name}
+            </h2>
+            <p className="break-words text-sm">
+              {candidate.kind === 'quantity'
+                ? 'Quantity item'
+                : 'Individual asset'}{' '}
+              ·{' '}
+              <span className="experience-code">
+                {candidate.identifier || 'No display identifier'}
+              </span>{' '}
+              · <RecordStatus status={candidate.status} />
+            </p>
+            <p>
+              Destination: {state.context?.siteName}
+              {state.context?.reference
+                ? ` · Ticket ${state.context.reference}`
+                : ''}
+            </p>
+            <fieldset
+              disabled={unresolved || state.phase === 'conflict'}
+              className="space-y-3"
+            >
+              <label className="block space-y-2">
+                Storage source
+                <select
+                  aria-label="Storage source"
+                  className={field}
+                  value={state.sourceId}
+                  onChange={(e) => editReview({ sourceId: e.target.value })}
+                >
+                  <option value="">Choose source</option>
+                  {candidate.sources.map((source) => (
+                    <option key={source.id} value={source.id}>
+                      {source.name} · {source.quantity} available
+                      {!source.active ? ' · inactive source' : ''}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              {candidate.kind === 'quantity' && (
+                <label className="block space-y-2">
+                  Units to assign
+                  <Input
+                    aria-label="Units to assign"
+                    type="number"
+                    min={1}
+                    max={
+                      candidate.sources.find((row) => row.id === state.sourceId)
+                        ?.quantity ?? 2147483647
+                    }
+                    step={1}
+                    value={state.units}
+                    onChange={(e) => editReview({ units: e.target.value })}
+                  />
+                </label>
+              )}
+            </fieldset>
+            {problem && (
+              <p role="note" className="text-sm text-amber-200">
+                {problem}
+              </p>
+            )}
+            {candidate.currentSite && (
+              <p>Current custody: {candidate.currentSite}</p>
+            )}
+            <div className="flex flex-wrap gap-3">
+              <Button
+                type="button"
+                disabled={
+                  !freshReady ||
+                  state.phase === 'pending' ||
+                  (state.phase !== 'unknown' &&
+                    (!!problem || state.phase !== 'review'))
+                }
+                onClick={() => void confirm()}
+              >
+                {state.phase === 'pending'
+                  ? 'Assigning…'
+                  : state.phase === 'unknown'
+                    ? 'Retry same assignment'
+                    : 'Confirm assign'}
+              </Button>
+              {state.phase === 'conflict' && (
+                <Button
+                  variant="outline"
+                  type="button"
+                  onClick={refreshInspection}
+                >
+                  Inspect current state
+                </Button>
+              )}
+              <Link
+                className="inline-flex min-h-11 items-center text-cyan-300 underline"
+                href={candidate.path}
+              >
+                Open inventory record
+              </Link>
+            </div>
+          </section>
+        )}
+      </LoadingReveal>
       {state.receipt && (
         <section
           aria-label="Latest assignment receipt"

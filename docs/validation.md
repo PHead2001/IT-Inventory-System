@@ -121,7 +121,7 @@ independent review remain required before accepting the route subset of D303.2.
 Panels/receipts/disclosures remain pending U406 integration. W09 source and
 journeys are being implemented, with readiness/overlap acceptance still pending.
 
-The partial W08 route-loading tests in `src/app/(protected)/loading.test.tsx`
+The W08 route-loading tests in `src/app/(protected)/loading.test.tsx`
 mount actual Suspense fallbacks for Inventory/records, History/events, Labels, new
 inventory records and category-form routes. They prove one loading status alongside delayed top
 progress, actual reveal/readiness, retained Back waits, overlapping fallback
@@ -132,7 +132,37 @@ failed against the existing plain route fallback (two status regions), then
 passed after opaque owner election. jsdom readiness geometry is supplied explicitly;
 these tests do not prove streamed Next loading boundaries, native title pairing,
 layout stability or populated visual quality. The existing delayed RSC/browser
-journeys remain separate runtime acceptance and the remaining W08 feature waits are unported.
+journeys remain separate runtime acceptance. Retained route evidence is a
+137-test batch across nine suites followed by a separate 56-test query/regression
+batch; those results are not one combined run.
+
+The audited inline W08 waits are now implemented in `spaces-workspace.tsx`,
+`room-workspace.tsx`, `metadata-form.tsx`, `files-panel.tsx`, `label-designer.tsx`
+and `assign-workspace.tsx`, with their paired component tests and the shared
+`loading-skeleton.tsx`/test: 14 source/test files in the held local candidate.
+Coverage includes renderer chunks, category fields, files, selected contents,
+label search and compact queued-record details, occupancy and inspection.
+Nonvisual loading announcements sit outside busy ancestors; errors, cancellation,
+usable prior content, drafts, focus and mounted controls retain their existing
+contracts. Quick fades follow real waits, including populated and empty file
+successes; selected contents retain the existing 170 ms reduced-aware arrival.
+The reveal controller reads only the canonical HTML motion mode and the OS
+preference, never Storage. Unknown/missing modes remain static; withdrawal,
+Reduced and hidden-page changes cancel motion without remounting private content.
+
+Accepted local component evidence comprises 422 tests across reused scoped
+batches, followed by the 76-test Files suite including two new deferred-empty
+cases. This is not a single full-suite run or exact-SHA certification. Focused
+regressions cover announcements outside busy regions, real readiness/error
+settlement, deferred queue details, initial and empty file reads, inspection
+cancellation/focus, unchanged privacy-admission storage assertions, stable
+reveal DOM/focus, no fake initial-ready fade, and live motion cancellation.
+Final ordinary consumer and independent Astra helper source reviews have no
+actionable findings. Typecheck, scoped zero-warning lint, formatting and diff
+checks passed during iteration. Native Full/Reduced populated/empty layout and
+fade inspection, screen-reader announcements, streamed Next Flight/browser
+journeys, integrated staging and the final canonical/exact-SHA gates remain
+pending. Neither all of W08 nor D303.2 is accepted by these local checks.
 
 `paired-route-loading.test.tsx` uses actual React Suspense/StrictMode to prove the
 same outgoing node/draft survives a legitimate held pair, plus real primary reveal,

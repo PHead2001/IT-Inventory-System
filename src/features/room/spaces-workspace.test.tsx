@@ -4,6 +4,7 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import type { LocationRef } from '../inventory/contracts-ui';
 import { spaces } from './spaces';
 import type { CameraView } from './scene/camera-view';
+import { useEffect } from 'react';
 
 const focusCallbacks: Array<(code: string | null) => void> = [];
 const roomReferences: object[] = [];
@@ -23,8 +24,13 @@ vi.mock('next/dynamic', () => ({
       onFocusComplete?: (code: string | null) => void;
       onFocusCancel?: () => void;
       onFailure?: (message: string) => void;
+      onReady?: () => void;
       room: object;
     }) {
+      const { onReady } = props;
+      useEffect(() => {
+        onReady?.();
+      }, [onReady]);
       if (props.onFocusComplete) focusCallbacks.push(props.onFocusComplete);
       roomReferences.push(props.room);
       return (
@@ -322,6 +328,17 @@ it('replaces the room selection instruction immediately and restores it after cl
   );
   expect(screen.getByText('Selected: Shelf 1A')).toBeVisible();
   expect(
+    document.querySelector('[data-loading-shape="contents"]'),
+  ).toBeInTheDocument();
+  expect(screen.getByText('Loading contents for Shelf 1A…')).toHaveClass(
+    'sr-only',
+  );
+  expect(
+    screen
+      .getByText('Loading contents for Shelf 1A…')
+      .closest('[aria-busy="true"]'),
+  ).toBeNull();
+  expect(
     screen.queryByText('Select a location in the map or browser'),
   ).not.toBeInTheDocument();
   expect(
@@ -329,6 +346,12 @@ it('replaces the room selection instruction immediately and restores it after cl
   ).toHaveAttribute('aria-busy', 'true');
   resolveContents(response('Shelf stock', 'ITC-S1A'));
   await screen.findByText('Shelf stock');
+  expect(
+    document.querySelector('[data-loading-shape="contents"]'),
+  ).not.toBeInTheDocument();
+  expect(
+    screen.getByRole('region', { name: 'Location inventory' }),
+  ).toHaveAttribute('aria-busy', 'false');
   expect(screen.getByText('Selected: Shelf 1A')).toBeVisible();
   await user.click(screen.getByRole('button', { name: 'Clear selection' }));
   expect(
@@ -847,6 +870,48 @@ it('explains a transport failure and retries the same selection', async () => {
   expect(fetcher).toHaveBeenCalledTimes(2);
 });
 
+it('announces deferred occupancy outside busy geometry and replaces it with failure guidance', async () => {
+  let fail!: (error: Error) => void;
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(
+      () =>
+        new Promise((_resolve, reject) => {
+          fail = reject;
+        }),
+    ),
+  );
+  render(
+    <SpacesWorkspace
+      backend="https://backend.example"
+      locations={locations}
+      userId="test-user"
+      initialSpace={spaces[0]}
+      initialCode={null}
+    />,
+  );
+  await userEvent
+    .setup()
+    .click(screen.getByRole('button', { name: 'Toggle item counts' }));
+  const announcement = await screen.findByText('Refreshing location counts…');
+  expect(announcement.closest('[aria-busy="true"]')).toBeNull();
+  expect(
+    document.querySelector(
+      '[data-loading-shape="occupancy"] [aria-busy="true"]',
+    ),
+  ).toBeInTheDocument();
+  await act(async () => fail(new Error('private occupancy detail')));
+  await screen.findByText('Item counts unavailable. Refresh to try again.');
+  expect(
+    document.querySelector('[data-loading-shape="occupancy"]'),
+  ).not.toBeInTheDocument();
+  expect(
+    screen.queryByText('Refreshing location counts…'),
+  ).not.toBeInTheDocument();
+  expect(
+    screen.queryByText('private occupancy detail'),
+  ).not.toBeInTheDocument();
+});
 it('loads counts only when enabled and refreshes counts and contents together on return', async () => {
   const user = userEvent.setup();
   const fetcher = vi.fn().mockImplementation((url: string) => {

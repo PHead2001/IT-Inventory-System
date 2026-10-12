@@ -1552,6 +1552,13 @@ it('immediately announces inspection, focuses Cancel before disabling input, can
   fireEvent.change(input, { target: { value: 'ADAPTER' } });
   fireEvent.submit(screen.getByRole('form', { name: 'Inspect equipment' }));
   expect(screen.getByText('Inspecting equipment…')).toBeInTheDocument();
+  expect(screen.getByText('Inspecting equipment…')).toHaveClass('sr-only');
+  expect(
+    screen.getByText('Inspecting equipment…').closest('[aria-busy="true"]'),
+  ).toBeNull();
+  expect(
+    document.querySelector('[data-loading-shape="inspection"]'),
+  ).toBeInTheDocument();
   expect(
     screen.getByRole('form', { name: 'Inspect equipment' }),
   ).toHaveAttribute('aria-busy', 'true');
@@ -1560,6 +1567,9 @@ it('immediately announces inspection, focuses Cancel before disabling input, can
   ).toHaveFocus();
   fireEvent.click(screen.getByRole('button', { name: 'Cancel inspection' }));
   expect(input).toHaveFocus();
+  expect(
+    document.querySelector('[data-loading-shape="inspection"]'),
+  ).not.toBeInTheDocument();
   await act(async () =>
     finish({ ok: true, status: 'found', matches: [match] }),
   );
