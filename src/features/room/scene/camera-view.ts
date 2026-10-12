@@ -8,7 +8,7 @@ export type CameraView = {
   mode: OrbitMode;
 };
 
-/** Exact geometry/configuration match; snapshots never outlive this client workspace. */
+/** Exact geometry/configuration match; snapshots never outlive the protected layout instance. */
 export function cameraViewKey(
   userId: string,
   environment: string,

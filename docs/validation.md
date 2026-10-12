@@ -935,3 +935,28 @@ browser assertion remains unexecuted locally. These focused working-tree results
 do not certify real browser cookie delivery, local/hosted request-origin routing,
 database behavior, the full production build/E2E gate, or final committed-SHA
 remote checks and fresh review. Root integration owns those remaining boundaries.
+
+## Room Back camera retention with the configured router
+
+Cache Components is not enabled in this app. Installed Next 16.3.6 defaults it
+to false; its layout router adds Activity retention only under that flag and
+otherwise keeps one active entry. A stable ancestor alone therefore cannot
+preserve a page-local camera map across Room → Inventory → Back.
+
+The actual workspace unmount/remount regression first failed with null initial
+view instead of the saved pose. The protected-layout camera provider uses a
+bounded, per-key external store with independent actor/backend/privacy-grant
+ownership. Store/provider/workspace tests prove exact restoration input,
+cloning/bounds, stale callback retirement, ordinary visible rechecks and scoped
+publication without rerendering unrelated consumers. They use a mocked renderer,
+so actual native Back camera equality, explicit focus precedence and canvas
+ancestor exclusion still require the retained real WebGL/browser gate. No
+application-wide Cache Components switch or global camera cache is introduced.
+
+The working-tree sibling batch passed 81 tests across ten files with one worker
+and a 768 MiB heap, including the actual CameraRig initial-frame policy, legacy
+room workspace, protected room page/layout and privacy content. Canonical
+typechecking passed with a 1536 MiB heap; scoped zero-warning lint, formatting
+and diff whitespace checks passed. Independent architecture review found no
+actionable source issue. These are local working-tree results based on
+`43874f64`, not committed-SHA CI or native browser acceptance.

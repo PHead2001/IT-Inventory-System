@@ -4,7 +4,7 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import type { LocationRef } from '../inventory/contracts-ui';
 import { spaces } from './spaces';
 import type { CameraView } from './scene/camera-view';
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 
 const focusCallbacks: Array<(code: string | null) => void> = [];
 const roomReferences: object[] = [];
@@ -81,6 +81,12 @@ vi.mock('../inventory/components/read-ui', async (importOriginal) => ({
   ),
 }));
 import { SpacesWorkspace } from './spaces-workspace';
+import { RoomCameraSnapshotProvider } from './scene/camera-snapshot-provider';
+import { PrivacyReadinessContext } from '@/components/auth/privacy-readiness';
+import {
+  assignmentEpoch,
+  readPrivacyRevocationRevision,
+} from '@/features/scan/assign-batch';
 
 const locations: LocationRef[] = [
   {
@@ -516,6 +522,71 @@ it('restores the compatible modeled-space camera after hiding and switching spac
   expect(screen.getByTestId('scene-selection')).toHaveAttribute(
     'data-focus-on-restore',
     'false',
+  );
+});
+
+it('retains the exact compatible camera across the configured one-entry route unmount and Back remount', async () => {
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async () => response('Stock')),
+  );
+  const user = userEvent.setup();
+  function OneEntryRouter() {
+    const [room, setRoom] = useState(true);
+    return (
+      <div>
+        <button onClick={() => setRoom(!room)}>
+          {room ? 'Navigate Inventory' : 'Browser Back to room'}
+        </button>
+        {room ? (
+          <SpacesWorkspace
+            backend="https://backend.example"
+            locations={locations}
+            userId="test-user"
+            initialSpace={spaces[0]}
+            initialCode={null}
+          />
+        ) : (
+          <h1>Inventory</h1>
+        )}
+      </div>
+    );
+  }
+  render(
+    <PrivacyReadinessContext
+      value={{
+        ready: true,
+        visible: true,
+        generation: 'camera-test',
+        revocationRevision: readPrivacyRevocationRevision(),
+        verifiedEpoch: assignmentEpoch(),
+      }}
+    >
+      <RoomCameraSnapshotProvider
+        actorId="test-user"
+        backend="https://backend.example"
+      >
+        <OneEntryRouter />
+      </RoomCameraSnapshotProvider>
+    </PrivacyReadinessContext>,
+  );
+  await user.click(screen.getByRole('button', { name: 'Record camera view' }));
+  const saved = screen
+    .getByTestId('room-viewer')
+    .getAttribute('data-camera-view');
+  expect(JSON.parse(saved!)).toMatchObject({ zoom: 2, mode: 'free' });
+  await user.click(screen.getByRole('button', { name: 'Navigate Inventory' }));
+  expect(screen.queryByTestId('room-viewer')).not.toBeInTheDocument();
+  await user.click(
+    screen.getByRole('button', { name: 'Browser Back to room' }),
+  );
+  expect(screen.getByTestId('scene-selection')).toHaveAttribute(
+    'data-initial-view',
+    saved!,
+  );
+  expect(screen.getByTestId('room-viewer')).toHaveAttribute(
+    'data-camera-view',
+    saved!,
   );
 });
 

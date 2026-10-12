@@ -37,6 +37,7 @@ import { LocationBrowser } from './location-browser';
 import { parseRoomLocation } from './navigation';
 import { useRoomOccupancy } from './use-room-occupancy';
 import { cameraViewKey, type CameraView } from './scene/camera-view';
+import { useRoomCameraSnapshot } from './scene/camera-snapshot-provider';
 import {
   parseRoomContentsResponse,
   roomContentsFilter,
@@ -212,7 +213,12 @@ export function SpacesWorkspace({
       document.removeEventListener('visibilitychange', refresh);
     };
   }, []);
-  const initialView = viewKey ? (cameraViews.get(viewKey) ?? null) : null;
+  const layoutCamera = useRoomCameraSnapshot(viewKey, userId, backend);
+  const initialView = layoutCamera.present
+    ? layoutCamera.view
+    : viewKey
+      ? (cameraViews.get(viewKey) ?? null)
+      : null;
   const bindings = useMemo(() => (room ? buildRoomBindings(room) : []), [room]);
   const scoped = useMemo(
     () => spaceLocations(locations, selection.space),
@@ -616,6 +622,10 @@ export function SpacesWorkspace({
                       )}
                       initialView={initialView}
                       onViewChange={(view) => {
+                        if (layoutCamera.present) {
+                          layoutCamera.write(view);
+                          return;
+                        }
                         if (viewKey) {
                           setCameraViews((current) => {
                             if (
