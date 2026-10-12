@@ -6,6 +6,7 @@ import {
   acceptanceLogin,
 } from './audit-three-acceptance-fixtures';
 import { openRecordTask } from './record-task-controls';
+import { chooseLocation } from './location-picker';
 
 type Fixture = Awaited<ReturnType<typeof acceptanceFixtures>>;
 async function asset(
@@ -219,6 +220,146 @@ for (const width of [1280, 390])
       }
     });
   }
+
+test('Scan and assign requires a deliberate duplicate-serial choice and cancellation leaves both assets unchanged', async ({
+  page,
+}) => {
+  test.setTimeout(90_000);
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  const f = await acceptanceFixtures();
+  try {
+    const serial = `A4-ASSIGN-SERIAL-${f.suffix}`;
+    const firstName = `Serial assignment Dell ${f.suffix}`;
+    const secondName = `Serial assignment Lenovo ${f.suffix}`;
+    const secondTag = `A4-ASSIGN-SECOND-${f.suffix}`;
+    const first = await asset(
+      f,
+      firstName,
+      `A4-ASSIGN-FIRST-${f.suffix}`,
+      serial,
+      'Dell',
+    );
+    const second = await asset(
+      f,
+      secondName,
+      secondTag,
+      serial,
+      'Lenovo',
+      'ITC-BLACK',
+    );
+    const site = await f.site();
+    const ids = [first.entity_id, second.entity_id];
+    const readSnapshot = async () => {
+      const [assets, events, assignments] = await Promise.all([
+        f.caller
+          .from('serialized_assets')
+          .select(
+            'id,name,asset_tag,serial_number,status,location_id,site_id,version',
+          )
+          .in('id', ids)
+          .order('id'),
+        f.caller
+          .from('asset_events')
+          .select('id,asset_id,kind,version')
+          .in('asset_id', ids)
+          .order('id'),
+        f.caller
+          .from('assignment_events')
+          .select('id,asset_id,kind')
+          .in('asset_id', ids)
+          .order('id'),
+      ]);
+      expect(assets.error).toBeNull();
+      expect(events.error).toBeNull();
+      expect(assignments.error).toBeNull();
+      return {
+        assets: assets.data,
+        events: events.data,
+        assignments: assignments.data,
+      };
+    };
+    const baseline = await readSnapshot();
+    expect(baseline.assets).toHaveLength(2);
+    expect(baseline.events).toHaveLength(2);
+    expect(baseline.assignments).toEqual([]);
+    await acceptanceLogin(page);
+    await page.goto('/sites/' + site.code);
+    await page
+      .getByRole('link', { name: 'Issue existing stock', exact: true })
+      .click();
+    await expect(
+      page.getByLabel('Destination site', { exact: true }),
+    ).toHaveValue(site.id);
+    const ticket = `A4-ASSIGN-TICKET-${f.suffix}`;
+    await page
+      .getByLabel('Ticket number reference (optional)', { exact: true })
+      .fill(ticket);
+    await chooseLocation(
+      page.locator('body'),
+      'Preferred storage source (optional)',
+      'ITC-BLACK',
+    );
+    const input = page.getByLabel('Scan, paste, or search inventory', {
+      exact: true,
+    });
+    await input.fill(` \t${serial.toLowerCase()} \n`);
+    await input.press('Enter');
+    const chooser = page.getByRole('list', { name: 'Choose inventory record' });
+    await expect(chooser.getByRole('button')).toHaveCount(2);
+    await expect(chooser).toContainText(firstName);
+    await expect(chooser).toContainText(secondName);
+    await expect(chooser).toContainText('Serial: ' + serial);
+    const chosen = chooser.getByRole('button', {
+      name: new RegExp(secondName),
+    });
+    await expect(chosen).toHaveAccessibleDescription(
+      /Serial: .*Manufacturer: Lenovo.*Black Container/,
+    );
+    const review = page.getByRole('region', { name: 'Review assignment' });
+    await expect(review).toHaveCount(0);
+    await expect(
+      page.getByRole('button', { name: 'Confirm assign', exact: true }),
+    ).toHaveCount(0);
+    expect(await readSnapshot()).toEqual(baseline);
+    await chosen.click();
+    await expect(
+      review.getByRole('heading', { name: secondName, exact: true }),
+    ).toBeVisible();
+    await expect(review).toContainText(secondTag);
+    await expect(review).toContainText(ticket);
+    await expect(review).not.toContainText(firstName);
+    await expect(
+      review.getByRole('link', { name: 'Open inventory record', exact: true }),
+    ).toHaveAttribute('href', '/inventory/assets/' + second.entity_id);
+    await expect(
+      review.getByLabel('Storage source', { exact: true }),
+    ).toHaveValue(await f.location('ITC-BLACK'));
+    await expect(
+      review.getByRole('button', { name: 'Confirm assign', exact: true }),
+    ).toBeEnabled();
+    expect(await readSnapshot()).toEqual(baseline);
+    await page
+      .getByRole('form', { name: 'Inspect equipment' })
+      .getByRole('button', { name: 'Skip inspection / review', exact: true })
+      .click();
+    await expect(review).toHaveCount(0);
+    await expect(chooser).toHaveCount(0);
+    await expect(input).toBeFocused();
+    await expect(
+      page.getByLabel('Destination site', { exact: true }),
+    ).toHaveValue(site.id);
+    await expect(
+      page.getByLabel('Ticket number reference (optional)', { exact: true }),
+    ).toHaveValue(ticket);
+    await expect(
+      page.getByRole('region', { name: 'Latest assignment receipt' }),
+    ).toHaveCount(0);
+    expect(await readSnapshot()).toEqual(baseline);
+  } finally {
+    await f.cleanup();
+  }
+});
 
 test('a serial at the lookup bound shows twenty choices and ordinary search guidance', async ({
   page,
