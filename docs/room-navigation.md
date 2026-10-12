@@ -24,6 +24,14 @@ initialized room under its original current renderer session; a withheld snapsho
 or replacement context wrapper cannot trigger the ready callback. A same-session
 recheck preserves an already initialized camera;
 the snapshot provider continues to deny writes and retire stale owners as before.
+Initialization belongs to the committed room, camera and controls resource tuple.
+Replacing either graphics resource waits for the same authorized saved-view grant
+and reapplies that baseline before explicit selection focus. Outgoing resource
+cleanup and frames cannot publish through replacement resources, and consumed
+camera commands do not replay when the saved pose already contains their result.
+Camera resource cleanup retires its own animation without disposing the separate
+reveal controller. Controls attachment and replacement preserve that controller's
+lifetime; an outgoing frame cannot cancel or complete a replacement flight.
 
 The strict Zod room contract is validated without a database at build/test/load time. Binding-to-seeded-location validation stays in the local Supabase integration gate. The production build needs no live Supabase.
 

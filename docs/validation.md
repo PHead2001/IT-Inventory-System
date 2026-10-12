@@ -407,6 +407,18 @@ this journey does not require a positive snapshot count. Eligible paired-title
 journeys retain their positive native-capture assertions. It also requires an
 exact camera roundtrip and zero document navigation fallback; it does not claim
 Next's Activity cache was used. These corrections still require browser reruns.
+The camera journey now covers Full and Reduced motion at both widths, including
+Free Orbit, Pan right, Close controls, Search inventory and native Back before
+Hide/Show recreates the renderer. It compares the live canvas pose with the saved
+workspace pose. CameraRig regressions cover replacement camera/controls resources,
+withheld restoration grants, outgoing-resource cleanup, explicit selection focus
+and consumed-command preservation in both motion modes. Passing these local
+resource regressions does not establish that the hosted reduced-motion failure
+used that resource replacement path; the exact hosted journey remains required.
+The Effects integration also proves controls attachment/replacement preserves the
+reveal controller, confirmed-render readiness still precedes explicit focus, and
+an outgoing frame cannot cancel or complete the replacement flight. A retired
+original renderer session leaves a previously withheld camera untouched.
 Repository runner image inputs were regenerated;
 Bundle coherence/version requires root-owned integration with the current runner
 baseline before final certification.
