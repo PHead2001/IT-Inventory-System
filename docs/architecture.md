@@ -252,7 +252,15 @@ stream bytes for logout/comparison and 512 bytes for privacy reads; all methods 
 no-store without CORS. Sign-out uses the caller's writable Supabase cookies and
 local session scope, without a membership gate that would strand revoked users.
 The privacy-read handler uses the canonical caller-scoped generation/identity
-service with read-only cookies. The proxy skips Supabase session refresh for
+service with a dedicated read-only SDK client. Its per-request fetch guard admits
+only GET `/auth/v1/user` and GET `/rest/v1/app_members` on the configured backend,
+without following redirects. It refuses token refresh and every other provider
+request before network dispatch, suppresses cookie writes, and remembers a blocked
+attempt even if the SDK subsequently preserves a still-valid bearer. An expired
+or near-expiry session that requires refresh therefore returns `unavailable`;
+ordinary session refresh followed by explicit privacy retry can recover. Writable
+Server Actions, the ordinary proxy and browser refresh retain their existing
+behavior. The proxy skips Supabase session refresh for
 precisely these three endpoint paths, so their rejected requests and read-only
 verification cannot write refresh cookies
 before handler admission. All other routes retain the existing proxy behavior.

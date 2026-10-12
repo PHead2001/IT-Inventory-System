@@ -12,6 +12,10 @@ import {
 } from './audit-two-controls';
 import { metadataReviewButton, metadataSaveButton } from './metadata-controls';
 import {
+  isLogoutGeneration,
+  logoutAcknowledgementKey,
+} from '../../src/lib/auth/privacy-barrier';
+import {
   buildFullQuantityFlightProbe,
   readFallbackMarker,
 } from './quantity-flight-probe';
@@ -23,6 +27,8 @@ type Proof = {
     next: Capture[];
     ready: boolean;
     finished: boolean;
+    completionMs?: number;
+    finishRejected?: boolean;
   }>;
   cancellations: Array<{ pseudo: string; whileActive: boolean }>;
   replacements: Array<{
@@ -100,8 +106,10 @@ async function observeMotion(page: Page, unsupported = false) {
             ? wrapped
             : { ...options, update: wrapped },
         );
+        let readyAt: number | undefined;
         void transition.ready.then(
           () => {
+            readyAt = performance.now();
             entry.ready = true;
             // A timing barrier only: the binding never starts, pauses or
             // changes the native animation or React's commit.
@@ -114,9 +122,12 @@ async function observeMotion(page: Page, unsupported = false) {
         void transition.finished.then(
           () => {
             entry.finished = true;
+            if (readyAt !== undefined)
+              entry.completionMs = performance.now() - readyAt;
           },
           () => {
             entry.finished = true;
+            entry.finishRejected = true;
           },
         );
         return transition;
@@ -176,6 +187,26 @@ async function resetProof(page: Page) {
     p.replacements = [];
     p.cls = 0;
   });
+}
+
+/** A paired image fade must release the native transition, so the next real
+ * navigation can capture. No animation is started, resumed or skipped here. */
+async function completedTitlePair(page: Page) {
+  await settled(page);
+  const paired = (await proof(page)).transitions.filter((entry) =>
+    entry.old.some(
+      (old) =>
+        old.name.startsWith('inventory-title-') &&
+        entry.next.some((next) => next.name === old.name),
+    ),
+  );
+  expect(paired).toHaveLength(1);
+  expect(paired[0]).toMatchObject({ ready: true, finished: true });
+  expect(paired[0].finishRejected).not.toBe(true);
+  expect(Number.isFinite(paired[0].completionMs)).toBe(true);
+  expect(paired[0].completionMs!).toBeGreaterThanOrEqual(0);
+  // Motion is 200ms; leave bounded scheduler headroom, never a native timeout.
+  expect(paired[0].completionMs!).toBeLessThan(1500);
 }
 
 /** A separate full-route Flight reader proves fallback bytes while the actual
@@ -834,7 +865,7 @@ for (const width of [1280, 390]) {
     await expect(
       page.getByRole('heading', { name, exact: true }),
     ).toBeVisible();
-    await settled(page);
+    await completedTitlePair(page);
     const forward = await proof(page);
     await info.attach('primary-data-delayed-after-fallback-stream', {
       body: JSON.stringify(streaming),
@@ -884,7 +915,7 @@ for (const width of [1280, 390]) {
     await page.goBack();
     await expect(page).toHaveURL(new URL(scope, page.url()).href);
     await expect(page.locator('#inventory-row-2')).toBeVisible();
-    await settled(page);
+    await completedTitlePair(page);
     const firstBrowserBack = await proof(page);
     expect(firstBrowserBack.replacements).toHaveLength(1);
     const firstBackPair = firstBrowserBack.transitions.find((entry) =>
@@ -897,6 +928,7 @@ for (const width of [1280, 390]) {
     ).toHaveLength(1);
     expect(firstBrowserBack.cls).toBe(0);
     expect(new URL(page.url()).hash).toBe('');
+    await resetProof(page);
     await page
       .locator('#inventory-row-2')
       .getByRole('link', { name, exact: true })
@@ -904,13 +936,14 @@ for (const width of [1280, 390]) {
     await expect(
       page.getByRole('heading', { name, exact: true }),
     ).toBeVisible();
+    await completedTitlePair(page);
     await resetProof(page);
     await page.getByRole('link', { name: 'Back to results' }).click();
     await expect(page).toHaveURL(
       new URL(scope + '#inventory-row-2', page.url()).href,
     );
     await expect(page.locator('#inventory-row-2')).toBeVisible();
-    await settled(page);
+    await completedTitlePair(page);
     const back = await proof(page);
     expect(back.replacements).toHaveLength(1);
     const pair = back.transitions.find((entry) =>
@@ -925,6 +958,7 @@ for (const width of [1280, 390]) {
       contentType: 'image/png',
     });
     // Native browser Back to a real anchored history entry is a separate path.
+    await resetProof(page);
     await page
       .locator('#inventory-row-2')
       .getByRole('link', { name, exact: true })
@@ -932,10 +966,11 @@ for (const width of [1280, 390]) {
     await expect(
       page.getByRole('heading', { name, exact: true }),
     ).toBeVisible();
+    await completedTitlePair(page);
     await resetProof(page);
     await page.goBack();
     await expect(page.locator('#inventory-row-2')).toBeVisible();
-    await settled(page);
+    await completedTitlePair(page);
     expect((await proof(page)).replacements).toHaveLength(1);
     await info.attach('native-route-proof', {
       body: JSON.stringify({
@@ -1561,6 +1596,13 @@ for (const width of [1280, 390]) {
   }) => {
     await page.setViewportSize({ width, height: 900 });
     await auditLogin(page);
+    const reminderNames = new Set([
+      'inventory-logout-local-v1',
+      '__Host-inventory-logout-v1',
+    ]);
+    const previousReminder = (await page.context().cookies()).find((cookie) =>
+      reminderNames.has(cookie.name),
+    )?.value;
     const slow = await holdRouteWork(page, '/history');
     try {
       await (await navigationLink(page, 'History')).click();
@@ -1577,22 +1619,41 @@ for (const width of [1280, 390]) {
           response.request().method() === 'POST',
       );
       await page.getByRole('button', { name: 'Sign out', exact: true }).click();
-      // Both HTTP acknowledgements must finish while History Flight stays held.
-      // This fails if either path is dispatched through the App Router action queue.
+      // Both independent HTTP requests must respond while History Flight stays
+      // held. The app can already have navigated away when click resolves, so
+      // old-context CDP response bodies are not reliable assertion evidence.
       const signedOut = await signout;
       expect(signedOut.status()).toBe(200);
-      const receipt = await signedOut.json();
-      expect(receipt).toEqual({
-        ok: true,
-        logoutGeneration: expect.any(String),
-      });
       const cleaned = await cleanup;
       expect(cleaned.status()).toBe(200);
-      expect(cleaned.request().postDataJSON()).toEqual({
-        generation: receipt.logoutGeneration,
-      });
-      expect(await cleaned.json()).toEqual({ status: 'match' });
+      const confirmation = cleaned.request().postDataJSON();
+      expect(Object.keys(confirmation)).toEqual(['generation']);
+      expect(isLogoutGeneration(confirmation.generation)).toBe(true);
       await expect(page).toHaveURL(/\/login$/);
+      await expect(
+        page.getByRole('form', { name: 'Sign in', exact: true }),
+      ).toBeVisible();
+      const reminder = (await page.context().cookies()).find((cookie) =>
+        reminderNames.has(cookie.name),
+      );
+      // Boolean comparisons preserve exact identity without putting generation
+      // or cookie values into a failing assertion's output/artifact.
+      expect(reminder?.httpOnly).toBe(true);
+      expect(reminder!.value !== previousReminder).toBe(true);
+      expect(
+        decodeURIComponent(reminder!.value) === `v1:${confirmation.generation}`,
+      ).toBe(true);
+      // verifyTabPrivacy records this only after the server confirms the exact
+      // generation and authoritative cleanup succeeds; HTTP 200 alone cannot.
+      expect(
+        await page.evaluate(
+          ({ key, generation }) => sessionStorage.getItem(key) === generation,
+          {
+            key: logoutAcknowledgementKey,
+            generation: confirmation.generation,
+          },
+        ),
+      ).toBe(true);
       await expect(routeProgress(page)).toHaveCount(0);
       slow.release();
       await slow.delivery;

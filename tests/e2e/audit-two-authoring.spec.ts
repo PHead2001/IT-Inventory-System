@@ -67,7 +67,7 @@ async function addOption(scope: Locator, label: string, parent?: string) {
   await input.fill(label);
 }
 
-async function pasteReview(scope: Locator, paths: string) {
+async function pasteReview(scope: Locator, paths: string, skipped: number) {
   await scope
     .getByRole('button', { name: 'Paste option paths', exact: true })
     .click();
@@ -77,9 +77,50 @@ async function pasteReview(scope: Locator, paths: string) {
   });
   await expect(paste.getByLabel('Option paths')).toBeFocused();
   await paste.getByLabel('Option paths').fill(paths);
+  await expect(paste.getByLabel('Option paths')).toHaveValue(paths);
   await paste
     .getByRole('button', { name: 'Review paths', exact: true })
     .click();
+  try {
+    await expect(
+      paste.getByRole('heading', {
+        name: `Skipped identical paths (${skipped})`,
+        exact: true,
+      }),
+    ).toBeVisible();
+  } catch {
+    // Bounded stage evidence only: no field text, credentials or page dump.
+    const stage = await scope.evaluate(
+      (element, expected) => {
+        const section = element.querySelector<HTMLElement>(
+          'section[aria-label="Paste option paths"]',
+        );
+        const textarea = section?.querySelector('textarea');
+        const review = section?.querySelector(
+          '[aria-label="Option path review"]',
+        );
+        return {
+          pasteAttached: Boolean(section),
+          inputExact: textarea?.value === expected.paths,
+          reviewAttached: Boolean(review),
+          skippedHeadingExact: Array.from(
+            review?.querySelectorAll('h5') ?? [],
+          ).some(
+            (heading) =>
+              heading.textContent?.trim() ===
+              `Skipped identical paths (${expected.skipped})`,
+          ),
+          inspectorHidden:
+            Boolean(element.closest('[hidden]')) ||
+            getComputedStyle(element).display === 'none',
+        };
+      },
+      { paths, skipped },
+    );
+    throw new Error(
+      `Option path review did not commit: ${JSON.stringify(stage)}`,
+    );
+  }
   return paste;
 }
 
@@ -129,7 +170,7 @@ test('nested paths are reviewed, cancelled, undone, published at six levels and 
     'Labels > A\\>B',
     'USB > USB-A',
   ].join('\n');
-  let paste = await pasteReview(choices, paths);
+  let paste = await pasteReview(choices, paths, 1);
   await expect(
     paste.getByRole('heading', { name: 'Skipped identical paths (1)' }),
   ).toBeVisible();
@@ -148,7 +189,7 @@ test('nested paths are reviewed, cancelled, undone, published at six levels and 
   await expect(
     choices.getByLabel('Option name: Existing root', { exact: true }),
   ).toHaveValue('Existing root');
-  paste = await pasteReview(choices, paths);
+  paste = await pasteReview(choices, paths, 1);
   await paste.getByRole('button', { name: 'Apply paths', exact: true }).click();
   await expect(
     choices.getByLabel('Option name: Gen 4', { exact: true }),
@@ -165,7 +206,7 @@ test('nested paths are reviewed, cancelled, undone, published at six levels and 
   await expect(
     choices.getByLabel('Option name: Existing root', { exact: true }),
   ).toHaveValue('Existing root');
-  paste = await pasteReview(choices, paths);
+  paste = await pasteReview(choices, paths, 1);
   await paste.getByRole('button', { name: 'Apply paths', exact: true }).click();
   // U403 now requires fresh labels to be distinguishable across parents too.
   await choices

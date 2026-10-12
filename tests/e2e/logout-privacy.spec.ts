@@ -1,3 +1,4 @@
+import { isPrivacyGenerationRead } from './privacy-read-request';
 import { expect, test, type Page } from '@playwright/test';
 import fixture from '../fixtures/auth.json' with { type: 'json' };
 import { acceptanceFixtures } from './audit-three-acceptance-fixtures';
@@ -199,20 +200,8 @@ test('real query-only Scan navigation withholds assignment storage bootstrap whi
     release = resolve;
   });
   let held = false;
-  await page.route('**/scan*', async (route) => {
-    const request = route.request();
-    // This fixture deliberately defers the no-argument privacy-generation read.
-    // Inspection/search actions carry business arguments and must pass through.
-    let privacyRead = false;
-    if (request.method() === 'POST' && request.headers()['next-action']) {
-      try {
-        const args: unknown = request.postDataJSON();
-        privacyRead = Array.isArray(args) && args.length === 0;
-      } catch {
-        privacyRead = false;
-      }
-    }
-    if (!held && privacyRead) {
+  await page.route('**/api/auth/privacy-read', async (route) => {
+    if (isPrivacyGenerationRead(route.request())) {
       held = true;
       await deferred;
     }
@@ -247,7 +236,7 @@ test('real query-only Scan navigation withholds assignment storage bootstrap whi
     ).toBeGreaterThan(0);
   } finally {
     release();
-    await page.unroute('**/scan*');
+    await page.unroute('**/api/auth/privacy-read');
   }
 });
 
@@ -291,18 +280,9 @@ test('private document title clears on real privacy failure and logout, then res
       }
     }, privateTitle);
   };
-  await page.route('**/inventory/assets/**', async (route) => {
-    const request = route.request();
-    let noArgumentPrivacyAction = false;
-    if (request.method() === 'POST' && request.headers()['next-action']) {
-      try {
-        const args: unknown = request.postDataJSON();
-        noArgumentPrivacyAction = Array.isArray(args) && args.length === 0;
-      } catch {
-        noArgumentPrivacyAction = false;
-      }
-    }
-    if (rejectPrivacy && noArgumentPrivacyAction) await route.abort('failed');
+  await page.route('**/api/auth/privacy-read', async (route) => {
+    if (rejectPrivacy && isPrivacyGenerationRead(route.request()))
+      await route.abort('failed');
     else await route.continue();
   });
   try {
@@ -392,7 +372,7 @@ test('private document title clears on real privacy failure and logout, then res
           .forEach((node) => node.remove()),
       )
       .catch(() => {});
-    await page.unroute('**/inventory/assets/**');
+    await page.unroute('**/api/auth/privacy-read');
     await other?.close();
     await owned.cleanup();
   }

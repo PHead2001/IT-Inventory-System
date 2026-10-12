@@ -1,4 +1,5 @@
 import {
+  Activity,
   Component,
   StrictMode,
   Suspense,
@@ -17,6 +18,7 @@ import {
   waitFor,
 } from '@testing-library/react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
+import { flushSync } from 'react-dom';
 import { RedirectBoundary } from 'next/dist/client/components/redirect-boundary';
 import { getRedirectError } from 'next/dist/client/components/redirect';
 import { isRedirectError } from 'next/dist/client/components/redirect-error';
@@ -53,6 +55,9 @@ import { routeKey } from './route-key';
 const runtime = vi.hoisted(() => ({
   route: () => ({ pathname: '/inventory', query: '' }),
   navigate: (href: string) => {
+    void href;
+  },
+  restoreSync: (href: string) => {
     void href;
   },
   auth: (event: string, session: { user: { id: string } } | null) => {
@@ -308,10 +313,37 @@ function GatedPrimary({
     </ProtectedPrivacyContent>
   );
 }
-function OpaqueRouterSlot({ work }: { work: ReturnType<typeof deferred> }) {
+function OpaqueRouterSlot({
+  work,
+  cache = false,
+}: {
+  work: ReturnType<typeof deferred>;
+  cache?: boolean;
+}) {
   const route = useContext(NavigationContext);
   const href = route.pathname + (route.query ? `?${route.query}` : '');
   const isDetail = route.pathname.startsWith('/inventory/quantity/');
+  if (cache)
+    return (
+      <>
+        <Activity mode={isDetail ? 'hidden' : 'visible'}>
+          <Boundary>
+            <Suspense fallback={<InventoryLoading />}>
+              <ProtectedPrivacyContent routeKey={list}>
+                <Source />
+              </ProtectedPrivacyContent>
+            </Suspense>
+          </Boundary>
+        </Activity>
+        <Activity mode={isDetail ? 'visible' : 'hidden'}>
+          <Boundary>
+            <Suspense fallback={<QuantityLoading />}>
+              <GatedPrimary work={work} routeKey={detail} />
+            </Suspense>
+          </Boundary>
+        </Activity>
+      </>
+    );
   return (
     <Boundary key={href}>
       <Suspense
@@ -347,6 +379,7 @@ function Router({
   pairedFallback = true,
   actualPrivacy = false,
   opaqueSlot = false,
+  cacheSlot = false,
   secondWork,
   redirectTo,
   backRedirectTo,
@@ -358,14 +391,21 @@ function Router({
   pairedFallback?: boolean;
   actualPrivacy?: boolean;
   opaqueSlot?: boolean;
+  cacheSlot?: boolean;
   secondWork?: ReturnType<typeof deferred>;
   redirectTo?: string;
   backRedirectTo?: string;
   listHref?: string;
 }) {
   const [href, setHref] = useState(listHref);
-  const [stableSlot] = useState(() => <OpaqueRouterSlot work={work} />);
+  const [stableSlot] = useState(() => (
+    <OpaqueRouterSlot work={work} cache={cacheSlot} />
+  ));
   useLayoutEffect(() => {
+    runtime.restoreSync = (next) => {
+      const destination = new URL(next, location.origin);
+      setHref(destination.pathname + destination.search);
+    };
     runtime.navigate = (next) => {
       const destination = new URL(next, location.origin);
       if (destination.pathname + destination.search === href) return;
@@ -1128,4 +1168,97 @@ it('native Back starts original-binding preparation before a stable opaque list 
   await screen.findByRole('link', { name: 'Source cable title' });
   expect(gate.store.snapshot()).toBeNull();
   expect(pending.state.snapshot().pending).toBe(false);
+});
+
+it.each([false, true])(
+  'cached Activity native Back after repeated pairs restores its primary (router listener first=%s)',
+  async (routerFirst) => {
+    const work = deferred();
+    render(
+      <StrictMode>
+        <Router
+          work={work}
+          privacy={grant()}
+          actualPrivacy
+          opaqueSlot
+          cacheSlot
+        />
+      </StrictMode>,
+    );
+    await screen.findByRole('link', { name: 'Source cable title' });
+    await waitFor(() => expect(mountedPrivacy.ready).toBe(true));
+    fireEvent.click(screen.getByRole('link', { name: 'Source cable title' }));
+    await act(work.resolve);
+    await screen.findByRole('heading', { name: 'Authorized detail title' });
+    await waitFor(() => expect(mountedPrivacy.ready).toBe(true));
+    fireEvent.click(screen.getByRole('link', { name: 'Back to results' }));
+    await screen.findByRole('link', { name: 'Source cable title' });
+    await waitFor(() => expect(mountedPrivacy.ready).toBe(true));
+    fireEvent.click(screen.getByRole('link', { name: 'Source cable title' }));
+    await screen.findByRole('heading', { name: 'Authorized detail title' });
+    await waitFor(() => expect(mountedPrivacy.ready).toBe(true));
+    let settle!: (value: { status: 'absent' }) => void;
+    const verification = new Promise<{ status: 'absent' }>((resolve) => {
+      settle = resolve;
+    });
+    runtime.read.mockReturnValueOnce(verification);
+    act(() => {
+      history.replaceState(null, '', list + '#inventory-row-1');
+      if (routerFirst) runtime.navigate(list + '#inventory-row-1');
+      window.dispatchEvent(new PopStateEvent('popstate'));
+      if (!routerFirst) runtime.navigate(list + '#inventory-row-1');
+    });
+    await act(async () => {
+      settle({ status: 'absent' });
+      await verification;
+    });
+    await screen.findByRole('link', { name: 'Source cable title' });
+    await waitFor(() => expect(mountedPrivacy.ready).toBe(true));
+    expect(gate.store.snapshot()).toBeNull();
+    expect(pending.state.snapshot().pending).toBe(false);
+  },
+);
+
+it('native Back prepares before an earlier router listener commits and replaces pathname effects', async () => {
+  const work = deferred();
+  const restore = () => flushSync(() => runtime.restoreSync(location.href));
+  // Model a real event's inter-listener React commit, not a synthetic event
+  // whose entire dispatch remains in the same JavaScript stack.
+  window.addEventListener('popstate', restore);
+  try {
+    render(
+      <StrictMode>
+        <Router work={work} privacy={grant()} actualPrivacy opaqueSlot />
+      </StrictMode>,
+    );
+    await screen.findByRole('link', { name: 'Source cable title' });
+    await waitFor(() => expect(mountedPrivacy.ready).toBe(true));
+    fireEvent.click(screen.getByRole('link', { name: 'Source cable title' }));
+    await act(work.resolve);
+    await screen.findByRole('heading', { name: 'Authorized detail title' });
+    await waitFor(() => expect(mountedPrivacy.ready).toBe(true));
+    let settle!: (value: { status: 'absent' }) => void;
+    const verification = new Promise<{ status: 'absent' }>((resolve) => {
+      settle = resolve;
+    });
+    runtime.read.mockReturnValueOnce(verification);
+    const before = pending.state.snapshot().epoch;
+    act(() => {
+      history.replaceState(null, '', list + '#inventory-row-1');
+      window.dispatchEvent(new PopStateEvent('popstate'));
+    });
+    expect(pending.state.snapshot().epoch).toBeGreaterThan(before);
+    expect(mountedPrivacy.navigation!.admission(list)).toMatchObject({
+      ready: false,
+      wait: expect.any(Promise),
+    });
+    await act(async () => {
+      settle({ status: 'absent' });
+      await verification;
+    });
+    await screen.findByRole('link', { name: 'Source cable title' });
+    await waitFor(() => expect(mountedPrivacy.ready).toBe(true));
+  } finally {
+    window.removeEventListener('popstate', restore);
+  }
 });

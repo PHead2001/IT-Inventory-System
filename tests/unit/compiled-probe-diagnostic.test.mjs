@@ -56,3 +56,35 @@ it('calls an exit a deadline only when this probe fired its own deadline', () =>
     childFailureDiagnostic(null, false, 'probe-failure:tree-1.framing'),
   ).toBe('probe-failure:tree-1.framing');
 });
+it('classifies fetch failures without exposing connection or credential details', () => {
+  for (const [cause, reason] of [
+    [{ message: 'unexpected redirect' }, 'redirect'],
+    [{ code: 'ECONNREFUSED' }, 'connection'],
+    [{ code: 'ECONNRESET' }, 'socket'],
+    [{ code: 'UND_ERR_SOCKET' }, 'socket'],
+    [{ code: 'UND_ERR_CONNECT_TIMEOUT' }, 'deadline'],
+    [{ code: 'UND_ERR_HEADERS_TIMEOUT' }, 'deadline'],
+    [{ code: 'unknown-secret-code' }, 'transport'],
+  ]) {
+    const error = new TypeError('fetch failed', {
+      cause: { ...cause, privateDetail: 'must-never-escape' },
+    });
+    const classified = classifyProbeFailure(error);
+    expect(classified).toBe(reason);
+    expect(
+      extractProbeFailure(probeFailureMarker('request-1', classified)),
+    ).toBe(`probe-failure:request-1.${reason}`);
+  }
+  expect(classifyProbeFailure(new DOMException('secret', 'TimeoutError'))).toBe(
+    'deadline',
+  );
+  expect(classifyProbeFailure(new DOMException('secret', 'AbortError'))).toBe(
+    'aborted',
+  );
+  expect(
+    classifyProbeFailure({
+      message: 'unknown private failure',
+      cause: { message: 'unexpected redirect with secret suffix' },
+    }),
+  ).toBe('failure');
+});

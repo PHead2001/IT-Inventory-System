@@ -29,6 +29,11 @@ const reasons = [
   'deadline',
   'spawn',
   'cleanup',
+  'redirect',
+  'connection',
+  'socket',
+  'aborted',
+  'transport',
   'unknown',
 ];
 export function probeFailureMarker(stage, reason) {
@@ -53,6 +58,24 @@ export function childFailureDiagnostic(signal, deadlineFired, diagnostic) {
   return extractProbeFailure(diagnostic);
 }
 export function classifyProbeFailure(error) {
+  // Only static transport classes escape. Never return URLs, headers, arbitrary
+  // messages or Node's credential-bearing connection diagnostics.
+  if (error?.name === 'TimeoutError') return 'deadline';
+  if (error?.name === 'AbortError') return 'aborted';
+  if (error?.cause?.message === 'unexpected redirect') return 'redirect';
+  const code = error?.cause?.code;
+  if (code === 'ECONNREFUSED') return 'connection';
+  if (['ECONNRESET', 'EPIPE', 'UND_ERR_SOCKET'].includes(code)) return 'socket';
+  if (
+    [
+      'ETIMEDOUT',
+      'UND_ERR_CONNECT_TIMEOUT',
+      'UND_ERR_HEADERS_TIMEOUT',
+    ].includes(code)
+  )
+    return 'deadline';
+  if (error?.name === 'TypeError' && error?.message === 'fetch failed')
+    return 'transport';
   const message = typeof error?.message === 'string' ? error.message : '';
   for (const [prefix, reason] of [
     ['refusing nonlocal', 'origin'],

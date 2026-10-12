@@ -446,11 +446,14 @@ export function RouteMotionProvider({
         latestPrivacy.current.navigation?.prepare(location.href, providerToken);
       else latestPrivacy.current.navigation?.retire(providerToken);
     };
-    window.addEventListener('popstate', pop);
+    // Prepare while the departing route still owns this listener. Next's bubble
+    // traversal may commit between native listeners and replace pathname effects,
+    // removing a later bubble listener before that same event can invoke it.
+    window.addEventListener('popstate', pop, true);
     return () => {
       listening = false;
       subscription.unsubscribe();
-      window.removeEventListener('popstate', pop);
+      window.removeEventListener('popstate', pop, true);
     };
   }, [
     state,

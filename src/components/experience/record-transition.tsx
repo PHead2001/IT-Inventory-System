@@ -70,8 +70,9 @@ export function InventoryRecordLink({
       name={matches ? intent?.name : undefined}
       onShare={(instance) => {
         if (!current()) return;
-        sharedTitleMotion(instance, validNow);
+        const cleanup = sharedTitleMotion(instance, validNow);
         finishAfterSnapshot(instance);
+        return cleanup;
       }}
     >
       <Link
@@ -113,8 +114,9 @@ export function RecordTitle({
       name={matches ? intent!.name : undefined}
       onShare={(instance) => {
         if (!current()) return;
-        sharedTitleMotion(instance, validNow);
+        const cleanup = sharedTitleMotion(instance, validNow);
         finishAfterSnapshot(instance);
+        return cleanup;
       }}
     >
       <h1 {...headingProps}>{children}</h1>

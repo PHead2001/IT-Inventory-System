@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
+import { readFileSync } from 'node:fs';
 import { sharedTitleMotion } from './shared-title-motion';
 
 const name = 'inventory-title-opaque';
@@ -10,6 +11,24 @@ let frames: Array<Record<string, unknown>>;
 let destination: { width: string; height: string; transform: string };
 let animate: ReturnType<typeof vi.fn>;
 let skip: ReturnType<typeof vi.fn>;
+
+it('holds captured geometry without inheriting its paused state into native image fades', () => {
+  const css = readFileSync('src/app/globals.css', 'utf8');
+  const groupRule = css.match(
+    /::view-transition-group\(\.record-title\)\s*\{([^}]+)\}/,
+  )?.[1];
+  const imageRule = css
+    .match(
+      /::view-transition-old\(\.record-title\),\s*::view-transition-new\(\.record-title\)\s*\{([^}]+)\}/g,
+    )
+    ?.at(-1);
+  // The native UA sets image-pair/old/new play state to inherit. Without this
+  // author override, paused finite fades prevent ViewTransition.finished.
+  expect(groupRule).toMatch(/animation-play-state:\s*paused\s*;/);
+  expect(imageRule).toMatch(/animation-play-state:\s*running\s*;/);
+  expect(imageRule).toMatch(/width:\s*100%\s*;/);
+  expect(imageRule).toMatch(/height:\s*100%\s*;/);
+});
 
 beforeEach(() => {
   frames = [
@@ -144,6 +163,21 @@ it('uses the actual Back capture, including a scroll shift, instead of a saved c
     { transform: 'translate(100px, -40px) scale(2, 2.4)' },
     { transform: 'translate(20px, 180px) scale(1, 1)' },
   ]);
+});
+
+it('a departing callback cleanup cannot cancel a subsequent replacement', () => {
+  const firstCancel = vi.fn();
+  const nextCancel = vi.fn();
+  animate
+    .mockReturnValueOnce({ cancel: firstCancel })
+    .mockReturnValueOnce({ cancel: nextCancel });
+  const firstCleanup = sharedTitleMotion({ name }, () => true);
+  const nextCleanup = sharedTitleMotion({ name }, () => true);
+  firstCleanup?.();
+  expect(firstCancel).toHaveBeenCalledOnce();
+  expect(nextCancel).not.toHaveBeenCalled();
+  nextCleanup?.();
+  expect(nextCancel).toHaveBeenCalledOnce();
 });
 
 it('supports a source implicit dimension endpoint without inventing another box', () => {

@@ -390,6 +390,22 @@ not inspect or change hosted Auth configuration.
 
 ## Proof by layer
 
+`privacy-read-sdk.test.ts` exercises the installed Supabase SSR, Auth and
+PostgREST SDKs with intercepted outbound fetches and cookies seeded by the SDK.
+Expired and near-expiry sessions issue no outbound refresh request or cookie
+write and return unavailable, including the SDK's still-valid bearer fallback.
+Explicit-JWT user verification plus an Authorization-bearing membership request
+also exercises PostgREST's session refresh path. Matching, revoked and changed
+bindings, a held read after caller logout, and ordinary writable refresh followed
+by privacy retry have permanent coverage. The fetch guard separately rejects
+non-GET, other tables, credentials, other origins and redirects. These tests use
+synthetic provider responses; they do not certify hosted Auth configuration.
+The query-only Scan and retained private-title browser fixtures defer or reject
+the canonical `read-generation` POST to `/api/auth/privacy-read`, with exact
+operation selection; identity verification and business actions pass through.
+They continue to assert withheld storage bootstrap, hidden private presentation,
+cleared document titles and preservation of the original draft owner.
+
 The logout privacy regression also mounts a populated label queue with an already
 acknowledged generation, fails authoritative logout cleanup, then retries under
 the same cookie generation. It verifies that cleared entries disappear from the

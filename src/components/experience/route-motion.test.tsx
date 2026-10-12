@@ -43,6 +43,7 @@ import { RouteContentIdentityContext } from './route-content-identity';
 import { RouteReady } from './route-ready';
 import { routeKey } from './route-key';
 import { PairedRouteLoadingContext } from './paired-route-loading';
+import { sharedTitleMotion } from './shared-title-motion';
 import {
   cancelRouteSnapshots,
   createRouteMotionState,
@@ -61,7 +62,7 @@ const runtime = vi.hoisted(() => ({
   boundaries: [] as Array<{
     name?: string;
     share?: string;
-    onShare?: (instance: { name: string }) => void;
+    onShare?: (instance: { name: string }) => void | (() => void);
     onUpdate?: (
       instance: { name: string },
       types: string[],
@@ -372,6 +373,34 @@ it('names only the initiating holding and the authorized matching title until ac
   );
   Reflect.deleteProperty(document, 'getAnimations');
 });
+
+it.each(['row', 'heading'] as const)(
+  'returns the exact replacement cleanup from the admitted %s share callback',
+  async (surface) => {
+    const rendered = render(view(<List />));
+    fireEvent.click(screen.getByRole('link', { name: 'Cable row 2' }));
+    const name = screen
+      .getByRole('link', { name: 'Cable row 2' })
+      .getAttribute('data-test-transition-name')!;
+    if (surface === 'heading') {
+      runtime.pathname = detailPath;
+      rendered.rerender(view(<Detail />));
+    }
+    const captured = runtime.boundaries.findLast(
+      (boundary) => boundary.name === name,
+    )!;
+    const cancelReplacement = vi.fn();
+    vi.mocked(sharedTitleMotion).mockReturnValueOnce(cancelReplacement);
+    let cleanup: void | (() => void);
+    await act(async () => {
+      cleanup = captured.onShare!({ name });
+    });
+    expect(cleanup!).toBe(cancelReplacement);
+    expect(cancelReplacement).not.toHaveBeenCalled();
+    cleanup!();
+    expect(cancelReplacement).toHaveBeenCalledOnce();
+  },
+);
 
 it('keeps title scope bound to admitted content through a live destination URL and rejects a different admitted query scope', () => {
   const content = (listHref: string) =>
