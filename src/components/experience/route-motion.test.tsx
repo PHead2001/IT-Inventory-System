@@ -433,6 +433,70 @@ it('keeps title scope bound to admitted content through a live destination URL a
   expect(source).not.toHaveAttribute('data-test-transition-name');
 });
 
+it('failed paired geometry retires only its own title and generic arrival without canceling a newer navigation', () => {
+  let motion!: ReturnType<typeof useRouteMotion>;
+  let loading!: NonNullable<
+    React.ContextType<typeof PairedRouteLoadingContext>
+  >['store'];
+  let pending!: NonNullable<
+    React.ContextType<typeof RoutePendingContext>
+  >['state'];
+  function Capture() {
+    const value = useRouteMotion();
+    const scope = useContext(RoutePendingContext)!;
+    const paired = useContext(PairedRouteLoadingContext)!;
+    useLayoutEffect(() => {
+      motion = value;
+      pending = scope.state;
+      loading = paired.store;
+    });
+    return null;
+  }
+  render(
+    view(
+      <>
+        <Capture />
+        <List />
+      </>,
+    ),
+  );
+  const source = screen.getByRole('link', { name: 'Cable row 2' });
+  fireEvent.click(source);
+  const first = motion.intent!;
+  const arrival = motion.arrival;
+  expect(arrival).not.toBeNull();
+  // Native onShare runs only after the real primary has released its gate.
+  act(() => {
+    loading.ready(detailPath);
+  });
+  const epoch = pending.snapshot().epoch;
+  const captured = runtime.boundaries.findLast(
+    (boundary) => boundary.name === first.name,
+  )!;
+  act(() => {
+    captured.onShare!({ name: first.name });
+  });
+  const reject = vi.mocked(sharedTitleMotion).mock.calls.at(-1)?.[2];
+  expect(reject).toBeTypeOf('function');
+  act(() => {
+    reject!();
+  });
+  expect(motion.intent).toBeNull();
+  expect(motion.arrival).toBeNull();
+  expect(pending.snapshot().epoch).toBe(epoch);
+  expect(screen.getByText('enabled')).toBeVisible();
+
+  fireEvent.click(source);
+  const next = motion.intent;
+  const nextArrival = motion.arrival;
+  expect(next).not.toBeNull();
+  act(() => {
+    reject!();
+  });
+  expect(motion.intent).toBe(next);
+  expect(motion.arrival).toBe(nextArrival);
+});
+
 it('binds title pairing to the actual primary when the opaque router slot commits ahead of its outer pathname', () => {
   const listHref = '/inventory?type=quantity';
   let loading: React.ContextType<typeof PairedRouteLoadingContext>;

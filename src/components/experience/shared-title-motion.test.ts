@@ -277,3 +277,20 @@ it('stale callbacks and auth/reduction during setup cannot start a replacement',
   expect(animate).not.toHaveBeenCalled();
   expect(nativeCancel).toHaveBeenCalled();
 });
+
+it('retires the failed presentation before skipping invalid captured geometry', () => {
+  frames[0].width = '0px';
+  const unsupported = vi.fn();
+  skip.mockImplementation(() => expect(unsupported).toHaveBeenCalledOnce());
+  sharedTitleMotion({ name }, () => true, unsupported);
+  expect(unsupported).toHaveBeenCalledOnce();
+  expect(animate).not.toHaveBeenCalled();
+  expect(skip).toHaveBeenCalledOnce();
+});
+
+it('does not retire the navigation when captured geometry is supported', () => {
+  const unsupported = vi.fn();
+  sharedTitleMotion({ name }, () => true, unsupported);
+  expect(unsupported).not.toHaveBeenCalled();
+  expect(animate).toHaveBeenCalledOnce();
+});

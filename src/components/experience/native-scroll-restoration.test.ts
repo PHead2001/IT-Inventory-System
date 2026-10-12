@@ -84,11 +84,17 @@ function fixture() {
     navigate(key, url, type);
     commit(key, url);
   }
-  function navigate(key: string, url: string, type = 'traverse') {
-    const event = new Event('navigate');
+  function navigate(
+    key: string,
+    url: string,
+    type = 'traverse',
+    signal = new AbortController().signal,
+  ) {
+    const event = new Event('navigate', { cancelable: true });
     Object.assign(event, {
       navigationType: type,
       destination: { key, url: location.origin + url },
+      signal,
     });
     navigation.dispatchEvent(event);
     return event;
@@ -354,7 +360,7 @@ it.each([
   expect(f.scrollTo).not.toHaveBeenCalled();
 });
 
-it.each(['wheel', 'touchstart', 'keydown'])(
+it.each(['wheel', 'touchstart', 'keydown', 'pointerdown', 'mousedown'])(
   'cancels restoration on user %s without preventing browser behavior',
   (type) => {
     const f = fixture();
@@ -364,12 +370,153 @@ it.each(['wheel', 'touchstart', 'keydown'])(
     const event =
       type === 'keydown'
         ? new KeyboardEvent(type, { key: 'PageDown', cancelable: true })
-        : new Event(type, { cancelable: true });
+        : type === 'pointerdown' || type === 'mousedown'
+          ? new MouseEvent(type, {
+              button: type === 'mousedown' ? 1 : 0,
+              cancelable: true,
+            })
+          : new Event(type, { cancelable: true });
     window.dispatchEvent(event);
     expect(event.defaultPrevented).toBe(false);
     f.commit('list-one', '/inventory?q=x#row');
     f.permission.ready = true;
     f.reveal();
+    expect(f.scrollTo).not.toHaveBeenCalled();
+  },
+);
+
+it.each(['pointerdown', 'mousedown'])(
+  'user %s without a pending restore keeps ordinary checkpoint capture active',
+  (type) => {
+    const f = fixture();
+    f.offset(240);
+    const event = new MouseEvent(type, { button: 1, cancelable: true });
+    window.dispatchEvent(event);
+    expect(event.defaultPrevented).toBe(false);
+    detail(f, 610);
+    f.navigate('list-one', '/inventory?q=x#row');
+    f.collapse();
+    f.commit('list-one', '/inventory?q=x#row');
+    f.permission.ready = true;
+    f.reveal();
+    expect(f.scrollTo).toHaveBeenCalledExactlyOnceWith({
+      left: 0,
+      top: 610,
+      behavior: 'instant',
+    });
+  },
+);
+
+it('an aborted dirty-leave attempt resumes capture on its unchanged authorized source', () => {
+  const f = fixture();
+  f.offset(728);
+  const controller = new AbortController();
+  const event = f.navigate(
+    '',
+    '/inventory/assets/a',
+    'push',
+    controller.signal,
+  );
+  event.preventDefault();
+  controller.abort();
+  expect(f.scrollTo).not.toHaveBeenCalled();
+  detail(f, 610);
+  f.navigate('list-one', '/inventory?q=x#row');
+  f.collapse();
+  f.commit('list-one', '/inventory?q=x#row');
+  f.permission.ready = true;
+  f.reveal();
+  expect(f.scrollTo).toHaveBeenCalledExactlyOnceWith({
+    left: 0,
+    top: 610,
+    behavior: 'instant',
+  });
+});
+
+it('an abort during a temporary privacy check waits for fresh source readiness before capturing', () => {
+  const f = fixture();
+  f.offset(728);
+  const controller = new AbortController();
+  f.navigate('', '/inventory/assets/a', 'push', controller.signal);
+  f.collapse();
+  controller.abort();
+  f.offset(100);
+  expect(f.scrollTo).not.toHaveBeenCalled();
+  f.permission.ready = true;
+  f.reveal();
+  detail(f, 610);
+  f.navigate('list-one', '/inventory?q=x#row');
+  f.collapse();
+  f.commit('list-one', '/inventory?q=x#row');
+  f.permission.ready = true;
+  f.reveal();
+  expect(f.scrollTo).toHaveBeenCalledExactlyOnceWith({
+    left: 0,
+    top: 610,
+    behavior: 'instant',
+  });
+});
+
+it('a delayed source abort after a committed traversal cannot cancel destination restoration', () => {
+  const f = fixture();
+  detail(f);
+  const controller = new AbortController();
+  f.navigate('list-one', '/inventory?q=x#row', 'traverse', controller.signal);
+  f.collapse();
+  f.commit('list-one', '/inventory?q=x#row');
+  controller.abort();
+  f.permission.ready = true;
+  f.reveal();
+  expect(f.scrollTo).toHaveBeenCalledExactlyOnceWith({
+    left: 0,
+    top: 728,
+    behavior: 'instant',
+  });
+});
+
+it('a stale abort from a superseded attempt cannot cancel a newer traversal token', () => {
+  const f = fixture();
+  detail(f);
+  const old = new AbortController();
+  const remove = vi.spyOn(old.signal, 'removeEventListener');
+  f.navigate('', '/other', 'push', old.signal);
+  f.navigate('list-one', '/inventory?q=x#row');
+  expect(remove).toHaveBeenCalledWith('abort', expect.any(Function));
+  old.abort();
+  f.collapse();
+  f.commit('list-one', '/inventory?q=x#row');
+  f.permission.ready = true;
+  f.reveal();
+  expect(f.scrollTo).toHaveBeenCalledExactlyOnceWith({
+    left: 0,
+    top: 728,
+    behavior: 'instant',
+  });
+});
+
+it.each(['authority change', 'detach', 'unmount'])(
+  'a delayed attempt abort after %s cannot reassociate or grant the retired source',
+  (change) => {
+    const f = fixture();
+    f.offset(728);
+    const controller = new AbortController();
+    const add = vi.spyOn(controller.signal, 'addEventListener');
+    const remove = vi.spyOn(controller.signal, 'removeEventListener');
+    f.navigate('', '/other', 'push', controller.signal);
+    expect(add).toHaveBeenCalledExactlyOnceWith('abort', expect.any(Function), {
+      once: true,
+    });
+    const stale = add.mock.calls[0][1] as EventListener;
+    if (change === 'authority change') {
+      f.permission.key = 'new-actor:generation';
+      f.coordinator.reconcile();
+    } else if (change === 'detach') f.coordinator.detach();
+    else f.coordinator.dispose();
+    expect(remove).toHaveBeenCalledWith('abort', stale);
+    const primary = vi.spyOn(f.readiness, 'currentPrimary');
+    controller.abort();
+    stale(new Event('abort'));
+    expect(primary).not.toHaveBeenCalled();
     expect(f.scrollTo).not.toHaveBeenCalled();
   },
 );

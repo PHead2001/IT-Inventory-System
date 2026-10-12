@@ -1044,6 +1044,74 @@ for (const width of [1280, 390]) {
     await settled(page);
     expect((await proof(page)).transitions).toHaveLength(0);
     expect((await proof(page)).replacements).toHaveLength(0);
+    const browserBack = await proof(page);
+    // History ends in [detail B, results A]. Hold a real accepted A -> B
+    // response, then native Back restores that exact pending destination B.
+    const pendingRow = page
+      .locator('#inventory-row-2')
+      .getByRole('link', { name, exact: true });
+    const pendingHref = await pendingRow.getAttribute('href');
+    expect(pendingHref).not.toBeNull();
+    const pendingDestination = new URL(pendingHref!, page.url());
+    expect(pendingDestination.pathname).toBe(
+      `/inventory/quantity/${record.id}`,
+    );
+    const pendingSource = await pendingRow.elementHandle();
+    expect(pendingSource).not.toBeNull();
+    const interrupted = await holdRouteWork(page, pendingDestination.pathname);
+    const pendingNativeProof: {
+      back?: Proof;
+      lateDelivery?: Proof;
+      appBack?: Proof;
+    } = {};
+    try {
+      await resetProof(page);
+      await pendingRow.click();
+      await interrupted.arrival;
+      await expect(routeProgress(page)).toHaveAttribute('data-visible', 'true');
+      expect(
+        await pendingSource!.evaluate(
+          (node) =>
+            node.isConnected &&
+            node.getClientRects().length > 0 &&
+            node === document.querySelector('#inventory-row-2 a'),
+        ),
+      ).toBe(true);
+      expect(await page.locator('[data-loading-shape]').count()).toBe(0);
+      expect((await proof(page)).transitions).toHaveLength(0);
+      await page.goBack();
+      await expect(page).toHaveURL(pendingDestination.href);
+      // Native restore may use resolved destination data or await the held
+      // Flight/cache entry. Either ready or pending content is valid here;
+      // exact URL restoration must capture no transition in either case.
+      pendingNativeProof.back = await proof(page);
+      expect(pendingNativeProof.back.transitions).toHaveLength(0);
+      expect(pendingNativeProof.back.replacements).toHaveLength(0);
+      interrupted.release();
+      await interrupted.delivery;
+      await expect(page).toHaveURL(pendingDestination.href);
+      await expect(
+        page.getByRole('heading', { name, exact: true }),
+      ).toBeVisible();
+      await expect(routeProgress(page)).toHaveAttribute(
+        'data-visible',
+        'false',
+      );
+      await settled(page);
+      pendingNativeProof.lateDelivery = await proof(page);
+      expect(pendingNativeProof.lateDelivery.transitions).toHaveLength(0);
+      expect(pendingNativeProof.lateDelivery.replacements).toHaveLength(0);
+      await resetProof(page);
+      await page.getByRole('link', { name: 'Back to results' }).click();
+      await expect(page).toHaveURL(
+        new URL(scope + '#inventory-row-2', page.url()).href,
+      );
+      await expect(page.locator('#inventory-row-2')).toBeVisible();
+      pendingNativeProof.appBack = await completedTitlePair(page);
+      expect(pendingNativeProof.appBack.replacements).toHaveLength(1);
+    } finally {
+      await interrupted.dispose();
+    }
     await info.attach('native-route-proof', {
       body: JSON.stringify({
         forward,
@@ -1051,7 +1119,8 @@ for (const width of [1280, 390]) {
         firstBrowserForward,
         appBackAfterNativeForward,
         back,
-        browserBack: await proof(page),
+        browserBack,
+        pendingNativeProof,
       }),
       contentType: 'application/json',
     });

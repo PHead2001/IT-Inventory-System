@@ -195,9 +195,15 @@ connected, visible, actor-matched and ready for the complete query. Primary/priv
 notifications and post-popstate reconciliation cover either admission order and
 already-authorized same-URL or hash-only entries. Consume the pending restore
 before scrolling; a shorter final page clamps naturally without retries. User
-wheel/touch/scroll-key input or a new navigation cancels the pending restore;
+wheel/touch/pointer/mouse/scroll-key input or a new navigation cancels the pending restore;
 ordinary scroll events cannot cancel it because document collapse also emits them.
 Only Next's exact same-entry/same-URL replacement preserves a pending restore.
+A single listener on the current navigation attempt's AbortSignal releases a
+cancelled departure freeze only while its original history entry, exact URL and
+authority remain current. Resuming capture still requires the existing fresh
+privacy grant and canonical visible primary. A commit, new attempt, authority
+change or retired provider fences and removes the old abort listener; a delayed
+abort cannot cancel a newer restore or revive an old actor's checkpoint.
 This coordination never intercepts navigation, changes history or scroll restoration
 mode, persists checkpoints, moves focus or grants authorization/readiness. Without
 supported Navigation API entry observation, ordinary browser restoration remains

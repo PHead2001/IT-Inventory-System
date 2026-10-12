@@ -255,7 +255,15 @@ both admission and popstate-listener orders, already-authorized entries without 
 new readiness effect, plain router filters, exact internal replacement, user
 interruption, rapid traversal, authority invalidation, stale callbacks, the 50-entry
 cap, finite/nonnegative offsets, shorter-page one-shot clamping and unsupported or
-failed observers. `native-scroll-restoration.integration.test.tsx` mounts the real
+failed observers. Pointer/scrollbar and middle-mouse interruption coverage also
+proves that inactive input leaves normal checkpoint capture intact. Aborted
+dirty-leave attempts resume capture at the unchanged authorized source, preserving
+the user's later offset; one owned AbortSignal listener is retired on supersede,
+commit, authority change, detach and disposal. Delayed aborts cannot cancel newer
+pending restoration or reauthorize retired callbacks, and temporary privacy checks
+still wait for a fresh grant and real primary. These paths do not prevent browser
+input, intercept navigation or rely on a global navigation-error event.
+`native-scroll-restoration.integration.test.tsx` mounts the real
 route provider and canonical readiness owner to exercise hidden same-authority
 privacy collapse, both admission orders and real revocation notifications. Three
 additional provider regressions reproduced premature restoration when a new

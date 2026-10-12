@@ -39,6 +39,7 @@ function translation(value: unknown) {
 export function sharedTitleMotion(
   instance: { name: string },
   valid: () => boolean,
+  unsupported?: () => void,
 ) {
   if (!valid()) {
     cancelRouteSnapshots();
@@ -119,6 +120,7 @@ export function sharedTitleMotion(
     // A post-capture failure cannot rebuild the parent's image without retaining
     // private DOM. Skip the entire snapshot, revealing the live destination now.
     replacement?.cancel();
+    unsupported?.();
     cancelRouteSnapshots();
   }
 }

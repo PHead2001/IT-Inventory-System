@@ -24,8 +24,21 @@ export function createNativeScrollRestoration(
   let incarnation = 0;
   let navigation: Navigation | undefined;
   let unbind: (() => void) | undefined;
+  let attempt:
+    { source: Entry; authority: string; release: () => void } | undefined;
+
+  const retireAttempt = () => {
+    const previous = attempt;
+    attempt = undefined;
+    try {
+      previous?.release();
+    } catch {
+      // Removed ownership keeps an old callback inert if native cleanup fails.
+    }
+  };
 
   const clear = () => {
+    retireAttempt();
     checkpoints.clear();
     associated = undefined;
     pending = undefined;
@@ -103,9 +116,54 @@ export function createNativeScrollRestoration(
     departing = false;
     capture();
   };
+  const observeAbort = (
+    signal: AbortSignal | undefined,
+    source: Entry | undefined,
+    authorityKey: string,
+  ) => {
+    if (
+      !source ||
+      typeof signal?.addEventListener !== 'function' ||
+      typeof signal.removeEventListener !== 'function'
+    )
+      return;
+    const owner = {
+      source,
+      authority: authorityKey,
+      release: () => signal.removeEventListener('abort', abort),
+    };
+    const abort = () => {
+      if (attempt !== owner || disposed || !listening) return;
+      const value = grant();
+      if (
+        attempt !== owner ||
+        !value ||
+        value.key !== owner.authority ||
+        !matches(current(), owner.source)
+      ) {
+        if (attempt === owner) retireAttempt();
+        return;
+      }
+      retireAttempt();
+      pending = undefined;
+      departing = false;
+      associated = undefined;
+      // Aborting grants nothing. The unchanged source still needs a fresh
+      // privacy grant and canonical visible primary before capture resumes.
+      reconcile();
+    };
+    attempt = owner;
+    try {
+      signal.addEventListener('abort', abort, { once: true });
+      if (signal.aborted) abort();
+    } catch {
+      if (attempt === owner) retireAttempt();
+    }
+  };
   const navigate = (raw: Event) => {
     const value = grant();
     if (!value || disposed) return;
+    retireAttempt();
     const event = raw as NavigateEvent;
     const url = exactURL(event.destination?.url ?? null);
     const entry = current();
@@ -121,14 +179,22 @@ export function createNativeScrollRestoration(
     capture();
     pending = undefined;
     departing = true;
-    if (event.navigationType !== 'traverse' || !url) return;
-    const saved = checkpoints.get(event.destination.key);
-    if (saved?.url === url && saved.authority === value.key)
-      pending = { ...saved };
+    if (event.navigationType === 'traverse' && url) {
+      const saved = checkpoints.get(event.destination.key);
+      if (saved?.url === url && saved.authority === value.key)
+        pending = { ...saved };
+    }
+    observeAbort(event.signal, entry, value.key);
   };
-  const entryChanged = () => {
+  const entryChanged = (event: Event) => {
     if (disposed || !listening) return;
     grant();
+    if (
+      attempt &&
+      (!matches(current(), attempt.source) ||
+        (event as NavigationCurrentEntryChangeEvent).navigationType != null)
+    )
+      retireAttempt();
     // Destination admission comes from a real readiness/privacy notification,
     // after the browser changes entries, rather than from its history event.
     if (!pending) reconcile();
@@ -194,6 +260,8 @@ export function createNativeScrollRestoration(
         ['scroll', capture],
         ['wheel', interrupt],
         ['touchstart', interrupt],
+        ['pointerdown', interrupt],
+        ['mousedown', interrupt],
         ['keydown', (event: Event) => keydown(event as KeyboardEvent)],
       ] as const) {
         const listener = observe(callback);

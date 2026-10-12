@@ -713,6 +713,14 @@ export function useRouteMotion() {
     listHref: context?.listHref,
     intent: enabled ? intent : null,
     current,
+    rejectTitleSnapshot: () => {
+      if (!current() || !intent) return;
+      // A failed pair reveals its live destination directly. Its later outer
+      // commit must not start a generic snapshot of that same navigation.
+      // Exact captured identities protect a newer navigation from late cleanup.
+      if (arrival) state?.finishArrival(arrival);
+      state?.finish(intent.name);
+    },
     retireTitle: () => {
       if (current()) state?.stageNavigation(null);
     },

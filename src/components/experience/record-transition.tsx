@@ -58,6 +58,7 @@ export function InventoryRecordLink({
     listHref,
     finishAfterSnapshot,
     current,
+    rejectTitleSnapshot,
   } = useRouteMotion();
   const contentIdentity = useContext(RouteContentIdentityContext);
   const target =
@@ -80,7 +81,11 @@ export function InventoryRecordLink({
       name={matches ? intent?.name : undefined}
       onShare={(instance) => {
         if (!current()) return;
-        const cleanup = sharedTitleMotion(instance, validNow);
+        const cleanup = sharedTitleMotion(
+          instance,
+          validNow,
+          rejectTitleSnapshot,
+        );
         finishAfterSnapshot(instance);
         return cleanup;
       }}
@@ -119,6 +124,7 @@ export function RecordTitle({
     pathname,
     finishAfterSnapshot,
     current,
+    rejectTitleSnapshot,
   } = useRouteMotion();
   const privacy = usePrivacyReadiness();
   const heading = useRef<HTMLHeadingElement>(null);
@@ -173,7 +179,11 @@ export function RecordTitle({
       name={matches ? intent!.name : undefined}
       onShare={(instance) => {
         if (!current()) return;
-        const cleanup = sharedTitleMotion(instance, validNow);
+        const cleanup = sharedTitleMotion(
+          instance,
+          validNow,
+          rejectTitleSnapshot,
+        );
         finishAfterSnapshot(instance);
         return cleanup;
       }}
