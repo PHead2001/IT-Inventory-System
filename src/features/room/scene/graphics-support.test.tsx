@@ -6,6 +6,7 @@ import {
   StrictMode,
   useContext,
   useEffect,
+  useLayoutEffect,
   useState,
   type ReactNode,
 } from 'react';
@@ -104,6 +105,43 @@ function contextValue<T>(tree: ReactNode, context: unknown): T | undefined {
   visit(tree);
   return result;
 }
+it('treats a queued grant between committed withholding and passive cleanup as pending admission, then resumes fresh automatically', async () => {
+  const privacy = verifiedOwner();
+  let complete!: () => void;
+  driver.teardown.mockImplementation((_canvas, callback) => {
+    complete = callback;
+  });
+  function Release({ release }: { release: boolean }) {
+    useLayoutEffect(() => {
+      if (release) complete();
+    }, [release]);
+    return null;
+  }
+  const ui = (occupied: boolean, ready: boolean, release = false) => (
+    <PrivacyReadinessContext value={privacy(ready)}>
+      <RoomSceneBudgetProvider>
+        {occupied && (
+          <ScenePriorityContext value={1}>
+            <SafeCanvas onFailure={vi.fn()}>occupied</SafeCanvas>
+          </ScenePriorityContext>
+        )}
+        <ScenePriorityContext value={0}>
+          <SafeCanvas onFailure={vi.fn()}>queued</SafeCanvas>
+        </ScenePriorityContext>
+        <Release release={release} />
+      </RoomSceneBudgetProvider>
+    </PrivacyReadinessContext>
+  );
+  const view = render(ui(true, true));
+  await waitFor(() => expect(driver.render).toHaveBeenCalledOnce());
+  view.rerender(ui(false, true));
+  await waitFor(() => expect(driver.teardown).toHaveBeenCalledOnce());
+  view.rerender(ui(false, false, true));
+  expect(driver.create).toHaveBeenCalledOnce();
+  view.rerender(ui(false, true));
+  await waitFor(() => expect(driver.create).toHaveBeenCalledTimes(2));
+  expect(screen.queryByRole('button', { name: 'Resume map' })).toBeNull();
+});
 it('retains the allocated canvas and original session while propagating withheld current privacy', async () => {
   const privacy = verifiedOwner();
   const ui = (ready: boolean) => (
@@ -493,6 +531,59 @@ it('priority preemption retains the disposing slot and Resume map allocates agai
   view.rerender(ui(false));
   await waitFor(() => expect(driver.teardown).toHaveBeenCalledTimes(2));
   act(() => finish());
+  await userEvent
+    .setup()
+    .click(screen.getByRole('button', { name: 'Resume map' }));
+  await waitFor(() => expect(driver.create).toHaveBeenCalledTimes(3));
+});
+
+it('keeps a preempted allocation withdrawn across privacy refresh and slot release until explicit fresh Resume', async () => {
+  const privacy = verifiedOwner();
+  const completions: (() => void)[] = [];
+  driver.teardown.mockImplementation((_canvas, complete) =>
+    completions.push(complete),
+  );
+  const ui = (picker: boolean, ready: boolean) => (
+    <PrivacyReadinessContext value={privacy(ready)}>
+      <RoomSceneBudgetProvider>
+        <ScenePriorityContext value={0}>
+          <SafeCanvas onFailure={vi.fn()}>preview</SafeCanvas>
+        </ScenePriorityContext>
+        {picker && (
+          <ScenePriorityContext value={2}>
+            <SafeCanvas onFailure={vi.fn()}>picker</SafeCanvas>
+          </ScenePriorityContext>
+        )}
+      </RoomSceneBudgetProvider>
+    </PrivacyReadinessContext>
+  );
+  const view = render(ui(false, true));
+  await waitFor(() => expect(driver.render).toHaveBeenCalledOnce());
+  view.rerender(ui(true, true));
+  await waitFor(() => expect(completions).toHaveLength(1));
+  view.rerender(ui(true, false));
+  view.rerender(ui(true, true));
+  expect(driver.create).toHaveBeenCalledOnce();
+  expect(
+    screen.getAllByRole('button', { name: 'Resume map' }),
+  ).not.toHaveLength(0);
+  act(() => completions[0]());
+  await waitFor(() => expect(driver.create).toHaveBeenCalledTimes(2));
+  view.rerender(ui(false, true));
+  await waitFor(() => expect(completions).toHaveLength(2));
+  expect(driver.create).toHaveBeenCalledTimes(2);
+  act(() => completions[1]());
+  view.rerender(ui(false, false));
+  await userEvent
+    .setup()
+    .click(screen.getByRole('button', { name: 'Resume map' }));
+  view.rerender(ui(false, true));
+  // A fresh grant or a newly free slot cannot substitute for the user's Resume.
+  await act(async () => {
+    await new Promise((resolve) => requestAnimationFrame(resolve));
+  });
+  expect(driver.create).toHaveBeenCalledTimes(2);
+  expect(screen.getByRole('button', { name: 'Resume map' })).toBeVisible();
   await userEvent
     .setup()
     .click(screen.getByRole('button', { name: 'Resume map' }));

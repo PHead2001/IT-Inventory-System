@@ -10,18 +10,37 @@ import {
 import { PrivacyReadinessContext } from '@/components/auth/privacy-readiness';
 import type { LocationRef } from '../inventory/contracts-ui';
 const driver = vi.hoisted(() => ({
+  mount: vi.fn(),
+  unmount: vi.fn(),
   authority: null as
     import('../room/scene/camera-snapshot-store').CameraAuthority | null,
 }));
+import { useEffect, useState } from 'react';
 vi.mock('../room/scene/camera-snapshot-provider', () => ({
   useRoomSceneAuthority: () => driver.authority,
 }));
 vi.mock('../room/embedded-room', () => ({
-  EmbeddedRoom: ({ onSelect }: { onSelect(code: string): void }) => (
-    <button type="button" onClick={() => onSelect('ITC-D01')}>
-      Stage drawer
-    </button>
-  ),
+  EmbeddedRoom: ({ onSelect }: { onSelect(code: string): void }) => {
+    const [camera, setCamera] = useState('original camera');
+    useEffect(() => {
+      driver.mount();
+      return driver.unmount;
+    }, []);
+    return (
+      <>
+        <button type="button" onClick={() => onSelect('ITC-D01')}>
+          Stage drawer
+        </button>
+        <button type="button" onClick={() => onSelect('ITC-D02')}>
+          Stage second drawer
+        </button>
+        <button type="button" onClick={() => setCamera('moved camera')}>
+          Move camera
+        </button>
+        <output>{camera}</output>
+      </>
+    );
+  },
 }));
 const root: LocationRef = {
   id: 'root',
@@ -41,7 +60,15 @@ const drawer: LocationRef = {
   active: true,
   can_hold_inventory: true,
 };
+const other: LocationRef = {
+  ...drawer,
+  id: 'other',
+  code: 'ITC-D02',
+  name: 'Drawer 2',
+  breadcrumb: 'Closet / Drawer 2',
+};
 beforeEach(() => {
+  vi.clearAllMocks();
   driver.authority = null;
   Object.defineProperty(HTMLDialogElement.prototype, 'showModal', {
     configurable: true,
@@ -55,6 +82,80 @@ beforeEach(() => {
       this.removeAttribute('open');
     },
   });
+});
+it('retains the open original dialog, staged draft and camera during a visible check while fresh actions are withheld', async () => {
+  const authority = {
+    actorId: 'actor-a',
+    backend: 'https://backend.example',
+    generation: 'verified',
+    revision: readPrivacyRevocationRevision(),
+    epoch: assignmentEpoch(),
+  };
+  driver.authority = authority;
+  const use = vi.fn(),
+    close = vi.fn(),
+    mounted = vi.fn();
+  const ui = (ready: boolean) => (
+    <PrivacyReadinessContext
+      value={{
+        ready,
+        visible: true,
+        generation: authority.generation,
+        revocationRevision: authority.revision,
+        verifiedEpoch: ready ? authority.epoch : undefined,
+      }}
+    >
+      <LocationMapPicker
+        locations={[root, drawer, other]}
+        initialValue=""
+        disabled={false}
+        onUse={use}
+        onClose={close}
+        onMounted={mounted}
+      />
+    </PrivacyReadinessContext>
+  );
+  const view = render(ui(true));
+  const dialog = screen.getByRole('dialog');
+  await userEvent
+    .setup()
+    .click(screen.getByRole('button', { name: 'Stage drawer' }));
+  await userEvent
+    .setup()
+    .click(screen.getByRole('button', { name: 'Move camera' }));
+  const draft = screen.getByText(drawer.breadcrumb, {
+    selector: 'p[role="status"]',
+  });
+  const show = vi.spyOn(dialog, 'showModal'),
+    hide = vi.spyOn(dialog, 'close');
+  view.rerender(ui(false));
+  expect(screen.getByRole('dialog')).toBe(dialog);
+  expect(dialog).toHaveAttribute('open');
+  expect(dialog).not.toHaveAttribute('inert');
+  expect(screen.getByRole('button', { name: 'Use location' })).toBeDisabled();
+  fireEvent.click(screen.getByRole('button', { name: 'Use location' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Stage second drawer' }));
+  expect(use).not.toHaveBeenCalled();
+  expect(draft).toBeVisible();
+  expect(
+    screen.queryByText(other.breadcrumb, { selector: 'p[role="status"]' }),
+  ).toBeNull();
+  expect(screen.getByText('moved camera')).toBeVisible();
+  view.rerender(ui(true));
+  expect(screen.getByRole('button', { name: 'Use location' })).toBeEnabled();
+  expect(show).not.toHaveBeenCalled();
+  expect(hide).not.toHaveBeenCalled();
+  expect(mounted).toHaveBeenCalledOnce();
+  expect(driver.mount).toHaveBeenCalledOnce();
+  expect(driver.unmount).not.toHaveBeenCalled();
+  act(() => revokePrivatePresentation());
+  expect(dialog).toHaveAttribute('hidden');
+  expect(dialog).toHaveAttribute('inert');
+  expect(dialog).not.toHaveAttribute('open');
+  view.rerender(ui(true));
+  expect(dialog).toHaveAttribute('hidden');
+  expect(close).toHaveBeenCalledOnce();
+  expect(use).not.toHaveBeenCalled();
 });
 it('opens after initial same-owner verification and cannot reopen a cancelled dialog on another readiness cycle', () => {
   const authority = {

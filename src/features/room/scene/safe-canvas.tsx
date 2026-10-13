@@ -140,6 +140,9 @@ export function SafeCanvas({
   const [retry, setRetry] = useState(0);
   const leaseRef = useRef<SceneLease | null>(null);
   const allocated = useRef(false);
+  // Withdrawal is a user-resumable pause, distinct from a queued request whose
+  // initial admission was withheld. A later privacy refresh cannot readmit it.
+  const withdrawn = useRef(false);
   const stopRequest = useRef<(() => void) | null>(null);
   useLayoutEffect(() => {
     // A committed identity/environment change retires the original session even
@@ -214,7 +217,7 @@ export function SafeCanvas({
     };
   }, [owner]);
   const requestLease = useCallback(() => {
-    if (leaseRef.current || !freshCurrent()) return;
+    if (withdrawn.current || leaseRef.current || !freshCurrent()) return;
     let live = true;
     let granted = false;
     // The initial grant can run synchronously before request returns its lease.
@@ -225,7 +228,12 @@ export function SafeCanvas({
         granted = true;
         if (!live) return;
         if (admission.request && !freshCurrent()) {
+          // This request never allocated. Rejecting a late stale admission is
+          // withholding, not user withdrawal of a retained map.
+          live = false;
           admission.request.cancel();
+          if (leaseRef.current === admission.request) leaseRef.current = null;
+          setLease(null);
           return;
         }
         if (admission.request && freshCurrent()) {
@@ -235,6 +243,7 @@ export function SafeCanvas({
       },
       () => {
         if (live) {
+          withdrawn.current = true;
           if (leaseRef.current === admission.request) leaseRef.current = null;
           setLease(null);
           setRequestStatus('withdrawn');
@@ -268,7 +277,10 @@ export function SafeCanvas({
   useEffect(() => {
     // Ordinary visible verification preserves an allocated original owner. A
     // queued/admitted request has no retained renderer and needs a fresh grant.
-    if (!current() || (!freshCurrent() && !allocated.current)) {
+    if (
+      !current() ||
+      (!freshCurrent() && !(leaseRef.current && allocated.current))
+    ) {
       stopRequest.current?.();
       stopRequest.current = null;
       return;
@@ -324,6 +336,7 @@ export function SafeCanvas({
               className="min-h-11 text-cyan-300 underline"
               onClick={() => {
                 if (freshCurrent()) {
+                  withdrawn.current = false;
                   setRequestStatus('starting');
                   setRetry((value) => value + 1);
                 }

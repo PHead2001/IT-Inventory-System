@@ -145,7 +145,10 @@ A different identity cannot rebind the original session.
 Committed actor/backend/generation drift permanently retires each canvas, map
 dialog and embedded-count owner even without a global invalidation event. Returning
 to the original identity cannot revive its scene or staged confirmation. An ordinary
-same-owner readiness recheck can resume after verification succeeds.
+same-owner visible readiness recheck retains the mounted native dialog, its staged
+candidate and camera. New selections, Use location, first modal opening and focus
+handoff still require fresh verification. Cancel safely closes the retained dialog;
+focus restoration is withheld until its original grant is fresh.
 
 Fiber 9.8.1's public `unmountComponentAtNode(canvas, complete)` handles failed
 and pending configuration, missing scenes and factory-owned async renderer
@@ -177,8 +180,17 @@ late loading, selection or focus callbacks cannot adopt a reauthorized owner or
 clear a successor intent. Ordinary same-authority rechecks retain intent, but a
 fresh grant is required before first dialog mount, confirmation and focus transfer. Renderer startup uses loading feedback until a budget request
 actually queues or is withdrawn; Resume is reserved for genuine paused/retry states.
-Static canonical room bindings decide whether a detail location has modeled geometry
-before any dynamic chunk or map footprint is reserved. Inventory-only spaces and
+Once an allocation is withdrawn by a higher-priority map, it stays paused through
+ordinary privacy refresh and slot release. Only an explicit Resume map with a
+fresh original grant can request a new lease. A queued request withheld before
+allocation may resume automatically when fresh verification returns. Neither path
+releases the disposing renderer's slot before Fiber completion.
+The server detail wrapper derives compact per-choice capability flags from the
+canonical room bindings and supplies server-rendered room links to the client.
+The eager client region, including the links' client descendants, imports no room
+geometry; its near-viewport dynamic chunk owns that load. Capability flags decide
+whether a detail location has modeled geometry before any map footprint is reserved.
+Inventory-only spaces and
 unmodeled children use the same short recorded-context fallback.
 
 Compact embedded maps use their own cold-chunk placeholder, rather than the full

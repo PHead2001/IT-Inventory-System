@@ -1,9 +1,16 @@
 import { afterEach, expect, it, vi } from 'vitest';
 import { act, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { renderToString } from 'react-dom/server';
 import { DetailRoomPreview } from './detail-room-preview';
+import { buildRoomBindings } from './bindings';
+import { spaceRoom, spaces } from './spaces';
+import { hasModeledRoomBinding } from './room-map-model';
+import type { ComponentProps } from 'react';
+import type { DetailRoomPreviewClient } from './detail-room-preview-client';
 const chunks = vi.hoisted(() => ({ pending: false }));
 import type { LocationRef } from '../inventory/contracts-ui';
+vi.mock('server-only', () => ({}));
 vi.mock('next/dynamic', () => ({
   default:
     (_loader: unknown, options: { loading(): import('react').ReactNode }) =>
@@ -26,6 +33,83 @@ const location: LocationRef = {
   active: true,
   can_hold_inventory: true,
 };
+it('projects every canonical modeled binding and rejects unmodeled ancestry without sending geometry to the client', () => {
+  const codes = [
+    ...new Set(
+      spaces.flatMap((space) => {
+        const room = spaceRoom(space);
+        return room
+          ? buildRoomBindings(room).map((binding) => binding.code)
+          : [];
+      }),
+    ),
+  ];
+  const locations = codes.map((code) => ({ ...location, id: code, code }));
+  const unmodeled = { ...location, id: 'extra', code: 'ITC-EXTRA' };
+  const unknownRoot = {
+    ...location,
+    id: 'office',
+    code: 'ITO',
+    parentId: null,
+  };
+  const misleading = {
+    ...location,
+    id: 'spoof',
+    code: 'ITC-D01',
+    parentId: unknownRoot.id,
+  };
+  const choices = codes.map((code) => ({ code, label: code }));
+  const client = DetailRoomPreview({
+    locations: [...locations, unmodeled],
+    choices: [...choices, { code: unmodeled.code, label: 'Extra' }],
+  });
+  const clientChoices = (
+    client.props as ComponentProps<typeof DetailRoomPreviewClient>
+  ).choices;
+  expect(client.props.locations).toEqual([...locations, unmodeled]);
+  for (const choice of clientChoices) {
+    expect(choice.modeled).toBe(
+      hasModeledRoomBinding([...locations, unmodeled], choice.code),
+    );
+    expect(Object.keys(choice).sort()).toEqual([
+      'code',
+      'label',
+      'modeled',
+      'roomLink',
+    ]);
+  }
+  expect(clientChoices.filter((choice) => choice.modeled)).toHaveLength(
+    codes.length,
+  );
+  expect(clientChoices.at(-1)?.modeled).toBe(false);
+  const mismatch = DetailRoomPreview({
+    locations: [unknownRoot, misleading],
+    choices: [{ code: misleading.code, label: 'Recorded' }],
+  });
+  expect(mismatch.props.choices[0].modeled).toBe(false);
+});
+
+it('server rendering preserves a truthful pending compact slot even without an observer, and unmodeled context stays compact', () => {
+  const modeled = renderToString(
+    <DetailRoomPreview
+      locations={[location]}
+      choices={[{ code: location.code, label: location.name }]}
+    />,
+  );
+  expect(modeled).toContain('data-loading-shape="compact-room"');
+  expect(modeled).toContain('aria-busy="true"');
+  expect(modeled).not.toContain('Map for');
+  const unmodeled = { ...location, code: 'ITC-EXTRA' };
+  const compact = renderToString(
+    <DetailRoomPreview
+      locations={[unmodeled]}
+      choices={[{ code: unmodeled.code, label: unmodeled.name }]}
+    />,
+  );
+  expect(compact).toContain('This location has no modeled map');
+  expect(compact).not.toContain('compactPreviewSlot');
+  expect(compact).not.toContain('data-loading-shape');
+});
 it('requires an explicit choice for several positive balances and mounts only one preview', async () => {
   const other = { ...location, id: 'other', code: 'ITC-D02', name: 'Drawer 2' };
   render(

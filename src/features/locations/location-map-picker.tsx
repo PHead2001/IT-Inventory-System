@@ -8,7 +8,10 @@ import {
 } from 'react';
 import { createPortal } from 'react-dom';
 import { usePrivacyReadiness } from '@/components/auth/privacy-readiness';
-import { freshPresentationGrant } from '@/components/experience/presentation-privacy';
+import {
+  freshPresentationGrant,
+  retainedPresentationGrantCurrent,
+} from '@/components/experience/presentation-privacy';
 import {
   assignmentEpoch,
   readPrivacyRevocationRevision,
@@ -62,16 +65,34 @@ export default function LocationMapPicker({
       },
     };
   });
-  const current = () =>
+  const [mounted, setMounted] = useState(false);
+  const reportedMount = useRef(false);
+  const latest = useRef({ privacy, key });
+  useLayoutEffect(() => {
+    latest.current = { privacy, key };
+  }, [privacy, key]);
+  const bindingCurrent = (candidate: {
+    privacy: typeof privacy;
+    key: typeof key;
+  }) =>
     !owner.retired() &&
     owner.key !== null &&
-    owner.key === key &&
-    owner.generation === privacy.generation &&
+    owner.key === candidate.key &&
+    owner.generation === candidate.privacy.generation &&
     owner.revision === readPrivacyRevocationRevision() &&
-    owner.epoch === assignmentEpoch() &&
+    owner.epoch === assignmentEpoch();
+  const freshFor = (candidate: { privacy: typeof privacy; key: typeof key }) =>
+    bindingCurrent(candidate) &&
+    (candidate.privacy.generation === 'unmanaged'
+      ? candidate.privacy.ready
+      : freshPresentationGrant(candidate.privacy));
+  const current = () => freshFor(latest.current);
+  const fresh = freshFor({ privacy, key });
+  const visible =
+    bindingCurrent({ privacy, key }) &&
     (privacy.generation === 'unmanaged'
       ? privacy.ready
-      : freshPresentationGrant(privacy));
+      : fresh || (mounted && retainedPresentationGrantCurrent(privacy, owner)));
   const [candidate, setCandidate] = useState(
     () =>
       locations.find((location) => location.id === initialValue)?.code ?? null,
@@ -116,16 +137,12 @@ export default function LocationMapPicker({
       closeRef.current();
     }
   }, [owner, key, privacy.generation]);
-  useLayoutEffect(() => {
-    if (current()) onMounted?.();
-    // Report only this original dialog's first authorized mount/recheck.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [onMounted, privacy, key]);
   useEffect(() => {
     closeRef.current = onClose;
   }, [onClose]);
   useInsertionEffect(() => {
     const retire = () => {
+      if (owner.retired()) return;
       owner.retire();
       if (dialog.current) {
         dialog.current.hidden = true;
@@ -142,20 +159,33 @@ export default function LocationMapPicker({
     ];
     return () => remove.forEach((unsubscribe) => unsubscribe());
   }, [owner]);
+  useLayoutEffect(() => {
+    const element = dialog.current;
+    if (!element) return;
+    if (!visible) {
+      element.close();
+      return;
+    }
+    if (!element.open && current()) element.showModal();
+    if (element.open && !reportedMount.current && current()) {
+      reportedMount.current = true;
+      setMounted(true);
+      onMounted?.();
+    }
+    // Initial opening and focus handoff require a fresh grant. An ordinary
+    // visible recheck keeps this same native dialog and its camera/draft owner.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [privacy, key, owner, onMounted, visible, mounted]);
   useEffect(() => {
     const element = dialog.current;
-    if (!element || !current()) return;
-    if (!element.open) element.showModal();
-    return () => element.close();
-    // The modal retains the original private session.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [privacy.ready, key, owner]);
+    return () => element?.close();
+  }, []);
   if (typeof document === 'undefined') return null;
   return createPortal(
     <dialog
       ref={dialog}
-      hidden={!current()}
-      inert={!current()}
+      hidden={!visible}
+      inert={!visible}
       aria-label="Pick a storage location"
       onCancel={(event) => {
         event.preventDefault();
@@ -190,7 +220,7 @@ export default function LocationMapPicker({
           mapEnabled={false}
           value={selected?.id ?? ''}
           excludeIds={excludeIds}
-          disabled={disabled}
+          disabled={disabled || !fresh}
           onValueChange={(id) => {
             if (current() && !disabled)
               setCandidate(
@@ -210,7 +240,7 @@ export default function LocationMapPicker({
         <button
           type="button"
           className="min-h-11 rounded-md border border-cyan-400 px-4 disabled:opacity-50"
-          disabled={disabled || !selected || !current()}
+          disabled={disabled || !selected || !fresh}
           onClick={() => {
             if (selected && current() && !disabled) {
               const code = selected.code;

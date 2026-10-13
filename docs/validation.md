@@ -109,6 +109,17 @@ Additional authored regressions cover actual modal opening after initial
 verification, permanent cancel retirement, an unmodeled child within IT Closet,
 captured camera publication and actual RoomScene selections through the original
 picker owner. These source assertions require fresh execution on this candidate.
+The review repair batch adds a real protected-controller focus recheck around the
+mounted destination dialog, retaining its native open state, staged candidate and
+camera while denying fresh selection/confirmation and stale focus restoration.
+Allocated preemption coverage holds teardown completion across privacy refresh
+and slot release, requiring explicit fresh Resume before a new allocation.
+Detail capability parity covers every canonical room binding, unmodeled children
+and ancestry mismatch. Server-rendered pending/unmodeled footprints and an AST
+walk of every eager client boundary (including server-supplied link descendants)
+guard optional geometry loading. Source graph assertions establish import
+separation; they do not substitute for production chunk/network observations or
+real native modal focus/WebGL acceptance.
 
 Use the canonical `npm run test -- --maxWorkers=1` with the affected room,
 location-picker and PageArrival test files, then `npm run typecheck`, scoped
