@@ -370,6 +370,9 @@ export async function captureRoomEffects(page: Page) {
       bloomMeshes,
       contactVisible,
       contactCaptures: Number(canvas.dataset.contactCaptures ?? 0),
+      contactCaptureMs: canvas.dataset.contactCaptureMs
+        ? Number(canvas.dataset.contactCaptureMs)
+        : null,
       contactStatus: canvas.dataset.contactStatus ?? '',
       bloomStatus: canvas.dataset.bloomStatus ?? '',
       paletteRevision: Number(canvas.dataset.paletteRevision ?? 0),
@@ -384,6 +387,24 @@ export async function captureRoomEffects(page: Page) {
       qualityEvidence: canvas.dataset.effectsQualityEvidence ?? '',
       runtime: {
         userAgent: navigator.userAgent,
+        renderer: (() => {
+          const context = gl.getContext();
+          const extension = context.getExtension('WEBGL_debug_renderer_info');
+          return {
+            unmaskedAvailable: extension !== null,
+            vendor: String(
+              context.getParameter(
+                extension?.UNMASKED_VENDOR_WEBGL ?? context.VENDOR,
+              ),
+            ),
+            name: String(
+              context.getParameter(
+                extension?.UNMASKED_RENDERER_WEBGL ?? context.RENDERER,
+              ),
+            ),
+            version: String(context.getParameter(context.VERSION)),
+          };
+        })(),
         dpr: gl.getPixelRatio(),
         width: gl.domElement.width,
         height: gl.domElement.height,

@@ -2,6 +2,59 @@
 
 ## Spatial composition source slice
 
+### Draw and temporal evidence harness
+
+The W14 journey now uses an independently witnessed surface and a trusted mouse
+click. Under the controlled browser clock it checks resting geometry at 744 ms,
+observes the first reveal publication between 750 and 776 ms, and checks reveal
+completion between 384 and 416 ms after that publication. The attachment records
+the request/phase timestamps and actual native draw-bearing frame buckets. These
+are authored assertions until the browser journey executes; phase telemetry is a
+passive publication, not an internal controller clock.
+
+`tests/e2e/room-draw-observation.ts` wraps native WebGL draw methods only in the
+test page, preserving their receiver, arguments, return and exceptions. It groups
+successful room-canvas draw submissions by animation-frame boundary, caps the
+buffer at 4096 frames/200,000 draws per frame/180 seconds, reports overflow, and
+restores only its own method descriptors on cleanup. Idle rAF callbacks create no
+draw-frame entries. Its own rAF observer adds measurement overhead but never
+invalidates the scene or renders it. Reported native submission durations are CPU
+measurements; draw-bearing frame intervals are not GPU execution durations.
+
+The opt-in `room-effects-performance.spec.ts` uses real time and five identical
+warmed trusted-pointer drag samples, separate selection/contact-capture samples,
+and a two-second settled draw-free window. It attaches bounded raw observations,
+median/p95 summaries, capture CPU cost, quality/fallback state, graphics readiness,
+resource counts, viewport/DPR, renderer strings and harness-file hashes. A software
+renderer is explicitly classified in the report. No frame-rate acceptance threshold
+or hardware pass is invented by the harness.
+
+Run it after the ordinary local prerequisites, on the reference browser/hardware:
+
+```powershell
+$env:SPATIAL_PERF = '1'
+$env:SPATIAL_PERF_KIND = 'candidate'
+$env:SPATIAL_PERF_SHA = '<exact candidate HEAD>'
+$env:SPATIAL_PERF_QUALITY = 'standard'
+npm run test:e2e -- tests/e2e/room-effects-performance.spec.ts
+```
+
+The approved baseline is `05cd02c4942047dccbeb9c8c4e87b302ad2569e0`; it has no
+SceneEffects owner, bloom or contact-shadow integration. Run the identical harness
+against that baseline production build with `SPATIAL_PERF_KIND=baseline` and its
+exact SHA. The comparison owner supplies the same three test files
+(`room-effects-performance.spec.ts`, `room-draw-observation.ts`,
+`room-visibility-witness.ts`) as a documented harness overlay, preserving baseline
+application/dependency inputs; matching harness hashes are required. Use the same
+browser/GPU, build mode, populated database, viewport and DPR, and retain both JSON
+attachments outside Playwright's cleaned output directory before the next run.
+Candidate `low` and `off` runs use the real Settings preference and isolate contact
+and bloom costs; they are ablations, not historical-baseline substitutes. Compare
+active median/p95 draw intervals and CPU submission costs, separate contact spikes,
+and settled idle draws. Software rendering leaves reference-GPU acceptance open.
+These runs do not certify physical-phone performance, visual theme quality or GPU
+execution time. The temporal journey's fake clock must not be used for performance.
+
 `tests/e2e/spatial-composition.spec.ts` adds the following authored browser
 journeys using the existing loopback-only owned fixtures and audited cleanup.
 The spec is exclusive under the existing scheduling policy. Its observation

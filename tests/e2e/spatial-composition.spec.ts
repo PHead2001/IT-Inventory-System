@@ -14,6 +14,12 @@ import {
   acceptanceLogin,
 } from './audit-three-acceptance-fixtures';
 import { chooseLocation } from './location-picker';
+import { installRoomDrawObservation } from './room-draw-observation';
+import {
+  captureRoomWitness,
+  roomVisibilityWitnesses,
+  uncoveredRoomWitnesses,
+} from './room-visibility-witness';
 import {
   beginNewRecordTransaction,
   openRecordTask,
@@ -504,6 +510,7 @@ test('W14 actual Full flight precedes reveal, newer selection retires it, and Re
   test.setTimeout(120_000);
   await observeSpatialComposition(page);
   await page.clock.install();
+  await page.addInitScript(installRoomDrawObservation);
   await page.emulateMedia({ reducedMotion: 'no-preference' });
   await acceptanceLogin(page);
   await page.goto('/room');
@@ -520,15 +527,42 @@ test('W14 actual Full flight precedes reveal, newer selection retires it, and Re
     initialTarget,
   );
   await expect(canvas).toHaveAttribute('data-spatial-open-code', '');
-  await selectRoom(page, 'ITC-RED');
+  const exposed = await uncoveredRoomWitnesses(
+    page,
+    roomVisibilityWitnesses(await captureRoomWitness(page)),
+  );
+  const redPoint = exposed.get('ITC-RED');
+  expect(
+    redPoint,
+    'actual independently witnessed container surface',
+  ).toBeDefined();
+  await page.evaluate(() => window.__roomDrawObservation!.reset());
+  const requestedAt = await page.evaluate(() => performance.now());
+  await page.mouse.click(redPoint!.x, redPoint!.y);
+  await expect(viewer).toHaveAttribute('data-selected-code', 'ITC-RED');
   await page.clock.runFor(16);
   await expect(canvas).toHaveAttribute('data-spatial-phase', 'flying');
-  await page.clock.runFor(760);
+  await page.clock.runFor(728);
+  await expect(canvas).toHaveAttribute('data-spatial-phase', 'flying');
+  await expect(canvas).toHaveAttribute('data-spatial-open-code', '');
+  await expectRevealPosition(canvas, revealNode('ITC-RED').id, [0, 0, 0]);
+  // Observe the first phase publication across this narrow frame boundary.
+  // Its timestamp is independent of the next draw's passive telemetry.
+  for (let step = 0; step < 32; step++) {
+    await page.clock.runFor(1);
+    if ((await canvas.getAttribute('data-spatial-phase')) === 'revealing')
+      break;
+  }
   await expect(canvas).toHaveAttribute('data-spatial-phase', 'revealing');
   await expect(canvas).toHaveAttribute('data-spatial-open-code', 'ITC-RED');
   const arrivedTarget = await canvas.getAttribute('data-camera-target');
   await expectRevealPosition(canvas, revealNode('ITC-D01').id, [0, 0, 0]);
-  await page.clock.runFor(420);
+  const revealAt = await page.evaluate(() => performance.now());
+  expect(revealAt - requestedAt).toBeGreaterThanOrEqual(750);
+  expect(revealAt - requestedAt).toBeLessThanOrEqual(776);
+  await page.clock.runFor(384);
+  await expect(canvas).toHaveAttribute('data-spatial-phase', 'revealing');
+  await page.clock.runFor(32);
   await expect(canvas).toHaveAttribute('data-camera-target', arrivedTarget!);
   await expect(canvas).toHaveAttribute('data-spatial-phase', 'settled');
   await expectRevealPosition(
@@ -536,6 +570,31 @@ test('W14 actual Full flight precedes reveal, newer selection retires it, and Re
     revealNode('ITC-RED').id,
     toScenePosition(revealOffset(revealNode('ITC-RED'))),
   );
+  const temporalDraws = await page.evaluate(() =>
+    window.__roomDrawObservation!.snapshot(),
+  );
+  expect(temporalDraws.overflow).toBe(false);
+  expect(
+    temporalDraws.frames.some(
+      (frame) => frame.phase === 'flying' && frame.open === '',
+    ),
+  ).toBe(true);
+  expect(
+    temporalDraws.frames.some(
+      (frame) => frame.phase === 'settled' && frame.open === 'ITC-RED',
+    ),
+  ).toBe(true);
+  await testInfo.attach('full-flight-reveal-draw-timeline', {
+    body: JSON.stringify({
+      requestedAt,
+      revealAt,
+      flightMs: revealAt - requestedAt,
+      beforeRevealCompletionMs: 384,
+      afterRevealCompletionMs: 416,
+      draws: temporalDraws,
+    }),
+    contentType: 'application/json',
+  });
   // Real toolbar input interrupts before the older drawer flight can reveal.
   await selectRoom(page, 'ITC-D01');
   await page.clock.runFor(100);
@@ -565,4 +624,5 @@ test('W14 actual Full flight precedes reveal, newer selection retires it, and Re
   await page.screenshot({
     path: testInfo.outputPath('reduced-complete-spatial-endpoint.png'),
   });
+  await page.evaluate(() => window.__roomDrawObservation!.stop());
 });
