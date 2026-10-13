@@ -1,15 +1,25 @@
 import { renderToString } from 'react-dom/server';
 import { act, render, waitFor } from '@testing-library/react';
-import { Children, isValidElement, StrictMode, type ReactNode } from 'react';
+import {
+  Children,
+  isValidElement,
+  StrictMode,
+  useContext,
+  useEffect,
+  useState,
+  type ReactNode,
+} from 'react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { SafeCanvas, GraphicsBoundary } from './safe-canvas';
 import {
   RoomSceneBudgetProvider,
   ScenePriorityContext,
+  SceneSessionContext,
 } from './scene-budget-provider';
 import { revokePrivatePresentation } from '@/features/scan/assign-batch';
 import {
   assignmentEpoch,
+  invalidateAssignmentCallbacks,
   readPrivacyRevocationRevision,
 } from '@/features/scan/assign-batch';
 import { PrivacyReadinessContext } from '@/components/auth/privacy-readiness';
@@ -66,6 +76,256 @@ afterEach(() => {
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
 });
+function verifiedOwner() {
+  const authority = {
+    actorId: 'actor-a',
+    backend: 'https://backend.example',
+    generation: 'verified',
+    revision: readPrivacyRevocationRevision(),
+    epoch: assignmentEpoch(),
+  };
+  driver.authority = authority;
+  return (ready: boolean) => ({
+    ready,
+    visible: true,
+    generation: authority.generation,
+    revocationRevision: authority.revision,
+    verifiedEpoch: ready ? authority.epoch : undefined,
+  });
+}
+function contextValue<T>(tree: ReactNode, context: unknown): T | undefined {
+  let result: T | undefined;
+  const visit = (nodes: ReactNode) =>
+    Children.forEach(nodes, (node) => {
+      if (!isValidElement<{ value?: T; children?: ReactNode }>(node)) return;
+      if (node.type === context) result = node.props.value;
+      visit(node.props.children);
+    });
+  visit(tree);
+  return result;
+}
+it('retains the allocated canvas and original session while propagating withheld current privacy', async () => {
+  const privacy = verifiedOwner();
+  const ui = (ready: boolean) => (
+    <PrivacyReadinessContext value={privacy(ready)}>
+      <SafeCanvas onFailure={vi.fn()}>scene</SafeCanvas>
+    </PrivacyReadinessContext>
+  );
+  const view = render(ui(true));
+  await waitFor(() => expect(driver.render).toHaveBeenCalledOnce());
+  const canvas = view.container.querySelector('canvas');
+  const session = contextValue<{ current(): boolean }>(
+    driver.render.mock.calls[0][0],
+    SceneSessionContext,
+  );
+  view.rerender(ui(false));
+  await waitFor(() => expect(driver.render).toHaveBeenCalledTimes(2));
+  expect(view.container.querySelector('canvas')).toBe(canvas);
+  expect(view.container.firstElementChild).not.toHaveAttribute('hidden');
+  expect(
+    contextValue(driver.render.mock.calls.at(-1)![0], PrivacyReadinessContext),
+  ).toEqual(privacy(false));
+  expect(
+    contextValue(driver.render.mock.calls.at(-1)![0], SceneSessionContext),
+  ).toBe(session);
+  expect(session?.current()).toBe(true);
+  view.rerender(ui(true));
+  await waitFor(() => expect(driver.render).toHaveBeenCalledTimes(3));
+  expect(driver.create).toHaveBeenCalledOnce();
+  expect(driver.configure).toHaveBeenCalledOnce();
+  expect(driver.teardown).not.toHaveBeenCalled();
+});
+it('preserves mounted child state in the separate renderer root through a visible recheck', async () => {
+  const privacy = verifiedOwner();
+  const scene = render(<></>);
+  driver.render.mockImplementation((tree: ReactNode) =>
+    scene.rerender(<>{tree}</>),
+  );
+  driver.teardown.mockImplementation((_canvas, complete) => {
+    scene.unmount();
+    complete();
+  });
+  let incarnation = 0;
+  const mount = vi.fn();
+  const unmount = vi.fn();
+  function Child() {
+    const [id] = useState(() => ++incarnation);
+    const currentPrivacy = useContext(PrivacyReadinessContext);
+    useEffect(() => {
+      mount();
+      return unmount;
+    }, []);
+    return (
+      <output data-testid="scene-owner">
+        {id}:{currentPrivacy.ready ? 'fresh' : 'withheld'}
+      </output>
+    );
+  }
+  const onLeaseChange = vi.fn();
+  const ui = (ready: boolean) => (
+    <PrivacyReadinessContext value={privacy(ready)}>
+      <SafeCanvas onFailure={vi.fn()} onLeaseChange={onLeaseChange}>
+        <Child />
+      </SafeCanvas>
+    </PrivacyReadinessContext>
+  );
+  const view = render(ui(true));
+  await waitFor(() =>
+    expect(screen.getByTestId('scene-owner')).toHaveTextContent('1:fresh'),
+  );
+  const child = screen.getByTestId('scene-owner');
+  view.rerender(ui(false));
+  await waitFor(() => expect(child).toHaveTextContent('1:withheld'));
+  view.rerender(ui(true));
+  await waitFor(() => expect(child).toHaveTextContent('1:fresh'));
+  expect(screen.getByTestId('scene-owner')).toBe(child);
+  expect(mount).toHaveBeenCalledOnce();
+  expect(unmount).not.toHaveBeenCalled();
+  expect(onLeaseChange).toHaveBeenCalledExactlyOnceWith(true);
+  expect(driver.create).toHaveBeenCalledOnce();
+  expect(driver.teardown).not.toHaveBeenCalled();
+  view.unmount();
+  expect(unmount).toHaveBeenCalledOnce();
+});
+it('retains pending configure without first scene mount while withheld and resumes at unchanged dimensions', async () => {
+  const privacy = verifiedOwner();
+  let finish!: (value: unknown) => void;
+  driver.configure.mockImplementationOnce(
+    () =>
+      new Promise((resolve) => {
+        finish = resolve;
+      }),
+  );
+  const ui = (ready: boolean) => (
+    <PrivacyReadinessContext value={privacy(ready)}>
+      <SafeCanvas onFailure={vi.fn()}>scene</SafeCanvas>
+    </PrivacyReadinessContext>
+  );
+  const view = render(ui(true));
+  await waitFor(() => expect(driver.configure).toHaveBeenCalledOnce());
+  const canvas = view.container.querySelector('canvas');
+  view.rerender(ui(false));
+  await act(async () => finish(undefined));
+  expect(driver.render).not.toHaveBeenCalled();
+  expect(driver.teardown).not.toHaveBeenCalled();
+  expect(view.container.querySelector('canvas')).toBe(canvas);
+  view.rerender(ui(true));
+  await waitFor(() => expect(driver.render).toHaveBeenCalledOnce());
+  expect(driver.create).toHaveBeenCalledOnce();
+  expect(driver.configure).toHaveBeenCalledOnce();
+});
+it('cancels withheld queued admission and waits for fresh verification after the occupied slot completes', async () => {
+  const privacy = verifiedOwner();
+  let complete!: () => void;
+  driver.teardown.mockImplementation((_canvas, done) => {
+    complete = done;
+  });
+  const ui = (primary: boolean, ready: boolean) => (
+    <RoomSceneBudgetProvider>
+      {primary && (
+        <ScenePriorityContext value={2}>
+          <SafeCanvas onFailure={vi.fn()}>primary</SafeCanvas>
+        </ScenePriorityContext>
+      )}
+      <PrivacyReadinessContext value={privacy(ready)}>
+        <ScenePriorityContext value={0}>
+          <SafeCanvas onFailure={vi.fn()}>queued</SafeCanvas>
+        </ScenePriorityContext>
+      </PrivacyReadinessContext>
+    </RoomSceneBudgetProvider>
+  );
+  const view = render(ui(true, true));
+  await waitFor(() => expect(driver.render).toHaveBeenCalledOnce());
+  view.rerender(ui(false, false));
+  await waitFor(() => expect(driver.teardown).toHaveBeenCalledOnce());
+  act(() => complete());
+  await act(async () => {});
+  expect(driver.create).toHaveBeenCalledOnce();
+  view.rerender(ui(false, true));
+  await waitFor(() => expect(driver.render).toHaveBeenCalledTimes(2));
+  expect(driver.create).toHaveBeenCalledTimes(2);
+});
+it('withdraws admitted but unallocated work before the deferred frame and resumes only with a fresh grant', async () => {
+  const privacy = verifiedOwner();
+  const frames: FrameRequestCallback[] = [];
+  vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => {
+    frames.push(callback);
+    return frames.length;
+  });
+  vi.stubGlobal('cancelAnimationFrame', vi.fn());
+  const ui = (ready: boolean) => (
+    <PrivacyReadinessContext value={privacy(ready)}>
+      <SafeCanvas onFailure={vi.fn()}>scene</SafeCanvas>
+    </PrivacyReadinessContext>
+  );
+  const view = render(ui(true));
+  expect(frames).toHaveLength(1);
+  view.rerender(ui(false));
+  await act(async () => frames[0](0));
+  expect(driver.create).not.toHaveBeenCalled();
+  expect(driver.render).not.toHaveBeenCalled();
+  view.rerender(ui(true));
+  expect(frames).toHaveLength(2);
+  await act(async () => frames[1](1));
+  expect(driver.create).toHaveBeenCalledOnce();
+  expect(driver.render).toHaveBeenCalledOnce();
+});
+it.each(['revocation', 'assignment'] as const)(
+  'retires the retained original allocation during %s and blocks late callbacks until Fiber completes',
+  async (reason) => {
+    const privacy = verifiedOwner();
+    let finish!: () => void;
+    driver.teardown.mockImplementation((_canvas, complete) => {
+      finish = complete;
+    });
+    const failure = vi.fn();
+    const ui = (ready: boolean) => (
+      <PrivacyReadinessContext value={privacy(ready)}>
+        <SafeCanvas onFailure={failure}>scene</SafeCanvas>
+      </PrivacyReadinessContext>
+    );
+    const view = render(ui(true));
+    await waitFor(() => expect(driver.render).toHaveBeenCalledOnce());
+    const session = contextValue<{ current(): boolean }>(
+      driver.render.mock.calls[0][0],
+      SceneSessionContext,
+    );
+    view.rerender(ui(false));
+    const created = driver.configure.mock.calls[0][0].onCreated;
+    const connect = vi.fn();
+    act(() => {
+      if (reason === 'revocation') revokePrivatePresentation();
+      else invalidateAssignmentCallbacks();
+      expect(view.container.firstElementChild).toHaveAttribute('hidden');
+      expect(view.container.firstElementChild).toHaveAttribute('inert');
+      created({ events: { connect } });
+    });
+    expect(connect).not.toHaveBeenCalled();
+    expect(session?.current()).toBe(false);
+    await waitFor(() => expect(driver.teardown).toHaveBeenCalledOnce());
+    const renders = driver.render.mock.calls.length;
+    view.rerender(ui(true));
+    expect(driver.render).toHaveBeenCalledTimes(renders);
+    expect(driver.create).toHaveBeenCalledOnce();
+    act(() => finish());
+    expect(driver.create).toHaveBeenCalledOnce();
+    expect(failure).not.toHaveBeenCalled();
+  },
+);
+it.each(['revocationRevision', 'verifiedEpoch'] as const)(
+  'rejects stale %s even when readiness claims a fresh grant',
+  async (field) => {
+    const privacy = verifiedOwner();
+    render(
+      <PrivacyReadinessContext value={{ ...privacy(true), [field]: -1 }}>
+        <SafeCanvas onFailure={vi.fn()}>scene</SafeCanvas>
+      </PrivacyReadinessContext>,
+    );
+    await act(async () => {});
+    expect(driver.create).not.toHaveBeenCalled();
+    expect(driver.render).not.toHaveBeenCalled();
+  },
+);
 it('keeps canvas fallback markup inert while configuring the actual renderer', async () => {
   const onFailure = vi.fn();
   const { container } = render(

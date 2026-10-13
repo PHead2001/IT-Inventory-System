@@ -573,6 +573,39 @@ it('allows captured camera publication after a same-session pause but blocks the
   expect(publish).not.toHaveBeenCalled();
   view.unmount();
 });
+it('keeps a consumed Pan command from replaying over Reduced selection after a retained visible recheck', () => {
+  mocks.reduced = true;
+  size.width = 390;
+  size.height = 400;
+  const rig = restorationHarness();
+  const session = { current: () => true };
+  const ui = (ready: boolean, selected: boolean, pan: boolean) => (
+    <SceneSessionContext value={session}>
+      {rig.ui(ready, true, selected, 'generation', true, pan)}
+    </SceneSessionContext>
+  );
+  const view = render(ui(true, false, false));
+  act(() => {
+    mocks.frame!();
+    mocks.frame!();
+  });
+  const originalTarget = control.target.toArray();
+  view.rerender(ui(true, false, true));
+  expect(control.target.toArray()).not.toEqual(originalTarget);
+  view.rerender(ui(false, true, true));
+  expect(control.target.toArray()).toEqual([8, 80.5, -18]);
+  view.rerender(ui(true, true, true));
+  expect(control.target.toArray()).toEqual([8, 80.5, -18]);
+  expect(rig.complete).toHaveBeenLastCalledWith(
+    'ITC-S1A',
+    expect.objectContaining({ code: 'ITC-S1A', requestId: 1 }),
+  );
+  const selectedPosition = camera.position.toArray();
+  view.rerender(ui(false, true, true));
+  view.rerender(ui(true, true, true));
+  expect(control.target.toArray()).toEqual([8, 80.5, -18]);
+  expect(camera.position.toArray()).toEqual(selectedPosition);
+});
 function expectCanonicalFirstFrame() {
   const offset = camera.position.clone().sub(control.target);
   expect(Math.atan2(offset.x, offset.z)).toBeCloseTo(

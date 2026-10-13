@@ -132,8 +132,16 @@ completion; requests that never allocate cancel immediately. There is no timeout
 reclamation. The original actor/backend/privacy generation/revision/epoch binds
 each scene session. Revocation synchronously hides/inerts the scene and independent
 DOM portals, and late initialization/frame callbacks cannot publish private data.
-Privacy and session context cross Fiber's separate root explicitly. Ordinary
-verification pauses the original session; a different identity cannot rebind it.
+Privacy and session context cross Fiber's separate root explicitly. An ordinary
+visible verification recheck retains the allocated original renderer, scene,
+controls and consumed camera commands. Its lifetime uses the original owner and
+live retained presentation grant; current privacy context continues to propagate
+into Fiber, so inventory selection remains fresh-grant gated. Request admission,
+allocation, the first scene mount after configuration and explicit Resume map
+require a fresh grant. Withheld queued or unallocated requests cancel immediately;
+pending allocated configuration can finish but cannot first mount scene children
+until fresh verification returns, even when viewport dimensions have not changed.
+A different identity cannot rebind the original session.
 Committed actor/backend/generation drift permanently retires each canvas, map
 dialog and embedded-count owner even without a global invalidation event. Returning
 to the original identity cannot revive its scene or staged confirmation. An ordinary

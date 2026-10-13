@@ -48,7 +48,10 @@ import {
   PrivacyReadinessContext,
   usePrivacyReadiness,
 } from '@/components/auth/privacy-readiness';
-import { freshPresentationGrant } from '@/components/experience/presentation-privacy';
+import {
+  freshPresentationGrant,
+  retainedPresentationGrantCurrent,
+} from '@/components/experience/presentation-privacy';
 import {
   assignmentEpoch,
   readPrivacyRevocationRevision,
@@ -136,6 +139,8 @@ export function SafeCanvas({
   >('starting');
   const [retry, setRetry] = useState(0);
   const leaseRef = useRef<SceneLease | null>(null);
+  const allocated = useRef(false);
+  const stopRequest = useRef<(() => void) | null>(null);
   useLayoutEffect(() => {
     // A committed identity/environment change retires the original session even
     // if an outer controller has not emitted its invalidation event yet.
@@ -164,7 +169,7 @@ export function SafeCanvas({
     owner.epoch === assignmentEpoch() &&
     (candidate.privacy.generation === 'unmanaged'
       ? candidate.privacy.ready
-      : freshPresentationGrant(candidate.privacy));
+      : retainedPresentationGrantCurrent(candidate.privacy, owner));
   const current = useCallback(() => {
     const { privacy, key } = latest.current;
     return (
@@ -176,9 +181,18 @@ export function SafeCanvas({
       owner.epoch === assignmentEpoch() &&
       (privacy.generation === 'unmanaged'
         ? privacy.ready
-        : freshPresentationGrant(privacy))
+        : retainedPresentationGrantCurrent(privacy, owner))
     );
   }, [owner]);
+  const freshCurrent = useCallback(() => {
+    const { privacy } = latest.current;
+    return (
+      current() &&
+      (privacy.generation === 'unmanaged'
+        ? privacy.ready
+        : freshPresentationGrant(privacy))
+    );
+  }, [current]);
   useInsertionEffect(() => {
     const retire = () => {
       owner.retire();
@@ -199,42 +213,68 @@ export function SafeCanvas({
       remove.forEach((unsubscribe) => unsubscribe());
     };
   }, [owner]);
-  useEffect(() => {
-    if (!current()) return;
+  const requestLease = useCallback(() => {
+    if (leaseRef.current || !freshCurrent()) return;
     let live = true;
     let granted = false;
+    // The initial grant can run synchronously before request returns its lease.
+    const admission = { request: null as SceneLease | null };
     const request = budget.request(
       priority,
       () => {
         granted = true;
-        if (leaseRef.current && live && current()) {
-          setLease(leaseRef.current);
+        if (!live) return;
+        if (admission.request && !freshCurrent()) {
+          admission.request.cancel();
+          return;
+        }
+        if (admission.request && freshCurrent()) {
+          setLease(admission.request);
           latest.current.onLeaseChange?.(true);
         }
       },
       () => {
         if (live) {
+          if (leaseRef.current === admission.request) leaseRef.current = null;
           setLease(null);
           setRequestStatus('withdrawn');
           latest.current.onLeaseChange?.(false);
         }
       },
     );
+    admission.request = request;
     leaseRef.current = request;
-    if (!granted && current()) setRequestStatus('queued');
-    if (granted && current()) {
+    allocated.current = false;
+    if (!granted && freshCurrent()) setRequestStatus('queued');
+    if (granted && freshCurrent()) {
       setLease(request);
       latest.current.onLeaseChange?.(true);
     }
-    return () => {
+    stopRequest.current = () => {
       live = false;
       request.cancel();
       latest.current.onLeaseChange?.(false);
-      leaseRef.current = null;
+      if (leaseRef.current === request) leaseRef.current = null;
+      setLease(null);
     };
-    // A session never adopts a new identity; ordinary verification resumes the original session.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [budget, priority, privacy.ready, key, owner, retry]);
+  }, [budget, priority, freshCurrent]);
+  useEffect(() => {
+    requestLease();
+    return () => {
+      stopRequest.current?.();
+      stopRequest.current = null;
+    };
+  }, [requestLease, key, owner, retry]);
+  useEffect(() => {
+    // Ordinary visible verification preserves an allocated original owner. A
+    // queued/admitted request has no retained renderer and needs a fresh grant.
+    if (!current() || (!freshCurrent() && !allocated.current)) {
+      stopRequest.current?.();
+      stopRequest.current = null;
+      return;
+    }
+    requestLease();
+  }, [privacy, key, current, freshCurrent, requestLease]);
   const permitted = permittedFor({ privacy, key });
   return (
     <div
@@ -257,6 +297,10 @@ export function SafeCanvas({
           fallback={fallback}
           lease={lease}
           current={current}
+          freshCurrent={freshCurrent}
+          onAllocated={() => {
+            if (leaseRef.current === lease) allocated.current = true;
+          }}
         >
           <PrivacyReadinessContext value={privacy}>
             {children}
@@ -279,7 +323,7 @@ export function SafeCanvas({
               type="button"
               className="min-h-11 text-cyan-300 underline"
               onClick={() => {
-                if (current()) {
+                if (freshCurrent()) {
                   setRequestStatus('starting');
                   setRetry((value) => value + 1);
                 }
@@ -300,8 +344,15 @@ function CanvasRoot({
   onFailure,
   lease,
   current,
+  freshCurrent,
+  onAllocated,
   ...configuration
-}: Props & { lease: SceneLease; current(): boolean }) {
+}: Props & {
+  lease: SceneLease;
+  current(): boolean;
+  freshCurrent(): boolean;
+  onAllocated(): void;
+}) {
   const session = useMemo(
     () => ({ current: () => current() && lease.current() }),
     [current, lease],
@@ -320,10 +371,19 @@ function CanvasRoot({
   const container = useRef<HTMLDivElement>(null);
   const root = useRef<ReturnType<typeof createRoot> | null>(null);
   const ready = useRef(false);
+  const mounted = useRef(false);
   const latest = useRef({ children, configuration });
-  useEffect(() => {
+  useLayoutEffect(() => {
+    // Pending configure callbacks must see the committed privacy wrapper even
+    // before the separate root's passive update has been dispatched.
     latest.current = { children, configuration };
-    if (ready.current && sessionCurrent())
+  }, [children, configuration]);
+  useEffect(() => {
+    if (
+      ready.current &&
+      sessionCurrent() &&
+      (mounted.current || freshCurrent())
+    ) {
       root.current?.render(
         <SceneSessionContext value={session}>
           <GraphicsBoundary onFailure={reportSceneFailure}>
@@ -331,11 +391,21 @@ function CanvasRoot({
           </GraphicsBoundary>
         </SceneSessionContext>,
       );
-  }, [children, configuration, reportSceneFailure, session, sessionCurrent]);
+      mounted.current = true;
+    }
+  }, [
+    children,
+    configuration,
+    reportSceneFailure,
+    session,
+    sessionCurrent,
+    freshCurrent,
+  ]);
   useEffect(() => {
     const element = canvas.current,
       host = container.current;
     if (!element || !host) return;
+    mounted.current = false;
     let disposed = false;
     let tearingDown = false;
     let allocationCreated = false;
@@ -375,7 +445,9 @@ function CanvasRoot({
         try {
           if (!sessionCurrent()) return;
           if (!root.current) {
+            if (!freshCurrent()) return;
             if (!lease.allocate()) return;
+            onAllocated();
             root.current = createRoot(element);
             allocationCreated = true;
           }
@@ -396,6 +468,7 @@ function CanvasRoot({
             });
           if (disposed || tearingDown || !sessionCurrent()) return;
           ready.current = true;
+          if (!mounted.current && !freshCurrent()) return;
           root.current.render(
             <SceneSessionContext value={session}>
               <GraphicsBoundary onFailure={reportSceneFailure}>
@@ -403,6 +476,7 @@ function CanvasRoot({
               </GraphicsBoundary>
             </SceneSessionContext>,
           );
+          mounted.current = true;
         } catch {
           const report = !disposed && sessionCurrent();
           disposed = true;
@@ -429,6 +503,7 @@ function CanvasRoot({
       cancelAnimationFrame(frame);
       observer.disconnect();
       ready.current = false;
+      mounted.current = false;
       // Public Fiber unmount waits for pending configuration and disposal itself.
       // Waiting for our configure queue first can indefinitely withhold teardown.
       teardownAllocation();
