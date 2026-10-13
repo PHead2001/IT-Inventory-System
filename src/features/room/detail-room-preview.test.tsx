@@ -146,3 +146,15 @@ it('reserves the selected preview slot while the map remains offscreen', () => {
     slot,
   );
 });
+
+it('retains the preview while its page owns the single room navigation action', () => {
+  render(
+    <DetailRoomPreview
+      locations={[location]}
+      choices={[{ code: location.code, label: 'Drawer 1' }]}
+      showRoomLink={false}
+    />,
+  );
+  expect(screen.getByText('Map for ITC-D01')).toBeInTheDocument();
+  expect(screen.queryByRole('link', { name: 'Show in room' })).toBeNull();
+});

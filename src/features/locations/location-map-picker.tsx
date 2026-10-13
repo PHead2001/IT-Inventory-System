@@ -86,7 +86,7 @@ export default function LocationMapPicker({
   });
   const dialog = useRef<HTMLDialogElement>(null);
   const closeRef = useRef(onClose);
-  const dismiss = () => {
+  const closeDialog = () => {
     owner.retire();
     if (dialog.current) {
       dialog.current.hidden = true;
@@ -94,6 +94,9 @@ export default function LocationMapPicker({
       dialog.current.setAttribute('inert', '');
       dialog.current.close();
     }
+  };
+  const dismiss = () => {
+    closeDialog();
     closeRef.current();
   };
   useLayoutEffect(() => {
@@ -202,7 +205,12 @@ export default function LocationMapPicker({
           className="min-h-11 rounded-md border border-cyan-400 px-4 disabled:opacity-50"
           disabled={disabled || !selected || !current()}
           onClick={() => {
-            if (selected && current() && !disabled) onUse(selected.code);
+            if (selected && current() && !disabled) {
+              const code = selected.code;
+              // Release native modal inertness before the form restores focus.
+              closeDialog();
+              onUse(code);
+            }
           }}
         >
           Use location

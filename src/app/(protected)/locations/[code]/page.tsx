@@ -126,6 +126,7 @@ export default async function LocationPage({
             </ExportLink>
           </nav>
           <DetailRoomPreview
+            showRoomLink={false}
             locations={locations}
             choices={[{ code: location.code, label: location.breadcrumb }]}
           />

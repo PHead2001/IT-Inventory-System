@@ -166,6 +166,22 @@ export default async function QuantityPage({
               </p>
             )}
           </section>
+          {member.role === 'staff' && (
+            <DetailTasks
+              key={member.user_id + ':' + item.id}
+              actorId={member.user_id}
+              backendScope={process.env.NEXT_PUBLIC_SUPABASE_URL}
+              canManageConfiguration={member.can_manage_configuration}
+              item={item}
+              balances={balances}
+              siteHoldings={siteHoldings}
+              archiveReview={archiveReview}
+              categories={categories}
+              locations={locations}
+              sites={sites}
+              forms={forms}
+            />
+          )}
           <DetailRoomPreview
             locations={locations}
             choices={balances
@@ -183,22 +199,6 @@ export default async function QuantityPage({
                 : undefined
             }
           />
-          {member.role === 'staff' && (
-            <DetailTasks
-              key={member.user_id + ':' + item.id}
-              actorId={member.user_id}
-              backendScope={process.env.NEXT_PUBLIC_SUPABASE_URL}
-              canManageConfiguration={member.can_manage_configuration}
-              item={item}
-              balances={balances}
-              siteHoldings={siteHoldings}
-              archiveReview={archiveReview}
-              categories={categories}
-              locations={locations}
-              sites={sites}
-              forms={forms}
-            />
-          )}
           <div className={styles.recordGrid}>
             <div className={styles.recordMain}>
               <section className={panel + ' my-5'}>

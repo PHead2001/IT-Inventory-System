@@ -16,10 +16,12 @@ export function DetailRoomPreview({
   locations,
   choices,
   context,
+  showRoomLink = true,
 }: {
   locations: LocationRef[];
   choices: { code: string; label: string }[];
   context?: string;
+  showRoomLink?: boolean;
 }) {
   // Only user choices persist: a sole location is an implicit preview.
   const [choice, setChoice] = useState('');
@@ -105,7 +107,7 @@ export function DetailRoomPreview({
               </RoomRegionBoundary>
             )}
           </div>
-          <ShowInRoom location={selected} />
+          {showRoomLink && <ShowInRoom location={selected} />}
         </>
       ) : (
         <p className="my-3 text-sm">

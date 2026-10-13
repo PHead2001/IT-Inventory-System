@@ -15,6 +15,7 @@ import {
 } from './audit-three-acceptance-fixtures';
 import { chooseLocation } from './location-picker';
 import { installRoomDrawObservation } from './room-draw-observation';
+import { chooseRevealWitness } from './spatial-witness-choice';
 import {
   captureRoomWitness,
   roomVisibilityWitnesses,
@@ -161,9 +162,11 @@ test('A302 map stages a destination UUID, preserves Cancel drafts and hands the 
     await stageDrawerLabel(dialog);
     await dialog
       .getByRole('button', { name: 'Use location', exact: true })
-      .click();
+      .focus();
+    await page.keyboard.press('Enter');
     await expect(dialog).toHaveCount(0);
     await expect(value).toContainText('ITC-D01');
+    await expect(value).toBeFocused();
     await expect(
       form.getByRole('region', { name: 'Review changes' }),
     ).toHaveCount(0);
@@ -386,8 +389,15 @@ for (const surface of ['quantity', 'asset', 'location'] as const) {
         }),
       ).toEqual({ selectionVolumes: 0, selectionHandlers: 0 });
       await expect(
-        preview.getByRole('link', { name: 'Show ' + code + ' in room' }),
+        (surface === 'location'
+          ? page.getByRole('navigation', { name: 'Location actions' })
+          : preview
+        ).getByRole('link', { name: 'Show ' + code + ' in room' }),
       ).toBeVisible();
+      if (surface === 'location')
+        await expect(
+          page.getByRole('link', { name: 'Show ' + code + ' in room' }),
+        ).toHaveCount(1);
       await expectSingleLiveRenderer(page);
       if (surface === 'quantity') {
         await preview
@@ -525,10 +535,19 @@ test('A303 an owned unmodeled closet child keeps truthful recorded previews with
       ).toBeVisible();
       await expect(preview.getByText(new RegExp(location.name))).toBeVisible();
       await expect(
-        preview.getByRole('link', {
+        (path.startsWith('/locations/')
+          ? page.getByRole('navigation', { name: 'Location actions' })
+          : preview
+        ).getByRole('link', {
           name: 'Show ' + location.code + ' in Spaces',
         }),
       ).toBeVisible();
+      if (path.startsWith('/locations/'))
+        await expect(
+          page.getByRole('link', {
+            name: 'Show ' + location.code + ' in Spaces',
+          }),
+        ).toHaveCount(1);
       await expect(preview.locator('canvas')).toHaveCount(0);
     }
     expect(countReads).toBe(0);
@@ -560,25 +579,62 @@ test('W14 actual Full flight precedes reveal, newer selection retires it, and Re
     initialTarget,
   );
   await expect(canvas).toHaveAttribute('data-spatial-open-code', '');
-  const exposed = await uncoveredRoomWitnesses(
-    page,
-    roomVisibilityWitnesses(await captureRoomWitness(page)),
+  const witness = await captureRoomWitness(page);
+  const physicalWitnesses = roomVisibilityWitnesses(witness);
+  const exposed = await uncoveredRoomWitnesses(page, physicalWitnesses);
+  const replacement = chooseRevealWitness(
+    bindings
+      .filter((binding) => binding.primary)
+      .map((binding) => revealNode(binding.code)),
+    'ITC-D01',
+    exposed,
   );
-  const redPoint = exposed.get('ITC-RED');
-  expect(
-    redPoint,
-    'actual independently witnessed container surface',
-  ).toBeDefined();
+  if (!replacement) {
+    await testInfo.attach('interrupted-flight-visible-surface-diagnostic', {
+      body: JSON.stringify({
+        target: await canvas.getAttribute('data-camera-target'),
+        position: await canvas.getAttribute('data-camera-position'),
+        view: witness.view,
+        projection: witness.projection,
+        frame: witness.frame,
+        maskCount: witness.masks.length,
+        candidateCodes: bindings
+          .filter((binding) => binding.primary)
+          .map((binding) => revealNode(binding.code))
+          .filter(
+            (node) =>
+              node.kind === 'box' &&
+              node.visual?.style !== 'rack' &&
+              node.interaction?.selectable &&
+              node.locationCode !== 'ITC-D01' &&
+              revealOffset(node).some((value) => value !== 0),
+          )
+          .map((node) => node.locationCode)
+          .sort(),
+        physicalCodes: [...physicalWitnesses.keys()].sort(),
+        uncoveredCodes: [...exposed.keys()].sort(),
+      }),
+      contentType: 'application/json',
+    });
+    throw new Error(
+      'No independently witnessed uncovered revealable surface is available to interrupt the drawer flight',
+    );
+  }
+  const {
+    code: replacementCode,
+    node: replacementNode,
+    point: replacementPoint,
+  } = replacement;
   await page.evaluate(() => window.__roomDrawObservation!.reset());
   const requestedAt = await page.evaluate(() => performance.now());
-  await page.mouse.click(redPoint!.x, redPoint!.y);
-  await expect(viewer).toHaveAttribute('data-selected-code', 'ITC-RED');
+  await page.mouse.click(replacementPoint.x, replacementPoint.y);
+  await expect(viewer).toHaveAttribute('data-selected-code', replacementCode);
   await page.clock.runFor(16);
   await expect(canvas).toHaveAttribute('data-spatial-phase', 'flying');
   await page.clock.runFor(728);
   await expect(canvas).toHaveAttribute('data-spatial-phase', 'flying');
   await expect(canvas).toHaveAttribute('data-spatial-open-code', '');
-  await expectRevealPosition(canvas, revealNode('ITC-RED').id, [0, 0, 0]);
+  await expectRevealPosition(canvas, replacementNode.id, [0, 0, 0]);
   // Observe the first phase publication across this narrow frame boundary.
   // Its timestamp is independent of the next draw's passive telemetry.
   for (let step = 0; step < 32; step++) {
@@ -587,7 +643,10 @@ test('W14 actual Full flight precedes reveal, newer selection retires it, and Re
       break;
   }
   await expect(canvas).toHaveAttribute('data-spatial-phase', 'revealing');
-  await expect(canvas).toHaveAttribute('data-spatial-open-code', 'ITC-RED');
+  await expect(canvas).toHaveAttribute(
+    'data-spatial-open-code',
+    replacementCode,
+  );
   const arrivedTarget = await canvas.getAttribute('data-camera-target');
   await expectRevealPosition(canvas, revealNode('ITC-D01').id, [0, 0, 0]);
   const revealAt = await page.evaluate(() => performance.now());
@@ -600,8 +659,8 @@ test('W14 actual Full flight precedes reveal, newer selection retires it, and Re
   await expect(canvas).toHaveAttribute('data-spatial-phase', 'settled');
   await expectRevealPosition(
     canvas,
-    revealNode('ITC-RED').id,
-    toScenePosition(revealOffset(revealNode('ITC-RED'))),
+    replacementNode.id,
+    toScenePosition(revealOffset(replacementNode)),
   );
   const temporalDraws = await page.evaluate(() =>
     window.__roomDrawObservation!.snapshot(),
@@ -614,11 +673,12 @@ test('W14 actual Full flight precedes reveal, newer selection retires it, and Re
   ).toBe(true);
   expect(
     temporalDraws.frames.some(
-      (frame) => frame.phase === 'settled' && frame.open === 'ITC-RED',
+      (frame) => frame.phase === 'settled' && frame.open === replacementCode,
     ),
   ).toBe(true);
   await testInfo.attach('full-flight-reveal-draw-timeline', {
     body: JSON.stringify({
+      replacementCode,
       requestedAt,
       revealAt,
       flightMs: revealAt - requestedAt,

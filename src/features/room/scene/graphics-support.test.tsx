@@ -437,3 +437,68 @@ it('ignores a retired graphics boundary callback after preemption and resume wit
   act(() => currentFailure('Current scene failed'));
   expect(failure).toHaveBeenCalledExactlyOnceWith('Current scene failed');
 });
+
+it.each(['resolve', 'reject'] as const)(
+  'starts unmount while configure is pending and keeps the lease through late %s until Fiber completes',
+  async (outcome) => {
+    let resolve!: (value: unknown) => void;
+    let reject!: (error: Error) => void;
+    driver.configure.mockImplementationOnce(
+      () =>
+        new Promise((success, failure) => {
+          resolve = success;
+          reject = failure;
+        }),
+    );
+    const completions: (() => void)[] = [];
+    driver.teardown.mockImplementation((_canvas, complete) =>
+      completions.push(complete),
+    );
+    const failure = vi.fn();
+    const ui = (picker: boolean) => (
+      <RoomSceneBudgetProvider>
+        <ScenePriorityContext value={0}>
+          <SafeCanvas onFailure={failure}>preview</SafeCanvas>
+        </ScenePriorityContext>
+        {picker && (
+          <ScenePriorityContext value={2}>
+            <SafeCanvas onFailure={failure}>picker</SafeCanvas>
+          </ScenePriorityContext>
+        )}
+      </RoomSceneBudgetProvider>
+    );
+    const view = render(ui(false));
+    await waitFor(() => expect(driver.configure).toHaveBeenCalledOnce());
+    view.rerender(ui(true));
+    // Teardown begins before the configuration promise has settled.
+    await waitFor(() => expect(driver.teardown).toHaveBeenCalledOnce());
+    expect(driver.create).toHaveBeenCalledOnce();
+    expect(driver.render).not.toHaveBeenCalled();
+    await act(async () => {
+      if (outcome === 'resolve') resolve(undefined);
+      else reject(new Error('Late configuration rejection'));
+    });
+    expect(failure).not.toHaveBeenCalled();
+    expect(driver.teardown).toHaveBeenCalledOnce();
+    expect(driver.create).toHaveBeenCalledOnce();
+    expect(driver.configure).toHaveBeenCalledOnce();
+    expect(driver.render).not.toHaveBeenCalled();
+    // Only actual Fiber completion permits the successor; duplicate completion
+    // cannot release that successor's newly acquired allocation.
+    act(() => {
+      completions[0]();
+      completions[0]();
+    });
+    await waitFor(() => expect(driver.create).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(driver.render).toHaveBeenCalledOnce());
+    expect(driver.configure).toHaveBeenCalledTimes(2);
+    expect(failure).not.toHaveBeenCalled();
+    view.unmount();
+    await waitFor(() => expect(driver.teardown).toHaveBeenCalledTimes(2));
+    act(() => {
+      completions[1]();
+      completions[1]();
+    });
+    expect(driver.create).toHaveBeenCalledTimes(2);
+  },
+);

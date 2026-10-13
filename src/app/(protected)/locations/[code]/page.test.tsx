@@ -57,6 +57,12 @@ it('shows selected normalized scope and matching CSV, retaining filters and rese
     '/locations/ITO?q=Cable',
   );
   expect(screen.queryByText(/Current scope:/)).not.toBeInTheDocument();
+  expect(
+    screen.getAllByRole('link', { name: 'Show ITO in Spaces' }),
+  ).toHaveLength(1);
+  expect(
+    screen.getByRole('region', { name: 'Storage preview' }),
+  ).toBeInTheDocument();
   const actions = screen.getByRole('navigation', { name: 'Location actions' });
   expect(within(actions).getAllByRole('link')).toHaveLength(4);
   expect(

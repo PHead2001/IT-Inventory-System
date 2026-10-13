@@ -214,3 +214,32 @@ it('cancel leaves the form untouched and revocation synchronously masks the port
   });
   expect(use).not.toHaveBeenCalled();
 });
+
+it('closes the native dialog before keyboard confirmation invokes form selection and focus restoration', async () => {
+  const user = userEvent.setup();
+  const trigger = document.createElement('button');
+  trigger.textContent = 'Form destination';
+  document.body.append(trigger);
+  const use = vi.fn(() => {
+    expect(screen.getByRole('dialog', { hidden: true })).not.toHaveAttribute(
+      'open',
+    );
+    trigger.focus();
+  });
+  render(
+    <LocationMapPicker
+      locations={[root, drawer]}
+      initialValue={drawer.id}
+      disabled={false}
+      onUse={use}
+      onClose={vi.fn()}
+    />,
+  );
+  const confirm = screen.getByRole('button', { name: 'Use location' });
+  confirm.focus();
+  await user.keyboard('{Enter}');
+  expect(use).toHaveBeenCalledExactlyOnceWith(drawer.code);
+  expect(trigger).toHaveFocus();
+  expect(screen.getByRole('dialog', { hidden: true })).toHaveAttribute('inert');
+  trigger.remove();
+});

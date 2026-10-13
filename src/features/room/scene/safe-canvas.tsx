@@ -321,6 +321,23 @@ function CanvasRoot({
     if (!element || !host) return;
     let disposed = false;
     let tearingDown = false;
+    let allocationCreated = false;
+    let released = false;
+    const completeAllocation = () => {
+      if (released) return;
+      released = true;
+      lease.complete();
+    };
+    // This allocation owns disposal independently of its configuration promise.
+    const teardownAllocation = (configureRejected = false) => {
+      if (tearingDown || !root.current) return;
+      const allocatedRoot = root.current;
+      tearingDown = true;
+      root.current = null;
+      if (configureRejected)
+        teardownFailedCanvas(allocatedRoot, element, completeAllocation);
+      else unmountComponentAtNode(element, completeAllocation);
+    };
     let lastWidth = 0,
       lastHeight = 0;
     let queue = Promise.resolve();
@@ -336,13 +353,14 @@ function CanvasRoot({
       lastWidth = width;
       lastHeight = height;
       queue = queue.then(async () => {
-        if (disposed) return;
+        if (disposed || tearingDown) return;
         let configureRejected = false;
         try {
           if (!sessionCurrent()) return;
           if (!root.current) {
             if (!lease.allocate()) return;
             root.current = createRoot(element);
+            allocationCreated = true;
           }
           await root.current
             .configure({
@@ -351,14 +369,15 @@ function CanvasRoot({
               size: { width, height, top: 0, left: 0 },
               onCreated: (state) => {
                 // Drei Html portals into events.connected, so connect the host, never the canvas fallback subtree.
-                state.events.connect?.(host);
+                if (!disposed && !tearingDown && sessionCurrent())
+                  state.events.connect?.(host);
               },
             })
             .catch((error: unknown) => {
               configureRejected = true;
               throw error;
             });
-          if (disposed || !sessionCurrent()) return;
+          if (disposed || tearingDown || !sessionCurrent()) return;
           ready.current = true;
           root.current.render(
             <SceneSessionContext value={session}>
@@ -371,17 +390,11 @@ function CanvasRoot({
           const report = !disposed && sessionCurrent();
           disposed = true;
           ready.current = false;
-          if (root.current && !tearingDown) {
-            tearingDown = true;
-            if (configureRejected)
-              teardownFailedCanvas(root.current, element, () =>
-                lease.complete(),
-              );
-            else unmountComponentAtNode(element, () => lease.complete());
-            root.current = null;
-          } else if (!root.current) {
-            // Capture authority above before completing a root-less failed lease.
-            lease.complete();
+          teardownAllocation(configureRejected);
+          if (!allocationCreated) {
+            // Only root-less construction failure can complete without Fiber.
+            // A late configure rejection must never release a disposing root.
+            completeAllocation();
           }
           if (report)
             onFailure(
@@ -399,16 +412,9 @@ function CanvasRoot({
       cancelAnimationFrame(frame);
       observer.disconnect();
       ready.current = false;
-      void queue.finally(() => {
-        const current = root.current;
-        root.current = null;
-        if (current && !tearingDown) {
-          tearingDown = true;
-          unmountComponentAtNode(element, () => lease.complete());
-        }
-        // No allocation belongs to the outer request, whose cancellation releases
-        // it immediately. StrictMode may replay this inner effect on that lease.
-      });
+      // Public Fiber unmount waits for pending configuration and disposal itself.
+      // Waiting for our configure queue first can indefinitely withhold teardown.
+      teardownAllocation();
     };
     // This allocation owns one original lease; callback changes cannot recreate it.
     // eslint-disable-next-line react-hooks/exhaustive-deps

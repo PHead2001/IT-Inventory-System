@@ -153,7 +153,13 @@ they do not create WebGL or prove GPU release. Disposal APIs that throw and
 allocations hidden inside a rejecting factory do not establish actual GPU release
 even when Fiber reports completion, and remain browser/resource acceptance limits.
 A factory that allocates resources and rejects without returning them must clean
-up those allocations itself.
+up those allocations itself. SafeCanvas initiates public unmount immediately on
+cleanup, even while configuration is pending, and fences later configure/render
+work. Only Fiber's completion callback releases a created root's original lease;
+a late configuration rejection cannot release it while disposal remains pending.
+Production room callers provide a synchronous renderer configuration object. A
+custom renderer factory that never settles can also prevent Fiber from completing
+teardown; safely reclaiming its unknown resources is not established by a timeout.
 
 Whole-page `PageArrival` capture excludes `/room`, asset/quantity record details
 and location details before their lazy previews load, including the preceding
