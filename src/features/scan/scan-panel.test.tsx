@@ -19,6 +19,7 @@ const mocks = vi.hoisted(() => ({
   stop: vi.fn(),
   resolve: vi.fn(),
   resolveItemCode: vi.fn(),
+  resolveSerial: vi.fn(),
   push: vi.fn(),
 }));
 vi.mock('@zxing/browser', async () => {
@@ -35,6 +36,7 @@ vi.mock('@zxing/browser', async () => {
 vi.mock('./resolve.server', () => ({
   resolveScan: mocks.resolve,
   resolveItemCode: mocks.resolveItemCode,
+  resolveSerial: mocks.resolveSerial,
 }));
 vi.mock('next/navigation', () => ({ useRouter: () => ({ push: mocks.push }) }));
 vi.mock('@/lib/supabase/browser', () => ({
@@ -72,6 +74,106 @@ beforeEach(() => {
   mocks.decode.mockResolvedValue({ stop: mocks.stop });
   mocks.resolve.mockResolvedValue({ status: 'unknown', matches: [] });
   mocks.resolveItemCode.mockResolvedValue({ status: 'unknown', matches: [] });
+  mocks.resolveSerial.mockResolvedValue({ status: 'unknown', matches: [] });
+});
+it.each(['manual', 'camera'])(
+  'a %s serial collision shows context and lifecycle without silently opening either asset',
+  async (mode) => {
+    mocks.resolve.mockResolvedValue({
+      status: 'ambiguous',
+      matches: [
+        {
+          kind: 'asset',
+          path: '/inventory/assets/70000000-0000-4000-8000-000000000001',
+          label: 'Laptop (Tag-1)',
+          name: 'Laptop',
+          identifier: 'Tag-1',
+          serialNumber: 'Serial-Mixed',
+          state: 'active',
+          context: 'Manufacturer: Dell · IT Closet / Red Container',
+        },
+        {
+          kind: 'asset',
+          path: '/inventory/assets/70000000-0000-4000-8000-000000000002',
+          label: 'Spare laptop (Tag-2)',
+          name: 'Spare laptop',
+          identifier: 'Tag-2',
+          state: 'retired',
+          context:
+            'Manufacturer: Lenovo · Last recorded storage: Black Container',
+        },
+      ],
+    });
+    render(<ScanPanel />);
+    if (mode === 'manual') {
+      fireEvent.change(screen.getByLabelText(/Paste a label URL/), {
+        target: { value: 'Serial-Mixed' },
+      });
+      fireEvent.click(screen.getByRole('button', { name: 'Open' }));
+    } else {
+      fireEvent.click(screen.getByRole('button', { name: 'Start camera' }));
+      await waitFor(() => expect(mocks.decode).toHaveBeenCalled());
+      mocks.decode.mock.calls[0][2]({ getText: () => 'Serial-Mixed' });
+    }
+    expect(
+      await screen.findByRole('link', { name: 'Laptop (Tag-1)' }),
+    ).toBeVisible();
+    expect(
+      screen.getByRole('link', { name: 'Laptop (Tag-1)' }),
+    ).toHaveAttribute(
+      'href',
+      '/inventory/assets/70000000-0000-4000-8000-000000000001',
+    );
+    expect(
+      screen.getByRole('link', { name: 'Spare laptop (Tag-2)' }),
+    ).toHaveAttribute(
+      'href',
+      '/inventory/assets/70000000-0000-4000-8000-000000000002',
+    );
+    expect(
+      screen.getByRole('list', { name: 'Matching records' }),
+    ).toHaveTextContent('Dell · IT Closet / Red Container');
+    expect(
+      screen.getByRole('list', { name: 'Matching records' }),
+    ).toHaveTextContent('Retired');
+    expect(screen.getByRole('link', { name: 'Laptop (Tag-1)' })).toHaveFocus();
+    expect(
+      screen.getByRole('link', { name: 'Laptop (Tag-1)' }),
+    ).toHaveAccessibleDescription(
+      'Serial: Serial-Mixed · Manufacturer: Dell · IT Closet / Red Container',
+    );
+    expect(mocks.resolve).toHaveBeenCalledExactlyOnceWith('Serial-Mixed');
+    expect(mocks.push).not.toHaveBeenCalled();
+  },
+);
+it('a saturated result never claims a unique match and offers ordinary inventory search', async () => {
+  mocks.resolve.mockResolvedValue({
+    status: 'found',
+    truncated: true,
+    matches: [
+      {
+        kind: 'asset',
+        path: '/inventory/assets/70000000-0000-4000-8000-000000000001',
+        label: 'Laptop',
+        state: 'active',
+      },
+    ],
+  });
+  render(<ScanPanel />);
+  fireEvent.change(screen.getByLabelText(/Paste a label URL/), {
+    target: { value: 'Serial' },
+  });
+  fireEvent.click(screen.getByRole('button', { name: 'Open' }));
+  expect(
+    await screen.findByText(
+      /Additional matches exist.*up to 20 records.*asset tag or record QR/,
+    ),
+  ).toBeVisible();
+  expect(
+    screen.getByRole('link', { name: 'Search inventory' }),
+  ).toHaveAttribute('href', '/inventory');
+  expect(screen.getByRole('link', { name: 'Laptop' })).toHaveFocus();
+  expect(mocks.push).not.toHaveBeenCalled();
 });
 it('reports changed scope when an earlier sibling guard invalidates during mount before Scan subscribes', () => {
   const actorId = '00000000-0000-4000-8000-000000000001';
@@ -167,7 +269,7 @@ it('focuses and announces the ambiguous chooser after inspection', async () => {
   );
   expect(mocks.push).not.toHaveBeenCalled();
 });
-it.each(['cancel', 'text', 'mode', 'account'])(
+it.each(['cancel', 'text', 'mode', 'serial-mode', 'account'])(
   'invalidates a pending lookup on %s without late navigation or context changes',
   async (action) => {
     const pending = deferred<unknown>();
@@ -185,6 +287,8 @@ it.each(['cancel', 'text', 'mode', 'account'])(
       fireEvent.change(input, { target: { value: 'NEW' } });
     else if (action === 'mode')
       fireEvent.click(screen.getByLabelText('Quantity item code (SKU)'));
+    else if (action === 'serial-mode')
+      fireEvent.click(screen.getByLabelText('Serial number'));
     else act(() => invalidateAssignmentCallbacks());
     await act(async () => pending.resolve(found));
     expect(mocks.push).not.toHaveBeenCalled();
@@ -464,6 +568,58 @@ it('keeps camera payloads in label mode even when manual Item code mode is selec
     ),
   );
   expect(mocks.resolveItemCode).not.toHaveBeenCalled();
+});
+it.each(['manual', 'camera'])(
+  'explicit serial %s lookup opens only the resolved canonical asset path',
+  async (entry) => {
+    const path = '/inventory/assets/7b84a7cf-197b-45b1-8016-87482d124cb4';
+    mocks.resolveSerial.mockResolvedValue({
+      status: 'found',
+      matches: [{ kind: 'asset', path, state: 'active', label: 'Device' }],
+    });
+    render(<ScanPanel />);
+    fireEvent.click(screen.getByLabelText('Serial number'));
+    expect(
+      screen.getByText(/QR URLs are treated as serial text/),
+    ).toBeVisible();
+    if (entry === 'manual') {
+      fireEvent.change(screen.getByLabelText('Enter the exact serial number'), {
+        target: { value: 'SN:12345' },
+      });
+      fireEvent.click(screen.getByRole('button', { name: 'Open' }));
+    } else {
+      fireEvent.click(screen.getByRole('button', { name: 'Start camera' }));
+      await waitFor(() => expect(mocks.decode).toHaveBeenCalled());
+      mocks.decode.mock.calls[0][2]({ getText: () => 'SN:12345' });
+    }
+    await waitFor(() =>
+      expect(mocks.resolveSerial).toHaveBeenCalledExactlyOnceWith('SN:12345'),
+    );
+    await waitFor(() =>
+      expect(mocks.push).toHaveBeenCalledExactlyOnceWith(path),
+    );
+    expect(mocks.resolve).not.toHaveBeenCalled();
+    expect(mocks.resolveItemCode).not.toHaveBeenCalled();
+  },
+);
+it('serial camera mode retires old frames on mode change and routes a QR URL only as serial data', async () => {
+  render(<ScanPanel />);
+  fireEvent.click(screen.getByRole('button', { name: 'Start camera' }));
+  await waitFor(() => expect(mocks.decode).toHaveBeenCalledTimes(1));
+  const oldFrame = mocks.decode.mock.calls[0][2];
+  fireEvent.click(screen.getByLabelText('Serial number'));
+  oldFrame({ getText: () => 'LOC:ITC' });
+  expect(mocks.resolve).not.toHaveBeenCalled();
+  expect(mocks.stop).toHaveBeenCalled();
+  fireEvent.click(screen.getByRole('button', { name: 'Start camera' }));
+  await waitFor(() => expect(mocks.decode).toHaveBeenCalledTimes(2));
+  const url = 'https://inventory.example.test/locations/ITC';
+  mocks.decode.mock.calls[1][2]({ getText: () => url });
+  await waitFor(() =>
+    expect(mocks.resolveSerial).toHaveBeenCalledExactlyOnceWith(url),
+  );
+  expect(mocks.push).not.toHaveBeenCalled();
+  expect(mocks.resolve).not.toHaveBeenCalled();
 });
 it('releases camera when the scan page unmounts', async () => {
   const page = render(<ScanPanel />);

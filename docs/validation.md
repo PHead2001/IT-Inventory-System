@@ -1,5 +1,16 @@
 # Validation
 
+## Room label transition correctness
+
+Captured selected-label transition regressions use a deterministic injected clock
+and a 150,000-operation cap to verify complete coverage, collision-free placement,
+pointer containment, the full selected footprint and stable settled pins. These
+are geometry and bounded-work assertions, not host timing benchmarks. Separate
+injected-deadline regressions verify cooperative expiry and safe retained pins;
+the runtime's 16 ms deadline is unchanged. Browser placement and performance
+acceptance require the populated room E2E checks and are not established by these
+unit tests.
+
 ## C403 live-search timing coverage
 
 `tests/e2e/inventory-search.spec.ts` uses applied URL, input, row count,
@@ -731,3 +742,16 @@ and print-media regression mapping. Focused location/tree, inventory presentatio
 metadata/title/privacy and working-control checks provide local integration
 evidence only. Earlier PR48 CI/review remains bound to `d2c6222`; the new combined
 commit requires its own canonical CI, fresh review and hosted acceptance.
+
+## A306/A310 serial identification integration
+
+Serial-mode regressions cover literal colon/prefix/URL serials, caller denial,
+Unicode bounds, contextual duplicates/overflow and unchanged automatic URL guards.
+Both entry points cover deliberate camera/manual serial lookup, old camera frame
+retirement and assignment mode preservation after a failed durable reset. The
+browser identifier-guidance journey adds a persisted `SN:` serial at desktop/phone
+widths in Full/Reduced motion; report its execution separately from unit coverage.
+
+Focused resolver/parser/chooser/assignment and tag-advisory regressions cover exact spelling, Unicode lengths, legal duplicates, cross-namespace collisions, typed-prefix isolation, unknowns, errors, overflow and retained cancellation/privacy guards. `supabase/tests/serial_scan.test.sql` adds transactional fixtures for stable invoker/empty-search-path grants, active viewer/staff reads, nonmember/inactive/anonymous denial, exact case/whitespace lookup, 200 supplementary Unicode characters, deterministic first21 results, truthful site/retired context and nonmutating reads. The migration and provisional generated-type addition require canonical clean-database execution and `db:types:check`; they have not been validated against local PostgreSQL here because its Docker daemon is unavailable.
+
+`tests/e2e/audit-four-identifier-guidance.spec.ts` retains owned new fixtures for duplicate serials, serial/tag/SKU collisions, tag blur guidance and a synthetic camera QR frame. Scan and tag-blur cases are defined at 1280/390 px with Full/Reduced motion. A separate 390 px Reduced-motion Scan-and-assign journey enters a duplicate serial through the real input, requires a named/contextual chooser, deliberately selects the intended asset, checks the review's immutable record link and storage source, then cancels with **Skip inspection / review**. Caller-scoped reads compare both assets, their versions and their inventory/assignment events before choice, after inspection and after cancellation to prove that no assignment was made. These are durable test definitions; browser/hosted execution and physical-camera testing remain pending. SQL timeout configuration likewise requires effective REST hoisting and elapsed-time proof before it establishes any request-time bound. This is iteration evidence, not final PR certification.

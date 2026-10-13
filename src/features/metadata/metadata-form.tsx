@@ -68,6 +68,10 @@ import { inventoryReturnPath } from '@/features/inventory/create-return';
 import { useOperationalTimeZone } from '@/components/operational-time';
 import { editSummary, normalizeEditIntent } from './edit-summary';
 import {
+  AssetTagAdvisory,
+  useAssetTagAdvisory,
+} from '@/features/inventory/components/asset-tag-advisory';
+import {
   editBaseline,
   readEdit,
   writeEdit,
@@ -328,6 +332,12 @@ export function MetadataForm({
     null,
   );
   const [duplicates, setDuplicates] = useState<DuplicateSerial[]>([]);
+  const tagAdvisory = useAssetTagAdvisory({
+    value: core.asset_tag,
+    owner: JSON.stringify([actorId, recoveryBackend, latest?.id, kind]),
+    excludeId: kind === 'asset' ? latest?.id : undefined,
+    enabled: kind === 'asset' && !preview && !actorStale && !taskCompleted,
+  });
   const recoveryEnabled = creating && !preview;
   const editRecoveryEnabled = !creating && !preview;
   const editRecovery = useRef<EditEnvelope | null>(null);
@@ -1084,6 +1094,7 @@ export function MetadataForm({
       refreshNeeded
     )
       return;
+    if (name === 'asset_tag') tagAdvisory.invalidate();
     const next = { ...core, [name]: value };
     persistInputs({
       core: next,
@@ -1284,9 +1295,11 @@ export function MetadataForm({
             scopeId + '-metadata-' + name,
             name === 'item_code' && invalidItemCode
               ? scopeId + '-metadata-item_code-help'
-              : name === 'reorder_threshold'
-                ? scopeId + '-metadata-threshold-help'
-                : undefined,
+              : name === 'asset_tag' && !preview
+                ? scopeId + '-metadata-asset-tag-check'
+                : name === 'reorder_threshold'
+                  ? scopeId + '-metadata-threshold-help'
+                  : undefined,
           )}
           type={name === 'reorder_threshold' ? 'number' : 'text'}
           min={name === 'reorder_threshold' ? 0 : undefined}
@@ -1302,11 +1315,20 @@ export function MetadataForm({
           }
           required={name === 'name'}
           value={core[name as keyof typeof core] ?? ''}
+          onBlur={
+            name === 'asset_tag' ? () => void tagAdvisory.check() : undefined
+          }
           onChange={(event) =>
             updateCore(name as keyof typeof core, event.target.value)
           }
         />
         {validation.error(scopeId + '-metadata-' + name)}
+        {name === 'asset_tag' && !preview && (
+          <AssetTagAdvisory
+            id={scopeId + '-metadata-asset-tag-check'}
+            result={tagAdvisory.result}
+          />
+        )}
         {name === 'item_code' && invalidItemCode && (
           <p
             id={scopeId + '-metadata-item_code-help'}

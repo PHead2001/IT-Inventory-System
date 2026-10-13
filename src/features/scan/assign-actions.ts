@@ -7,7 +7,12 @@ import {
 } from '@/features/inventory/queries.server';
 import { getSites } from '@/features/custody/queries.server';
 import { searchLabelRecords } from '@/features/labels/queue.server';
-import { resolveScan, resolveItemCode, type ScanMatch } from './resolve.server';
+import {
+  resolveScan,
+  resolveItemCode,
+  resolveSerial,
+  type ScanMatch,
+} from './resolve.server';
 import { targetPath } from './targets';
 import type {
   AssignmentInspection,
@@ -33,7 +38,7 @@ export async function findAssignmentRecords(
     .strictObject({
       actorId: z.uuid(),
       text: z.string().max(1024),
-      mode: z.enum(['identifier', 'item_code', 'search']),
+      mode: z.enum(['identifier', 'item_code', 'serial', 'search']),
       page: z.number().int().min(1).max(100000).default(1),
     })
     .safeParse(input);
@@ -47,7 +52,9 @@ export async function findAssignmentRecords(
     if (parsed.data.mode !== 'search') {
       const resolution = await (parsed.data.mode === 'item_code'
         ? resolveItemCode(parsed.data.text)
-        : resolveScan(parsed.data.text));
+        : parsed.data.mode === 'serial'
+          ? resolveSerial(parsed.data.text)
+          : resolveScan(parsed.data.text));
       return { ok: true, ...resolution };
     }
     const query = parsed.data.text.trim();

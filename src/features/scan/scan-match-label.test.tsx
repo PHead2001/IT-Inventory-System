@@ -1,6 +1,6 @@
 import { render, screen } from '@testing-library/react';
 import { expect, it } from 'vitest';
-import { ScanMatchLabel } from './scan-match-label';
+import { ScanMatchLabel, ScanMatchContext } from './scan-match-label';
 
 it('composes name and literal identifier independently without parsing punctuation or changing target identity', () => {
   const match = {
@@ -39,4 +39,26 @@ it('keeps a legacy combined label intact when structured display fields are abse
     'Name (parentheses) /SKU',
   );
   expect(screen.getByRole('button').querySelector('span')).toBeNull();
+});
+
+it('renders stored serial spelling in the code font while treating manufacturer and location as text', () => {
+  const match = {
+    kind: 'asset' as const,
+    path: '/inventory/assets/id',
+    label: 'Laptop',
+    state: 'retired' as const,
+    serialNumber: '<script>Sn-00</script>',
+    context:
+      'Manufacturer: Dell · Last recorded storage Red Container (ITC-RED)',
+  };
+  const { container } = render(
+    <p>
+      <ScanMatchContext match={match} />
+    </p>,
+  );
+  expect(container.querySelector('.experience-code')).toHaveTextContent(
+    match.serialNumber,
+  );
+  expect(container.querySelector('script')).toBeNull();
+  expect(container).toHaveTextContent(match.context);
 });

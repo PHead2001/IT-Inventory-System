@@ -10,6 +10,11 @@ import {
 const origin = 'https://inventory.example.test';
 const id = '7b84a7cf-197b-45b1-8016-87482d124cb4';
 describe('label destinations', () => {
+  it('accepts a bounded long bare serial without changing typed tag limits or unsafe parsing', () => {
+    expect(parseScan('x'.repeat(200), origin)?.kind).toBe('bare');
+    expect(parseScan('x'.repeat(201), origin)).toBeNull();
+    expect(parseScan('AST:' + 'x'.repeat(101), origin)).toBeNull();
+  });
   it('trims only pasted outer whitespace and preserves internal punctuation and zero padding', () => {
     expect(
       parseScan(' \r\n' + origin + quantityLabelPath(id) + '\n ', origin),
@@ -124,4 +129,16 @@ describe('label destinations', () => {
   ])('rejects noncanonical Overview return %s', (value) => {
     expect(validReturnPath(value)).toBeNull();
   });
+});
+
+it('accepts 200 supplementary bare serial characters while keeping AST and return destinations unchanged', () => {
+  const serial = '😀'.repeat(200);
+  expect(
+    parseScan(' \t' + serial + '\n ', 'https://inventory.example.test'),
+  ).toEqual({ kind: 'bare', identifier: serial });
+  expect(parseScan(serial + '😀', 'https://inventory.example.test')).toBeNull();
+  expect(
+    parseScan('AST:' + serial, 'https://inventory.example.test'),
+  ).toBeNull();
+  expect(validReturnPath(serial)).toBeNull();
 });
