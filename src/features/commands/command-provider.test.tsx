@@ -174,6 +174,103 @@ function open() {
   fireEvent.click(screen.getByRole('button', { name: 'Search and commands' }));
   return screen.getByRole('combobox');
 }
+it.each(['query', 'native'] as const)(
+  'retires palette requests on %s traversal of the same pathname',
+  async (kind) => {
+    let finish!: (value: Response) => void;
+    let signal!: AbortSignal;
+    vi.mocked(fetch).mockImplementation((_url, init) => {
+      signal = init!.signal as AbortSignal;
+      return new Promise((resolve) => {
+        finish = resolve;
+      });
+    });
+    const view = render(<Workspace />);
+    fireEvent.change(open(), { target: { value: 'private search' } });
+    await settle();
+    expect(signal.aborted).toBe(false);
+    act(() => {
+      history.replaceState({}, '', '/inventory?q=other');
+      if (kind === 'native')
+        window.dispatchEvent(new PopStateEvent('popstate'));
+    });
+    if (kind === 'query') view.rerender(<Workspace />);
+    await act(async () => {});
+    expect(signal.aborted).toBe(true);
+    expect(screen.queryByRole('dialog')).toBeNull();
+    await act(async () => finish(response('Stale private reply')));
+    expect(screen.queryByText('Stale private reply')).toBeNull();
+    expect(open()).toHaveValue('');
+  },
+);
+it.each(['hidden', 'inert', 'visible'] as const)(
+  'only a %s retained overlay can block the launcher',
+  (state) => {
+    const owner = document.createElement('div');
+    owner.setAttribute('role', 'dialog');
+    owner.hidden = state === 'hidden';
+    if (state === 'inert') owner.setAttribute('inert', '');
+    document.body.append(owner);
+    try {
+      render(<Workspace />);
+      fireEvent.click(
+        screen.getByRole('button', { name: 'Search and commands' }),
+      );
+      expect(screen.queryByRole('combobox') !== null).toBe(state !== 'visible');
+    } finally {
+      owner.remove();
+    }
+  },
+);
+it.each(['storage', 'site', 'mixed', 'empty', 'legacy'] as const)(
+  'renders truthful bounded %s inventory context',
+  async (kind) => {
+    const storage = {
+      kind: 'location',
+      id: row.id,
+      name: 'Drawer 1',
+      code: 'ITC-D01',
+    };
+    const site = { kind: 'site', id: row.id, name: 'Office', code: 'OFFICE' };
+    const context =
+      kind === 'legacy'
+        ? undefined
+        : {
+            places:
+              kind === 'empty'
+                ? []
+                : kind === 'mixed'
+                  ? [storage, site]
+                  : [kind === 'site' ? site : storage],
+            hasMore: kind === 'mixed',
+          };
+    vi.mocked(fetch).mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          identity: { actorId: 'actor', backend: 'local-backend' },
+          result: { version: 1, rows: [{ ...row, context }], hasMore: false },
+        }),
+      ),
+    );
+    render(<Workspace />);
+    fireEvent.change(open(), { target: { value: 'camera' } });
+    await settle();
+    const option = screen.getByRole('option', { name: /Camera laptop/ });
+    if (kind === 'legacy')
+      expect(option).not.toHaveTextContent('No current storage or site');
+    else if (kind === 'empty')
+      expect(option).toHaveTextContent('No current storage or site');
+    else {
+      expect(option).toHaveTextContent(
+        kind === 'site' ? 'Site: Office' : 'Storage: Drawer 1',
+      );
+      if (kind === 'mixed')
+        expect(option).toHaveTextContent(
+          'Site: Office (OFFICE); More locations',
+        );
+    }
+  },
+);
 it('focuses connected Add choices both from N and an existing palette and contains Tab/Escape', async () => {
   render(<Workspace />);
   const launcher = screen.getByRole('button', { name: 'Search and commands' });

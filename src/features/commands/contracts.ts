@@ -32,6 +32,25 @@ export const entityRow = z
     serialNumber: boundedText(200).nullable(),
     status: z.enum(['active', 'retired', 'archived', 'inactive']),
     matchedField: z.enum(['name', 'code', 'assetTag', 'serialNumber']),
+    context: z
+      .object({
+        places: z
+          .array(
+            z
+              .object({
+                kind: z.enum(['location', 'site']),
+                id: z.string().uuid(),
+                name: boundedText(200),
+                code: boundedText(200),
+              })
+              .strict(),
+          )
+          .max(3),
+        hasMore: z.boolean(),
+      })
+      .strict()
+      .nullable()
+      .optional(),
   })
   .strict();
 export const commandResults = z

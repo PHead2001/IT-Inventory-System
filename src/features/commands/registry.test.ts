@@ -12,6 +12,46 @@ import {
   entityDestination,
   type EntityRow,
 } from './contracts';
+it('accepts legacy absent context and bounds enriched authorized places', () => {
+  const row = {
+    kind: 'quantity',
+    id: 'a3010000-0000-4000-8000-000000000001',
+    name: 'Cable',
+    code: null,
+    assetTag: null,
+    serialNumber: null,
+    status: 'active',
+    matchedField: 'name',
+  };
+  const place = {
+    kind: 'location',
+    id: row.id,
+    name: '😀'.repeat(200),
+    code: 'ITC-D01',
+  };
+  expect(entityRow.safeParse(row).success).toBe(true);
+  expect(
+    entityRow.safeParse({
+      ...row,
+      context: { places: [place], hasMore: false },
+    }).success,
+  ).toBe(true);
+  expect(
+    entityRow.safeParse({
+      ...row,
+      context: { places: Array(4).fill(place), hasMore: true },
+    }).success,
+  ).toBe(false);
+  expect(
+    entityRow.safeParse({
+      ...row,
+      context: {
+        places: [{ ...place, name: '😀'.repeat(201) }],
+        hasMore: false,
+      },
+    }).success,
+  ).toBe(false);
+});
 it.each([
   ['name', 200],
   ['code', 200],

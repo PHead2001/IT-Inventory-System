@@ -11,6 +11,47 @@ vi.mock('@/lib/supabase/server', () => ({
   createSupabaseServerClient: mocks.client,
 }));
 import { POST } from './route';
+it.each(['deadline', 'request', 'oversized'] as const)(
+  'bounds an incomplete streamed body and nonsettling cancellation on %s',
+  async (reason) => {
+    vi.useFakeTimers();
+    const cancel = vi.fn(() => new Promise<void>(() => {}));
+    const stream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(
+          new TextEncoder().encode(
+            reason === 'oversized' ? 'x'.repeat(4097) : '{"query":',
+          ),
+        );
+      },
+      cancel,
+    });
+    const controller = new AbortController();
+    const init = {
+      method: 'POST',
+      headers: { origin: 'https://inventory.example' },
+      body: stream,
+      duplex: 'half' as const,
+      signal: controller.signal,
+    };
+    const pending = POST(
+      new NextRequest('https://inventory.example/api/commands/search', init),
+    );
+    if (reason !== 'oversized') {
+      await vi.waitFor(() => expect(stream.locked).toBe(true));
+      if (reason === 'request') controller.abort();
+      else await vi.advanceTimersToNextTimerAsync();
+    }
+    const response = await pending;
+    expect(response.status).toBe(
+      reason === 'deadline' ? 504 : reason === 'request' ? 499 : 400,
+    );
+    expect(cancel).toHaveBeenCalledOnce();
+    expect(stream.locked).toBe(false);
+    expect(vi.getTimerCount()).toBe(0);
+    expect(mocks.client).not.toHaveBeenCalled();
+  },
+);
 const result = { version: 1, rows: [], hasMore: false };
 beforeEach(() => {
   vi.resetAllMocks();

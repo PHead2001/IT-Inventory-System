@@ -1,4 +1,4 @@
-import { routeKey } from './route-key';
+import { routeKey, canonicalRecordPath } from './route-key';
 import type { RoutePendingState } from './route-pending';
 
 export type ReadyContent = {
@@ -79,7 +79,7 @@ export function createRouteReadiness(
       if (!content || primary() !== content) return null;
       const url = new URL(location.href);
       if (
-        url.pathname !== recordPath ||
+        canonicalRecordPath(url.pathname) !== canonicalRecordPath(recordPath) ||
         url.searchParams.getAll('task').length !== 1 ||
         url.searchParams.get('task') !== task
       )

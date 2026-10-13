@@ -12,7 +12,8 @@ import {
   useSyncExternalStore,
   type ReactNode,
 } from 'react';
-import { usePathname } from 'next/navigation';
+import { usePathname, useSearchParams } from 'next/navigation';
+import { routeKey } from '@/components/experience/route-key';
 import { useRouteRouter } from '@/components/experience/route-pending';
 import {
   useRouteCommandBoundary,
@@ -151,6 +152,11 @@ export function CommandProvider({
     latestPrivacy.current = privacy;
   }, [privacy]);
   const pathname = usePathname();
+  const parameters = useSearchParams();
+  const currentRoute = routeKey(
+    pathname,
+    new URLSearchParams(parameters?.toString()),
+  );
   const reduced = useEffectiveReducedMotion();
   const storageKey =
     'it-inventory:shortcuts:v1:' + encodeURIComponent(backend) + ':' + actorId;
@@ -190,7 +196,7 @@ export function CommandProvider({
   } | null>(null);
   const prefixUntil = useRef(0);
   const prefixTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const previousPath = useRef(pathname);
+  const previousPath = useRef(currentRoute);
   const clearPrefix = useCallback(() => {
     prefixUntil.current = 0;
     if (prefixTimer.current) clearTimeout(prefixTimer.current);
@@ -288,8 +294,16 @@ export function CommandProvider({
       !boundary.authorized() ||
       !freshPresentationGrant(latestPrivacy.current) ||
       overlay ||
-      document.querySelector(
-        '[role="dialog"], [role="alertdialog"], dialog[open], [role="menu"], [role="listbox"]',
+      Array.from(
+        document.querySelectorAll<HTMLElement>(
+          '[role="dialog"], [role="alertdialog"], dialog[open], [role="menu"], [role="listbox"]',
+        ),
+      ).some(
+        (element) =>
+          element.isConnected &&
+          !element.closest('[hidden], [inert]') &&
+          element.getClientRects().length > 0 &&
+          getComputedStyle(element).visibility !== 'hidden',
       )
     )
       return;
@@ -412,16 +426,35 @@ export function CommandProvider({
     queueMicrotask(() => {
       if (!live) return;
       setHeld(false);
-      if (previousPath.current !== pathname) {
-        generation.current++;
+      if (previousPath.current !== currentRoute) {
+        cancelSessionWork(true);
         setOverlay(null);
-        previousPath.current = pathname;
+        setQuery('');
+        setResult(null);
+        setLoading(false);
+        setError('');
+        setAuthChecked(false);
+        previousPath.current = currentRoute;
       }
     });
     return () => {
       live = false;
     };
-  }, [pathname, clearPrefix]);
+  }, [currentRoute, clearPrefix, cancelSessionWork]);
+  useEffect(() => {
+    const traverse = () => {
+      cancelSessionWork();
+      clearPrefix();
+      setOverlay(null);
+      setQuery('');
+      setResult(null);
+      setLoading(false);
+      setAuthChecked(false);
+      setError('');
+    };
+    window.addEventListener('popstate', traverse, true);
+    return () => window.removeEventListener('popstate', traverse, true);
+  }, [cancelSessionWork, clearPrefix]);
   const reconcile = useEffectEvent(() => focusDestination());
   useEffect(() => {
     reconcile();
@@ -962,6 +995,27 @@ export function CommandProvider({
                           <span className="block break-words font-semibold">
                             {row.name}
                           </span>
+                          {row.context &&
+                            (row.kind === 'asset' ||
+                              row.kind === 'quantity') && (
+                              <span className="block text-sm">
+                                {row.context.places.length === 0
+                                  ? 'No current storage or site'
+                                  : row.context.places
+                                      .map(
+                                        (place) =>
+                                          (place.kind === 'site'
+                                            ? 'Site: '
+                                            : 'Storage: ') +
+                                          place.name +
+                                          ' (' +
+                                          place.code +
+                                          ')',
+                                      )
+                                      .join('; ')}
+                                {row.context.hasMore && '; More locations'}
+                              </span>
+                            )}
                           <span className="experience-code block break-words text-sm">
                             {row.assetTag ?? row.code ?? row.serialNumber}
                           </span>

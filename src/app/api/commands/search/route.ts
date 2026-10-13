@@ -44,32 +44,6 @@ export async function POST(request: NextRequest) {
     return reply('Request unavailable.', 403);
   if (Number(request.headers.get('content-length') ?? 0) > 4096)
     return reply('Search is too long.', 400);
-  let raw: unknown;
-  try {
-    const reader = request.body?.getReader();
-    if (!reader) return reply('Enter a search.', 400);
-    const chunks: Uint8Array[] = [];
-    let length = 0;
-    while (true) {
-      const chunk = await reader.read();
-      if (chunk.done) break;
-      length += chunk.value.byteLength;
-      if (length > 4096) {
-        await reader.cancel();
-        return reply('Search is too long.', 400);
-      }
-      chunks.push(chunk.value);
-    }
-    const bytes = new Uint8Array(length);
-    let offset = 0;
-    for (const chunk of chunks) {
-      bytes.set(chunk, offset);
-      offset += chunk.byteLength;
-    }
-    raw = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes));
-  } catch {
-    return reply('Check your search and try again.', 400);
-  }
   const lifetime = new AbortController();
   const signal = lifetime.signal;
   let timedOut = false;
@@ -82,7 +56,38 @@ export async function POST(request: NextRequest) {
       new DOMException('Search deadline elapsed.', 'TimeoutError'),
     );
   }, 8000);
+  let reader: ReadableStreamDefaultReader<Uint8Array> | undefined;
+  let bodyFinished = false;
   try {
+    let raw: unknown;
+    try {
+      reader = request.body?.getReader();
+      if (!reader) return reply('Enter a search.', 400);
+      const chunks: Uint8Array[] = [];
+      let length = 0;
+      while (true) {
+        const chunk = await withinLifetime(signal, () => reader!.read());
+        if (chunk.done) {
+          bodyFinished = true;
+          break;
+        }
+        length += chunk.value.byteLength;
+        if (length > 4096) {
+          return reply('Search is too long.', 400);
+        }
+        chunks.push(chunk.value);
+      }
+      const bytes = new Uint8Array(length);
+      let offset = 0;
+      for (const chunk of chunks) {
+        bytes.set(chunk, offset);
+        offset += chunk.byteLength;
+      }
+      raw = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes));
+    } catch (error) {
+      if (signal.aborted) throw error;
+      return reply('Check your search and try again.', 400);
+    }
     const parsed = commandQuery.safeParse(raw);
     if (!parsed.success)
       return reply('Use up to 200 characters without control characters.', 400);
@@ -179,5 +184,14 @@ export async function POST(request: NextRequest) {
   } finally {
     clearTimeout(timer);
     request.signal.removeEventListener('abort', cancel);
+    if (reader) {
+      // Cancellation may never settle for an adversarial stream. Do not await it.
+      try {
+        if (!bodyFinished) void reader.cancel().catch(() => {});
+        reader.releaseLock();
+      } catch {
+        /* Cleanup cannot replace the request's terminal result. */
+      }
+    }
   }
 }

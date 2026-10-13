@@ -123,7 +123,9 @@ similarity at fixed 0.35 threshold. Static commands support approximate matching
 Nine GiST expression indexes cover asset name/tag/serial, quantity name/item code,
 location name/code and site name/code. Each field contributes at most 21 eligible
 exact candidates and 21 eligible nearest-word-distance candidates. The indexed
-expression is lower(btrim(coalesce(field,''))). Distance orientation is
+expression is `command_palette_normalize(field)`, an immutable invoker helper
+using the same explicit Unicode whitespace set and lowercase for query, fields
+and indexes. Distance orientation is
 field OPERATOR(extensions.<->>) query, equivalent to 1-word_similarity(query,field);
 its threshold operator is %>. Exact candidates rank first, best field matches
 deduplicate by (kind,id), and kind/id break ties deterministically. At most 20
@@ -137,12 +139,22 @@ and 20-row cap. Response text limits count Unicode codepoints, matching PostgreS
 `char_length`, including supplementary characters. Internal identities are not
 rendered as normal text.
 
+Inventory rows add optional current context: up to three authorized named storage
+locations or sites, plus `hasMore` from a fourth-place sentinel. Assets use their
+current storage/site fields; quantity items use positive storage and site holdings.
+Enrichment follows entity deduplication and the twenty-result cap; it never
+aggregates all holdings or reads event history. An explicit empty context means
+no current storage/site; legacy absent context remains unknown and is omitted.
+The forward normalization/context migration must deploy before context is accepted;
+database execution, generated types and authenticated KNN checks remain required.
+
 The private no-store POST endpoint caps streamed bodies at 4 KiB, requires
 same-origin requests, rechecks Auth/membership with the caller SDK, propagates
-cancellation and supplies one eight-second lifetime covering caller client setup,
+cancellation and supplies one eight-second lifetime covering body reads, caller client setup,
 Auth verification, membership and RPC reads. The caller fetch composes this
 lifetime with existing Request/init signals; bounded waits also retire adapters
-that fail to settle. Cleanup cancels timers/listeners. JWT/session and access
+that fail to settle. Cleanup cancels timers/listeners and releases the body reader
+without waiting for a nonsettling stream cancellation. JWT/session and access
 denials remain 401/403; transient Auth/read failures remain retryable 503s. Invalid,
 timeout and read failures offer Retry, never No matches. Session/access denial
 clears private search and dismisses the palette; another explicit opening still

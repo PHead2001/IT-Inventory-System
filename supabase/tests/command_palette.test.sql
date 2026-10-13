@@ -56,6 +56,17 @@ insert into public.sites(code,name)
 insert into public.serialized_assets(id,name,asset_tag,category_id,location_id) values
  ('a3010000-0000-4000-8000-000000008001','PurposeCrowd equipment','PAL-PURPOSE-ASSET',(select id from public.categories where code='OTHER'),(select id from public.locations where code='ITC-D01')),
  ('a3010000-0000-4000-8000-000000008002','PrintCrowd equipment','PAL-PRINT-ASSET',(select id from public.categories where code='OTHER'),(select id from public.locations where code='ITC-D01'));
+insert into public.quantity_items(id,name,item_code,category_id) values
+ ('a3010000-0000-4000-8000-000000000013','Palette many places','PAL-MANY',(select id from public.categories where code='OTHER'));
+insert into public.stock_balances(item_id,location_id,quantity)
+ select 'a3010000-0000-4000-8000-000000000013',id,1 from public.locations where code in ('ITC-D01','ITC-D02','ITC-D03','ITC-D04');
+-- Context and Unicode normalization regressions use owned rows only.
+insert into public.serialized_assets(id,name,serial_number,category_id,location_id,status) values
+ ('a3010000-0000-4000-8000-000000000023','Palette Unicode',chr(160)||'Z9'||chr(65279),(select id from public.categories where code='OTHER'),(select id from public.locations where code='ITC-D01'),'active');
+insert into public.serialized_assets(id,name,asset_tag,category_id,site_id,status) values
+ ('a3010000-0000-4000-8000-000000000024','Palette site asset','PAL-SITE-ASSET',(select id from public.categories where code='OTHER'),'a3010000-0000-4000-8000-000000000030','active');
+insert into public.site_quantity_holdings(item_id,site_id,quantity) values
+ ('a3010000-0000-4000-8000-000000000011','a3010000-0000-4000-8000-000000000030',1);
 analyze public.quantity_items;
 analyze public.serialized_assets;
 analyze public.locations;
@@ -63,6 +74,21 @@ analyze public.sites;
 select set_config('request.jwt.claims','{"sub":"a3010000-0000-4000-8000-000000000001","role":"authenticated"}',true);
 set local role authenticated;
 select is(public.command_palette_search_v1('  ')->'rows','[]'::jsonb,'blank query is empty');
+select is(public.command_palette_normalize(chr(160)||'Z9'||chr(65279)),'z9','same immutable Unicode trim for query, indexed fields and exact match');
+select is(public.command_palette_normalize(chr(code)||'Z9'||chr(code)),'z9','explicit Unicode normalization codepoint '||code) from (values (9),(10),(11),(12),(13),(32),(160),(5760),(8192),(8193),(8194),(8195),(8196),(8197),(8198),(8199),(8200),(8201),(8202),(8232),(8233),(8239),(8287),(12288),(65279)) whitespace(code);
+
+select is(public.command_palette_search_v1('Z9')->'rows'->0->>'id','a3010000-0000-4000-8000-000000000023','NBSP and BOM stored short serial finds exact asset');
+select is(public.command_palette_search_v1(chr(160)||'Z9'||chr(65279))->'rows'->0->>'id','a3010000-0000-4000-8000-000000000023','Unicode trimmed query uses the same normalized field');
+select is(public.command_palette_search_v1('PAL-ZERO')->'rows'->0->'context','{"places":[],"hasMore":false}'::jsonb,'zero stock explicitly has no current context');
+select is(public.command_palette_search_v1('PAL-ONE')->'rows'->0->'context'->'places'->0->>'code','ITC-D01','asset context uses current physical storage');
+select is(public.command_palette_search_v1('PAL-SITE-ASSET')->'rows'->0->'context'->'places'->0->>'kind','site','site-held asset uses current custody');
+select is(jsonb_array_length(public.command_palette_search_v1('PAL-MULTI')->'rows'),1,'mixed storage/site holdings still produce one quantity entity');
+select is(jsonb_array_length(public.command_palette_search_v1('PAL-MULTI')->'rows'->0->'context'->'places'),3,'mixed quantity context contains bounded storage and site places');
+select is(public.command_palette_search_v1('PAL-MULTI')->'rows'->0->'context'->>'hasMore','false','three authorized places have no fourth sentinel');
+select is(jsonb_array_length(public.command_palette_search_v1('PAL-MANY')->'rows'->0->'context'->'places'),3,'more than three places are clipped before response aggregation');
+select is(public.command_palette_search_v1('PAL-MANY')->'rows'->0->'context'->>'hasMore','true','fourth authorized place yields explicit more context');
+
+
 select throws_ok($$select public.command_palette_search_v1(null)$$,'P1012','invalid_palette_query','null query rejected');
 select throws_ok($$select public.command_palette_search_v1('Palette','hidden')$$,'P1012','invalid_palette_query','unknown lifecycle scope rejected');
 select throws_ok($$select public.command_palette_search_v1('Palette','active','hidden')$$,'P1012','invalid_palette_query','unknown purpose rejected');
@@ -107,7 +133,7 @@ begin
  table_name:=case p_kind when 'asset' then 'serialized_assets' when 'quantity' then 'quantity_items' when 'location' then 'locations' when 'site' then 'sites' end;
  eligibility:=case p_kind when 'asset' then 'r.status=''active''' when 'quantity' then 'not r.archived' else 'r.active' end;
  query:=case when p_field='name' then 'calibration' else 'pal-bulk' end;
- execute format('explain (analyze,buffers,format json) select r.id from public.%I r where %s and lower(btrim(coalesce(r.%I,''''))) operator(extensions.%%>) %L order by lower(btrim(coalesce(r.%I,''''))) operator(extensions.<->>) %L,r.id limit 21',table_name,eligibility,p_field,query,p_field,query) into plan;
+ execute format('explain (analyze,buffers,format json) select r.id from public.%I r where %s and public.command_palette_normalize(r.%I) operator(extensions.%%>) %L order by public.command_palette_normalize(r.%I) operator(extensions.<->>) %L,r.id limit 21',table_name,eligibility,p_field,query,p_field,query) into plan;
  return plan;
 end $$;
 select set_config('request.jwt.claims','{"sub":"a3010000-0000-4000-8000-000000000001","role":"authenticated"}',true);

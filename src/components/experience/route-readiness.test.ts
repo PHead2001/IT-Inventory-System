@@ -1,7 +1,49 @@
 import { afterEach, expect, it, vi } from 'vitest';
 import { createRoutePendingState } from './route-pending-state';
 import { createRouteReadiness } from './route-readiness';
-import { routeKey } from './route-key';
+import { routeKey, canonicalRecordPath } from './route-key';
+it('canonicalizes only UUID identity case on known record paths and retains query authority', () => {
+  const upper = '/inventory/assets/A3010000-0000-4000-8000-0000000000AB';
+  expect(canonicalRecordPath(upper)).toBe(upper.toLowerCase());
+  for (const path of [
+    '/locations/ITC-A',
+    '/sites/SITE-A',
+    '/INVENTORY/assets/A3010000-0000-4000-8000-0000000000AB',
+    '/inventory/assets/CaseSensitive',
+  ])
+    expect(canonicalRecordPath(path)).toBe(path);
+  const key = routeKey(
+    upper,
+    new URLSearchParams('task=asset_move&keep=Case&keep=Other'),
+  );
+  expect(key).toBe(
+    upper.toLowerCase() + '?keep=Case&keep=Other&task=asset_move',
+  );
+  history.replaceState({}, '', upper + '?task=asset_move&keep=Case');
+  const readiness = createRouteReadiness(
+    'actor',
+    createRoutePendingState(),
+    () => {},
+  );
+  const element = root();
+  const sourceKey = routeKey(upper, new URLSearchParams(location.search));
+  readiness.register({
+    actorId: 'actor',
+    routeKey: sourceKey,
+    contentIdentity: 'asset',
+    root: element,
+  });
+  expect(
+    readiness.consumeTask(
+      element,
+      sourceKey,
+      upper.toLowerCase(),
+      'asset_move',
+      (href) => history.replaceState({}, '', href),
+    ),
+  ).toEqual({ sourceKey, destinationKey: upper.toLowerCase() + '?keep=Case' });
+  expect(location.pathname).toBe(upper);
+});
 
 afterEach(() => {
   document.body.replaceChildren();
