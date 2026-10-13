@@ -1025,10 +1025,14 @@ for (const width of [1280, 390]) {
             .reduce((total, entry) => total + entry.value, 0),
         };
       });
+      const totalCLS = (await proof(page)).cls;
+      expect(admitted.preAdmissionCLS).toBe(0);
+      expect(admitted.postAdmissionCLS).toBe(0);
+      expect(totalCLS).toBe(0);
       await info.attach('privacy-gated-cold-title-admission', {
         body: JSON.stringify({
           ...admitted,
-          totalCLS: (await proof(page)).cls,
+          totalCLS,
         }),
         contentType: 'application/json',
       });
