@@ -1,5 +1,9 @@
 import { expect, test, type Page, type Request } from '@playwright/test';
 import { withHeldQuantityPrimary } from './route-primary-delay';
+import {
+  routePresentationTiming,
+  type RouteEffectTiming,
+} from './route-presentation-timing';
 import { documentRecordRoute } from '../../src/lib/document-route';
 import { holdRouteWork } from './held-route-work';
 import { createClient } from '@supabase/supabase-js';
@@ -62,6 +66,11 @@ type Proof = {
     finished: boolean;
     completionMs?: number;
     finishRejected?: boolean;
+    readyAt?: number;
+    finishedAt?: number;
+    effects: RouteEffectTiming[];
+    timingErrors: string[];
+    timingComplete: boolean;
   }>;
   cancellations: Array<{ pseudo: string; whileActive: boolean }>;
   replacements: Array<{
@@ -118,6 +127,33 @@ async function observeMotion(page: Page, unsupported = false) {
         return;
       }
       const native = document.startViewTransition.bind(document);
+      const tracked = new WeakMap<Animation, RouteEffectTiming>();
+      const pause = Animation.prototype.pause;
+      Animation.prototype.pause = function () {
+        const effect = tracked.get(this);
+        if (effect) effect.paused = true;
+        return pause.call(this);
+      };
+      const updateRate = Animation.prototype.updatePlaybackRate;
+      Animation.prototype.updatePlaybackRate = function (rate) {
+        const effect = tracked.get(this);
+        if (effect && rate !== effect.playbackRate) effect.rateChanged = true;
+        return updateRate.call(this, rate);
+      };
+      const rateProperty = Object.getOwnPropertyDescriptor(
+        Animation.prototype,
+        'playbackRate',
+      );
+      if (rateProperty?.set && rateProperty.configurable)
+        Object.defineProperty(Animation.prototype, 'playbackRate', {
+          ...rateProperty,
+          set(rate: number) {
+            const effect = tracked.get(this);
+            if (effect && rate !== effect.playbackRate)
+              effect.rateChanged = true;
+            rateProperty.set!.call(this, rate);
+          },
+        });
       document.startViewTransition = ((
         options: Parameters<Document['startViewTransition']>[0],
       ) => {
@@ -126,6 +162,9 @@ async function observeMotion(page: Page, unsupported = false) {
           next: [],
           ready: false,
           finished: false,
+          effects: [],
+          timingErrors: [],
+          timingComplete: false,
         };
         proof.transitions.push(entry);
         const update =
@@ -139,11 +178,78 @@ async function observeMotion(page: Page, unsupported = false) {
             ? wrapped
             : { ...options, update: wrapped },
         );
+        const observed = new Set<Animation>();
+        const pending = new Set<Promise<void>>();
+        const sample = () => {
+          for (const animation of document.getAnimations()) {
+            const effect = animation.effect as KeyframeEffect | null;
+            const pseudo = effect?.pseudoElement;
+            if (!pseudo?.startsWith('::view-transition') || !effect) continue;
+            const prior = tracked.get(animation);
+            if (prior) {
+              if (animation.playState === 'paused') prior.paused = true;
+              if (animation.playbackRate !== prior.playbackRate)
+                prior.rateChanged = true;
+            }
+            if (observed.has(animation)) continue;
+            observed.add(animation);
+            if (Number(effect.getComputedTiming().activeDuration) === 0)
+              continue;
+            const initialRate = animation.playbackRate;
+            const initialPaused = animation.playState === 'paused';
+            const value: RouteEffectTiming = {
+              pseudo,
+              startTime: null,
+              endTime: NaN,
+              activeDuration: NaN,
+              playbackRate: initialRate,
+              documentTimeline: animation.timeline === document.timeline,
+              paused: initialPaused,
+              rateChanged: false,
+            };
+            // Track interruption even while animation.ready is unresolved.
+            tracked.set(animation, value);
+            const work = (async () => {
+              try {
+                // Native ready is not animation ready. Never infer an unresolved
+                // startTime from Promise delivery or the current wall clock.
+                await animation.ready;
+                const timing = effect.getComputedTiming();
+                value.startTime =
+                  typeof animation.startTime === 'number'
+                    ? animation.startTime
+                    : null;
+                value.endTime = Number(timing.endTime);
+                value.activeDuration = Number(timing.activeDuration);
+                value.documentTimeline =
+                  animation.timeline === document.timeline;
+                value.paused ||= animation.playState === 'paused';
+                value.rateChanged ||= animation.playbackRate !== initialRate;
+                entry.effects.push(value);
+              } catch {
+                entry.timingErrors.push(
+                  'Animation ready rejected for ' + pseudo,
+                );
+              }
+            })();
+            pending.add(work);
+            void work.finally(() => pending.delete(work));
+          }
+        };
+        const frame = () => {
+          sample();
+          if (!entry.finished) requestAnimationFrame(frame);
+        };
         let readyAt: number | undefined;
         void transition.ready.then(
           () => {
             readyAt = performance.now();
             entry.ready = true;
+            entry.readyAt = readyAt;
+            // React's shared-title callback replaces the native geometry effect
+            // in this ready turn. Observe actual surviving/added effects from
+            // the next frame and continuously through native completion.
+            requestAnimationFrame(frame);
             // A timing barrier only: the binding never starts, pauses or
             // changes the native animation or React's commit.
             void (
@@ -153,14 +259,19 @@ async function observeMotion(page: Page, unsupported = false) {
           () => {},
         );
         void transition.finished.then(
-          () => {
+          async () => {
             entry.finished = true;
+            entry.finishedAt = performance.now();
             if (readyAt !== undefined)
-              entry.completionMs = performance.now() - readyAt;
+              entry.completionMs = entry.finishedAt - readyAt;
+            sample();
+            await Promise.allSettled([...pending]);
+            entry.timingComplete = true;
           },
           () => {
             entry.finished = true;
             entry.finishRejected = true;
+            entry.timingComplete = true;
           },
         );
         return transition;
@@ -206,7 +317,9 @@ async function proof(page: Page) {
 async function settled(page: Page) {
   await expect
     .poll(async () =>
-      (await proof(page)).transitions.every((entry) => entry.finished),
+      (await proof(page)).transitions.every(
+        (entry) => entry.finished && entry.timingComplete,
+      ),
     )
     .toBe(true);
 }
@@ -266,6 +379,18 @@ async function completedTitlePair(
   let settlementError: unknown;
   try {
     await settled(page);
+    // The inner primary/title can appear before Next commits the outer route.
+    // Include that real later commit and its queued effects in this journey.
+    await expect(
+      page.locator('.experience-page-arrival:visible').last(),
+    ).toHaveAttribute('data-route-path', new URL(page.url()).pathname);
+    await page.evaluate(
+      () =>
+        new Promise<void>((resolve) =>
+          requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
+        ),
+    );
+    await settled(page);
   } catch (error) {
     settlementError = error;
   }
@@ -311,6 +436,9 @@ async function completedTitlePair(
   expect(paired[0].completionMs!, diagnostic).toBeGreaterThanOrEqual(0);
   // Motion is 200ms; leave bounded scheduler headroom, never a native timeout.
   expect(paired[0].completionMs!, diagnostic).toBeLessThan(1500);
+  const presentation = routePresentationTiming(observed.transitions);
+  expect(presentation.animatedStages, diagnostic).toBe(1);
+  expect(presentation.durationMs, diagnostic).toBeLessThanOrEqual(250);
   return observed;
 }
 
@@ -1025,10 +1153,14 @@ for (const width of [1280, 390]) {
             .reduce((total, entry) => total + entry.value, 0),
         };
       });
+      const totalCLS = (await proof(page)).cls;
+      expect(admitted.preAdmissionCLS).toBe(0);
+      expect(admitted.postAdmissionCLS).toBe(0);
+      expect(totalCLS).toBe(0);
       await info.attach('privacy-gated-cold-title-admission', {
         body: JSON.stringify({
           ...admitted,
-          totalCLS: (await proof(page)).cls,
+          totalCLS,
         }),
         contentType: 'application/json',
       });

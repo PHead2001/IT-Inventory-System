@@ -347,6 +347,90 @@ it('generic snapshot completion before a late inner primary preserves its exact 
   }
 });
 
+it('a captured inner title consumes its arrival before a later outer commit can add a second route fade', async () => {
+  let primaryKey = '/inventory';
+  let motion!: ReturnType<typeof useRouteMotion>;
+  function Observe() {
+    const current = useRouteMotion();
+    useLayoutEffect(() => {
+      motion = current;
+    });
+    return null;
+  }
+  const fixture = () =>
+    view(
+      <>
+        <Observe />
+        <PageArrival pathname={runtime.pathname}>
+          <RouteContentIdentityContext
+            value={{
+              pathname: primaryKey,
+              listHref: primaryKey,
+              rawRouteKey: primaryKey,
+            }}
+          >
+            {primaryKey === '/inventory' ? <List /> : <Detail />}
+          </RouteContentIdentityContext>
+        </PageArrival>
+      </>,
+    );
+  let finishTitle!: () => void;
+  const titleFinished = new Promise<void>((resolve) => {
+    finishTitle = resolve;
+  });
+  const page = render(fixture());
+  fireEvent.click(screen.getByRole('link', { name: 'Cable row 2' }));
+  const original = motion.intent!;
+  const approval = motion.titleArrival;
+  Object.defineProperty(document, 'getAnimations', {
+    configurable: true,
+    value: () => [
+      {
+        effect: {
+          pseudoElement: `::view-transition-group(${original.name})`,
+        },
+        finished: titleFinished,
+      },
+    ],
+  });
+  try {
+    // Next's opaque primary reveals before the outer pathname catches up.
+    primaryKey = detailPath;
+    page.rerender(fixture());
+    const title = runtime.boundaries.findLast(
+      (boundary) => boundary.name === original.name,
+    )!;
+    expect(title.onShare).toBeDefined();
+    vi.mocked(sharedTitleMotion).mockReturnValueOnce(() => {});
+    await act(async () => {
+      title.onShare!({ name: original.name });
+    });
+    // The capture belongs to this navigation, while its native title is alive.
+    expect(motion.arrival).toBeNull();
+    expect(motion.intent).toBe(original);
+    expect(motion.titleArrival).toBe(approval);
+    runtime.boundaries = [];
+    runtime.pathname = detailPath;
+    page.rerender(fixture());
+    const arrivals = runtime.boundaries.filter(
+      (boundary) => boundary.enter !== undefined,
+    );
+    expect(arrivals.length).toBeGreaterThan(0);
+    expect(arrivals.every((boundary) => boundary.enter === 'none')).toBe(true);
+    expect(arrivals.every((boundary) => boundary.exit === 'none')).toBe(true);
+    expect(arrivals.every((boundary) => boundary.update === 'none')).toBe(true);
+    expect(motion.intent).toBe(original);
+    await act(async () => {
+      finishTitle();
+      await titleFinished;
+    });
+    expect(motion.intent).toBeNull();
+    expect(motion.titleArrival).toBeNull();
+  } finally {
+    Reflect.deleteProperty(document, 'getAnimations');
+  }
+});
+
 it('old generic and title completions cannot consume a newer same-provider Back intent', async () => {
   let motion!: ReturnType<typeof useRouteMotion>;
   let loading!: NonNullable<

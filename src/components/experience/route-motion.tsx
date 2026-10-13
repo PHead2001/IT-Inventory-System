@@ -775,7 +775,12 @@ export function useRouteMotion() {
     },
     finishTitleAfterSnapshot: (instance: { name: string }) => {
       const name = intent?.name;
-      if (!name || instance.name !== name) return;
+      if (!name || instance.name !== name || !current()) return;
+      // A real shared-title capture already presents this navigation. Next can
+      // commit its outer pathname later; consume only the matching generic
+      // approval now so that follow-up commit cannot add a second route fade.
+      // Keep the title owner alive until its own native snapshot completes.
+      if (titleArrival) state?.finishArrival(titleArrival);
       // React has captured the commit. Observe only its matching native
       // snapshot lifetime; a late completion cannot consume another intent.
       queueMicrotask(() => {
