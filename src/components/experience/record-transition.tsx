@@ -57,7 +57,7 @@ export function InventoryRecordLink({
     retireTitle,
     validNow,
     listHref,
-    finishAfterSnapshot,
+    finishTitleAfterSnapshot,
     current,
     rejectTitleSnapshot,
   } = useRouteMotion();
@@ -87,7 +87,7 @@ export function InventoryRecordLink({
           validNow,
           rejectTitleSnapshot,
         );
-        finishAfterSnapshot(instance);
+        finishTitleAfterSnapshot(instance);
         return cleanup;
       }}
     >
@@ -123,7 +123,7 @@ export function RecordTitle({
     enabled,
     validNow,
     pathname,
-    finishAfterSnapshot,
+    finishTitleAfterSnapshot,
     current,
     rejectTitleSnapshot,
   } = useRouteMotion();
@@ -185,7 +185,7 @@ export function RecordTitle({
           validNow,
           rejectTitleSnapshot,
         );
-        finishAfterSnapshot(instance);
+        finishTitleAfterSnapshot(instance);
         return cleanup;
       }}
     >

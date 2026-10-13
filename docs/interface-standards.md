@@ -235,6 +235,12 @@ This layout-only reveal may pass the exact fieldset made inert by an active capt
 while controls stay disabled. Previously inert fieldsets, other inert ancestors,
 hidden content, stale epochs and withdrawn privacy grants still reject it. Native
 traversal and title retirement clear this title-specific identity as before.
+Generic snapshot completion retires only its exact generic arrival owner;
+it never consumes a shared title. Only the matching named title snapshot may
+finish that title's intent. Provider, pending-epoch and captured-owner checks
+prevent late completion from consuming a newer gesture. A retained title owner
+remains a single metadata entry and is also retired by existing cancellation,
+traversal, superseding navigation, mismatched readiness and privacy paths.
 The approved origin can survive traversal for a later application Back link, but
 cannot authorize another Link gesture. No history entry is changed for animation.
 Ordinals locate anchors and do not identify holdings. Reordered holdings can pair

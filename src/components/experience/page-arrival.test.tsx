@@ -30,7 +30,7 @@ vi.mock('./route-motion', () => ({
     arrivalEnabled: route.enabled,
     finishArrival: vi.fn(),
     cancelIfInvalid: vi.fn(),
-    finishAfterSnapshot: vi.fn(),
+    finishArrivalAfterSnapshot: vi.fn(),
   }),
 }));
 vi.mock('react', async (importOriginal) => {
