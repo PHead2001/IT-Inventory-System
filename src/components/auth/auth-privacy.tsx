@@ -832,6 +832,8 @@ function PrivacyController({
       state.navigationTicket,
     ],
   );
+  // Protected cleanup is fixed below: removing status must not displace an
+  // admitted private page. Auth-entry cleanup retains its existing placement.
   const cleanup = !visible && (
     <CleanupStatus
       issue={state.issue}
@@ -842,7 +844,16 @@ function PrivacyController({
   return (
     <PrivateDocumentTitleContext value={titles}>
       <PrivacyReadinessContext value={privacy}>
-        {protectedRoute && cleanup}
+        {protectedRoute && cleanup && (
+          <div
+            role="region"
+            aria-label="Privacy cleanup"
+            style={{ position: 'fixed' }}
+            className="right-4 bottom-4 left-4 z-50 max-h-[calc(100dvh-2rem)] overflow-y-auto rounded-xl border border-[color:var(--warning)] bg-[var(--surface)] p-4 text-[color:var(--foreground)] shadow-lg sm:left-auto sm:w-sm"
+          >
+            {cleanup}
+          </div>
+        )}
         {protectedRoute ? (
           (children as ReactNode)
         ) : (
