@@ -108,6 +108,7 @@ export function RoomToolbar({
   onCountsChange,
   interactionRef,
   onOverlayChange,
+  selectionEnabled = true,
 }: {
   active: boolean;
   onActiveChange(active: boolean): void;
@@ -122,6 +123,7 @@ export function RoomToolbar({
   onCountsChange(): void;
   interactionRef?: RefObject<HTMLButtonElement | null>;
   onOverlayChange?: () => void;
+  selectionEnabled?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const [help, setHelp] = useState(false);
@@ -424,8 +426,10 @@ export function RoomToolbar({
           {help && (
             <div className={styles.controlsHelp}>
               <p>
-                Click or tap a location to select it. Outside Interact mode,
-                scroll and swipe move the page.
+                {selectionEnabled
+                  ? 'Click or tap a location to select it.'
+                  : 'This preview shows the recorded location.'}{' '}
+                Outside Interact mode, scroll and swipe move the page.
               </p>
               <p>
                 Choose Interact with map to rotate by dragging, or zoom with an

@@ -88,6 +88,7 @@ export function DetailRoomPreview({
             (browserReady && typeof IntersectionObserver === 'undefined')) && (
             <RoomRegionBoundary key={selected.code}>
               <EmbeddedRoom
+                selectionMode="preview"
                 locations={locations}
                 code={selected.code}
                 permittedCodes={[]}

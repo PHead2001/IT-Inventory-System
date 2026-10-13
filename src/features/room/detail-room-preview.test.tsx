@@ -6,7 +6,9 @@ import type { LocationRef } from '../inventory/contracts-ui';
 vi.mock('next/dynamic', () => ({
   default:
     () =>
-    ({ code }: { code: string }) => <p>Map for {code}</p>,
+    ({ code, selectionMode }: { code: string; selectionMode?: string }) => (
+      <p data-selection-mode={selectionMode}>Map for {code}</p>
+    ),
 }));
 vi.mock('./show-in-room', () => ({
   ShowInRoom: () => <a href="/room">Show in room</a>,
@@ -37,6 +39,10 @@ it('requires an explicit choice for several positive balances and mounts only on
     .selectOptions(screen.getByRole('combobox'), other.code);
   expect(screen.getAllByText(/^Map for/)).toHaveLength(1);
   expect(screen.getByText('Map for ITC-D02')).toBeInTheDocument();
+  expect(screen.getByText('Map for ITC-D02')).toHaveAttribute(
+    'data-selection-mode',
+    'preview',
+  );
 });
 it('renders assigned and inactive context without promising current custody', () => {
   const view = render(

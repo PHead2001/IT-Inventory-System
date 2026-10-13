@@ -84,7 +84,12 @@ import {
   VisibleHoverTracker,
   type VisibleHover,
 } from './visible-hover-runtime';
-import { placeHoverTooltip, visibleRoomTarget } from './visible-hover';
+import { placeHoverTooltip } from './visible-hover';
+import {
+  createRoomSelectionGesture,
+  roomSelectionBox,
+  roomSelectionTarget,
+} from './room-selection';
 import {
   createSpatialRevealController,
   focusToken,
@@ -112,6 +117,7 @@ export type RoomSceneProps = {
   compact?: boolean;
   permittedCodes?: readonly string[];
   selectionAllowed?: () => boolean;
+  selectionMode?: 'select' | 'preview';
   room: RoomDefinition;
   locationNames?: Record<string, string>;
   locationOccupancy?: RoomOccupancy;
@@ -188,19 +194,26 @@ function Solid({
   size,
   color = '#1e293b',
   onDoubleClick,
+  passSelection = false,
 }: {
   position: [number, number, number];
   size: [number, number, number];
   color?: string;
   onDoubleClick?: (event: ThreeEvent<MouseEvent>) => void;
+  passSelection?: boolean;
 }) {
   return (
     <mesh
       position={toScenePosition(position)}
-      onDoubleClick={(event) => {
-        event.stopPropagation();
-        onDoubleClick?.(event);
-      }}
+      onClick={passSelection ? undefined : (event) => event.stopPropagation()}
+      onDoubleClick={
+        passSelection
+          ? undefined
+          : (event) => {
+              event.stopPropagation();
+              onDoubleClick?.(event);
+            }
+      }
     >
       <boxGeometry args={toSceneSize(size)} />
       <meshStandardMaterial color={color} roughness={0.85} />
@@ -222,10 +235,7 @@ function Envelope({
     thickness = room.envelope.wallThickness;
   // Low perimeter rails retain room proportions without hiding lower storage.
   return (
-    <group
-      onClick={(event) => event.stopPropagation()}
-      onDoubleClick={(event) => event.stopPropagation()}
-    >
+    <group onDoubleClick={(event) => event.stopPropagation()}>
       <Solid
         position={[width / 2, depth / 2, -thickness / 2]}
         size={[width, depth, thickness]}
@@ -332,7 +342,7 @@ function CameraFacingLabel({
   hovered: boolean;
   occupancy?: LocationOccupancy;
   label: string;
-  onSelect: (code: string) => void;
+  onSelect?: (code: string) => void;
 }) {
   const { camera, invalidate } = useThree();
   const visibility = useRoomVisibilityBatch();
@@ -503,6 +513,8 @@ function NodeVisual({
   canSelect,
   openCode,
   revealSettled,
+  selectionEnabled = true,
+  isSelectable = () => true,
 }: {
   locationNames?: Record<string, string>;
   profiles: RoomDefinition['rackFaceProfiles'];
@@ -518,13 +530,15 @@ function NodeVisual({
   canSelect: () => boolean;
   openCode: string | null;
   revealSettled: boolean;
+  selectionEnabled?: boolean;
+  isSelectable?: (code: string) => boolean;
 }) {
   const { camera, scene, gl } = useThree();
   const visualHoverCode = useVisualHoverCode();
-  const pointerOwner = useRef<{
-    code: string | null;
-    pointerId: number;
-  } | null>(null);
+  const [pointerOwner] = useState(createRoomSelectionGesture);
+  useLayoutEffect(() => {
+    pointerOwner.cancel();
+  }, [pointerOwner, selectionEnabled]);
   const actualOwner = (event: ThreeEvent<PointerEvent | MouseEvent>) => {
     const rect = gl.domElement.getBoundingClientRect();
     if (!rect.width || !rect.height) return null;
@@ -539,8 +553,10 @@ function NodeVisual({
       camera,
     );
     return (
-      visibleRoomTarget(ray.intersectObjects(scene.children, true))?.code ??
-      null
+      roomSelectionTarget(
+        ray.intersectObjects(scene.children, true),
+        isSelectable,
+      )?.code ?? null
     );
   };
   const label =
@@ -552,32 +568,24 @@ function NodeVisual({
     !!node.locationCode &&
     (node.locationCode === selectedCode || highlighted.has(node.locationCode));
   const interactive = !!node.locationCode && !!node.interaction?.selectable;
+  const proxy = selectionEnabled ? roomSelectionBox(node) : null;
   const click = (event: ThreeEvent<MouseEvent>) => {
     event.stopPropagation();
+    const code = actualOwner(event);
     if (
-      interactive &&
-      event.delta <= 5 &&
-      canSelect() &&
-      pointerOwner.current?.code === node.locationCode &&
-      actualOwner(event) === node.locationCode
+      pointerOwner.click(
+        code,
+        event.delta,
+        interactive && code === node.locationCode && canSelect(),
+      )
     )
       onSelect(node.locationCode!);
-    pointerOwner.current = null;
   };
   return (
     <group
       position={toScenePosition(node.position)}
       rotation={[0, MathUtils.degToRad(node.rotationZDegrees), 0]}
     >
-      {interactive && node.interaction?.hitBox && (
-        <mesh
-          position={toScenePosition(node.interaction.hitBox.center)}
-          userData={{ hoverPassThrough: true }}
-        >
-          <boxGeometry args={toSceneSize(node.interaction.hitBox.size)} />
-          <meshBasicMaterial transparent opacity={0} depthWrite={false} />
-        </mesh>
-      )}
       {node.kind === 'box' && node.size && (
         <group
           userData={
@@ -590,26 +598,50 @@ function NodeVisual({
                 }
               : undefined
           }
-          onClick={click}
-          onPointerDown={(event) => {
-            event.stopPropagation();
-            pointerOwner.current = {
-              code: actualOwner(event),
-              pointerId: event.pointerId,
-            };
-          }}
-          onPointerUp={(event) => {
-            if (
-              pointerOwner.current?.pointerId !== event.pointerId ||
-              actualOwner(event) !== pointerOwner.current?.code
-            )
-              pointerOwner.current = null;
-          }}
-          onPointerCancel={() => {
-            pointerOwner.current = null;
-          }}
-          onDoubleClick={(event) => event.stopPropagation()}
+          onClick={selectionEnabled ? click : undefined}
+          onPointerDown={
+            selectionEnabled
+              ? (event) => {
+                  event.stopPropagation();
+                  pointerOwner.down(actualOwner(event), event.pointerId);
+                }
+              : undefined
+          }
+          onPointerUp={
+            selectionEnabled
+              ? (event) => {
+                  pointerOwner.up(actualOwner(event), event.pointerId);
+                }
+              : undefined
+          }
+          onPointerCancel={
+            selectionEnabled
+              ? () => {
+                  pointerOwner.cancel();
+                }
+              : undefined
+          }
+          onDoubleClick={
+            selectionEnabled ? (event) => event.stopPropagation() : undefined
+          }
         >
+          {proxy && (
+            <mesh
+              position={toScenePosition(proxy.center)}
+              userData={{
+                roomSelectionTarget: { code: node.locationCode, label },
+                hoverPassThrough: true,
+              }}
+            >
+              <boxGeometry args={toSceneSize(proxy.size)} />
+              <meshBasicMaterial
+                transparent
+                opacity={0}
+                depthWrite={false}
+                colorWrite={false}
+              />
+            </mesh>
+          )}
           <RevealedBody
             node={node}
             open={node.locationCode === openCode}
@@ -635,6 +667,7 @@ function NodeVisual({
               </mesh>
               {node.visual?.style === 'drawer' && (
                 <Solid
+                  passSelection
                   position={[
                     (node.interaction?.labelAnchor?.[0] ?? 1) > 0
                       ? node.size[0] / 2 + 0.3
@@ -648,6 +681,7 @@ function NodeVisual({
               )}
               {node.visual?.style === 'container' && (
                 <Solid
+                  passSelection
                   position={[0, 0, node.size[2] / 2 - 0.4]}
                   size={[node.size[0], node.size[1], 0.8]}
                   color={node.visual.color}
@@ -656,12 +690,14 @@ function NodeVisual({
               {node.visual?.style === 'rack' && (
                 <group>
                   <Solid
+                    passSelection
                     position={[0, -node.size[1] / 2 - 0.15, 0]}
                     size={[node.size[0] - 3, 0.3, node.size[2] - 4]}
                     color="#334155"
                   />
                   {profiles.map((profile, index) => (
                     <Solid
+                      passSelection
                       key={profile.id}
                       position={[
                         0,
@@ -678,6 +714,7 @@ function NodeVisual({
                   ))}
                   {[0, 1, 2, 3, 4, 5].map((index) => (
                     <Solid
+                      passSelection
                       key={index}
                       position={[
                         0,
@@ -708,7 +745,7 @@ function NodeVisual({
                         ? locationOccupancy?.[node.locationCode!]
                         : undefined
                     }
-                    onSelect={onSelect}
+                    onSelect={selectionEnabled ? onSelect : undefined}
                   />
                 )}
             </HoveredBody>
@@ -732,6 +769,8 @@ function NodeVisual({
           canSelect={canSelect}
           openCode={openCode}
           revealSettled={revealSettled}
+          selectionEnabled={selectionEnabled}
+          isSelectable={isSelectable}
         />
       ))}
     </group>
@@ -1576,14 +1615,24 @@ export default function RoomScene(props: RoomSceneProps) {
   useLayoutEffect(() => {
     selectionAuthority.current = { props, privacy };
   }, [props, privacy]);
-  const select = useCallback((code: string) => {
+  const isSelectable = useCallback((code: string) => {
     const { props, privacy } = selectionAuthority.current;
-    if (props.permittedCodes && !props.permittedCodes.includes(code)) return;
-    if (props.selectionAllowed && !props.selectionAllowed()) return;
+    if (props.selectionMode === 'preview') return false;
+    if (props.permittedCodes && !props.permittedCodes.includes(code))
+      return false;
+    if (props.selectionAllowed && !props.selectionAllowed()) return false;
     if (privacy.generation !== 'unmanaged' && !freshPresentationGrant(privacy))
-      return;
-    props.onSelect(code);
+      return false;
+    return true;
   }, []);
+  const select = useCallback(
+    (code: string) => {
+      if (isSelectable(code)) selectionAuthority.current.props.onSelect(code);
+    },
+    [isSelectable],
+  );
+  const selectionEnabled = props.selectionMode !== 'preview';
+  const HoverElement = selectionEnabled ? 'button' : 'span';
   const presentation = useMemo(
     () => ({ room: props.room, controller: createSpatialRevealController() }),
     [props.room],
@@ -1608,7 +1657,7 @@ export default function RoomScene(props: RoomSceneProps) {
     hit: VisibleHover;
   } | null>(null);
   const activeHover = hoverState?.room === props.room ? hoverState.hit : null;
-  const tooltipButton = useRef<HTMLButtonElement>(null);
+  const tooltipButton = useRef<HTMLButtonElement & HTMLSpanElement>(null);
   const [tooltipSize, setTooltipSize] = useState({ width: 0, height: 0 });
   useEffect(() => {
     const element = tooltipButton.current;
@@ -1842,6 +1891,7 @@ export default function RoomScene(props: RoomSceneProps) {
       }}
     >
       <RoomToolbar
+        selectionEnabled={selectionEnabled}
         interactionRef={interactionButton}
         onOverlayChange={registry.invalidateLayout}
         active={active}
@@ -1924,6 +1974,8 @@ export default function RoomScene(props: RoomSceneProps) {
                       locationOccupancy={props.locationOccupancy}
                       showCounts={showCounts}
                       canSelect={canSelect}
+                      selectionEnabled={selectionEnabled}
+                      isSelectable={isSelectable}
                       openCode={reveal.openCode}
                       revealSettled={reveal.phase === 'settled'}
                     />
@@ -1941,6 +1993,7 @@ export default function RoomScene(props: RoomSceneProps) {
                     onPassiveDrag={showDragHint}
                   />
                   <VisibleHoverTracker
+                    selectionEnabled={selectionEnabled}
                     showAllLabels={showAllLabels}
                     active={active}
                     suspended={active && dragging}
@@ -1969,13 +2022,21 @@ export default function RoomScene(props: RoomSceneProps) {
               className={styles.labelLeader}
               aria-hidden="true"
             />
-            <button
+            <HoverElement
               ref={tooltipButton}
-              type="button"
+              type={selectionEnabled ? 'button' : undefined}
               data-hover-tooltip="true"
               data-location-code={activeHover.target.code}
-              aria-label={`Select ${props.locationNames?.[activeHover.target.code] ?? activeHover.target.label} (${activeHover.target.code})${hoverCount !== null ? `; ${occupancyText(hoverCount)} at this location` : ''}`}
-              aria-pressed={props.selectedCode === activeHover.target.code}
+              aria-label={
+                selectionEnabled
+                  ? `Select ${props.locationNames?.[activeHover.target.code] ?? activeHover.target.label} (${activeHover.target.code})${hoverCount !== null ? `; ${occupancyText(hoverCount)} at this location` : ''}`
+                  : undefined
+              }
+              aria-pressed={
+                selectionEnabled
+                  ? props.selectedCode === activeHover.target.code
+                  : undefined
+              }
               onPointerEnter={() => {
                 labelPointer.current = true;
                 setRetainDuringLabelHandoff(true);
@@ -1986,12 +2047,22 @@ export default function RoomScene(props: RoomSceneProps) {
                 setRetainDuringLabelHandoff(false);
                 onCanvasHoverLeave();
               }}
-              onClick={(event) => {
-                event.stopPropagation();
-                select(activeHover.target.code);
-              }}
-              onDoubleClick={(event) => event.stopPropagation()}
-              className={styles.locationLabel}
+              onClick={
+                selectionEnabled
+                  ? (event) => {
+                      event.stopPropagation();
+                      select(activeHover.target.code);
+                    }
+                  : undefined
+              }
+              onDoubleClick={
+                selectionEnabled
+                  ? (event) => event.stopPropagation()
+                  : undefined
+              }
+              className={
+                selectionEnabled ? styles.locationLabel : styles.decorativeLabel
+              }
               style={{
                 maxWidth: Math.max(0, Math.min(208, activeHover.width - 16)),
                 overflowWrap: 'anywhere',
@@ -2005,7 +2076,7 @@ export default function RoomScene(props: RoomSceneProps) {
                   · {occupancyText(hoverCount)}
                 </span>
               )}
-            </button>
+            </HoverElement>
           </div>
         )}
       </div>
@@ -2031,8 +2102,10 @@ export default function RoomScene(props: RoomSceneProps) {
         placementCodes.length > 0) && (
         <div className={styles.sceneNote}>
           <p role="status">
-            Some room labels could not be checked or placed. Choose a location
-            below.
+            Some room labels could not be checked or placed.{' '}
+            {selectionEnabled
+              ? 'Choose a location below.'
+              : 'Recorded locations are listed below.'}
           </p>
           <button
             type="button"
@@ -2055,20 +2128,28 @@ export default function RoomScene(props: RoomSceneProps) {
               .sort()
               .map((code) => (
                 <li key={code}>
-                  <button
-                    type="button"
-                    className={styles.commandButton}
-                    aria-pressed={props.selectedCode === code}
-                    disabled={Boolean(
-                      props.permittedCodes &&
-                      !props.permittedCodes.includes(code),
-                    )}
-                    onClick={() => select(code)}
-                  >
-                    {props.locationNames?.[code] ?? code}
-                    {props.locationOccupancy?.[code] &&
-                      ` · ${occupancyText(props.locationOccupancy[code])}`}
-                  </button>
+                  {selectionEnabled ? (
+                    <button
+                      type="button"
+                      className={styles.commandButton}
+                      aria-pressed={props.selectedCode === code}
+                      disabled={Boolean(
+                        props.permittedCodes &&
+                        !props.permittedCodes.includes(code),
+                      )}
+                      onClick={() => select(code)}
+                    >
+                      {props.locationNames?.[code] ?? code}
+                      {props.locationOccupancy?.[code] &&
+                        ` · ${occupancyText(props.locationOccupancy[code])}`}
+                    </button>
+                  ) : (
+                    <span>
+                      {props.locationNames?.[code] ?? code}
+                      {props.locationOccupancy?.[code] &&
+                        ` · ${occupancyText(props.locationOccupancy[code])}`}
+                    </span>
+                  )}
                 </li>
               ))}
           </ul>

@@ -324,6 +324,69 @@ export async function captureRoomReveal(page: Page) {
   });
 }
 
+/** Selection-only stationary triangles; never add proxies to hover witnesses. */
+export async function captureRoomSelectionWitness(
+  page: Page,
+): Promise<WitnessSnapshot> {
+  const snapshot = await captureRoomWitness(page);
+  const proxies = await page.evaluate(() => {
+    const canvas = document.querySelector('[data-room-surface] canvas');
+    const states = [...(window.__roomWitnessStores ?? [])]
+      .map((store) => store.getState())
+      .filter((state) => state.gl.domElement === canvas);
+    if (states.length !== 1)
+      throw new Error('Expected one selection witness scene');
+    const triangles: WitnessTriangle[] = [];
+    let volumes = 0;
+    states[0].scene.traverse((object) => {
+      const target: unknown = object.userData.roomSelectionTarget;
+      if (
+        !target ||
+        typeof target !== 'object' ||
+        !('code' in target) ||
+        typeof target.code !== 'string' ||
+        !('isMesh' in object) ||
+        !object.isMesh
+      )
+        return;
+      for (
+        let current: import('three').Object3D | null = object;
+        current;
+        current = current.parent
+      )
+        if (!current.visible) return;
+      if (++volumes > 96) throw new Error('Selection volume witness bound');
+      const mesh = object as import('three').Mesh;
+      const geometry = mesh.geometry,
+        position = geometry.getAttribute('position'),
+        index = geometry.getIndex();
+      if (!index || index.count > 36 || position.itemSize !== 3)
+        throw new Error('Expected bounded selection box');
+      for (let offset = 0; offset < index.count; offset += 3) {
+        const vertices: number[] = [];
+        for (let corner = 0; corner < 3; corner++) {
+          const i = index.getX(offset + corner),
+            m = mesh.matrixWorld.elements;
+          const x = position.getX(i),
+            y = position.getY(i),
+            z = position.getZ(i);
+          vertices.push(
+            m[0] * x + m[4] * y + m[8] * z + m[12],
+            m[1] * x + m[5] * y + m[9] * z + m[13],
+            m[2] * x + m[6] * y + m[10] * z + m[14],
+          );
+        }
+        if (!vertices.every(Number.isFinite))
+          throw new Error('Nonfinite selection witness');
+        triangles.push({ code: target.code, side: 0, vertices });
+      }
+    });
+    return triangles;
+  });
+  // Actual physical surfaces precede proxies for equal-depth intersections.
+  return { ...snapshot, triangles: [...snapshot.triangles, ...proxies] };
+}
+
 /** Passive effects/ref/resource observation; never renders or mutates the scene. */
 export async function captureRoomEffects(page: Page) {
   return page.evaluate(() => {

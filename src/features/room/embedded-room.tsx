@@ -26,6 +26,7 @@ export function EmbeddedRoom({
   onSelect,
   selectionAllowed,
   priority = 0,
+  selectionMode = 'select',
 }: {
   locations: LocationRef[];
   code: string | null;
@@ -33,6 +34,7 @@ export function EmbeddedRoom({
   onSelect(code: string): void;
   selectionAllowed?(): boolean;
   priority?: number;
+  selectionMode?: 'select' | 'preview';
 }) {
   const space = containingSpace(locations, code ?? permittedCodes[0] ?? null);
   const spaceId = space?.id;
@@ -129,6 +131,7 @@ export function EmbeddedRoom({
           <ScenePriorityContext value={priority}>
             <RoomScene
               compact
+              selectionMode={selectionMode}
               key={space?.id + ':' + attempt}
               room={room}
               bindings={bindings}

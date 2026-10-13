@@ -20,6 +20,7 @@ import {
   captureRoomWitness,
   captureRoomReveal,
   captureRoomEffects,
+  captureRoomSelectionWitness,
   roomWitnessCodeAtPoint,
   roomVisibilityWitnesses,
   roomVisibilityWitnessReport,
@@ -674,8 +675,13 @@ test('spatial reveal endpoints retain actual picking and labels across oblique, 
       }
       await page.mouse.move(point.x, point.y);
       await expect(canvas).toHaveAttribute('data-hover-visible-code', code);
+      const beforePick = await canvas.getAttribute('data-spatial-request');
       await page.mouse.click(point.x, point.y);
       await expect(viewer).toHaveAttribute('data-selected-code', code);
+      await expect(canvas).not.toHaveAttribute(
+        'data-spatial-request',
+        beforePick!,
+      );
       await settledReveal(page, code);
       await testInfo.attach(`reveal-${pose}-${code}`, {
         body: await viewer.screenshot(),
@@ -704,6 +710,67 @@ test('spatial reveal endpoints retain actual picking and labels across oblique, 
     [...outsideRest].some((code) => /RED|BLACK|CLEAR/.test(code)),
     'a moved container face outside resting bindings remains selectable',
   ).toBe(true);
+});
+
+test('opened drawer, container and shelf retain their resting selection footprint through actual pointer clicks', async ({
+  page,
+}, testInfo) => {
+  test.setTimeout(120_000);
+  await observeRoomScene(page);
+  await page.setViewportSize({ width: 1280, height: 1100 });
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  await login(page);
+  await page.goto('/room?space=it-closet');
+  const viewer = await ready(page),
+    canvas = viewer.locator('canvas');
+  for (const [code, geometry] of [
+    ['ITC-D01', 'drawer-1'],
+    ['ITC-RED', 'red-container'],
+    ['ITC-S1A', 'shelf-1a'],
+  ] as const) {
+    await keyboardRoomLocation(page, code);
+    await settledReveal(page, code);
+    await page.mouse.move(0, 0);
+    const selection = await captureRoomSelectionWitness(page);
+    const physical = await captureRoomWitness(page);
+    const candidates = roomVisibilityWitnesses(selection).get(code) ?? [];
+    let point: (typeof candidates)[number] | undefined;
+    // A moved-body point cannot prove that the stationary proxy works.
+    for (const candidate of candidates) {
+      if (roomWitnessCodeAtPoint(selection, candidate) !== code) continue;
+      if (roomWitnessCodeAtPoint(physical, candidate) === code) continue;
+      if (
+        await page.evaluate(
+          ({ x, y }) => document.elementFromPoint(x, y)?.tagName === 'CANVAS',
+          candidate,
+        )
+      ) {
+        point = candidate;
+        break;
+      }
+    }
+    expect(
+      point,
+      `${geometry} (${code}) has no exposed resting proxy point outside the moved visible body`,
+    ).toBeDefined();
+    expect(
+      roomWitnessCodeAtPoint(selection, point!),
+      `${geometry}: selection witness owns the resting point`,
+    ).toBe(code);
+    expect(
+      roomWitnessCodeAtPoint(physical, point!),
+      `${geometry}: moved visible body cannot authorize this point`,
+    ).not.toBe(code);
+    const before = await canvas.getAttribute('data-spatial-request');
+    await page.mouse.click(point!.x, point!.y);
+    await expect(canvas).not.toHaveAttribute('data-spatial-request', before!);
+    await expect(viewer).toHaveAttribute('data-selected-code', code);
+    await settledReveal(page, code);
+    await testInfo.attach('resting-selection-' + code, {
+      body: await viewer.screenshot(),
+      contentType: 'image/png',
+    });
+  }
 });
 
 test('spatial interruption, reduced motion, stationary hover and moving down/up cannot revive a stale target', async ({

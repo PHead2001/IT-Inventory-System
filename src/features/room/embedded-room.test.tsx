@@ -30,6 +30,7 @@ vi.mock('next/dynamic', () => ({
       showCounts?: boolean;
       canFocusSelected?: boolean;
       focusRequest?: { code: string | null };
+      selectionMode?: string;
     }) => (
       <div
         data-testid="embedded-scene"
@@ -37,6 +38,7 @@ vi.mock('next/dynamic', () => ({
         data-overlay={String(props.showCounts)}
         data-focus-enabled={String(props.canFocusSelected)}
         data-focus-code={props.focusRequest?.code ?? ''}
+        data-selection-mode={props.selectionMode}
       >
         <button
           type="button"
@@ -111,6 +113,21 @@ it('retains the modeled room root overview through its canonical room binding', 
   expect(scene).toHaveAttribute('data-focus-enabled', 'true');
   expect(scene).toHaveAttribute('data-focus-code', 'ITC');
   expect(screen.queryByText(/This location has no modeled map/)).toBeNull();
+});
+it('propagates preview mode while preserving selected focus and count capability', () => {
+  render(
+    <EmbeddedRoom
+      locations={locations}
+      code="ITC-D01"
+      permittedCodes={[]}
+      selectionMode="preview"
+      onSelect={vi.fn()}
+    />,
+  );
+  const scene = screen.getByTestId('embedded-scene');
+  expect(scene).toHaveAttribute('data-selection-mode', 'preview');
+  expect(scene).toHaveAttribute('data-focus-enabled', 'true');
+  expect(scene).toHaveAttribute('data-focus-code', 'ITC-D01');
 });
 it.each(['actor', 'backend', 'generation'])(
   'does not rebind embedded counts after a committed %s A/B/A cycle without a global event',

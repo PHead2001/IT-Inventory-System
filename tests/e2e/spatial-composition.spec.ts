@@ -353,6 +353,39 @@ for (const surface of ['quantity', 'asset', 'location'] as const) {
       const code = surface === 'quantity' ? 'ITC-D01' : 'ITC-S1A';
       await expect(canvas).toHaveAttribute('data-spatial-open-code', code);
       await expect(
+        preview.getByRole('button', { name: /^Select / }),
+      ).toHaveCount(0);
+      await expect(
+        preview.locator('[data-room-decorative-label]'),
+      ).not.toHaveCount(0);
+      expect(
+        await canvas.evaluate((element) => {
+          const state = [...(window.__roomWitnessStores ?? [])]
+            .map((store) => store.getState())
+            .find((state) => state.gl.domElement === element);
+          if (!state) throw new Error('Expected actual preview scene');
+          let selectionVolumes = 0,
+            selectionHandlers = 0;
+          state.scene.traverse((object) => {
+            if (object.userData.roomSelectionTarget) selectionVolumes++;
+            if (!object.userData.roomHoverTarget) return;
+            const handlers = (
+              object as typeof object & {
+                __r3f?: { handlers?: Record<string, unknown> };
+              }
+            ).__r3f?.handlers;
+            for (const key of [
+              'onClick',
+              'onPointerDown',
+              'onPointerUp',
+              'onPointerCancel',
+            ])
+              if (handlers?.[key]) selectionHandlers++;
+          });
+          return { selectionVolumes, selectionHandlers };
+        }),
+      ).toEqual({ selectionVolumes: 0, selectionHandlers: 0 });
+      await expect(
         preview.getByRole('link', { name: 'Show ' + code + ' in room' }),
       ).toBeVisible();
       await expectSingleLiveRenderer(page);

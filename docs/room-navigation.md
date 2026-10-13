@@ -163,6 +163,21 @@ required for these source changes.
 
 ## Validation
 
+Reveal-capable selectable boxes retain a selection-only volume in their stationary
+parent-local event group, alongside the moving visible body. Explicit interaction
+hitboxes take precedence; otherwise the volume uses the centered node size.
+Selection rays accept eligible stationary volumes or moved visible surfaces, stop
+at nearer visible furniture, and prefer real surfaces at equal depth. Pointer down,
+up and click use the same resolver and require matching pointer/logical ownership;
+drag, cancellation and current authorization still prevent selection. These invisible
+volumes never supply hover ownership, label visibility, bloom or shadow casters.
+
+Detail maps explicitly use preview selection mode. They retain recorded-location
+choice, focus, reveal, counts, Show in room, pan and zoom, while omitting selection
+mesh handlers and presenting labels, hover details and fallback locations as text.
+The central selection guard also rejects stale callbacks in preview mode. The
+conventional tree and destination map remain selectable under their existing rules.
+
 Pure tests prove transforms, canonical bindings, database-derived descendants, strict URL selection and camera limits. Deterministic fake-clock visibility tests exhaust the cold 8 ms fingerprint/projection/clipping/ray phases, prove same-revision completion without reprojecting triangles, invalidate processed buffer/material and DOM state between slices, conceal stale cached results during incomplete guards, and stop demand frames at completion or the 64-frame/resource ceiling. A canonical physical-geometry probe invokes the actual hook-free room JSX and checks that its guard leaves work allowance and all 28 location queries complete under unchanged aggregate ceilings. It uses deterministic synthetic checkpoint time to prove progress; elapsed samples from separate real-clock runs remain observations and never form a mandatory OS timing assertion. This does not establish browser rendering, frame rate, phone performance or the populated 375px placement acceptance. Component tests prove the scene/application contract, coherent pending navigation, aggregate selection, repeated focus, missing bindings, retry/failure and located/unlocated links.
 
 Real local Supabase Playwright tests cover authentication, actual WebGL rendering/raycast selection, shelf and drawer stock, search-to-room, aggregates, history navigation, repeated focus, viewer access, phone usability and forced graphics failure. A passing mocked scene is not evidence that WebGL works. Inspect actual screenshots for clipping, label overlap and proportions; avoid pixel-perfect assertions.
