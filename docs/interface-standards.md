@@ -227,6 +227,14 @@ motion instant, preserving ordinary navigation and restoration.
 The committed page consumes its intent after React queues capture callbacks;
 the later popstate cleanup remains in place. Motion support or a retained title
 origin alone cannot authorize another arrival snapshot.
+The shared title retains the original accepted source/destination keys and pending
+epoch independently until that title's capture finishes. An outer pathname commit
+may consume generic arrival before Next reveals the inner primary; it must not
+prevent the authorized forward H1 from being scrolled into the capture viewport.
+This layout-only reveal may pass the exact fieldset made inert by an active capture,
+while controls stay disabled. Previously inert fieldsets, other inert ancestors,
+hidden content, stale epochs and withdrawn privacy grants still reject it. Native
+traversal and title retirement clear this title-specific identity as before.
 The approved origin can survive traversal for a later application Back link, but
 cannot authorize another Link gesture. No history entry is changed for animation.
 Ordinals locate anchors and do not identify holdings. Reordered holdings can pair
