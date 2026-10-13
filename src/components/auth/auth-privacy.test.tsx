@@ -416,6 +416,43 @@ it('preserves editable auth state when a reactivation check observes the same ge
   expect(screen.getByLabelText('Password')).toHaveValue('typed password');
 });
 
+it('keeps deferred protected cleanup outside page flow while admitting the original route slot', async () => {
+  routing.pathname = '/scan';
+  let finish!: (value: { status: 'absent' }) => void;
+  actions.readLogoutPrivacyGeneration.mockReturnValueOnce(
+    new Promise((resolve) => {
+      finish = resolve;
+    }),
+  );
+  render(
+    <ProtectedPrivacyBoundary binding={protectedBinding}>
+      <div data-testid="retained-route-slot">
+        <ProtectedPrivacyContent>
+          <input
+            aria-label="Cold admitted field"
+            defaultValue="original work"
+          />
+        </ProtectedPrivacyContent>
+      </div>
+    </ProtectedPrivacyBoundary>,
+  );
+  const slot = screen.getByTestId('retained-route-slot');
+  const cleanup = screen.getByRole('region', { name: 'Privacy cleanup' });
+  expect(getComputedStyle(cleanup).position).toBe('fixed');
+  expect(cleanup).not.toContainElement(slot);
+  expect(cleanup).toContainElement(screen.getByRole('status'));
+  expect(screen.getByRole('status')).toBeVisible();
+  expect(
+    screen.queryByLabelText('Cold admitted field'),
+  ).not.toBeInTheDocument();
+  await act(async () => finish({ status: 'absent' }));
+  expect(await screen.findByLabelText('Cold admitted field')).toBeVisible();
+  expect(screen.getByTestId('retained-route-slot')).toBe(slot);
+  expect(
+    screen.queryByRole('region', { name: 'Privacy cleanup' }),
+  ).not.toBeInTheDocument();
+});
+
 it('renders the retained server route slot while withholding its successful private body', async () => {
   routing.pathname = '/scan';
   const slotRendered = vi.fn();
@@ -771,6 +808,16 @@ it('settles failed cleanup without retrying its own callback invalidation and re
   });
   expect(actions.readLogoutPrivacyGeneration).toHaveBeenCalledTimes(2);
   expect(screen.getByRole('alert')).toHaveTextContent('could not clear');
+  const cleanup = screen.getByRole('region', { name: 'Privacy cleanup' });
+  expect(getComputedStyle(cleanup).position).toBe('fixed');
+  expect(cleanup).toContainElement(screen.getByRole('alert'));
+  expect(cleanup).toContainElement(
+    screen.getByRole('button', { name: 'Retry privacy cleanup' }),
+  );
+  expect(
+    screen.getByRole('link', { name: 'open Inventory in a new tab' }),
+  ).toBeVisible();
+  expect(cleanup).toHaveTextContent('Keep this page open');
   expect(field).not.toBeVisible();
   expect(field.closest('[inert]')).not.toBeNull();
   expect(field).toHaveValue('uncertain original');

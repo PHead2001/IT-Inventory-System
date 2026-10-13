@@ -24,6 +24,21 @@ import {
 } from './quantity-flight-probe';
 
 type Capture = { name: string; tag: string; canvas: boolean; shell: boolean };
+type ColdTitleGeometry = {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  headingWidth: number;
+  headingHeight: number;
+  followingTop: number;
+};
+type ColdTitleProbe = {
+  samples: ColdTitleGeometry[];
+  firstAdmittedAt: number | null;
+  shifts: Array<{ at: number; value: number }>;
+  stop: () => void;
+};
 type DocumentDepartureProbe = {
   read: () => {
     sourceKey: string | null;
@@ -228,7 +243,7 @@ async function inventoryPrefetchProbe(page: Page) {
         segment: !!headers['next-router-segment-prefetch'],
       });
       await route.abort('aborted');
-    } else await route.continue();
+    } else await route.fallback();
   };
   await page.route('**/*', handler);
   return {
@@ -441,7 +456,7 @@ async function holdIdentityDenial(page: Page, actorId: string) {
       !request.headers()['next-action'] ||
       request.postData() !== JSON.stringify([actorId])
     )
-      return route.continue();
+      return route.fallback();
     try {
       const response = await route.fetch({ timeout: 15_000 });
       expect(response.ok()).toBe(true);
@@ -852,9 +867,9 @@ for (const width of [1280, 390]) {
 }
 
 for (const width of [1280, 390]) {
-  test(`measured title disclosure preserves SSR and hydrated geometry at ${width}px`, async ({
+  test(`measured title disclosure preserves privacy-gated cold admission geometry at ${width}px`, async ({
     page,
-  }) => {
+  }, info) => {
     await page.setViewportSize({ width, height: 900 });
     await page.emulateMedia({ reducedMotion: 'reduce' });
     await observeMotion(page);
@@ -882,43 +897,99 @@ for (const width of [1280, 390]) {
         blockedScripts++;
         await gate;
       }
-      await route.continue();
+      await route.fallback();
     };
     await page.route('**/*', handler);
     try {
-      // Genuine server HTML and CSS render before deferred production bundles;
-      // no heading, measurement result or hydration state is manufactured.
+      // The Auth privacy gate admits no private DOM until genuine bundles run.
+      // The component's standalone SSR slot is covered separately by its unit
+      // regression; a cold protected document cannot expose that private row.
       await page.goto(record.url, { waitUntil: 'commit' });
       const heading = page.getByRole('heading', { name, exact: true });
-      await expect(heading).toBeVisible();
       await expect.poll(() => blockedScripts).toBeGreaterThan(0);
-      await page.evaluate(() => document.fonts.ready);
+      await expect(heading).toHaveCount(0);
       const row = page.locator('[data-record-name-row]');
-      const geometry = () =>
-        row.evaluate((node) => {
-          const h = node.querySelector('h1')!,
-            r = node.getBoundingClientRect(),
-            hr = h.getBoundingClientRect();
-          const following = node
-            .closest('section')!
-            .querySelector('dl')!
-            .getBoundingClientRect();
-          return {
-            x: r.x,
-            y: r.y,
-            width: r.width,
-            height: r.height,
-            headingWidth: hr.width,
-            headingHeight: hr.height,
-            followingTop: following.top,
-          };
+      await expect(row).toHaveCount(0);
+      await page.evaluate(() => document.fonts.ready);
+      // Sample only real, positive admitted geometry. React can batch admission
+      // and the measured disclosure, so a before-toggle sample is not required.
+      await page.evaluate((name) => {
+        const probe: ColdTitleProbe = {
+          samples: [],
+          firstAdmittedAt: null,
+          shifts: [],
+          stop: () => {},
+        };
+        Object.assign(window, { coldTitleProbe: probe });
+        const shifts = new PerformanceObserver((list) => {
+          for (const entry of list.getEntries()) {
+            const shift = entry as PerformanceEntry & {
+              hadRecentInput: boolean;
+              value: number;
+            };
+            if (!shift.hadRecentInput)
+              probe.shifts.push({ at: shift.startTime, value: shift.value });
+          }
         });
-      const before = await geometry();
-      await expect(row.getByRole('button')).toHaveCount(0);
-      // The passive observer is installed before app bundles and retains the
-      // complete hydration window, including delayed queued shift delivery.
-      await resetProof(page);
+        shifts.observe({ type: 'layout-shift', buffered: true });
+        let frame = 0;
+        const capture = () => {
+          const node = document.querySelector('[data-record-name-row]');
+          const h = node?.querySelector('h1');
+          const following = node?.closest('section')?.querySelector('dl');
+          if (
+            node &&
+            h &&
+            following &&
+            h.textContent === name &&
+            getComputedStyle(h).visibility === 'visible' &&
+            !node.closest('[hidden], [inert]')
+          ) {
+            const r = node.getBoundingClientRect();
+            const hr = h.getBoundingClientRect();
+            if (r.width > 0 && r.height > 0 && hr.width > 0 && hr.height > 0) {
+              probe.firstAdmittedAt ??= performance.now();
+              probe.samples.push({
+                x: r.x,
+                y: r.y,
+                width: r.width,
+                height: r.height,
+                headingWidth: hr.width,
+                headingHeight: hr.height,
+                followingTop: following.getBoundingClientRect().top,
+              });
+            }
+          }
+        };
+        const mutations = new MutationObserver(capture);
+        mutations.observe(document.body, {
+          childList: true,
+          subtree: true,
+          attributes: true,
+        });
+        const sample = () => {
+          capture();
+          frame = requestAnimationFrame(sample);
+        };
+        frame = requestAnimationFrame(sample);
+        probe.stop = () => {
+          cancelAnimationFrame(frame);
+          mutations.disconnect();
+          // Preserve queued entries before disconnect, including shell shifts
+          // before admission. Report them separately from title geometry.
+          for (const entry of shifts.takeRecords()) {
+            const shift = entry as PerformanceEntry & {
+              hadRecentInput: boolean;
+              value: number;
+            };
+            if (!shift.hadRecentInput)
+              probe.shifts.push({ at: shift.startTime, value: shift.value });
+          }
+          shifts.disconnect();
+        };
+      }, name);
       release();
+      await expect(heading).toBeVisible();
       const control = row.getByRole('button', {
         name: 'Show full name',
         exact: true,
@@ -931,14 +1002,39 @@ for (const width of [1280, 390]) {
       const touch = await control.boundingBox();
       expect(touch!.width).toBeGreaterThanOrEqual(44);
       expect(touch!.height).toBeGreaterThanOrEqual(44);
-      await expect.poll(geometry).toEqual(before);
+      await page.evaluate(() => document.fonts.ready);
       await page.evaluate(
         () =>
           new Promise((resolve) =>
             requestAnimationFrame(() => requestAnimationFrame(resolve)),
           ),
       );
-      expect((await proof(page)).cls).toBe(0);
+      const admitted = await page.evaluate(() => {
+        const probe = (window as Window & { coldTitleProbe: ColdTitleProbe })
+          .coldTitleProbe;
+        probe.stop();
+        return {
+          samples: probe.samples,
+          firstAdmittedAt: probe.firstAdmittedAt,
+          preAdmissionCLS: probe.shifts
+            .filter((entry) => entry.at < probe.firstAdmittedAt!)
+            .reduce((total, entry) => total + entry.value, 0),
+          postAdmissionCLS: probe.shifts
+            .filter((entry) => entry.at >= probe.firstAdmittedAt!)
+            .reduce((total, entry) => total + entry.value, 0),
+        };
+      });
+      await info.attach('privacy-gated-cold-title-admission', {
+        body: JSON.stringify({
+          ...admitted,
+          totalCLS: (await proof(page)).cls,
+        }),
+        contentType: 'application/json',
+      });
+      expect(admitted.firstAdmittedAt).not.toBeNull();
+      expect(admitted.samples.length).toBeGreaterThan(1);
+      for (const sample of admitted.samples)
+        expect(sample).toEqual(admitted.samples[0]);
       await control.focus();
       await page.keyboard.press('Enter');
       await expect(
@@ -947,6 +1043,13 @@ for (const width of [1280, 390]) {
       await expect(heading).toHaveText(name);
     } finally {
       release();
+      await page
+        .evaluate(() =>
+          (
+            window as Window & { coldTitleProbe?: ColdTitleProbe }
+          ).coldTitleProbe?.stop(),
+        )
+        .catch(() => {});
       await page.unroute('**/*', handler);
     }
   });
@@ -1528,6 +1631,7 @@ for (const mode of ['system-reduced', 'local-reduced'] as const) {
         const observed = await proof(page);
         expect(observed.transitions).toHaveLength(0);
         expect(observed.replacements).toHaveLength(0);
+        expect(observed.cls).toBe(0);
         expect(
           await page.evaluate(
             () =>
@@ -1980,7 +2084,7 @@ async function holdRoomContents(page: Page, code: string, fail = false) {
       claimed ||
       new URL(route.request().url()).searchParams.get('location') !== code
     )
-      return route.continue();
+      return route.fallback();
     claimed = true;
     try {
       const response = await route.fetch();
@@ -2386,7 +2490,7 @@ for (const width of [1280, 390]) {
         route.request().headers()['next-action']
       )
         return route.abort('failed');
-      return route.continue();
+      return route.fallback();
     };
     await page.route(pattern, abort);
     try {
