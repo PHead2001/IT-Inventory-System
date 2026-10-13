@@ -1010,8 +1010,9 @@ for (const width of [1280, 390]) {
           ),
       );
       const admitted = await page.evaluate(() => {
-        const probe = (window as Window & { coldTitleProbe: ColdTitleProbe })
-          .coldTitleProbe;
+        const probe = (
+          window as unknown as Window & { coldTitleProbe: ColdTitleProbe }
+        ).coldTitleProbe;
         probe.stop();
         return {
           samples: probe.samples,
