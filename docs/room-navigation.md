@@ -161,6 +161,16 @@ Production room callers provide a synchronous renderer configuration object. A
 custom renderer factory that never settles can also prevent Fiber from completing
 teardown; safely reclaiming its unknown resources is not established by a timeout.
 
+Compact embedded maps use their own cold-chunk placeholder, rather than the full
+room/browser skeleton. Offscreen reservation, both dynamic loading boundaries and
+the ready scene share the toolbar, 280px canvas, gaps and status metrics. The
+placeholder already renders the actual authorized selected label, so long labels
+wrap before geometry loads. A permanent two-line count-status slot preserves
+loading/error announcements without inserting a new block when counts arrive;
+normal selected text and the two-line phone interaction note complete the minimum
+status envelope. Long labels, inspections, additional notices and expanded controls
+remain free to grow; this is not a zero-layout-shift claim for every optional state.
+
 Whole-page `PageArrival` capture excludes `/room`, asset/quantity record details
 and location details before their lazy previews load, including the preceding
 canvas-bearing route when leaving. The independent record-title pairing remains.

@@ -115,6 +115,7 @@ import {
 export type RoomSceneProps = {
   onGraphicsActiveChange?: (active: boolean) => void;
   compact?: boolean;
+  compactCountStatus?: string;
   permittedCodes?: readonly string[];
   selectionAllowed?: () => boolean;
   selectionMode?: 'select' | 'preview';
@@ -2099,94 +2100,106 @@ export default function RoomScene(props: RoomSceneProps) {
           </div>
         )}
       </div>
-      {selectedLabel && (
-        <p role="status" className={styles.sceneStatus}>
-          Selected location: {selectedLabel}
-          {selectedLabel !== props.selectedCode && ` (${props.selectedCode})`}
-        </p>
-      )}
-      {inspectedSummary && (
-        <p className={styles.sceneStatus} data-room-inspected-summary="true">
-          {inspectedSummary}
-        </p>
-      )}
-      {(showAllLabels || showCounts) && suppressedLabels > 0 && (
-        <p role="status" className={styles.sceneNote}>
-          Some optional labels are unavailable in this view. Use the location
-          browser or Center selected.
-        </p>
-      )}
-      {(overflowCodes.length > 0 ||
-        unresolvedCodes.length > 0 ||
-        placementCodes.length > 0) && (
-        <div className={styles.sceneNote}>
-          <p role="status">
-            Some room labels could not be checked or placed. Recorded locations
-            are listed below.
+      <div className={styles.sceneMessages}>
+        {selectedLabel && (
+          <p role="status" className={styles.sceneStatus}>
+            Selected location: {selectedLabel}
+            {selectedLabel !== props.selectedCode && ` (${props.selectedCode})`}
           </p>
-          <button
-            type="button"
-            className={styles.commandButton}
-            onClick={() => {
-              visibilityRetry.current?.();
-              registry.retry();
-            }}
+        )}
+        {props.compact && (
+          <p
+            role="status"
+            aria-live="polite"
+            className={`${styles.sceneStatus} ${styles.compactCountStatus}`}
           >
-            Retry label placement
-          </button>
-          <ul aria-label="Locations with unavailable room labels">
-            {[
-              ...new Set([
-                ...overflowCodes,
-                ...unresolvedCodes,
-                ...placementCodes,
-              ]),
-            ]
-              .sort()
-              .map((code) => (
-                <li key={code}>
-                  {selectionAvailable(code) ? (
-                    <button
-                      type="button"
-                      className={styles.commandButton}
-                      aria-pressed={props.selectedCode === code}
-                      disabled={Boolean(
-                        props.permittedCodes &&
-                        !props.permittedCodes.includes(code),
-                      )}
-                      onClick={() => select(code)}
-                    >
-                      {props.locationNames?.[code] ?? code}
-                      {props.locationOccupancy?.[code] &&
-                        ` · ${occupancyText(props.locationOccupancy[code])}`}
-                    </button>
-                  ) : (
-                    <span>
-                      {props.locationNames?.[code] ?? code}
-                      {props.locationOccupancy?.[code] &&
-                        ` · ${occupancyText(props.locationOccupancy[code])}`}
-                    </span>
-                  )}
-                </li>
-              ))}
-          </ul>
-        </div>
-      )}
-      <p role="status" className={styles.sceneNote}>
-        {active
-          ? 'Map interaction is on. Ordinary wheel or direct pinch zooms the map.'
-          : 'Map interaction off. Scroll moves the page.'}
-      </p>
-      {dragHint && !active && (
+            {props.compactCountStatus ?? ''}
+          </p>
+        )}
+        {inspectedSummary && (
+          <p className={styles.sceneStatus} data-room-inspected-summary="true">
+            {inspectedSummary}
+          </p>
+        )}
+        {(showAllLabels || showCounts) && suppressedLabels > 0 && (
+          <p role="status" className={styles.sceneNote}>
+            Some optional labels are unavailable in this view. Use the location
+            browser or Center selected.
+          </p>
+        )}
+        {(overflowCodes.length > 0 ||
+          unresolvedCodes.length > 0 ||
+          placementCodes.length > 0) && (
+          <div className={styles.sceneNote}>
+            <p role="status">
+              Some room labels could not be checked or placed. Recorded
+              locations are listed below.
+            </p>
+            <button
+              type="button"
+              className={styles.commandButton}
+              onClick={() => {
+                visibilityRetry.current?.();
+                registry.retry();
+              }}
+            >
+              Retry label placement
+            </button>
+            <ul aria-label="Locations with unavailable room labels">
+              {[
+                ...new Set([
+                  ...overflowCodes,
+                  ...unresolvedCodes,
+                  ...placementCodes,
+                ]),
+              ]
+                .sort()
+                .map((code) => (
+                  <li key={code}>
+                    {selectionAvailable(code) ? (
+                      <button
+                        type="button"
+                        className={styles.commandButton}
+                        aria-pressed={props.selectedCode === code}
+                        disabled={Boolean(
+                          props.permittedCodes &&
+                          !props.permittedCodes.includes(code),
+                        )}
+                        onClick={() => select(code)}
+                      >
+                        {props.locationNames?.[code] ?? code}
+                        {props.locationOccupancy?.[code] &&
+                          ` · ${occupancyText(props.locationOccupancy[code])}`}
+                      </button>
+                    ) : (
+                      <span>
+                        {props.locationNames?.[code] ?? code}
+                        {props.locationOccupancy?.[code] &&
+                          ` · ${occupancyText(props.locationOccupancy[code])}`}
+                      </span>
+                    )}
+                  </li>
+                ))}
+            </ul>
+          </div>
+        )}
         <p role="status" className={styles.sceneNote}>
-          Interact to rotate. Scroll moves the page.
+          {active
+            ? 'Map interaction is on. Ordinary wheel or direct pinch zooms the map.'
+            : 'Map interaction off. Scroll moves the page.'}
         </p>
-      )}
-      {!props.selectedCode && (
-        <p className={styles.sceneNote}>
-          Select a location. Use More map controls for labels, counts and help.
-        </p>
-      )}
+        {dragHint && !active && (
+          <p role="status" className={styles.sceneNote}>
+            Interact to rotate. Scroll moves the page.
+          </p>
+        )}
+        {!props.selectedCode && (
+          <p className={styles.sceneNote}>
+            Select a location. Use More map controls for labels, counts and
+            help.
+          </p>
+        )}
+      </div>
     </div>
   );
 }

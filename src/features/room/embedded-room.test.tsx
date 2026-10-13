@@ -9,6 +9,7 @@ import {
 } from '../scan/assign-batch';
 import type { LocationRef } from '../inventory/contracts-ui';
 const driver = vi.hoisted(() => ({
+  chunkPending: false,
   authority: {
     actorId: 'actor',
     backend: 'https://backend.example',
@@ -22,7 +23,7 @@ vi.mock('./scene/camera-snapshot-provider', () => ({
 }));
 vi.mock('next/dynamic', () => ({
   default:
-    () =>
+    (_loader: unknown, options: { loading(): import('react').ReactNode }) =>
     (props: {
       onReady(): void;
       onGraphicsActiveChange(active: boolean): void;
@@ -31,34 +32,42 @@ vi.mock('next/dynamic', () => ({
       canFocusSelected?: boolean;
       focusRequest?: { code: string | null };
       selectionMode?: string;
-    }) => (
-      <div
-        data-testid="embedded-scene"
-        data-counts={JSON.stringify(props.locationOccupancy ?? null)}
-        data-overlay={String(props.showCounts)}
-        data-focus-enabled={String(props.canFocusSelected)}
-        data-focus-code={props.focusRequest?.code ?? ''}
-        data-selection-mode={props.selectionMode}
-      >
-        <button
-          type="button"
-          onClick={() => {
-            props.onGraphicsActiveChange(true);
-            props.onReady();
-          }}
+      compactCountStatus?: string;
+    }) =>
+      driver.chunkPending ? (
+        options.loading()
+      ) : (
+        <div
+          data-testid="embedded-scene"
+          data-counts={JSON.stringify(props.locationOccupancy ?? null)}
+          data-overlay={String(props.showCounts)}
+          data-focus-enabled={String(props.canFocusSelected)}
+          data-focus-code={props.focusRequest?.code ?? ''}
+          data-selection-mode={props.selectionMode}
         >
-          Start renderer
-        </button>
-        <button
-          type="button"
-          onClick={() => props.onGraphicsActiveChange(false)}
-        >
-          Pause renderer
-        </button>
-      </div>
-    ),
+          <p role="status">{props.compactCountStatus}</p>
+          <button
+            type="button"
+            onClick={() => {
+              props.onGraphicsActiveChange(true);
+              props.onReady();
+            }}
+          >
+            Start renderer
+          </button>
+          <button
+            type="button"
+            onClick={() => props.onGraphicsActiveChange(false)}
+          >
+            Pause renderer
+          </button>
+        </div>
+      ),
 }));
-afterEach(() => vi.unstubAllGlobals());
+afterEach(() => {
+  vi.unstubAllGlobals();
+  driver.chunkPending = false;
+});
 const locations: LocationRef[] = [
   {
     id: 'root',
@@ -286,3 +295,46 @@ it('conceals counts and rejects a late response after the active scene is withdr
   );
   expect(screen.queryByText(/counts are unavailable/)).toBeNull();
 });
+
+it.each([
+  'Drawer 1',
+  'Fictional exceptionally long modeled storage location label requiring several phone lines',
+])(
+  'keeps a compact-only cold chunk placeholder with the actual selected label: %s',
+  (name) => {
+    driver.chunkPending = true;
+    const named = locations.map((location) =>
+      location.code === 'ITC-D01' ? { ...location, name } : location,
+    );
+    const fetcher = vi.fn();
+    vi.stubGlobal('fetch', fetcher);
+    const props = {
+      locations: named,
+      code: 'ITC-D01',
+      permittedCodes: [],
+      onSelect: vi.fn(),
+      selectionMode: 'preview' as const,
+    };
+    const view = render(<EmbeddedRoom {...props} />);
+    const loading = view.container.querySelector(
+      '[data-loading-shape="compact-room"]',
+    );
+    expect(loading).not.toBeNull();
+    expect(loading).toHaveAttribute('aria-busy', 'true');
+    expect(
+      view.container.querySelector('[data-loading-shape="room"]'),
+    ).toBeNull();
+    expect(screen.queryByTestId('embedded-scene')).toBeNull();
+    expect(
+      screen.getByText(`Selected location: ${name} (ITC-D01)`),
+    ).toBeInTheDocument();
+    expect(screen.queryByRole('button')).toBeNull();
+    expect(fetcher).not.toHaveBeenCalled();
+    driver.chunkPending = false;
+    view.rerender(<EmbeddedRoom {...props} />);
+    expect(screen.getByTestId('embedded-scene')).toBeInTheDocument();
+    expect(
+      view.container.querySelector('[data-loading-shape="compact-room"]'),
+    ).toBeNull();
+  },
+);

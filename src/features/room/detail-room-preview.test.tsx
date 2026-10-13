@@ -2,13 +2,17 @@ import { afterEach, expect, it, vi } from 'vitest';
 import { act, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { DetailRoomPreview } from './detail-room-preview';
+const chunks = vi.hoisted(() => ({ pending: false }));
 import type { LocationRef } from '../inventory/contracts-ui';
 vi.mock('next/dynamic', () => ({
   default:
-    () =>
-    ({ code, selectionMode }: { code: string; selectionMode?: string }) => (
-      <p data-selection-mode={selectionMode}>Map for {code}</p>
-    ),
+    (_loader: unknown, options: { loading(): import('react').ReactNode }) =>
+    ({ code, selectionMode }: { code: string; selectionMode?: string }) =>
+      chunks.pending ? (
+        options.loading()
+      ) : (
+        <p data-selection-mode={selectionMode}>Map for {code}</p>
+      ),
 }));
 vi.mock('./show-in-room', () => ({
   ShowInRoom: () => <a href="/room">Show in room</a>,
@@ -65,7 +69,10 @@ it('renders assigned and inactive context without promising current custody', ()
   expect(screen.getByText(/Inactive location/)).toBeInTheDocument();
 });
 
-afterEach(() => vi.unstubAllGlobals());
+afterEach(() => {
+  vi.unstubAllGlobals();
+  chunks.pending = false;
+});
 it('does not persist an implicit sole balance when another recorded location appears', () => {
   const other = { ...location, id: 'other', code: 'ITC-D02' };
   const view = render(
@@ -157,4 +164,33 @@ it('retains the preview while its page owns the single room navigation action', 
   );
   expect(screen.getByText('Map for ITC-D01')).toBeInTheDocument();
   expect(screen.queryByRole('link', { name: 'Show in room' })).toBeNull();
+});
+
+it('uses the same actual-label compact shell while the outer embedded chunk is cold', () => {
+  chunks.pending = true;
+  const named = {
+    ...location,
+    name: 'Fictional very long recorded modeled location name that wraps across phone lines',
+  };
+  const view = render(
+    <DetailRoomPreview
+      locations={[named]}
+      choices={[{ code: named.code, label: named.name }]}
+    />,
+  );
+  expect(
+    view.container.querySelector('[data-loading-shape="compact-room"]'),
+  ).not.toBeNull();
+  expect(
+    screen.getByText(`Selected location: ${named.name} (${named.code})`),
+  ).toBeInTheDocument();
+  expect(screen.queryByText(/^Map for/)).toBeNull();
+  chunks.pending = false;
+  view.rerender(
+    <DetailRoomPreview
+      locations={[named]}
+      choices={[{ code: named.code, label: named.name }]}
+    />,
+  );
+  expect(screen.getByText('Map for ITC-D01')).toBeInTheDocument();
 });

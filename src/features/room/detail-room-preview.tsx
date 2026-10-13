@@ -5,9 +5,13 @@ import type { LocationRef } from '../inventory/contracts-ui';
 import { ShowInRoom } from './show-in-room';
 import { RoomRegionBoundary } from './room-region-boundary';
 import styles from './room-visual.module.css';
+import {
+  CompactRoomContext,
+  CompactRoomPlaceholder,
+} from './compact-room-placeholder';
 const EmbeddedRoom = dynamic(
   () => import('./embedded-room').then((module) => module.EmbeddedRoom),
-  { ssr: false },
+  { ssr: false, loading: () => <CompactRoomPlaceholder bordered /> },
 );
 const subscribeReady = () => () => {};
 
@@ -92,21 +96,26 @@ export function DetailRoomPreview({
             {!selected.active &&
               ' · Inactive location; this is the recorded storage context.'}
           </p>
-          <div className={styles.compactPreviewSlot}>
-            {(visible ||
-              (browserReady &&
-                typeof IntersectionObserver === 'undefined')) && (
-              <RoomRegionBoundary key={selected.code}>
-                <EmbeddedRoom
-                  selectionMode="preview"
-                  locations={locations}
-                  code={selected.code}
-                  permittedCodes={[]}
-                  onSelect={() => {}}
-                />
-              </RoomRegionBoundary>
-            )}
-          </div>
+          <CompactRoomContext
+            value={{ code: selected.code, label: selected.name }}
+          >
+            <div className={styles.compactPreviewSlot}>
+              {visible ||
+              (browserReady && typeof IntersectionObserver === 'undefined') ? (
+                <RoomRegionBoundary key={selected.code}>
+                  <EmbeddedRoom
+                    selectionMode="preview"
+                    locations={locations}
+                    code={selected.code}
+                    permittedCodes={[]}
+                    onSelect={() => {}}
+                  />
+                </RoomRegionBoundary>
+              ) : (
+                <CompactRoomPlaceholder bordered />
+              )}
+            </div>
+          </CompactRoomContext>
           {showRoomLink && <ShowInRoom location={selected} />}
         </>
       ) : (

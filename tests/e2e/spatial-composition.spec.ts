@@ -719,3 +719,90 @@ test('W14 actual Full flight precedes reveal, newer selection retires it, and Re
   });
   await page.evaluate(() => window.__roomDrawObservation!.stop());
 });
+
+test('A303 cold compact scene chunk preserves the normal phone preview and downstream anchor through counts arrival', async ({
+  page,
+}, testInfo) => {
+  test.setTimeout(120_000);
+  await page.setViewportSize({ width: 390, height: 844 });
+  await acceptanceLogin(page);
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  let held = false;
+  const pattern = '**/_next/static/chunks/*.js';
+  await page.route(pattern, async (route) => {
+    const response = await route.fetch();
+    const body = await response.body();
+    // Hold the actual served module, identified by its unique scene markup.
+    // Other chunks retain their real response bodies; no app state is injected.
+    if (
+      body.length <= 4_194_304 &&
+      body.toString().includes('Interactive room canvas')
+    ) {
+      held = true;
+      await gate;
+    }
+    await route.fulfill({ response });
+  });
+  try {
+    await page.goto('/locations/ITC-S1A', { waitUntil: 'domcontentloaded' });
+    const preview = page.getByRole('region', { name: 'Storage preview' });
+    await preview.scrollIntoViewIfNeeded();
+    await expect.poll(() => held).toBe(true);
+    await expect(
+      preview.locator('[data-loading-shape="compact-room"]'),
+    ).toBeVisible();
+    await expect(preview.locator('[data-loading-shape="room"]')).toHaveCount(0);
+    await expect(preview.locator('canvas')).toHaveCount(0);
+    const measure = () =>
+      preview.evaluate((element) => ({
+        height: element.getBoundingClientRect().height,
+        downstream:
+          element.nextElementSibling!.getBoundingClientRect().top +
+          window.scrollY,
+      }));
+    await page.evaluate(() => document.fonts.ready);
+    const loading = await measure();
+    await page.screenshot({
+      path: testInfo.outputPath('compact-cold-390.png'),
+    });
+    const counts = page.waitForResponse((response) =>
+      response.url().includes('/api/room/occupancy?'),
+    );
+    release();
+    const canvas = await sceneReady(preview);
+    await expect(canvas).toHaveAttribute('data-spatial-phase', 'settled');
+    const response = await counts;
+    expect(response.ok()).toBe(true);
+    await expect(
+      preview.getByText('Loading counts for the opened location…'),
+    ).toHaveCount(0);
+    const ready = await measure();
+    expect(Math.abs(ready.height - loading.height)).toBeLessThanOrEqual(1);
+    expect(Math.abs(ready.downstream - loading.downstream)).toBeLessThanOrEqual(
+      1,
+    );
+    await expect(
+      preview.getByRole('button', { name: 'Zoom in' }),
+    ).toBeEnabled();
+    await expect(
+      preview.getByRole('button', { name: 'More map controls' }),
+    ).toBeEnabled();
+    await testInfo.attach('compact-cold-chunk-phone-layout', {
+      body: JSON.stringify({
+        loading,
+        ready,
+        viewport: { width: 390, height: 844 },
+      }),
+      contentType: 'application/json',
+    });
+    await page.screenshot({
+      path: testInfo.outputPath('compact-ready-390.png'),
+    });
+  } finally {
+    release();
+    await page.unroute(pattern);
+  }
+});

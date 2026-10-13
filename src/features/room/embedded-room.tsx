@@ -1,7 +1,10 @@
 'use client';
 import dynamic from 'next/dynamic';
 import { useLayoutEffect, useMemo, useState } from 'react';
-import { LoadingSkeleton } from '@/components/ui/loading-skeleton';
+import {
+  CompactRoomContext,
+  CompactRoomPlaceholder,
+} from './compact-room-placeholder';
 import type { LocationRef } from '../inventory/contracts-ui';
 import { buildRoomBindings } from './bindings';
 import { containingSpace, spaceRoom, spaces } from './spaces';
@@ -15,9 +18,7 @@ import { freshPresentationGrant } from '@/components/experience/presentation-pri
 import { pickerLocations } from '../locations/picker-model';
 const RoomScene = dynamic(() => import('./scene/room-scene'), {
   ssr: false,
-  loading: () => (
-    <LoadingSkeleton shape="room" label="Loading map…" announce={false} />
-  ),
+  loading: () => <CompactRoomPlaceholder />,
 });
 export function EmbeddedRoom({
   locations,
@@ -103,80 +104,84 @@ export function EmbeddedRoom({
       </p>
     );
   return (
-    <section
-      aria-label="Location map"
-      aria-busy={!ready && !failure}
-      className="min-w-0 rounded-xl border border-slate-700"
+    <CompactRoomContext
+      value={{
+        code,
+        label:
+          locations.find((location) => location.code === code)?.name ?? code,
+      }}
     >
-      {failure ? (
-        <div className="p-4">
-          <p role="status">
-            Map unavailable. The recorded location and location browser remain
-            available.
-          </p>
-          <button
-            type="button"
-            className="min-h-11 text-cyan-300 underline"
-            onClick={() => {
-              setFailure(null);
-              setReady(false);
-              setAttempt((value) => value + 1);
-            }}
-          >
-            Retry map
-          </button>
-        </div>
-      ) : (
-        <RoomRegionBoundary key={space?.id + ':' + attempt}>
-          <ScenePriorityContext value={priority}>
-            <RoomScene
-              compact
-              selectionMode={selectionMode}
-              key={space?.id + ':' + attempt}
-              room={room}
-              bindings={bindings}
-              locationNames={Object.fromEntries(
-                locations.map((location) => [location.code, location.name]),
-              )}
-              selectedCode={code}
-              highlightedCodes={[]}
-              locationOccupancy={counts.counts}
-              showCounts={showCounts}
-              onCountsChange={setShowCounts}
-              onGraphicsActiveChange={(active) => {
-                setGraphicsActive(active);
-                if (!active) setReady(false);
+      <section
+        aria-label="Location map"
+        aria-busy={!ready && !failure}
+        className="min-w-0 rounded-xl border border-slate-700"
+      >
+        {failure ? (
+          <div className="p-4">
+            <p role="status">
+              Map unavailable. The recorded location and location browser remain
+              available.
+            </p>
+            <button
+              type="button"
+              className="min-h-11 text-cyan-300 underline"
+              onClick={() => {
+                setFailure(null);
+                setReady(false);
+                setAttempt((value) => value + 1);
               }}
-              permittedCodes={permittedCodes}
-              selectionAllowed={selectionAllowed}
-              onSelect={onSelect}
-              focusRequest={{
-                code: selectedIsBound ? code : null,
-                requestId: focus,
-                scope: 'embedded',
-                generation: attempt,
-                fitBeforeFlight: true,
-              }}
-              onReady={() => setReady(true)}
-              onFailure={setFailure}
-              onFocusComplete={() => {}}
-              canFocusSelected={selectedIsBound}
-              onRequestFocus={() => setFocus((value) => value + 1)}
-            />
-          </ScenePriorityContext>
-        </RoomRegionBoundary>
-      )}
-      {graphicsActive && ready && counts.status === 'loading' && (
-        <p role="status" className="p-3 text-sm">
-          Loading counts for the opened location…
-        </p>
-      )}
-      {graphicsActive && ready && counts.status === 'error' && (
-        <p role="status" className="p-3 text-sm">
-          Location counts are unavailable. The recorded location remains
-          available.
-        </p>
-      )}
-    </section>
+            >
+              Retry map
+            </button>
+          </div>
+        ) : (
+          <RoomRegionBoundary key={space?.id + ':' + attempt}>
+            <ScenePriorityContext value={priority}>
+              <RoomScene
+                compact
+                compactCountStatus={
+                  graphicsActive && ready && counts.status === 'loading'
+                    ? 'Loading counts for the opened location…'
+                    : graphicsActive && ready && counts.status === 'error'
+                      ? 'Location counts are unavailable. The recorded location remains available.'
+                      : ''
+                }
+                selectionMode={selectionMode}
+                key={space?.id + ':' + attempt}
+                room={room}
+                bindings={bindings}
+                locationNames={Object.fromEntries(
+                  locations.map((location) => [location.code, location.name]),
+                )}
+                selectedCode={code}
+                highlightedCodes={[]}
+                locationOccupancy={counts.counts}
+                showCounts={showCounts}
+                onCountsChange={setShowCounts}
+                onGraphicsActiveChange={(active) => {
+                  setGraphicsActive(active);
+                  if (!active) setReady(false);
+                }}
+                permittedCodes={permittedCodes}
+                selectionAllowed={selectionAllowed}
+                onSelect={onSelect}
+                focusRequest={{
+                  code: selectedIsBound ? code : null,
+                  requestId: focus,
+                  scope: 'embedded',
+                  generation: attempt,
+                  fitBeforeFlight: true,
+                }}
+                onReady={() => setReady(true)}
+                onFailure={setFailure}
+                onFocusComplete={() => {}}
+                canFocusSelected={selectedIsBound}
+                onRequestFocus={() => setFocus((value) => value + 1)}
+              />
+            </ScenePriorityContext>
+          </RoomRegionBoundary>
+        )}
+      </section>
+    </CompactRoomContext>
   );
 }
