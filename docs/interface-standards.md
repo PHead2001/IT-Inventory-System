@@ -280,6 +280,12 @@ pseudo-element WAAPI skips the **whole** transition instantly after capture;
 recapturing private DOM to rebuild a crossfade is prohibited. Browser proof of
 ordinary forward/app Back morphing, scrolled/mobile/long titles, no clipping/end snap,
 allowed keyframes and CLS remains mandatory; the Vitest adapter is not that proof.
+Record titles reserve a compact 44 px trailing control slot in the title row,
+including server HTML before overflow measurement. The measured three-line
+disclosure uses an accessible Show full name/Show less button with a title hint;
+adding that control must not shift following record content. Names that fit
+leave no focusable control. Expansion retains the same heading and native title
+identity; it does not reserve a separate empty row under short names.
 
 Effective motion reduction suppresses/cancels native snapshots synchronously.
 The protected provider cancels on null/different Supabase actor, permitted logout
