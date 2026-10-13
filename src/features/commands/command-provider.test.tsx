@@ -687,6 +687,55 @@ it('dismisses actor-mismatched results and requires a fresh explicit opening', a
   await settle();
   expect(screen.getByText('Fresh actor')).toBeVisible();
 });
+it.each(['Move asset or stock', 'Print label'])(
+  'resets keyboard selection when returning from %s results to commands',
+  async (task) => {
+    vi.mocked(fetch).mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          identity: { actorId: 'actor', backend: 'local-backend' },
+          result: {
+            version: 1,
+            rows: Array.from({ length: 20 }, (_, index) => ({
+              ...row,
+              id: row.id.slice(0, -2) + String(index + 1).padStart(2, '0'),
+              name: 'Camera ' + index,
+            })),
+            hasMore: false,
+          },
+        }),
+      ),
+    );
+    render(<Workspace />);
+    const search = open();
+    const taskIndex = screen
+      .getAllByRole('option')
+      .findIndex((option) => option.textContent?.startsWith(task));
+    expect(taskIndex).toBeGreaterThanOrEqual(0);
+    for (let index = 0; index < taskIndex; index++)
+      fireEvent.keyDown(search, { key: 'ArrowDown' });
+    fireEvent.keyDown(search, { key: 'Enter' });
+    fireEvent.change(search, { target: { value: 'camera' } });
+    await settle();
+    for (let index = 0; index < 19; index++)
+      fireEvent.keyDown(search, { key: 'ArrowDown' });
+    expect(screen.getAllByRole('option')[19]).toHaveAttribute(
+      'aria-selected',
+      'true',
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Back to commands' }));
+    // Assert and press Enter before the asynchronous search-effect cleanup.
+    expect(screen.getAllByRole('option')[0]).toHaveAttribute(
+      'aria-selected',
+      'true',
+    );
+    fireEvent.keyDown(screen.getByRole('combobox'), { key: 'Enter' });
+    expect(screen.queryByRole('combobox')).toBeNull();
+    expect(
+      screen.getByRole('link', { name: 'Add individual asset' }),
+    ).toBeVisible();
+  },
+);
 it('includes historical scope explicitly, navigates results by keyboard, and opens move/label intents', async () => {
   render(<Workspace />);
   const search = open();

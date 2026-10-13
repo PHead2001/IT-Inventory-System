@@ -308,6 +308,7 @@ export function CommandProvider({
     setHeld(false);
     setQuery('');
     setIntent('open');
+    setActive(0);
     setScope('active');
     setResult(null);
     setError('');
@@ -389,11 +390,13 @@ export function CommandProvider({
     if (command.target.kind === 'overlay') {
       setOverlay(command.target.overlay);
       setIntent('open');
+      setActive(0);
       return;
     }
     generation.current++;
     setOverlay('palette');
     setIntent(command.target.task === 'print' ? 'label' : command.target.task);
+    setActive(0);
     setQuery('');
     setResult(null);
     setError('');
@@ -1072,6 +1075,7 @@ export function CommandProvider({
                     variant="outline"
                     onClick={() => {
                       setIntent('open');
+                      setActive(0);
                       setQuery('');
                     }}
                   >
