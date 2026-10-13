@@ -247,6 +247,17 @@ Ordinals locate anchors and do not identify holdings. Reordered holdings can pai
 at their new ordinal on app Back; deleted/replaced/ambiguous holdings use ordinary
 navigation. Do not patch router history methods, lanes or browser events to force
 native animation.
+Inventory list and quantity/asset detail destinations disable Next Link prefetch
+in every motion mode through the shared route-link policy. Plain Full details,
+filter, history and navigation links must follow it as well; the standalone asset
+tag advisory also opts out. Creation forms and other destinations retain their
+existing prefetch behavior. This uses public `prefetch={false}`: navigation still
+uses Next's normal Link/history/scroll handling. In the installed Next 16.3.6,
+a canceled partial prefetch can fulfill with null and take precedence over the
+available primary, committing an empty source before its fallback and losing
+the cold shared title. Avoiding those speculative requests preserves the source
+without modifying framework files or private caches. Cold clicks may wait longer
+for their actual Flight request; ordinary loading/progress remains visible.
 Pair approval is staged and consumed within the same accepted Link event, for its
 exact href and current provider generation. Prevented/thrown handlers discard it;
 plain detail navigation or failed capture retires any older title intent/origin.

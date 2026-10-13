@@ -330,6 +330,21 @@ or fulfillment fails; cleanup completion remains separate. Unit regressions forc
 late fulfillment rejection after arrival, prove delivery waits for successful
 fulfillment, and retain cleanup after fetch/abort failure. Cached content therefore
 cannot substitute for the journey's awaited late-response fulfillment.
+Inventory destination-prefetch regressions cover the shared route-link policy,
+navigation hover/focus overrides, URL-object/query/hash handling, creation and
+external-route exclusions, ordinary navigation guards/modifiers, and the raw
+asset-tag advisory exception. The production-browser Full case now includes a
+real custom-answer Full details sibling with the exact paired row href, discards
+the prior router cache through hard source navigation, and cancels any genuinely
+attempted inventory partial prefetch. It requires zero such requests after real
+sibling hover/focus, cold primary-held title pairing, native history, app Back
+and navigation-link intent. The canceling probe exercises the old null-prefetch
+failure path if a caller reintroduces speculative requests; it never manufactures
+Flight, resolves a private cache promise, or bypasses the actual primary lock.
+Unit checks cannot establish native cold pairing; the actual production-browser
+case and exact-candidate hosted acceptance remain required. Disabling speculative
+inventory fetches may increase cold-click latency; no framework patch or provider
+upgrade is included.
 The decisive actual-React regression first reproduced async-action entanglement:
 a replacement caller rendered Ready while native pending remained behind a
 departed caller's unresolved action. It now passes with per-invocation promise
