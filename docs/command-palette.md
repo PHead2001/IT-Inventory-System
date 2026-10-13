@@ -133,11 +133,17 @@ Duplicate serials remain legal and return separate named assets.
 
 Version-one rows expose kind, id, name, code, assetTag, serialNumber, status and
 matchedField. Database JSON is capped at 64 KiB; the endpoint validates its schema
-and 20-row cap. Internal identities are not rendered as normal text.
+and 20-row cap. Response text limits count Unicode codepoints, matching PostgreSQL
+`char_length`, including supplementary characters. Internal identities are not
+rendered as normal text.
 
 The private no-store POST endpoint caps streamed bodies at 4 KiB, requires
 same-origin requests, rechecks Auth/membership with the caller SDK, propagates
-cancellation and supplies an eight-second AbortSignal Data API deadline. Invalid,
+cancellation and supplies one eight-second lifetime covering caller client setup,
+Auth verification, membership and RPC reads. The caller fetch composes this
+lifetime with existing Request/init signals; bounded waits also retire adapters
+that fail to settle. Cleanup cancels timers/listeners. JWT/session and access
+denials remain 401/403; transient Auth/read failures remain retryable 503s. Invalid,
 timeout and read failures offer Retry, never No matches. Session/access denial
 clears private search and dismisses the palette; another explicit opening still
 requires a fresh canonical presentation grant and caller session verification.

@@ -8,9 +8,37 @@ import {
 import {
   commandQuery,
   commandResults,
+  entityRow,
   entityDestination,
   type EntityRow,
 } from './contracts';
+it.each([
+  ['name', 200],
+  ['code', 200],
+  ['assetTag', 100],
+  ['serialNumber', 200],
+] as const)(
+  'bounds response %s by Unicode codepoints like PostgreSQL',
+  (field, limit) => {
+    const row = {
+      kind: 'asset',
+      id: '11000000-0000-4000-8000-000000000001',
+      name: 'Laptop',
+      code: null,
+      assetTag: null,
+      serialNumber: null,
+      status: 'active',
+      matchedField: 'name',
+    };
+    for (const value of ['😀'.repeat(limit), 'x'.repeat(limit - 1) + '😀'])
+      expect(entityRow.safeParse({ ...row, [field]: value }).success).toBe(
+        true,
+      );
+    expect(
+      entityRow.safeParse({ ...row, [field]: '😀'.repeat(limit + 1) }).success,
+    ).toBe(false);
+  },
+);
 it('keeps command IDs unique, typed, and staff-only tasks out of viewer search', () => {
   expect(new Set(commands.map((entry) => entry.id)).size).toBe(commands.length);
   expect(

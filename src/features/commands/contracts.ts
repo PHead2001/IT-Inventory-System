@@ -20,14 +20,16 @@ export const commandQuery = z
     purpose: z.enum(['all', 'move', 'print']).default('all'),
   })
   .strict();
+const boundedText = (limit: number) =>
+  z.string().refine((value) => Array.from(value).length <= limit);
 export const entityRow = z
   .object({
     kind: z.enum(['asset', 'quantity', 'location', 'site']),
     id: z.string().uuid(),
-    name: z.string().max(200),
-    code: z.string().max(200).nullable(),
-    assetTag: z.string().max(100).nullable(),
-    serialNumber: z.string().max(200).nullable(),
+    name: boundedText(200),
+    code: boundedText(200).nullable(),
+    assetTag: boundedText(100).nullable(),
+    serialNumber: boundedText(200).nullable(),
     status: z.enum(['active', 'retired', 'archived', 'inactive']),
     matchedField: z.enum(['name', 'code', 'assetTag', 'serialNumber']),
   })

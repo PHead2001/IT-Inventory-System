@@ -12,14 +12,24 @@ async function createCookieClient(
   writable: boolean,
   diagnostic: AuthDiagnostic | null,
   privacyRead = false,
+  signal?: AbortSignal,
 ) {
   const jar = await cookies();
   const { url, key } = supabaseConfig();
-  const guard = privacyRead
-    ? createPrivacyReadFetch(url, globalThis.fetch)
-    : undefined;
+  const outbound: typeof fetch = signal
+    ? (input, init) =>
+        globalThis.fetch(input, {
+          ...init,
+          signal: AbortSignal.any([
+            signal,
+            ...(input instanceof Request ? [input.signal] : []),
+            ...(init?.signal ? [init.signal] : []),
+          ]),
+        })
+    : globalThis.fetch;
+  const guard = privacyRead ? createPrivacyReadFetch(url, outbound) : undefined;
   const client = createServerClient<Database>(url, key, {
-    ...(guard ? { global: { fetch: guard.fetch } } : {}),
+    ...(guard || signal ? { global: { fetch: guard?.fetch ?? outbound } } : {}),
     cookies: {
       getAll: () =>
         observeAuthStageSync(diagnostic, 'cookie.getAll', () => jar.getAll()),
@@ -39,8 +49,9 @@ async function createCookieClient(
 export async function createSupabaseServerClient(
   writable = false,
   diagnostic: AuthDiagnostic | null = null,
+  signal?: AbortSignal,
 ) {
-  return (await createCookieClient(writable, diagnostic)).client;
+  return (await createCookieClient(writable, diagnostic, false, signal)).client;
 }
 /** Dedicated mode for /api/auth/privacy-read; ordinary server refresh is intact. */
 export function createSupabasePrivacyReadClient() {
