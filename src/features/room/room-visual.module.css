@@ -429,8 +429,15 @@
   );
 }
 
+.compact,
+.compactPreviewSlot {
+  --room-compact-canvas-height: 280px;
+}
 .compact .canvasFrame {
-  height: 280px;
+  height: var(--room-compact-canvas-height);
+}
+.compactPreviewSlot {
+  min-height: var(--room-compact-canvas-height);
 }
 .sceneStatus {
   color: var(--foreground);

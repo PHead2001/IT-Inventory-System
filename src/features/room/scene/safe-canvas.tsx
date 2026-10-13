@@ -242,7 +242,11 @@ export function SafeCanvas({
         <CanvasRoot
           {...configuration}
           onFailure={(message) => {
-            if (current()) onFailure(message);
+            if (current()) {
+              setLease(null);
+              latest.current.onLeaseChange?.(false);
+              onFailure(message);
+            }
           }}
           fallback={fallback}
           lease={lease}
@@ -286,6 +290,15 @@ function CanvasRoot({
     [current, lease],
   );
   const sessionCurrent = session.current;
+  // Scene errors belong to the original allocation, even when the same privacy
+  // owner later resumes with another lease. Initialization captures authority
+  // separately before completing its failed allocation.
+  const reportSceneFailure = useCallback(
+    (message: string) => {
+      if (sessionCurrent()) onFailure(message);
+    },
+    [sessionCurrent, onFailure],
+  );
   const canvas = useRef<HTMLCanvasElement>(null);
   const container = useRef<HTMLDivElement>(null);
   const root = useRef<ReturnType<typeof createRoot> | null>(null);
@@ -296,10 +309,12 @@ function CanvasRoot({
     if (ready.current && sessionCurrent())
       root.current?.render(
         <SceneSessionContext value={session}>
-          <GraphicsBoundary onFailure={onFailure}>{children}</GraphicsBoundary>
+          <GraphicsBoundary onFailure={reportSceneFailure}>
+            {children}
+          </GraphicsBoundary>
         </SceneSessionContext>,
       );
-  }, [children, configuration, onFailure, session, sessionCurrent]);
+  }, [children, configuration, reportSceneFailure, session, sessionCurrent]);
   useEffect(() => {
     const element = canvas.current,
       host = container.current;
@@ -327,12 +342,7 @@ function CanvasRoot({
           if (!sessionCurrent()) return;
           if (!root.current) {
             if (!lease.allocate()) return;
-            try {
-              root.current = createRoot(element);
-            } catch (error) {
-              lease.complete();
-              throw error;
-            }
+            root.current = createRoot(element);
           }
           await root.current
             .configure({
@@ -352,7 +362,7 @@ function CanvasRoot({
           ready.current = true;
           root.current.render(
             <SceneSessionContext value={session}>
-              <GraphicsBoundary onFailure={onFailure}>
+              <GraphicsBoundary onFailure={reportSceneFailure}>
                 {latest.current.children}
               </GraphicsBoundary>
             </SceneSessionContext>,
@@ -369,6 +379,9 @@ function CanvasRoot({
               );
             else unmountComponentAtNode(element, () => lease.complete());
             root.current = null;
+          } else if (!root.current) {
+            // Capture authority above before completing a root-less failed lease.
+            lease.complete();
           }
           if (report)
             onFailure(

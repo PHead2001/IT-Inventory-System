@@ -45,6 +45,7 @@ export function VisibleHoverTracker({
   active = false,
   suspended = false,
   selectionEnabled = true,
+  selectionAvailable,
 }: {
   showAllLabels: boolean;
   retainDuringLabelHandoff: boolean;
@@ -53,6 +54,7 @@ export function VisibleHoverTracker({
   active?: boolean;
   suspended?: boolean;
   selectionEnabled?: boolean;
+  selectionAvailable?: (code: string) => boolean;
 }) {
   const { camera, gl, scene, invalidate } = useThree();
   const effects = useOptionalSceneEffects();
@@ -121,7 +123,13 @@ export function VisibleHoverTracker({
       lastVisualSample.current = { camera: cameraKey, epoch };
       canvas.dataset.hoverVisibleCode = target?.code ?? '';
       canvas.style.cursor =
-        target && selectionEnabled ? 'pointer' : active ? 'grab' : 'auto';
+        target &&
+        selectionEnabled &&
+        (!selectionAvailable || selectionAvailable(target.code))
+          ? 'pointer'
+          : active
+            ? 'grab'
+            : 'auto';
       onHit(
         target
           ? {
@@ -148,6 +156,7 @@ export function VisibleHoverTracker({
       effects,
       isCurrent,
       selectionEnabled,
+      selectionAvailable,
     ],
   );
   useEffect(() => {

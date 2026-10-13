@@ -108,9 +108,13 @@ it('retains only a visual latch during its own lift while actual hover clears, t
   frame();
   expect(effects.getSnapshot().hoverCode).toBeNull();
 });
-it.each([true, false])(
-  'retains visible hover without unrelated-overlay handoff when selection is %s',
-  (selectionEnabled) => {
+it.each([
+  [true, true],
+  [false, true],
+  [true, false],
+])(
+  'retains hover while selection enabled=%s and per-code eligibility=%s',
+  (selectionEnabled, eligible) => {
     const host = document.createElement('div');
     const wrapper = document.createElement('div');
     const canvas = document.createElement('canvas');
@@ -148,6 +152,7 @@ it.each([true, false])(
         showAllLabels={false}
         retainDuringLabelHandoff
         selectionEnabled={selectionEnabled}
+        selectionAvailable={(code) => eligible && code === 'ITC-D01'}
         onHit={onHit}
         onCanvasLeave={vi.fn()}
       />,
@@ -162,7 +167,9 @@ it.each([true, false])(
         target: { code: 'ITC-D01', label: 'Drawer 1' },
       }),
     );
-    expect(canvas.style.cursor).toBe(selectionEnabled ? 'pointer' : 'auto');
+    expect(canvas.style.cursor).toBe(
+      selectionEnabled && eligible ? 'pointer' : 'auto',
+    );
     const ownButton = document.createElement('button');
     ownButton.dataset.hoverTooltip = 'true';
     host.append(ownButton);

@@ -515,6 +515,7 @@ function NodeVisual({
   revealSettled,
   selectionEnabled = true,
   isSelectable = () => true,
+  selectionAvailable = () => true,
 }: {
   locationNames?: Record<string, string>;
   profiles: RoomDefinition['rackFaceProfiles'];
@@ -532,6 +533,7 @@ function NodeVisual({
   revealSettled: boolean;
   selectionEnabled?: boolean;
   isSelectable?: (code: string) => boolean;
+  selectionAvailable?: (code: string) => boolean;
 }) {
   const { camera, scene, gl } = useThree();
   const visualHoverCode = useVisualHoverCode();
@@ -745,7 +747,11 @@ function NodeVisual({
                         ? locationOccupancy?.[node.locationCode!]
                         : undefined
                     }
-                    onSelect={selectionEnabled ? onSelect : undefined}
+                    onSelect={
+                      node.locationCode && selectionAvailable(node.locationCode)
+                        ? onSelect
+                        : undefined
+                    }
                   />
                 )}
             </HoveredBody>
@@ -771,6 +777,7 @@ function NodeVisual({
           revealSettled={revealSettled}
           selectionEnabled={selectionEnabled}
           isSelectable={isSelectable}
+          selectionAvailable={selectionAvailable}
         />
       ))}
     </group>
@@ -1632,7 +1639,15 @@ export default function RoomScene(props: RoomSceneProps) {
     [isSelectable],
   );
   const selectionEnabled = props.selectionMode !== 'preview';
-  const HoverElement = selectionEnabled ? 'button' : 'span';
+  const { permittedCodes, selectionAllowed } = props;
+  const selectionAvailable = useCallback(
+    (code: string) =>
+      selectionEnabled &&
+      (!permittedCodes || permittedCodes.includes(code)) &&
+      (!selectionAllowed || selectionAllowed()) &&
+      (privacy.generation === 'unmanaged' || freshPresentationGrant(privacy)),
+    [selectionEnabled, permittedCodes, selectionAllowed, privacy],
+  );
   const presentation = useMemo(
     () => ({ room: props.room, controller: createSpatialRevealController() }),
     [props.room],
@@ -1876,6 +1891,10 @@ export default function RoomScene(props: RoomSceneProps) {
     (showCounts || activeHover?.target.code === reveal.openCode) && activeHover
       ? occupiedLocation(props.locationOccupancy?.[activeHover.target.code])
       : null;
+  const hoverSelectable = Boolean(
+    activeHover && selectionAvailable(activeHover.target.code),
+  );
+  const HoverElement = hoverSelectable ? 'button' : 'span';
   return (
     <div
       ref={surface}
@@ -1976,6 +1995,7 @@ export default function RoomScene(props: RoomSceneProps) {
                       canSelect={canSelect}
                       selectionEnabled={selectionEnabled}
                       isSelectable={isSelectable}
+                      selectionAvailable={selectionAvailable}
                       openCode={reveal.openCode}
                       revealSettled={reveal.phase === 'settled'}
                     />
@@ -1994,6 +2014,7 @@ export default function RoomScene(props: RoomSceneProps) {
                   />
                   <VisibleHoverTracker
                     selectionEnabled={selectionEnabled}
+                    selectionAvailable={selectionAvailable}
                     showAllLabels={showAllLabels}
                     active={active}
                     suspended={active && dragging}
@@ -2024,16 +2045,16 @@ export default function RoomScene(props: RoomSceneProps) {
             />
             <HoverElement
               ref={tooltipButton}
-              type={selectionEnabled ? 'button' : undefined}
+              type={hoverSelectable ? 'button' : undefined}
               data-hover-tooltip="true"
               data-location-code={activeHover.target.code}
               aria-label={
-                selectionEnabled
+                hoverSelectable
                   ? `Select ${props.locationNames?.[activeHover.target.code] ?? activeHover.target.label} (${activeHover.target.code})${hoverCount !== null ? `; ${occupancyText(hoverCount)} at this location` : ''}`
                   : undefined
               }
               aria-pressed={
-                selectionEnabled
+                hoverSelectable
                   ? props.selectedCode === activeHover.target.code
                   : undefined
               }
@@ -2048,7 +2069,7 @@ export default function RoomScene(props: RoomSceneProps) {
                 onCanvasHoverLeave();
               }}
               onClick={
-                selectionEnabled
+                hoverSelectable
                   ? (event) => {
                       event.stopPropagation();
                       select(activeHover.target.code);
@@ -2056,12 +2077,10 @@ export default function RoomScene(props: RoomSceneProps) {
                   : undefined
               }
               onDoubleClick={
-                selectionEnabled
-                  ? (event) => event.stopPropagation()
-                  : undefined
+                hoverSelectable ? (event) => event.stopPropagation() : undefined
               }
               className={
-                selectionEnabled ? styles.locationLabel : styles.decorativeLabel
+                hoverSelectable ? styles.locationLabel : styles.decorativeLabel
               }
               style={{
                 maxWidth: Math.max(0, Math.min(208, activeHover.width - 16)),
@@ -2102,10 +2121,8 @@ export default function RoomScene(props: RoomSceneProps) {
         placementCodes.length > 0) && (
         <div className={styles.sceneNote}>
           <p role="status">
-            Some room labels could not be checked or placed.{' '}
-            {selectionEnabled
-              ? 'Choose a location below.'
-              : 'Recorded locations are listed below.'}
+            Some room labels could not be checked or placed. Recorded locations
+            are listed below.
           </p>
           <button
             type="button"
@@ -2128,7 +2145,7 @@ export default function RoomScene(props: RoomSceneProps) {
               .sort()
               .map((code) => (
                 <li key={code}>
-                  {selectionEnabled ? (
+                  {selectionAvailable(code) ? (
                     <button
                       type="button"
                       className={styles.commandButton}

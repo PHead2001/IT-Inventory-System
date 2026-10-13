@@ -332,3 +332,108 @@ it('connects pointer events to the host so Html portals stay outside canvas fall
   );
   expect(connect).not.toHaveBeenCalledWith(container.querySelector('canvas'));
 });
+
+it('reports synchronous root construction failure once, releases its lease and permits a fresh retry', async () => {
+  driver.create.mockImplementationOnce(() => {
+    throw new Error('Synchronous root failure');
+  });
+  const onFailure = vi.fn();
+  const view = render(<SafeCanvas onFailure={onFailure}>scene</SafeCanvas>);
+  await waitFor(() => expect(onFailure).toHaveBeenCalledOnce());
+  expect(driver.configure).not.toHaveBeenCalled();
+  expect(driver.teardown).not.toHaveBeenCalled();
+  expect(view.container.querySelector('canvas')).toBeNull();
+  await userEvent
+    .setup()
+    .click(screen.getByRole('button', { name: 'Resume map' }));
+  await waitFor(() => expect(driver.render).toHaveBeenCalledOnce());
+  expect(driver.create).toHaveBeenCalledTimes(2);
+  expect(onFailure).toHaveBeenCalledOnce();
+  view.unmount();
+  const newFailure = vi.fn();
+  render(<SafeCanvas onFailure={newFailure}>new session</SafeCanvas>);
+  await waitFor(() => expect(driver.render).toHaveBeenCalledTimes(2));
+  expect(newFailure).not.toHaveBeenCalled();
+  expect(onFailure).toHaveBeenCalledOnce();
+});
+
+it('does not report a synchronous construction failure after its presentation has been revoked', async () => {
+  driver.create.mockImplementationOnce(() => {
+    revokePrivatePresentation();
+    throw new Error('Retired root failure');
+  });
+  const onFailure = vi.fn();
+  const view = render(
+    <SafeCanvas onFailure={onFailure}>retired scene</SafeCanvas>,
+  );
+  await waitFor(() => expect(driver.create).toHaveBeenCalledOnce());
+  await act(async () => {});
+  expect(onFailure).not.toHaveBeenCalled();
+  expect(driver.render).not.toHaveBeenCalled();
+  view.unmount();
+  const nextFailure = vi.fn();
+  render(<SafeCanvas onFailure={nextFailure}>fresh scene</SafeCanvas>);
+  await waitFor(() => expect(driver.render).toHaveBeenCalledOnce());
+  expect(nextFailure).not.toHaveBeenCalled();
+});
+
+it('ignores a retired graphics boundary callback after preemption and resume without clearing the new lease', async () => {
+  const failure = vi.fn();
+  const pickerFailure = vi.fn();
+  const ui = (picker: boolean) => (
+    <RoomSceneBudgetProvider>
+      <ScenePriorityContext value={0}>
+        <SafeCanvas onFailure={failure}>preview</SafeCanvas>
+      </ScenePriorityContext>
+      {picker && (
+        <ScenePriorityContext value={2}>
+          <SafeCanvas onFailure={pickerFailure}>picker</SafeCanvas>
+        </ScenePriorityContext>
+      )}
+    </RoomSceneBudgetProvider>
+  );
+  const boundaryFailure = (tree: ReactNode) => {
+    let callback!: (message: string) => void;
+    const visit = (children: ReactNode) =>
+      Children.forEach(children, (child) => {
+        if (
+          !isValidElement<{
+            children?: ReactNode;
+            onFailure?: (message: string) => void;
+          }>(child)
+        )
+          return;
+        if (child.type === GraphicsBoundary) callback = child.props.onFailure!;
+        visit(child.props.children);
+      });
+    visit(tree);
+    expect(callback).toBeTypeOf('function');
+    return callback;
+  };
+  const view = render(ui(false));
+  await waitFor(() => expect(driver.render).toHaveBeenCalledOnce());
+  const retiredFailure = boundaryFailure(driver.render.mock.calls[0][0]);
+  view.rerender(ui(true));
+  await waitFor(() => expect(driver.create).toHaveBeenCalledTimes(2));
+  act(() => retiredFailure('Retired scene failed'));
+  expect(failure).not.toHaveBeenCalled();
+  view.rerender(ui(false));
+  await waitFor(() => expect(driver.teardown).toHaveBeenCalledTimes(2));
+  const rendersBeforeResume = driver.render.mock.calls.length;
+  await userEvent
+    .setup()
+    .click(screen.getByRole('button', { name: 'Resume map' }));
+  await waitFor(() => expect(driver.create).toHaveBeenCalledTimes(3));
+  await waitFor(() =>
+    expect(driver.render.mock.calls.length).toBeGreaterThan(
+      rendersBeforeResume,
+    ),
+  );
+  const currentFailure = boundaryFailure(driver.render.mock.calls.at(-1)![0]);
+  act(() => retiredFailure('Retired scene failed after resume'));
+  expect(failure).not.toHaveBeenCalled();
+  expect(view.container.querySelectorAll('canvas')).toHaveLength(1);
+  expect(screen.queryByRole('button', { name: 'Resume map' })).toBeNull();
+  act(() => currentFailure('Current scene failed'));
+  expect(failure).toHaveBeenCalledExactlyOnceWith('Current scene failed');
+});

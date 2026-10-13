@@ -4,6 +4,7 @@ import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import type { LocationRef } from '../inventory/contracts-ui';
 import { ShowInRoom } from './show-in-room';
 import { RoomRegionBoundary } from './room-region-boundary';
+import styles from './room-visual.module.css';
 const EmbeddedRoom = dynamic(
   () => import('./embedded-room').then((module) => module.EmbeddedRoom),
   { ssr: false },
@@ -20,9 +21,10 @@ export function DetailRoomPreview({
   choices: { code: string; label: string }[];
   context?: string;
 }) {
-  const [choice, setChoice] = useState(
-    choices.length === 1 ? choices[0].code : '',
-  );
+  // Only user choices persist: a sole location is an implicit preview.
+  const [choice, setChoice] = useState('');
+  const validChoice = choices.some((option) => option.code === choice);
+  if (choice && !validChoice) setChoice('');
   const [visible, setVisible] = useState(false);
   const browserReady = useSyncExternalStore(
     subscribeReady,
@@ -48,7 +50,11 @@ export function DetailRoomPreview({
     observer.observe(element);
     return () => observer.disconnect();
   }, []);
-  const code = choices.length === 1 ? choices[0].code : choice;
+  const code = validChoice
+    ? choice
+    : choices.length === 1
+      ? choices[0].code
+      : '';
   const selected = choices.some((option) => option.code === code)
     ? locations.find((location) => location.code === code)
     : undefined;
@@ -84,18 +90,21 @@ export function DetailRoomPreview({
             {!selected.active &&
               ' · Inactive location; this is the recorded storage context.'}
           </p>
-          {(visible ||
-            (browserReady && typeof IntersectionObserver === 'undefined')) && (
-            <RoomRegionBoundary key={selected.code}>
-              <EmbeddedRoom
-                selectionMode="preview"
-                locations={locations}
-                code={selected.code}
-                permittedCodes={[]}
-                onSelect={() => {}}
-              />
-            </RoomRegionBoundary>
-          )}
+          <div className={styles.compactPreviewSlot}>
+            {(visible ||
+              (browserReady &&
+                typeof IntersectionObserver === 'undefined')) && (
+              <RoomRegionBoundary key={selected.code}>
+                <EmbeddedRoom
+                  selectionMode="preview"
+                  locations={locations}
+                  code={selected.code}
+                  permittedCodes={[]}
+                  onSelect={() => {}}
+                />
+              </RoomRegionBoundary>
+            )}
+          </div>
           <ShowInRoom location={selected} />
         </>
       ) : (

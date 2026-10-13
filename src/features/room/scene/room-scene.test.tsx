@@ -519,3 +519,81 @@ it('offers unresolved room locations as native keyboard/touch actions and retrie
     }),
   ).toBeNull();
 });
+
+it.each([{ permittedCodes: [] }, { selectionAllowed: () => false }])(
+  'renders ineligible destinations as text across labels, tooltip and fallback: %o',
+  (exclusion) => {
+    const props = sceneProps({
+      ...exclusion,
+      locationNames: { 'ITC-D01': 'Drawer 1' },
+      room: {
+        ...sceneProps().room,
+        nodes: [
+          {
+            id: 'drawer',
+            kind: 'box',
+            position: [0, 0, 0],
+            rotationZDegrees: 0,
+            size: [2, 2, 2],
+            locationCode: 'ITC-D01',
+            interaction: { selectable: true },
+          } as RoomNode,
+        ],
+      },
+    });
+    const view = render(<RoomScene {...props} />);
+    let hover!: (hit: unknown) => void;
+    let unresolved!: (codes: string[]) => void;
+    let select!: (code: string) => void;
+    const find = (children: ReactNode) =>
+      Children.forEach(children, (child) => {
+        if (!isValidElement<Record<string, unknown>>(child)) return;
+        if (child.props.node) {
+          expect(
+            (child.props.selectionAvailable as (code: string) => boolean)(
+              'ITC-D01',
+            ),
+          ).toBe(false);
+          select = child.props.onSelect as typeof select;
+        }
+        if (child.props.onHit) hover = child.props.onHit as typeof hover;
+        if (child.props.onUnresolvedChange)
+          unresolved = child.props.onUnresolvedChange as typeof unresolved;
+        find(child.props.children as ReactNode);
+      });
+    find(sceneCanvas.children);
+    act(() => {
+      hover({
+        target: { code: 'ITC-D01', label: 'Drawer 1' },
+        x: 20,
+        y: 20,
+        width: 200,
+        height: 200,
+        needsTooltip: true,
+      });
+      unresolved(['ITC-D01']);
+      select('ITC-D01');
+    });
+    expect(props.onSelect).not.toHaveBeenCalled();
+    expect(screen.queryByRole('button', { name: /^Select/ })).toBeNull();
+    expect(
+      within(
+        screen.getByRole('list', {
+          name: 'Locations with unavailable room labels',
+        }),
+      ).queryByRole('button'),
+    ).toBeNull();
+    view.rerender(
+      <RoomScene
+        {...props}
+        permittedCodes={['ITC-D01']}
+        selectionAllowed={() => true}
+      />,
+    );
+    expect(
+      screen.getByRole('button', { name: /^Select Drawer 1/ }),
+    ).toBeEnabled();
+    act(() => select('ITC-D01'));
+    expect(props.onSelect).toHaveBeenCalledExactlyOnceWith('ITC-D01');
+  },
+);
