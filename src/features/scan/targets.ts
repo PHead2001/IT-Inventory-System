@@ -84,14 +84,16 @@ export function parseScan(value: string, origin: string): ScanTarget | null {
     return validIdentifier(tag) ? { kind: 'tag', tag } : null;
   }
   if (value.startsWith('/') || /^[a-z][a-z0-9+.-]*:/i.test(value)) return null;
-  // Exact database lookups decide whether a bare identifier is a location, a tag, or ambiguous.
-  return validIdentifier(value) ? { kind: 'bare', identifier: value } : null;
+  // Bare manufacturer serials can be longer than a tag. Typed AST keeps its tag limit.
+  return validIdentifier(value, 200)
+    ? { kind: 'bare', identifier: value }
+    : null;
 }
 
-export function validIdentifier(value: string): boolean {
+export function validIdentifier(value: string, max = 100): boolean {
   return (
     [...value].length >= 1 &&
-    [...value].length <= 100 &&
+    [...value].length <= max &&
     value.trim() === value &&
     !/[\u0000-\u001f\u007f-\u009f]/.test(value)
   );

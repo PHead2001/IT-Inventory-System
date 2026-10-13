@@ -82,6 +82,7 @@ let control: {
   maxZoom: number;
 };
 beforeEach(() => {
+  vi.restoreAllMocks();
   window.localStorage.clear();
   mocks.reduced = undefined;
   camera = new OrthographicCamera(-1, 1, 1, -1, 0.1, 3000);

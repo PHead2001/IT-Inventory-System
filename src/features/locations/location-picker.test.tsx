@@ -1,8 +1,15 @@
-import { render, screen, waitFor } from '@testing-library/react';
+import {
+  act,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 import type { LocationRef } from '../inventory/contracts-ui';
 import { LocationPicker } from './location-picker';
+import { holdTransitionCapture } from '../../../tests/helpers/transition-capture';
 
 const root: LocationRef = {
   id: 'root',
@@ -62,6 +69,35 @@ const leftDrawer: LocationRef = {
 };
 
 describe('LocationPicker', () => {
+  it.each(['release', 'close', 'unmount'])(
+    'retains picker autofocus until capture completes and cancels on %s',
+    async (outcome) => {
+      const view = render(
+        <LocationPicker
+          mode="browse"
+          label="Location"
+          locations={[root, drawer]}
+        />,
+      );
+      const capture = holdTransitionCapture();
+      try {
+        fireEvent.click(screen.getByLabelText('Location'));
+        const search = screen.getByRole('combobox', {
+          name: 'Search locations',
+        });
+        expect(search).not.toHaveFocus();
+        if (outcome === 'close') fireEvent.pointerDown(document.body);
+        if (outcome === 'unmount') view.unmount();
+        await act(capture.release);
+        if (outcome === 'release') expect(search).toHaveFocus();
+        else expect(search).not.toHaveFocus();
+      } finally {
+        view.unmount();
+        await act(capture.release);
+        capture.dispose();
+      }
+    },
+  );
   it('uses opaque tree DOM IDs while preserving keyboard aria relationships', async () => {
     const user = userEvent.setup();
     const uuid = '00000000-0000-4000-8000-000000000001';

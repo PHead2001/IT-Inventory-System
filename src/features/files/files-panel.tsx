@@ -1,4 +1,5 @@
 'use client';
+import { afterTransitionCapture } from '@/components/forms/transition-capture';
 import {
   LoadingAnnouncement,
   LoadingReveal,
@@ -240,16 +241,18 @@ function BoundFilesPanel({
   const removalDialog = useRef<HTMLDialogElement>(null);
   const removalTrigger = useRef<HTMLButtonElement | null>(null);
   useEffect(() => {
-    if (removal) {
-      const dialog = removalDialog.current;
-      if (dialog && !dialog.open) {
-        if (dialog.showModal) dialog.showModal();
-        else dialog.setAttribute('open', '');
-        dialog.querySelector<HTMLButtonElement>('button')?.focus();
+    return afterTransitionCapture(document, () => {
+      if (removal) {
+        const dialog = removalDialog.current;
+        if (dialog && !dialog.open) {
+          if (dialog.showModal) dialog.showModal();
+          else dialog.setAttribute('open', '');
+          dialog.querySelector<HTMLButtonElement>('button')?.focus();
+        }
+      } else {
+        if (removalTrigger.current?.isConnected) removalTrigger.current.focus();
       }
-    } else {
-      if (removalTrigger.current?.isConnected) removalTrigger.current.focus();
-    }
+    });
   }, [removal]);
   const [message, setMessage] = useState('');
   useEffect(() => {

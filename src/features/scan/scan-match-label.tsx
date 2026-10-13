@@ -15,3 +15,18 @@ export function ScanMatchLabel({ match }: { match: ScanMatch }) {
     </>
   );
 }
+
+export function ScanMatchContext({ match }: { match: ScanMatch }) {
+  return (
+    <>
+      {match.serialNumber && (
+        <>
+          {'Serial: '}
+          <span className="experience-code">{match.serialNumber}</span>
+          {' · '}
+        </>
+      )}
+      {match.context}
+    </>
+  );
+}

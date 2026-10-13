@@ -6,7 +6,12 @@ import {
   itemCodeValid,
   normalizeItemCode,
 } from '@/features/inventory/contracts';
-import { ASSET_UUID, QUANTITY_UUID, parseScan } from './targets';
+import {
+  ASSET_UUID,
+  QUANTITY_UUID,
+  parseScan,
+  validIdentifier,
+} from './targets';
 
 export type ScanMatch = {
   kind: 'location' | 'asset' | 'quantity';
@@ -15,10 +20,12 @@ export type ScanMatch = {
   name?: string;
   identifier?: string | null;
   state: 'active' | 'inactive' | 'retired' | 'archived';
+  context?: string;
+  serialNumber?: string;
 };
 export type ScanResolution =
-  | { status: 'invalid' | 'unknown'; matches: [] }
-  | { status: 'found' | 'ambiguous'; matches: ScanMatch[] };
+  | { status: 'invalid' | 'unknown'; matches: []; truncated?: true }
+  | { status: 'found' | 'ambiguous'; matches: ScanMatch[]; truncated?: true };
 
 const itemCodeRow = z.object({
   id: z.uuid(),
@@ -31,6 +38,14 @@ const assetTagRow = z.object({
   name: z.string(),
   status: z.enum(['active', 'retired']),
   asset_tag: z.string().nullable(),
+});
+const serialRow = assetTagRow.extend({
+  serial_number: z.string(),
+  manufacturer: z.string().nullable(),
+  location_name: z.string().nullable(),
+  location_code: z.string().nullable(),
+  site_name: z.string().nullable(),
+  site_code: z.string().nullable(),
 });
 
 async function lookupItemCode(value: string): Promise<ScanResolution> {
@@ -67,6 +82,17 @@ export async function resolveItemCode(value: string): Promise<ScanResolution> {
   return lookupItemCode(value);
 }
 
+/** Explicit serial text is data, including URL-like text and reserved label prefixes. */
+export async function resolveSerial(value: string): Promise<ScanResolution> {
+  if (typeof value !== 'string' || value.length > 1024)
+    return { status: 'invalid', matches: [] };
+  value = value.trim();
+  if (!validIdentifier(value, 200)) return { status: 'invalid', matches: [] };
+  const { supabase } = await requireMember();
+  const { matches, truncated } = await lookupSerial(supabase, value);
+  return resolutionFor(matches, truncated);
+}
+
 export async function resolveScan(value: string): Promise<ScanResolution> {
   if (typeof value !== 'string' || value.length > 1024)
     return { status: 'invalid', matches: [] };
@@ -83,6 +109,7 @@ export async function resolveScan(value: string): Promise<ScanResolution> {
   if (!target) return { status: 'invalid', matches: [] };
   const { supabase } = await requireMember();
   const matches: ScanMatch[] = [];
+  let truncated = false;
   if (target.kind === 'location' || target.kind === 'bare') {
     const code = target.kind === 'location' ? target.code : target.identifier;
     const { data, error } = await supabase
@@ -135,7 +162,10 @@ export async function resolveScan(value: string): Promise<ScanResolution> {
         state: data.archived ? 'archived' : 'active',
       });
   }
-  if (target.kind === 'tag' || target.kind === 'bare') {
+  if (
+    target.kind === 'tag' ||
+    (target.kind === 'bare' && validIdentifier(target.identifier))
+  ) {
     const tag = target.kind === 'tag' ? target.tag : target.identifier;
     // Preserve parsed spelling until PostgreSQL applies its own lower rule.
     const { data: raw, error } = await supabase.rpc(
@@ -157,9 +187,58 @@ export async function resolveScan(value: string): Promise<ScanResolution> {
       !matches.some((match) => match.path === itemResult.matches[0].path)
     )
       matches.push(itemResult.matches[0]);
+    const serialResult = await lookupSerial(supabase, target.identifier);
+    truncated = serialResult.truncated;
+    for (const match of serialResult.matches) {
+      const existing = matches.findIndex((value) => value.path === match.path);
+      if (existing >= 0) matches[existing] = match;
+      else matches.push(match);
+    }
   }
-  if (matches.length === 0) return { status: 'unknown', matches: [] };
-  return { status: matches.length > 1 ? 'ambiguous' : 'found', matches };
+  return resolutionFor(matches, truncated);
+}
+
+async function lookupSerial(
+  supabase: Awaited<ReturnType<typeof requireMember>>['supabase'],
+  value: string,
+) {
+  const { data, error } = await supabase.rpc('inventory_serial_lookup_v1', {
+    p_serial: value,
+  });
+  if (error) throw new Error('Serial lookup failed.');
+  // One PostgreSQL snapshot supplies exact identity and current context.
+  const serials = z.array(serialRow).max(21).parse(data);
+  return {
+    truncated: serials.length > 20,
+    matches: serials.slice(0, 20).map((row) => ({
+      ...assetMatch(row),
+      serialNumber: row.serial_number,
+      context: [
+        row.manufacturer ? `Manufacturer: ${row.manufacturer}` : null,
+        row.site_name
+          ? `Assigned to ${row.site_name}${row.site_code ? ` (${row.site_code})` : ''}`
+          : row.location_name
+            ? `${row.status === 'retired' ? 'Last recorded storage' : 'At'} ${row.location_name}${row.location_code ? ` (${row.location_code})` : ''}`
+            : 'Location unavailable',
+      ]
+        .filter(Boolean)
+        .join(' · '),
+    })),
+  };
+}
+
+function resolutionFor(
+  matches: ScanMatch[],
+  truncated: boolean,
+): ScanResolution {
+  truncated ||= matches.length > 20;
+  const limit = truncated ? { truncated: true as const } : {};
+  if (matches.length === 0) return { status: 'unknown', matches: [], ...limit };
+  return {
+    status: truncated || matches.length > 1 ? 'ambiguous' : 'found',
+    matches: matches.slice(0, 20),
+    ...limit,
+  };
 }
 
 function quantityLabel(data: {

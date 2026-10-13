@@ -49,6 +49,18 @@ Both camera flows release scanner controls and device tracks immediately when th
 
 ## Labels and stable destinations
 
+**Serial number** lookup in Scan and **Exact serial number** in Scan and assign
+match camera and manual text only against stored manufacturer serials. Use this
+explicit mode for values such as `SN:12345`, `LOC:ITC`, `AST:tag`, or a serial
+beginning with `/`. URL-like values remain serial data; QR URLs are never followed
+in this mode. Serial lookup keeps the 200-character/control-character limits,
+caller membership checks, contextual duplicate chooser and canonical asset UUID
+destinations. Multiple matches require a deliberate choice; scanning never assigns
+equipment. Changing mode cancels the prior lookup and stops camera capture. A
+failed durable assignment reset preserves the previous mode and inspection.
+The default label/identifier mode retains its safe same-origin URL, LOC/AST and
+cross-namespace ambiguity rules. Item code mode retains its existing camera rules.
+
 Settings and the current print job use the same **Label size**, **Paper size**, and **Barcode type** names and physical units. The screen option **QR code** explains that scanning opens the linked inventory record or location; **Code 128 when it fits** is a preference, with the existing explicit QR fallback acknowledgement. These descriptions stay outside the printed label sheet. Stored `size`, `page`, and `format` keys and barcode payloads are unchanged.
 
 Settings saves shared starting defaults through the existing configuration-maintainer permission and version checks. Labels changes only the current job; it does not save shared defaults. Updating defaults does not overwrite the current queue or an already-open job. New jobs retain the existing initialization and queue recovery rules.
@@ -82,6 +94,12 @@ Independent authorized manual and linked additions merge the latest queue when e
 Unresolved linked records appear as pending additions with individual Remove controls. Their requested IDs or location codes identify which addition is being cancelled without displaying unverified record details. Pending additions do not count as confirmed labels and never enter the print sheet; their controls remain available if lookup fails, alongside explicit retry and Clear.
 
 Quantity Item codes (SKU) are optional human-readable identifiers on quantity definitions. Label search, ordinary inventory search, and CSV downloads include them. A quantity label prints its current Item code when set; its QR destination remains the stable quantity UUID. Codes remain reserved while a definition is archived. Bare manual identifiers check exact case-insensitive Item code matches alongside locations and asset tags and ask the user to choose when namespaces collide. The scan page also has an explicit **Quantity Item code (SKU)** manual mode for codes such as `/SKU` or `AST:001`; in this mode URL-like text is matched only as stored data. Camera scans and ordinary label mode keep the canonical same-origin URL and `LOC:`/`AST:` rules.
+
+Bare manual or camera input also checks exact manufacturer serial numbers through `inventory_serial_lookup_v1`. PostgreSQL applies its own `lower` rule to both sides; the parser trims outer whitespace and preserves display spelling. Bare serials accept up to 200 Unicode characters; asset tags and Item codes retain their 100-character limits. `LOC:` and `AST:` remain explicit location/tag namespaces, and canonical QR paths remain explicit record identities. Distinct location, tag, Item code, UUID and serial candidates require a deliberate chooser; the same asset matched in multiple namespaces appears once. Serial matches return identity, lifecycle, manufacturer and location/site context in one caller-scoped snapshot, avoiding stale second-read hydration. Stored serials use the code font. Retired storage is labeled last recorded storage; an absent context remains unavailable. The SQL read orders by UUID and returns at most 21 rows; the twenty-first is an overflow sentinel. The app displays at most 20 combined candidates and explicitly states when additional matches exist, suggesting an asset tag or record QR. Truncated results never navigate or inspect automatically. Unknown input creates nothing; lookup failures offer retry without a partial result. The existing `inventory_serial_matches` duplicate-warning RPC and all writers are unchanged.
+
+The result cap bounds returned candidates, not the amount of database work for arbitrary duplicate populations. The function declares `statement_timeout='5s'` in SQL; effective PostgREST/REST timeout hoisting and elapsed-time enforcement remain unverified, so this declaration does not establish a five-second request bound. The existing lower-serial index does not cover UUID ordering, and large-volume query behavior remains unverified. Other identifier namespaces retain their existing exact reads. Opening or inspecting a record checks current access and state again. Scan and assign uses the same bounded chooser and still requires its ordinary inspection and explicit confirmation.
+
+Asset-tag fields in both published metadata and ordinary mutation forms perform an advisory lookup on blur. A conflict names and links the accessible active or retired record, excluding the edited asset itself. Input/account/record changes and unmounting invalidate pending results. A failed check says that it could not check, never that a tag is available. The advisory does not alter the form's original version, dirty state, mutation command or retry identity; database case-insensitive uniqueness remains the final save/race check.
 
 A quantity label always uses a QR URL with the configured origin plus `/inventory/quantity/UUID`; it identifies the definition, not one holding or a recorded total. Choosing Code 128 for a mixed job shows a QR fallback for quantity definitions and for assets without a suitable tag. Fallback explanations and required acknowledgement stay on screen, outside the printable sheet; the QR label itself is clean. Existing location `LOC:CODE`, asset `AST:tag`, and canonical location/asset QR payloads remain valid. All codes still open current read-only detail through membership and RLS. A printed quantity QR remains linked to the definition after stock moves or count changes.
 
