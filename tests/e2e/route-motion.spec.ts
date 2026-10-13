@@ -863,6 +863,12 @@ for (const width of [1280, 390]) {
     await expect(page.locator('html')).toHaveAttribute('data-motion', 'full');
     const category = await auditCategory(page);
     const designer = page.getByRole('region', { name: 'Forms and fields' });
+    if (width === 390) {
+      await designer
+        .getByRole('navigation', { name: 'Designer panels' })
+        .getByRole('button', { name: 'Library', exact: true })
+        .click();
+    }
     await designer
       .getByRole('button', { name: 'Add field', exact: true })
       .click();
@@ -1154,8 +1160,8 @@ for (const width of [1280, 390]) {
     expect((await proof(page)).transitions).toHaveLength(0);
     expect((await proof(page)).replacements).toHaveLength(0);
     const browserBack = await proof(page);
-    // History ends in [detail B, results A]. Hold a real accepted A -> B
-    // response, then native Back restores that exact pending destination B.
+    // A known detail route can commit its history entry before Flight arrives.
+    // Observe that boundary before Back; late delivery must preserve the list.
     const pendingRow = page
       .locator('#inventory-row-2')
       .getByRole('link', { name, exact: true });
@@ -1167,19 +1173,48 @@ for (const width of [1280, 390]) {
     );
     const pendingSource = await pendingRow.elementHandle();
     expect(pendingSource).not.toBeNull();
+    const pendingListHref = new URL(scope + '#inventory-row-2', page.url())
+      .href;
+    const pendingSourceScroll = await page.evaluate(() => window.scrollY);
+    const restoredPendingResults = async () => {
+      await expect(page).toHaveURL(pendingListHref);
+      await expect(pendingRow).toBeVisible();
+      await expect(page.getByRole('link', { name, exact: true })).toHaveCount(
+        2,
+      );
+      await expect(
+        page.getByRole('textbox', { name: 'Search inventory' }),
+      ).toHaveValue(name);
+      await expect(
+        page.getByRole('combobox', { name: 'Tracking type' }),
+      ).toHaveValue('quantity');
+      await expect
+        .poll(() => page.evaluate(() => window.scrollY))
+        .toBe(pendingSourceScroll);
+      await expect(routeProgress(page)).toHaveAttribute(
+        'data-visible',
+        'false',
+      );
+    };
     const interrupted = await holdRouteWork(page, pendingDestination.pathname);
     const pendingNativeProof: {
       back?: Proof;
       lateDelivery?: Proof;
+      forward?: Proof;
       appBack?: Proof;
+      urls: { stage: string; href: string }[];
       canceledDeparture?: Awaited<
         ReturnType<typeof verifyCanceledDocumentScroll>
       >;
-    } = {};
+    } = { urls: [{ stage: 'anchored-source', href: page.url() }] };
     try {
       await resetProof(page);
       await pendingRow.click();
       await interrupted.arrival;
+      pendingNativeProof.urls.push({
+        stage: 'held-response-arrived',
+        href: page.url(),
+      });
       await expect(routeProgress(page)).toHaveAttribute('data-visible', 'true');
       expect(
         await pendingSource!.evaluate(
@@ -1191,28 +1226,46 @@ for (const width of [1280, 390]) {
       ).toBe(true);
       expect(await page.locator('[data-loading-shape]').count()).toBe(0);
       expect((await proof(page)).transitions).toHaveLength(0);
-      await page.goBack();
       await expect(page).toHaveURL(pendingDestination.href);
-      // Native restore may use resolved destination data or await the held
-      // Flight/cache entry. Either ready or pending content is valid here;
-      // exact URL restoration must capture no transition in either case.
+      pendingNativeProof.urls.push({
+        stage: 'held-history-committed',
+        href: page.url(),
+      });
+      await page.goBack();
+      await restoredPendingResults();
+      pendingNativeProof.urls.push({ stage: 'native-back', href: page.url() });
       pendingNativeProof.back = await proof(page);
       expect(pendingNativeProof.back.transitions).toHaveLength(0);
       expect(pendingNativeProof.back.replacements).toHaveLength(0);
       interrupted.release();
       await interrupted.delivery;
+      await restoredPendingResults();
+      pendingNativeProof.urls.push({
+        stage: 'late-delivery',
+        href: page.url(),
+      });
+      await settled(page);
+      pendingNativeProof.lateDelivery = await proof(page);
+      expect(pendingNativeProof.lateDelivery.transitions).toHaveLength(0);
+      expect(pendingNativeProof.lateDelivery.replacements).toHaveLength(0);
+      await resetProof(page);
+      await page.goForward();
       await expect(page).toHaveURL(pendingDestination.href);
       await expect(
         page.getByRole('heading', { name, exact: true }),
       ).toBeVisible();
+      pendingNativeProof.urls.push({
+        stage: 'native-forward',
+        href: page.url(),
+      });
       await expect(routeProgress(page)).toHaveAttribute(
         'data-visible',
         'false',
       );
       await settled(page);
-      pendingNativeProof.lateDelivery = await proof(page);
-      expect(pendingNativeProof.lateDelivery.transitions).toHaveLength(0);
-      expect(pendingNativeProof.lateDelivery.replacements).toHaveLength(0);
+      pendingNativeProof.forward = await proof(page);
+      expect(pendingNativeProof.forward.transitions).toHaveLength(0);
+      expect(pendingNativeProof.forward.replacements).toHaveLength(0);
       pendingNativeProof.canceledDeparture = await verifyCanceledDocumentScroll(
         page,
         name,
@@ -1226,7 +1279,14 @@ for (const width of [1280, 390]) {
       pendingNativeProof.appBack = await completedTitlePair(page);
       expect(pendingNativeProof.appBack.replacements).toHaveLength(1);
     } finally {
-      await interrupted.dispose();
+      try {
+        await info.attach('held-native-history-timeline', {
+          body: JSON.stringify(pendingNativeProof.urls),
+          contentType: 'application/json',
+        });
+      } finally {
+        await interrupted.dispose();
+      }
     }
     await info.attach('native-route-proof', {
       body: JSON.stringify({
@@ -1532,12 +1592,21 @@ for (const mode of ['system-reduced', 'local-reduced'] as const) {
       const nativeForward = await instant();
       await resetProof(page);
       const applicationBack = await appBack();
-      // History is [detail, anchored results]. Interrupt a genuine results ->
-      // detail request with native Back to the earlier detail entry, then deliver
-      // the real late Flight response. Neither path may revive title motion.
+      // Observe the known detail's committed history entry while its genuine
+      // response is held. Back restores the anchored list; late Flight delivery
+      // must preserve it, and Forward restores detail without title motion.
       const interrupted = await holdRouteWork(page, destination.pathname);
+      const interruptedSourceScroll = await page.evaluate(() => window.scrollY);
+      const restoredInterruptedResults = async () => {
+        await results(anchoredScope);
+        await expect
+          .poll(() => page.evaluate(() => window.scrollY))
+          .toBe(interruptedSourceScroll);
+      };
+      const interruptedUrls = [{ stage: 'anchored-source', href: page.url() }];
       let pendingBack: Proof | undefined;
       let lateDelivery: Proof | undefined;
+      let pendingForward: Proof | undefined;
       let finalAppBack: Proof | undefined;
       try {
         await resetProof(page);
@@ -1545,27 +1614,53 @@ for (const mode of ['system-reduced', 'local-reduced'] as const) {
         await expect(row).toBeFocused();
         await page.keyboard.press('Enter');
         await interrupted.arrival;
+        interruptedUrls.push({
+          stage: 'held-response-arrived',
+          href: page.url(),
+        });
         await expect(routeProgress(page)).toHaveAttribute(
           'data-visible',
           'true',
         );
         await instant();
-        await page.goBack();
         await expect(page).toHaveURL(destination.href);
+        interruptedUrls.push({
+          stage: 'held-history-committed',
+          href: page.url(),
+        });
+        await page.goBack();
+        await restoredInterruptedResults();
+        interruptedUrls.push({ stage: 'native-back', href: page.url() });
         pendingBack = await instant();
         interrupted.release();
         await interrupted.delivery;
+        await restoredInterruptedResults();
+        interruptedUrls.push({ stage: 'late-delivery', href: page.url() });
+        lateDelivery = await instant();
+        await resetProof(page);
+        await page.goForward();
         await expect(page).toHaveURL(destination.href);
         await expect(heading).toBeVisible();
+        interruptedUrls.push({
+          stage: 'native-forward',
+          href: page.url(),
+        });
         await expect(routeProgress(page)).toHaveAttribute(
           'data-visible',
           'false',
         );
-        lateDelivery = await instant();
+        pendingForward = await instant();
         await resetProof(page);
         finalAppBack = await appBack();
       } finally {
-        await interrupted.dispose();
+        try {
+          await info.attach('reduced-held-native-history-timeline', {
+            body: JSON.stringify(interruptedUrls),
+            contentType: 'application/json',
+          });
+        } finally {
+          await interrupted.dispose();
+        }
       }
       await info.attach('reduced-delayed-record-route-proof', {
         body: JSON.stringify({
@@ -1579,6 +1674,7 @@ for (const mode of ['system-reduced', 'local-reduced'] as const) {
           applicationBack,
           pendingBack,
           lateDelivery,
+          pendingForward,
           finalAppBack,
         }),
         contentType: 'application/json',
