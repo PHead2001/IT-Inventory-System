@@ -20,7 +20,7 @@ vi.mock('./route-motion', () => ({
     retireTitle: vi.fn(),
     current: () => true,
     validNow: () => true,
-    finishAfterSnapshot: vi.fn(),
+    finishTitleAfterSnapshot: vi.fn(),
   }),
 }));
 vi.mock('react', async (importOriginal) => ({

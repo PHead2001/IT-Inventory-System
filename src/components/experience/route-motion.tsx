@@ -752,9 +752,30 @@ export function useRouteMotion() {
       )
         cancelRouteSnapshots();
     },
-    finishAfterSnapshot: (instance: { name: string }) => {
+    finishArrivalAfterSnapshot: (instance: { name: string }) => {
+      if (!arrival) return;
+      // Generic page snapshots own only their exact arrival. Their completion
+      // can precede an inner shared title's commit and must not consume it.
+      queueMicrotask(() => {
+        if (!current()) return;
+        const animations =
+          document
+            .getAnimations?.()
+            .filter((animation) =>
+              (
+                animation.effect as KeyframeEffect | null
+              )?.pseudoElement?.endsWith(`(${instance.name})`),
+            ) ?? [];
+        void Promise.allSettled(
+          animations.map((animation) => animation.finished),
+        ).then(() => {
+          if (current()) state?.finishArrival(arrival);
+        });
+      });
+    },
+    finishTitleAfterSnapshot: (instance: { name: string }) => {
       const name = intent?.name;
-      if (!name) return;
+      if (!name || instance.name !== name) return;
       // React has captured the commit. Observe only its matching native
       // snapshot lifetime; a late completion cannot consume another intent.
       queueMicrotask(() => {

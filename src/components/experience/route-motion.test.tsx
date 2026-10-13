@@ -240,6 +240,178 @@ function Probe() {
   return <output>{enabled ? 'enabled' : 'instant'}</output>;
 }
 
+it('generic snapshot completion before a late inner primary preserves its exact title pair', async () => {
+  let primaryKey = '/inventory';
+  let motion!: ReturnType<typeof useRouteMotion>;
+  function Observe() {
+    const current = useRouteMotion();
+    useLayoutEffect(() => {
+      motion = current;
+    });
+    return null;
+  }
+  const fixture = () =>
+    view(
+      <>
+        <Observe />
+        <PageArrival pathname={runtime.pathname}>
+          <RouteContentIdentityContext
+            value={{
+              pathname: primaryKey,
+              listHref: primaryKey,
+              rawRouteKey: primaryKey,
+            }}
+          >
+            {primaryKey === '/inventory' ? <List /> : <Detail />}
+          </RouteContentIdentityContext>
+        </PageArrival>
+      </>,
+    );
+  let finishGeneric!: () => void;
+  const genericFinished = new Promise<void>((resolve) => {
+    finishGeneric = resolve;
+  });
+  Object.defineProperty(document, 'getAnimations', {
+    configurable: true,
+    value: () => [
+      {
+        effect: { pseudoElement: '::view-transition-group(generic-route)' },
+        finished: genericFinished,
+      },
+    ],
+  });
+  try {
+    const page = render(fixture());
+    fireEvent.click(screen.getByRole('link', { name: 'Cable row 2' }));
+    const original = motion.intent!;
+    const titleArrival = motion.titleArrival;
+    runtime.pathname = detailPath;
+    page.rerender(fixture());
+    const generic = runtime.boundaries.findLast(
+      (boundary) => boundary.update === 'route-content',
+    );
+    expect(generic?.onUpdate).toBeDefined();
+    await act(async () => {
+      generic!.onUpdate!({ name: 'generic-route' }, []);
+    });
+    await act(async () => {
+      finishGeneric();
+      await genericFinished;
+    });
+    expect(motion.arrival).toBeNull();
+    expect(motion.intent).toBe(original);
+    expect(motion.titleArrival).toBe(titleArrival);
+    primaryKey = detailPath;
+    page.rerender(fixture());
+    expect(screen.getByRole('heading')).toHaveAttribute(
+      'data-test-transition-name',
+      original.name,
+    );
+    let finishTitle!: () => void;
+    const titleFinished = new Promise<void>((resolve) => {
+      finishTitle = resolve;
+    });
+    Object.defineProperty(document, 'getAnimations', {
+      configurable: true,
+      value: () => [
+        {
+          effect: {
+            pseudoElement: `::view-transition-group(${original.name})`,
+          },
+          finished: titleFinished,
+        },
+      ],
+    });
+    const title = runtime.boundaries.findLast(
+      (boundary) => boundary.name === original.name,
+    );
+    await act(async () => {
+      title!.onShare!({ name: original.name });
+    });
+    expect(motion.intent).toBe(original);
+    await act(async () => {
+      finishTitle();
+      await titleFinished;
+    });
+    expect(motion.intent).toBeNull();
+    expect(motion.titleArrival).toBeNull();
+  } finally {
+    Reflect.deleteProperty(document, 'getAnimations');
+  }
+});
+
+it('old generic and title completions cannot consume a newer same-provider Back intent', async () => {
+  let motion!: ReturnType<typeof useRouteMotion>;
+  let loading!: NonNullable<
+    React.ContextType<typeof PairedRouteLoadingContext>
+  >;
+  function Observe() {
+    const current = useRouteMotion();
+    const currentLoading = useContext(PairedRouteLoadingContext)!;
+    useLayoutEffect(() => {
+      motion = current;
+      loading = currentLoading;
+    });
+    return null;
+  }
+  const fixture = (children: ReactNode) =>
+    view(
+      <>
+        <Observe />
+        {children}
+      </>,
+    );
+  const page = render(fixture(<List />));
+  fireEvent.click(screen.getByRole('link', { name: 'Cable row 2' }));
+  const first = motion.intent!;
+  let finishOld!: () => void;
+  const oldFinished = new Promise<void>((resolve) => {
+    finishOld = resolve;
+  });
+  Object.defineProperty(document, 'getAnimations', {
+    configurable: true,
+    value: () =>
+      ['old-generic', first.name].map((name) => ({
+        effect: { pseudoElement: `::view-transition-group(${name})` },
+        finished: oldFinished,
+        cancel: vi.fn(),
+      })),
+  });
+  try {
+    await act(async () => {
+      motion.finishArrivalAfterSnapshot({ name: 'old-generic' });
+      motion.finishTitleAfterSnapshot({ name: first.name });
+    });
+    runtime.pathname = detailPath;
+    page.rerender(fixture(<Detail />));
+    act(() => loading.store.ready(detailPath));
+    fireEvent.click(screen.getByRole('link', { name: 'Back to results' }));
+    const next = motion.intent!;
+    const nextArrival = motion.arrival;
+    const nextTitleArrival = motion.titleArrival;
+    expect(next.name).not.toBe(first.name);
+    expect(nextArrival).not.toBeNull();
+    await act(async () => {
+      finishOld();
+      await oldFinished;
+    });
+    expect(motion.intent).toBe(next);
+    expect(motion.arrival).toBe(nextArrival);
+    expect(motion.titleArrival).toBe(nextTitleArrival);
+    await act(async () => {
+      motion.finishTitleAfterSnapshot({ name: 'unrelated-generic' });
+    });
+    expect(motion.intent).toBe(next);
+    await act(async () => {
+      motion.finishTitleAfterSnapshot({ name: next.name });
+    });
+    expect(motion.intent).toBeNull();
+    expect(motion.titleArrival).toBeNull();
+  } finally {
+    Reflect.deleteProperty(document, 'getAnimations');
+  }
+});
+
 it.each(['forward', 'native traverse', 'privacy revocation'])(
   'a late inner title after generic arrival consumption respects %s',
   (mode) => {

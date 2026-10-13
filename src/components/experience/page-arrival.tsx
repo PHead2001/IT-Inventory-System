@@ -15,7 +15,7 @@ export function CanvasFreeRouteContent({
 }: {
   children: React.ReactNode;
 }) {
-  const { arrivalEnabled, cancelIfInvalid, finishAfterSnapshot } =
+  const { arrivalEnabled, cancelIfInvalid, finishArrivalAfterSnapshot } =
     useRouteMotion();
   const { source, handoff } = useRoutePresentationSource();
   return (
@@ -26,12 +26,12 @@ export function CanvasFreeRouteContent({
         exit={arrivalEnabled ? 'route-content' : 'none'}
         onEnter={(instance) => {
           cancelIfInvalid();
-          finishAfterSnapshot(instance);
+          finishArrivalAfterSnapshot(instance);
         }}
         onExit={(instance) => {
           const finish = arrivalEnabled ? handoff() : undefined;
           cancelIfInvalid();
-          finishAfterSnapshot(instance);
+          finishArrivalAfterSnapshot(instance);
           return finish;
         }}
       >
@@ -56,7 +56,7 @@ export function PageArrival({
     listHref,
     finishArrival,
     cancelIfInvalid,
-    finishAfterSnapshot,
+    finishArrivalAfterSnapshot,
   } = useRouteMotion();
   const [history, setHistory] = useState<{
     pathname: string | null;
@@ -111,18 +111,18 @@ export function PageArrival({
         update={update ? 'route-content' : 'none'}
         onEnter={(instance) => {
           cancelIfInvalid();
-          finishAfterSnapshot(instance);
+          finishArrivalAfterSnapshot(instance);
         }}
         onExit={(instance) => {
           const finish = animate ? handoff() : undefined;
           cancelIfInvalid();
-          finishAfterSnapshot(instance);
+          finishArrivalAfterSnapshot(instance);
           return finish;
         }}
         onUpdate={(instance) => {
           const finish = update ? previousHandoff() : undefined;
           cancelIfInvalid();
-          finishAfterSnapshot(instance);
+          finishArrivalAfterSnapshot(instance);
           return finish;
         }}
       >
