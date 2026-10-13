@@ -116,7 +116,7 @@ it('retains the open original dialog, staged draft and camera during a visible c
     </PrivacyReadinessContext>
   );
   const view = render(ui(true));
-  const dialog = screen.getByRole('dialog');
+  const dialog = screen.getByRole('dialog') as HTMLDialogElement;
   await userEvent
     .setup()
     .click(screen.getByRole('button', { name: 'Stage drawer' }));

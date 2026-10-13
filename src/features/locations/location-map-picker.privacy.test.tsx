@@ -158,7 +158,7 @@ it.each(['cancel', 'revocation'] as const)(
     await user.click(
       screen.getByRole('button', { name: 'Stage drawer and camera' }),
     );
-    const dialog = screen.getByRole('dialog');
+    const dialog = screen.getByRole('dialog') as HTMLDialogElement;
     const canvas = screen.getByText('moved camera');
     const show = vi.spyOn(dialog, 'showModal'),
       close = vi.spyOn(dialog, 'close');
