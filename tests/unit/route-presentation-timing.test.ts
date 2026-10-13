@@ -1,6 +1,7 @@
 import { expect, it } from 'vitest';
 import {
   routePresentationTiming,
+  pairedBodyCrossfade,
   type RouteEffectTiming,
 } from '../e2e/route-presentation-timing';
 
@@ -20,6 +21,35 @@ const effect = (
 const stage = (...effects: RouteEffectTiming[]) => ({
   effects,
   timingErrors: [],
+});
+
+it('requires actual body old/new opacity effects concurrent with the exact title in the same stage', () => {
+  const title = effect({ pseudo: '::view-transition-group(title)' });
+  const old = effect({
+    pseudo: '::view-transition-old(title-content)',
+    opacityFrames: [1, 0],
+  });
+  const next = effect({
+    pseudo: '::view-transition-new(title-content)',
+    opacityFrames: [0, 1],
+  });
+  expect(pairedBodyCrossfade([stage(title, old, next)], 'title')).toBe(true);
+  expect(pairedBodyCrossfade([stage(title)], 'title')).toBe(false);
+  expect(pairedBodyCrossfade([stage(title), stage(old, next)], 'title')).toBe(
+    false,
+  );
+  expect(
+    pairedBodyCrossfade(
+      [stage(title, old, { ...next, startTime: 400 })],
+      'title',
+    ),
+  ).toBe(false);
+  expect(
+    pairedBodyCrossfade(
+      [stage(title, old, { ...next, opacityFrames: [1, 1] })],
+      'title',
+    ),
+  ).toBe(false);
 });
 
 it('measures concurrent title/content as one stage and sequential stages including their gap', () => {

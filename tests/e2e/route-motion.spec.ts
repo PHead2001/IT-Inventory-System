@@ -2,6 +2,7 @@ import { expect, test, type Page, type Request } from '@playwright/test';
 import { withHeldQuantityPrimary } from './route-primary-delay';
 import {
   routePresentationTiming,
+  pairedBodyCrossfade,
   type RouteEffectTiming,
 } from './route-presentation-timing';
 import { documentRecordRoute } from '../../src/lib/document-route';
@@ -221,6 +222,16 @@ async function observeMotion(page: Page, unsupported = false) {
                     : null;
                 value.endTime = Number(timing.endTime);
                 value.activeDuration = Number(timing.activeDuration);
+                value.delay = Number(timing.delay);
+                value.opacityFrames = effect
+                  .getKeyframes()
+                  .flatMap((frame) =>
+                    (typeof frame.opacity === 'string' ||
+                      typeof frame.opacity === 'number') &&
+                    Number.isFinite(Number(frame.opacity))
+                      ? [Number(frame.opacity)]
+                      : [],
+                  );
                 value.documentTimeline =
                   animation.timeline === document.timeline;
                 value.paused ||= animation.playState === 'paused';
@@ -400,6 +411,7 @@ async function completedTitlePair(
     entry.old.some(
       (old) =>
         old.name.startsWith('inventory-title-') &&
+        !old.name.endsWith('-content') &&
         entry.next.some((next) => next.name === old.name),
     ),
   );
@@ -439,6 +451,13 @@ async function completedTitlePair(
   const presentation = routePresentationTiming(observed.transitions);
   expect(presentation.animatedStages, diagnostic).toBe(1);
   expect(presentation.durationMs, diagnostic).toBeLessThanOrEqual(250);
+  const titleName = paired[0].old.find(
+    (old) =>
+      old.name.startsWith('inventory-title-') && !old.name.endsWith('-content'),
+  )!.name;
+  expect(pairedBodyCrossfade(observed.transitions, titleName), diagnostic).toBe(
+    true,
+  );
   return observed;
 }
 
@@ -1376,6 +1395,7 @@ for (const width of [1280, 390]) {
       entry.old.filter(
         (old) =>
           old.name.startsWith('inventory-title-') &&
+          !old.name.endsWith('-content') &&
           entry.next.some((next) => next.name === old.name),
       ),
     );
@@ -1464,10 +1484,18 @@ for (const width of [1280, 390]) {
     const back = await proof(page);
     expect(back.replacements).toHaveLength(1);
     const pair = back.transitions.find((entry) =>
-      entry.old.some((old) => old.name.startsWith('inventory-title-')),
+      entry.old.some(
+        (old) =>
+          old.name.startsWith('inventory-title-') &&
+          !old.name.endsWith('-content'),
+      ),
     )!;
     expect(
-      pair.next.filter((next) => next.name.startsWith('inventory-title-')),
+      pair.next.filter(
+        (next) =>
+          next.name.startsWith('inventory-title-') &&
+          !next.name.endsWith('-content'),
+      ),
     ).toHaveLength(1);
     expect(back.cls).toBe(0);
     prefetch.assertNone();

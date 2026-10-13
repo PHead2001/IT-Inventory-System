@@ -698,14 +698,59 @@ export function useRouteMotion() {
     currentRouteProvider === context.providerToken &&
     context.pending.current(epoch!) &&
     (!intent || state?.snapshot()?.name === intent.name);
+  const pairedArrivalEnabled =
+    enabled &&
+    !!intent &&
+    !!titleArrival &&
+    context?.pending.current(titleArrival.epoch) === true &&
+    (key === titleArrival.sourceKey || key === titleArrival.destinationKey);
+  const finishPairedAfterSnapshot = (
+    instance: { name: string },
+    body: boolean,
+  ) => {
+    const name = intent?.name;
+    const contentName = name + '-content';
+    if (!name || instance.name !== (body ? contentName : name) || !current())
+      return;
+    if (titleArrival) state?.finishArrival(titleArrival);
+    // All React capture callbacks (including the title's replacement effect)
+    // run before this microtask. Both names belong to this exact approval.
+    queueMicrotask(() => {
+      if (!current()) return;
+      const animations = document.getAnimations?.() ?? [];
+      const named = (candidate: string) =>
+        animations.filter((animation) =>
+          (animation.effect as KeyframeEffect | null)?.pseudoElement?.endsWith(
+            `(${candidate})`,
+          ),
+        );
+      const title = named(name),
+        content = named(contentName);
+      if (!content.length) {
+        // A title without its opted-in body cannot claim a paired page capture.
+        state?.finish(name);
+        cancelRouteSnapshots();
+        return;
+      }
+      // Missing/ambiguous titles retain a single body crossfade. Its completion
+      // retires the unused title approval; it never starts a later generic fade.
+      void Promise.allSettled(
+        [...title, ...content].map((animation) => animation.finished),
+      ).then(() => {
+        if (current()) state?.finish(name);
+      });
+    });
+  };
   return {
     enabled,
     arrivalEnabled:
       enabled &&
+      !pairedArrivalEnabled &&
       !!arrival &&
       context?.pending.current(arrival.epoch) === true &&
       (key === arrival.sourceKey || key === arrival.destinationKey),
     arrival,
+    pairedArrivalEnabled,
     titleArrival:
       enabled && titleArrival && context?.pending.current(titleArrival.epoch)
         ? titleArrival
@@ -773,33 +818,10 @@ export function useRouteMotion() {
         });
       });
     },
-    finishTitleAfterSnapshot: (instance: { name: string }) => {
-      const name = intent?.name;
-      if (!name || instance.name !== name || !current()) return;
-      // A real shared-title capture already presents this navigation. Next can
-      // commit its outer pathname later; consume only the matching generic
-      // approval now so that follow-up commit cannot add a second route fade.
-      // Keep the title owner alive until its own native snapshot completes.
-      if (titleArrival) state?.finishArrival(titleArrival);
-      // React has captured the commit. Observe only its matching native
-      // snapshot lifetime; a late completion cannot consume another intent.
-      queueMicrotask(() => {
-        if (!current()) return;
-        const animations =
-          document
-            .getAnimations?.()
-            .filter((animation) =>
-              (
-                animation.effect as KeyframeEffect | null
-              )?.pseudoElement?.endsWith(`(${instance.name})`),
-            ) ?? [];
-        void Promise.allSettled(
-          animations.map((animation) => animation.finished),
-        ).then(() => {
-          if (current()) state?.finish(name);
-        });
-      });
-    },
+    finishTitleAfterSnapshot: (instance: { name: string }) =>
+      finishPairedAfterSnapshot(instance, false),
+    finishPairedContentAfterSnapshot: (instance: { name: string }) =>
+      finishPairedAfterSnapshot(instance, true),
     validNow: () =>
       current() &&
       !!state?.valid() &&

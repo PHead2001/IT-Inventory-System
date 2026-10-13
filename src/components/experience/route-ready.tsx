@@ -10,6 +10,7 @@ import {
 import type { createRouteReadiness } from './route-readiness';
 import { RouteContentIdentityContext } from './route-content-identity';
 import { afterTransitionCapture } from '@/components/forms/transition-capture';
+import { PairedInventoryContent } from './paired-inventory-content';
 
 export const RouteReadyContext = createContext<ReturnType<
   typeof createRouteReadiness
@@ -21,6 +22,7 @@ export function RouteReady({
   pairingHref,
   children,
   ready = true,
+  pairedInventory = false,
 }: {
   actorId: string;
   routeKey: string;
@@ -29,6 +31,8 @@ export function RouteReady({
   pairingHref?: string;
   children: React.ReactNode;
   ready?: boolean;
+  /** Explicit opt-in for successful list/quantity/asset primaries, never fallback. */
+  pairedInventory?: boolean;
 }) {
   const readiness = useContext(RouteReadyContext);
   const root = useRef<HTMLDivElement>(null);
@@ -64,7 +68,13 @@ export function RouteReady({
   return (
     <RouteContentIdentityContext value={identity}>
       <div ref={root} data-route-ready="true" style={{ display: 'contents' }}>
-        {children}
+        {pairedInventory ? (
+          <PairedInventoryContent enabled={ready}>
+            {children}
+          </PairedInventoryContent>
+        ) : (
+          children
+        )}
       </div>
     </RouteContentIdentityContext>
   );

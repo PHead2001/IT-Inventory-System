@@ -121,6 +121,21 @@ authorization and real visible readiness remain required. Supersede, cancellatio
 retire and settle the old ticket. Changed logout evidence starts distinct current-
 route recovery rather than rebasing the captured target proof.
 
+Successful inventory list, quantity detail and asset detail primaries explicitly
+opt into a consistently mounted paired body boundary inside their exact raw
+RouteReady identity. It shares `${intent.name}-content` while the matching title
+shares `intent.name`, so the body crossfade and title morph occupy one native
+capture even when the inner primary and outer pathname commit in either order.
+That accepted pair suppresses the outer generic fade. Capture consumes only its
+exact generic arrival approval; title/body effects finish together before retiring
+their intent. A body-only capture fades once and retires its unused title approval;
+a title without an opted-in body reveals instantly. Ordinary unpaired routes
+retain their generic arrival. No readiness or request state is granted by these
+presentation boundaries. The body inherits the accepted page's existing source
+and returns its outgoing native cleanup lease; it never mounts a competing source.
+Room, loading/error boundaries and mismatched/retired approvals do not opt in.
+Location and history list/detail pairing remain a required Audit 4.2 follow-up.
+
 Native browser Back/Forward uses the installed Next/React eager history restore
 and is instant. The route provider observes popstate only to retire departing
 presentation, cancel a paired wait and register real authorized primary readiness.
