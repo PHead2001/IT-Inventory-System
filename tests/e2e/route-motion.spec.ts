@@ -852,6 +852,105 @@ for (const width of [1280, 390]) {
 }
 
 for (const width of [1280, 390]) {
+  test(`measured title disclosure preserves SSR and hydrated geometry at ${width}px`, async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width, height: 900 });
+    await page.emulateMedia({ reducedMotion: 'reduce' });
+    await observeMotion(page);
+    await auditLogin(page);
+    const category = await auditCategory(page);
+    const name =
+      `Hydration ${crypto.randomUUID()} ${'multiline cable '.repeat(9)}`.trim();
+    const record = await auditCreateRecord(
+      page,
+      'quantity',
+      category.name,
+      name,
+    );
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let blockedScripts = 0;
+    const handler: Parameters<Page['route']>[1] = async (route) => {
+      const url = new URL(route.request().url());
+      if (
+        url.pathname.startsWith('/_next/static/') &&
+        url.pathname.endsWith('.js')
+      ) {
+        blockedScripts++;
+        await gate;
+      }
+      await route.continue();
+    };
+    await page.route('**/*', handler);
+    try {
+      // Genuine server HTML and CSS render before deferred production bundles;
+      // no heading, measurement result or hydration state is manufactured.
+      await page.goto(record.url, { waitUntil: 'commit' });
+      const heading = page.getByRole('heading', { name, exact: true });
+      await expect(heading).toBeVisible();
+      await expect.poll(() => blockedScripts).toBeGreaterThan(0);
+      await page.evaluate(() => document.fonts.ready);
+      const row = page.locator('[data-record-name-row]');
+      const geometry = () =>
+        row.evaluate((node) => {
+          const h = node.querySelector('h1')!,
+            r = node.getBoundingClientRect(),
+            hr = h.getBoundingClientRect();
+          const following = node
+            .closest('section')!
+            .querySelector('dl')!
+            .getBoundingClientRect();
+          return {
+            x: r.x,
+            y: r.y,
+            width: r.width,
+            height: r.height,
+            headingWidth: hr.width,
+            headingHeight: hr.height,
+            followingTop: following.top,
+          };
+        });
+      const before = await geometry();
+      await expect(row.getByRole('button')).toHaveCount(0);
+      // The passive observer is installed before app bundles and retains the
+      // complete hydration window, including delayed queued shift delivery.
+      await resetProof(page);
+      release();
+      const control = row.getByRole('button', {
+        name: 'Show full name',
+        exact: true,
+      });
+      await expect(control).toBeVisible();
+      await expect(control).toHaveAttribute(
+        'aria-controls',
+        (await heading.getAttribute('id'))!,
+      );
+      const touch = await control.boundingBox();
+      expect(touch!.width).toBeGreaterThanOrEqual(44);
+      expect(touch!.height).toBeGreaterThanOrEqual(44);
+      await expect.poll(geometry).toEqual(before);
+      await page.evaluate(
+        () =>
+          new Promise((resolve) =>
+            requestAnimationFrame(() => requestAnimationFrame(resolve)),
+          ),
+      );
+      expect((await proof(page)).cls).toBe(0);
+      await control.focus();
+      await page.keyboard.press('Enter');
+      await expect(
+        row.getByRole('button', { name: 'Show less', exact: true }),
+      ).toBeFocused();
+      await expect(heading).toHaveText(name);
+    } finally {
+      release();
+      await page.unroute('**/*', handler);
+    }
+  });
+
   test(`commit-aware navigation and duplicate holding title/Back at ${width}px`, async ({
     page,
   }, info) => {
@@ -1160,8 +1259,8 @@ for (const width of [1280, 390]) {
     expect((await proof(page)).transitions).toHaveLength(0);
     expect((await proof(page)).replacements).toHaveLength(0);
     const browserBack = await proof(page);
-    // A known detail route can commit its history entry before Flight arrives.
-    // Observe that boundary before Back; late delivery must preserve the list.
+    // Full pairing retains source content and history while Flight is held.
+    // Native Back restores the earlier detail, not a speculative new entry.
     const pendingRow = page
       .locator('#inventory-row-2')
       .getByRole('link', { name, exact: true });
@@ -1175,32 +1274,10 @@ for (const width of [1280, 390]) {
     expect(pendingSource).not.toBeNull();
     const pendingListHref = new URL(scope + '#inventory-row-2', page.url())
       .href;
-    const pendingSourceScroll = await page.evaluate(() => window.scrollY);
-    const restoredPendingResults = async () => {
-      await expect(page).toHaveURL(pendingListHref);
-      await expect(pendingRow).toBeVisible();
-      await expect(page.getByRole('link', { name, exact: true })).toHaveCount(
-        2,
-      );
-      await expect(
-        page.getByRole('textbox', { name: 'Search inventory' }),
-      ).toHaveValue(name);
-      await expect(
-        page.getByRole('combobox', { name: 'Tracking type' }),
-      ).toHaveValue('quantity');
-      await expect
-        .poll(() => page.evaluate(() => window.scrollY))
-        .toBe(pendingSourceScroll);
-      await expect(routeProgress(page)).toHaveAttribute(
-        'data-visible',
-        'false',
-      );
-    };
     const interrupted = await holdRouteWork(page, pendingDestination.pathname);
     const pendingNativeProof: {
       back?: Proof;
       lateDelivery?: Proof;
-      forward?: Proof;
       appBack?: Proof;
       urls: { stage: string; href: string }[];
       canceledDeparture?: Awaited<
@@ -1226,46 +1303,35 @@ for (const width of [1280, 390]) {
       ).toBe(true);
       expect(await page.locator('[data-loading-shape]').count()).toBe(0);
       expect((await proof(page)).transitions).toHaveLength(0);
-      await expect(page).toHaveURL(pendingDestination.href);
+      await expect(page).toHaveURL(pendingListHref);
       pendingNativeProof.urls.push({
-        stage: 'held-history-committed',
+        stage: 'held-source-uncommitted',
         href: page.url(),
       });
       await page.goBack();
-      await restoredPendingResults();
+      await expect(page).toHaveURL(pendingDestination.href);
       pendingNativeProof.urls.push({ stage: 'native-back', href: page.url() });
       pendingNativeProof.back = await proof(page);
       expect(pendingNativeProof.back.transitions).toHaveLength(0);
       expect(pendingNativeProof.back.replacements).toHaveLength(0);
       interrupted.release();
       await interrupted.delivery;
-      await restoredPendingResults();
+      await expect(page).toHaveURL(pendingDestination.href);
       pendingNativeProof.urls.push({
         stage: 'late-delivery',
         href: page.url(),
       });
-      await settled(page);
-      pendingNativeProof.lateDelivery = await proof(page);
-      expect(pendingNativeProof.lateDelivery.transitions).toHaveLength(0);
-      expect(pendingNativeProof.lateDelivery.replacements).toHaveLength(0);
-      await resetProof(page);
-      await page.goForward();
-      await expect(page).toHaveURL(pendingDestination.href);
       await expect(
         page.getByRole('heading', { name, exact: true }),
       ).toBeVisible();
-      pendingNativeProof.urls.push({
-        stage: 'native-forward',
-        href: page.url(),
-      });
       await expect(routeProgress(page)).toHaveAttribute(
         'data-visible',
         'false',
       );
       await settled(page);
-      pendingNativeProof.forward = await proof(page);
-      expect(pendingNativeProof.forward.transitions).toHaveLength(0);
-      expect(pendingNativeProof.forward.replacements).toHaveLength(0);
+      pendingNativeProof.lateDelivery = await proof(page);
+      expect(pendingNativeProof.lateDelivery.transitions).toHaveLength(0);
+      expect(pendingNativeProof.lateDelivery.replacements).toHaveLength(0);
       pendingNativeProof.canceledDeparture = await verifyCanceledDocumentScroll(
         page,
         name,
