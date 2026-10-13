@@ -67,6 +67,10 @@ const runtime = vi.hoisted(() => ({
     name?: string;
     share?: string;
     onShare?: (instance: { name: string }) => void | (() => void);
+    onEnter?: (
+      instance: { name: string },
+      types: string[],
+    ) => void | (() => void);
     onUpdate?: (
       instance: { name: string },
       types: string[],
