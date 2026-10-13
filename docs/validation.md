@@ -435,10 +435,21 @@ request streams normally; neither headers nor body are attached. The held source
 must remain the same visible node, with live progress and no fallback/native capture,
 before release and the exact forward/app Back title assertions, followed by
 functional instant native-history assertions. Fixture/scheduling
-guards have unit coverage. These authored cases have not been executed in this
+guards have unit coverage. System and browser-local Reduced cases at 1280/390 px
+also hold real primary reads through fallback, restore native history URL/filter/
+scroll state, deliver an interrupted real Flight response after native Back, and
+activate anchored application Back by keyboard. They assert no native transition,
+title replacement or lingering pseudo-element animation, ordinary Reduced record
+skeletons, and normal focus after the departing link is removed. These authored
+cases have not been executed in this
 bounded integration cycle. They require the canonical disposable stack/production
 Next build and cannot run against a hosted preview. Hosted proof uses ordinary slow
 routes and native observation without this local lock fixture.
+The shared held-response helper rejects its delivery promise when genuine fetch
+or fulfillment fails; cleanup completion remains separate. Unit regressions force
+late fulfillment rejection after arrival, prove delivery waits for successful
+fulfillment, and retain cleanup after fetch/abort failure. Cached content therefore
+cannot substitute for the journey's awaited late-response fulfillment.
 The decisive actual-React regression first reproduced async-action entanglement:
 a replacement caller rendered Ready while native pending remained behind a
 departed caller's unresolved action. It now passes with per-invocation promise
