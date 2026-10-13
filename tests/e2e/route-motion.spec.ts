@@ -1,5 +1,6 @@
 import { expect, test, type Page, type Request } from '@playwright/test';
 import { withHeldQuantityPrimary } from './route-primary-delay';
+import { documentRecordRoute } from '../../src/lib/document-route';
 import { holdRouteWork } from './held-route-work';
 import { createClient } from '@supabase/supabase-js';
 import fixture from '../fixtures/auth.json' with { type: 'json' };
@@ -10,6 +11,7 @@ import {
   auditLogin,
   auditReadback,
   auditOpenMetadataTask,
+  auditSaveDesigner,
 } from './audit-two-controls';
 import { metadataReviewButton, metadataSaveButton } from './metadata-controls';
 import {
@@ -203,6 +205,41 @@ async function resetProof(page: Page) {
     p.replacements = [];
     p.cls = 0;
   });
+}
+
+/** Cancel any real partial prefetch attempted by the production router. The
+ * old link policy exercised Next's canceled/fulfilled-null prefetch path here;
+ * the mitigation must prevent those requests rather than patching that cache. */
+async function inventoryPrefetchProbe(page: Page) {
+  const attempts: Array<{ pathname: string; segment: boolean }> = [];
+  const handler: Parameters<Page['route']>[1] = async (route) => {
+    const request = route.request();
+    const pathname = new URL(request.url()).pathname;
+    const headers = request.headers();
+    const record = documentRecordRoute(pathname);
+    if (
+      (pathname === '/inventory' ||
+        (record?.prefix.startsWith('/inventory/') && record.key !== 'new')) &&
+      (headers['next-router-prefetch'] ||
+        headers['next-router-segment-prefetch'])
+    ) {
+      attempts.push({
+        pathname,
+        segment: !!headers['next-router-segment-prefetch'],
+      });
+      await route.abort('aborted');
+    } else await route.continue();
+  };
+  await page.route('**/*', handler);
+  return {
+    assertNone: () =>
+      expect(
+        attempts,
+        'Inventory links must not seed a canceled partial-prefetch cache entry.',
+      ).toEqual([]),
+    attempts,
+    dispose: () => page.unroute('**/*', handler),
+  };
 }
 
 /** A paired image fade must release the native transition, so the next real
@@ -825,13 +862,41 @@ for (const width of [1280, 390]) {
     await auditLogin(page);
     await expect(page.locator('html')).toHaveAttribute('data-motion', 'full');
     const category = await auditCategory(page);
+    const designer = page.getByRole('region', { name: 'Forms and fields' });
+    await designer
+      .getByRole('button', { name: 'Add field', exact: true })
+      .click();
+    const fieldDialog = page.getByRole('dialog', {
+      name: 'Add field',
+      exact: true,
+    });
+    await fieldDialog
+      .getByRole('button', { name: 'Short text', exact: true })
+      .click();
+    await fieldDialog
+      .getByLabel('Field name', { exact: true })
+      .fill('Pairing sibling note');
+    await fieldDialog
+      .getByRole('button', { name: 'Add to form', exact: true })
+      .click();
+    await auditSaveDesigner(designer);
     const name = `Route motion ${crypto.randomUUID()} long cable name for multiline title matching`;
-    const record = await auditCreateRecord(
-      page,
-      'quantity',
-      category.name,
-      name,
-    );
+    await page.goto('/inventory/quantity/new');
+    const create = page.getByRole('form', {
+      name: 'Add quantity item',
+      exact: true,
+    });
+    await create.getByLabel('Name', { exact: true }).fill(name);
+    await create
+      .getByLabel('Category', { exact: true })
+      .selectOption({ label: category.name });
+    await create
+      .getByLabel('Pairing sibling note', { exact: true })
+      .fill('Owned source details link');
+    await metadataReviewButton(create).click();
+    await metadataSaveButton(create).click();
+    await expect(page).toHaveURL(/\/inventory\/quantity\/[0-9a-f-]+$/);
+    const record = { id: new URL(page.url()).pathname.split('/').at(-1)! };
     const client = await auditReadback();
     try {
       const locations = await client
@@ -860,8 +925,33 @@ for (const width of [1280, 390]) {
       await client.auth.signOut({ scope: 'local' });
     }
     const scope = `/inventory?${new URLSearchParams({ q: name, type: 'quantity' })}`;
+    const prefetch = await inventoryPrefetchProbe(page);
+    // Hard navigation discards the prior creation/detail router cache. The
+    // source page must preserve its actual second title on a truly cold visit.
     await page.goto(scope);
     await expect(page.getByRole('link', { name, exact: true })).toHaveCount(2);
+    const details = page
+      .locator('#inventory-row-2')
+      .getByRole('link', { name: 'Full details', exact: true });
+    await expect(details).toBeVisible();
+    await details.scrollIntoViewIfNeeded();
+    await details.hover();
+    await details.focus();
+    await expect(details).toBeFocused();
+    const sourceHref = await page
+      .locator('#inventory-row-2')
+      .getByRole('link', { name, exact: true })
+      .getAttribute('href');
+    await expect(details).toHaveAttribute('href', sourceHref!);
+    const inventoryNavigation = await navigationLink(page, 'Inventory');
+    await inventoryNavigation.hover();
+    await inventoryNavigation.focus();
+    const closeMenu = page.getByRole('button', {
+      name: 'Close menu',
+      exact: true,
+    });
+    if (await closeMenu.isVisible()) await closeMenu.click();
+    await expect(page).toHaveURL(new URL(scope, page.url()).href);
     if (width === 390) {
       // A short mobile viewport makes this existing populated page scrollable.
       // Exercise real input rather than allowing a zero-offset restoration pass.
@@ -936,6 +1026,7 @@ for (const width of [1280, 390]) {
         contentType: 'application/json',
       });
     });
+    prefetch.assertNone();
     await info.attach('primary-data-delayed-after-fallback-stream', {
       body: JSON.stringify(streaming),
       contentType: 'application/json',
@@ -1012,6 +1103,7 @@ for (const width of [1280, 390]) {
     await expect(page.locator('#inventory-row-2')).toBeVisible();
     const appBackAfterNativeForward = await completedTitlePair(page);
     expect(appBackAfterNativeForward.replacements).toHaveLength(1);
+    prefetch.assertNone();
     await resetProof(page);
     await page
       .locator('#inventory-row-2')
@@ -1037,6 +1129,7 @@ for (const width of [1280, 390]) {
       pair.next.filter((next) => next.name.startsWith('inventory-title-')),
     ).toHaveLength(1);
     expect(back.cls).toBe(0);
+    prefetch.assertNone();
     await info.attach('after-app-back', {
       body: await page.screenshot(),
       contentType: 'image/png',
@@ -1224,6 +1317,15 @@ for (const width of [1280, 390]) {
       page.getByRole('heading', { name: 'Inventory', exact: true }),
     ).toBeVisible();
     await settled(page);
+    prefetch.assertNone();
+    await info.attach('cold-inventory-prefetch-proof', {
+      body: JSON.stringify({
+        canceledPrefetchAttempts: prefetch.attempts,
+        siblingExactHref: true,
+      }),
+      contentType: 'application/json',
+    });
+    await prefetch.dispose();
     expect(
       (await proof(page)).transitions
         .flatMap((entry) => [...entry.old, ...entry.next])
