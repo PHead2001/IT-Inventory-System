@@ -194,3 +194,35 @@ it('uses the same actual-label compact shell while the outer embedded chunk is c
   );
   expect(screen.getByText('Map for ITC-D01')).toBeInTheDocument();
 });
+
+it.each(['ITO-GENERAL', 'ITC-EXTRA'])(
+  'renders short unmodeled context without loading a chunk or reserving the compact canvas: %s',
+  (code) => {
+    chunks.pending = true;
+    const root = {
+      ...location,
+      id: 'root',
+      code: code.startsWith('ITO') ? 'ITO' : 'ITC',
+      name: 'Space',
+      parentId: null,
+      can_hold_inventory: false,
+    };
+    const unmodeled = { ...location, id: 'unmodeled', code, parentId: root.id };
+    const view = render(
+      <DetailRoomPreview
+        locations={[root, unmodeled]}
+        choices={[{ code, label: 'Recorded context' }]}
+      />,
+    );
+    expect(
+      screen.getByText(/This location has no modeled map/),
+    ).toBeInTheDocument();
+    expect(
+      view.container.querySelector('[class*="compactPreviewSlot"]'),
+    ).toBeNull();
+    expect(
+      view.container.querySelector('[data-loading-shape="compact-room"]'),
+    ).toBeNull();
+    expect(screen.queryByText(/^Map for/)).toBeNull();
+  },
+);

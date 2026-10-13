@@ -32,6 +32,7 @@ export default function LocationMapPicker({
   initialValue,
   onUse,
   onClose,
+  onMounted,
 }: {
   locations: LocationRef[];
   excludeIds?: string[];
@@ -39,6 +40,7 @@ export default function LocationMapPicker({
   initialValue: string;
   onUse(code: string): void;
   onClose(): void;
+  onMounted?(): void;
 }) {
   const privacy = usePrivacyReadiness();
   const authority = useRoomSceneAuthority();
@@ -114,6 +116,11 @@ export default function LocationMapPicker({
       closeRef.current();
     }
   }, [owner, key, privacy.generation]);
+  useLayoutEffect(() => {
+    if (current()) onMounted?.();
+    // Report only this original dialog's first authorized mount/recheck.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [onMounted, privacy, key]);
   useEffect(() => {
     closeRef.current = onClose;
   }, [onClose]);

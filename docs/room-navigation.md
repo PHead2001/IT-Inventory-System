@@ -161,6 +161,18 @@ Production room callers provide a synchronous renderer configuration object. A
 custom renderer factory that never settles can also prevent Fiber from completing
 teardown; safely reclaiming its unknown resources is not established by a timeout.
 
+A cold Pick on map request immediately announces loading and retains a cancellable
+owner-controlled placeholder; cancelling cannot open a later-resolved dialog or
+change the draft. Pending intent captures the original privacy generation and live
+revocation/assignment epochs at activation. Invalidation permanently retires it;
+late loading, selection or focus callbacks cannot adopt a reauthorized owner or
+clear a successor intent. Ordinary same-authority rechecks retain intent, but a
+fresh grant is required before first dialog mount, confirmation and focus transfer. Renderer startup uses loading feedback until a budget request
+actually queues or is withdrawn; Resume is reserved for genuine paused/retry states.
+Static canonical room bindings decide whether a detail location has modeled geometry
+before any dynamic chunk or map footprint is reserved. Inventory-only spaces and
+unmodeled children use the same short recorded-context fallback.
+
 Compact embedded maps use their own cold-chunk placeholder, rather than the full
 room/browser skeleton. Offscreen reservation, both dynamic loading boundaries and
 the ready scene share the toolbar, 280px canvas, gaps and status metrics. The

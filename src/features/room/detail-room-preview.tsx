@@ -5,6 +5,8 @@ import type { LocationRef } from '../inventory/contracts-ui';
 import { ShowInRoom } from './show-in-room';
 import { RoomRegionBoundary } from './room-region-boundary';
 import styles from './room-visual.module.css';
+import { hasModeledRoomBinding } from './room-map-model';
+import { UnmodeledRoomNotice } from './unmodeled-room-notice';
 import {
   CompactRoomContext,
   CompactRoomPlaceholder,
@@ -96,26 +98,31 @@ export function DetailRoomPreview({
             {!selected.active &&
               ' · Inactive location; this is the recorded storage context.'}
           </p>
-          <CompactRoomContext
-            value={{ code: selected.code, label: selected.name }}
-          >
-            <div className={styles.compactPreviewSlot}>
-              {visible ||
-              (browserReady && typeof IntersectionObserver === 'undefined') ? (
-                <RoomRegionBoundary key={selected.code}>
-                  <EmbeddedRoom
-                    selectionMode="preview"
-                    locations={locations}
-                    code={selected.code}
-                    permittedCodes={[]}
-                    onSelect={() => {}}
-                  />
-                </RoomRegionBoundary>
-              ) : (
-                <CompactRoomPlaceholder bordered />
-              )}
-            </div>
-          </CompactRoomContext>
+          {hasModeledRoomBinding(locations, selected.code) ? (
+            <CompactRoomContext
+              value={{ code: selected.code, label: selected.name }}
+            >
+              <div className={styles.compactPreviewSlot}>
+                {visible ||
+                (browserReady &&
+                  typeof IntersectionObserver === 'undefined') ? (
+                  <RoomRegionBoundary key={selected.code}>
+                    <EmbeddedRoom
+                      selectionMode="preview"
+                      locations={locations}
+                      code={selected.code}
+                      permittedCodes={[]}
+                      onSelect={() => {}}
+                    />
+                  </RoomRegionBoundary>
+                ) : (
+                  <CompactRoomPlaceholder bordered />
+                )}
+              </div>
+            </CompactRoomContext>
+          ) : (
+            <UnmodeledRoomNotice />
+          )}
           {showRoomLink && <ShowInRoom location={selected} />}
         </>
       ) : (

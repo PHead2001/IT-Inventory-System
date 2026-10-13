@@ -1,13 +1,13 @@
 'use client';
 import dynamic from 'next/dynamic';
-import { useLayoutEffect, useMemo, useState } from 'react';
+import { useLayoutEffect, useState } from 'react';
 import {
   CompactRoomContext,
   CompactRoomPlaceholder,
 } from './compact-room-placeholder';
 import type { LocationRef } from '../inventory/contracts-ui';
-import { buildRoomBindings } from './bindings';
-import { containingSpace, spaceRoom, spaces } from './spaces';
+import { resolveRoomMap } from './room-map-model';
+import { UnmodeledRoomNotice } from './unmodeled-room-notice';
 import { ScenePriorityContext } from './scene/scene-budget-provider';
 import { RoomRegionBoundary } from './room-region-boundary';
 import { useRoomOccupancy } from './use-room-occupancy';
@@ -37,16 +37,10 @@ export function EmbeddedRoom({
   priority?: number;
   selectionMode?: 'select' | 'preview';
 }) {
-  const space = containingSpace(locations, code ?? permittedCodes[0] ?? null);
+  const model = resolveRoomMap(locations, code ?? permittedCodes[0] ?? null);
+  const { space, room, bindings } = model;
   const spaceId = space?.id;
-  const room = useMemo(() => {
-    const registered = spaces.find((entry) => entry.id === spaceId);
-    return registered ? spaceRoom(registered) : null;
-  }, [spaceId]);
-  const bindings = useMemo(() => (room ? buildRoomBindings(room) : []), [room]);
-  const selectedIsBound = Boolean(
-    code && bindings.some((binding) => binding.code === code),
-  );
+  const selectedIsBound = Boolean(code && model.selectedIsBound);
   const [failure, setFailure] = useState<string | null>(null);
   const [attempt, setAttempt] = useState(0);
   const [ready, setReady] = useState(false);
@@ -97,12 +91,7 @@ export function EmbeddedRoom({
     [code, attempt, authority ? cameraAuthorityKey(authority) : ''].join('|'),
     authority?.backend ?? '',
   );
-  if (!room || (code && !selectedIsBound))
-    return (
-      <p className="text-sm">
-        This location has no modeled map. Use its recorded location below.
-      </p>
-    );
+  if (!room || (code && !selectedIsBound)) return <UnmodeledRoomNotice />;
   return (
     <CompactRoomContext
       value={{

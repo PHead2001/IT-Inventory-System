@@ -1,3 +1,4 @@
+import { renderToString } from 'react-dom/server';
 import { act, render, waitFor } from '@testing-library/react';
 import { Children, isValidElement, StrictMode, type ReactNode } from 'react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
@@ -502,3 +503,42 @@ it.each(['resolve', 'reject'] as const)(
     expect(driver.create).toHaveBeenCalledTimes(2);
   },
 );
+
+it('announces startup before the passive budget request without false contention or Resume', () => {
+  const html = renderToString(
+    <SafeCanvas onFailure={vi.fn()}>scene</SafeCanvas>,
+  );
+  expect(html).toContain('Loading map');
+  expect(html).toContain('aria-busy="true"');
+  expect(html).not.toContain('another map');
+  expect(html).not.toContain('Resume map');
+  expect(driver.create).not.toHaveBeenCalled();
+});
+it('retains genuine queued feedback until the active allocation actually completes', async () => {
+  let finish!: () => void;
+  driver.teardown.mockImplementation((_canvas, complete) => {
+    finish = complete;
+  });
+  const ui = (primary: boolean) => (
+    <RoomSceneBudgetProvider>
+      {primary && (
+        <ScenePriorityContext value={2}>
+          <SafeCanvas onFailure={vi.fn()}>primary</SafeCanvas>
+        </ScenePriorityContext>
+      )}
+      <ScenePriorityContext value={0}>
+        <SafeCanvas onFailure={vi.fn()}>queued</SafeCanvas>
+      </ScenePriorityContext>
+    </RoomSceneBudgetProvider>
+  );
+  const view = render(ui(true));
+  await waitFor(() => expect(driver.create).toHaveBeenCalledOnce());
+  expect(screen.getByRole('status')).toHaveTextContent('another map');
+  expect(screen.getByRole('button', { name: 'Resume map' })).toBeVisible();
+  view.rerender(ui(false));
+  await waitFor(() => expect(driver.teardown).toHaveBeenCalledOnce());
+  expect(screen.getByRole('status')).toHaveTextContent('another map');
+  act(() => finish());
+  await waitFor(() => expect(driver.create).toHaveBeenCalledTimes(2));
+  expect(screen.queryByRole('button', { name: 'Resume map' })).toBeNull();
+});

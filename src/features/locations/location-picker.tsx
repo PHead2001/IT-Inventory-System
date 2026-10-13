@@ -1,10 +1,31 @@
 'use client';
 import { afterTransitionCapture } from '@/components/forms/transition-capture';
 
-import { useEffect, useId, useMemo, useRef, useState } from 'react';
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useInsertionEffect,
+  useLayoutEffect,
+  useId,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import dynamic from 'next/dynamic';
 import { usePrivacyReadiness } from '@/components/auth/privacy-readiness';
-import { freshPresentationGrant } from '@/components/experience/presentation-privacy';
+import {
+  freshPresentationGrant,
+  retainedPresentationGrantCurrent,
+} from '@/components/experience/presentation-privacy';
+import {
+  assignmentEpoch,
+  readPrivacyRevocationRevision,
+  subscribePrivacyRevocation,
+  subscribeAssignmentInvalidation,
+  subscribeAuthoritativeCleanup,
+} from '@/features/scan/assign-batch';
 import { RoomRegionBoundary } from '../room/room-region-boundary';
 import { RequiredMark } from '@/components/forms/validation';
 import { countLabel } from '@/lib/count';
@@ -19,8 +40,50 @@ import {
   type PickerMode,
   type PickerTreeRow,
 } from './picker-model';
+type MapIntent = {
+  generation: string;
+  revision: number;
+  epoch: number;
+  retired(): boolean;
+  retire(): void;
+};
+function intentBindingCurrent(
+  intent: MapIntent | null,
+  privacy: ReturnType<typeof usePrivacyReadiness>,
+) {
+  return Boolean(
+    intent &&
+    !intent.retired() &&
+    intent.generation === privacy.generation &&
+    intent.revision === readPrivacyRevocationRevision() &&
+    intent.epoch === assignmentEpoch() &&
+    (privacy.generation === 'unmanaged' ||
+      retainedPresentationGrantCurrent(privacy, intent)),
+  );
+}
+const MapLoadingContext = createContext<{ cancel(): void }>({
+  cancel: () => {},
+});
+function MapLoadingFeedback() {
+  const { cancel } = useContext(MapLoadingContext);
+  return (
+    <div aria-busy="true" className="rounded-md border border-slate-600 p-3">
+      <p role="status" aria-live="polite">
+        Loading map… Your form draft remains available.
+      </p>
+      <button
+        type="button"
+        onClick={cancel}
+        className="min-h-11 text-cyan-300 underline"
+      >
+        Cancel map loading
+      </button>
+    </div>
+  );
+}
 const LocationMapPicker = dynamic(() => import('./location-map-picker'), {
   ssr: false,
+  loading: () => <MapLoadingFeedback />,
 });
 
 export type LocationPickerProps = {
@@ -72,7 +135,10 @@ export function LocationPicker({
   className = '',
 }: LocationPickerProps) {
   const privacy = usePrivacyReadiness();
-  const [mapOpen, setMapOpen] = useState(false);
+  const [mapIntent, setMapIntent] = useState<MapIntent | null>(null);
+  const [mountedIntent, setMountedIntent] = useState<MapIntent | null>(null);
+  const mapIntentRef = useRef<MapIntent | null>(null);
+  const latestPrivacy = useRef(privacy);
   const emptyAccessibleLabel =
     emptyLabel === 'All locations'
       ? 'All locations, no location filter'
@@ -114,6 +180,56 @@ export function LocationPicker({
     height: number;
   } | null>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
+  const intentCurrent = useCallback(
+    (intent: MapIntent | null, candidate = latestPrivacy.current) =>
+      mapIntentRef.current === intent &&
+      intentBindingCurrent(intent, candidate),
+    [],
+  );
+  const retireIntent = useCallback(
+    (intent: MapIntent | null, restoreFocus = false) => {
+      if (!intent || mapIntentRef.current !== intent) return;
+      const candidate = latestPrivacy.current;
+      const focus =
+        restoreFocus &&
+        intentCurrent(intent) &&
+        (candidate.generation === 'unmanaged' ||
+          freshPresentationGrant(candidate));
+      intent.retire();
+      mapIntentRef.current = null;
+      setMapIntent(null);
+      if (focus) triggerRef.current?.focus();
+    },
+    [intentCurrent],
+  );
+  useLayoutEffect(() => {
+    latestPrivacy.current = privacy;
+    const intent = mapIntentRef.current;
+    if (
+      intent &&
+      (intent.generation !== privacy.generation ||
+        intent.revision !== readPrivacyRevocationRevision() ||
+        intent.epoch !== assignmentEpoch())
+    )
+      retireIntent(intent);
+  }, [privacy, retireIntent]);
+  useInsertionEffect(() => {
+    const retire = () => retireIntent(mapIntentRef.current);
+    const remove = [
+      subscribePrivacyRevocation(retire),
+      subscribeAssignmentInvalidation(retire),
+      subscribeAuthoritativeCleanup(retire),
+    ];
+    return () => {
+      mapIntentRef.current?.retire();
+      mapIntentRef.current = null;
+      remove.forEach((unsubscribe) => unsubscribe());
+    };
+  }, [retireIntent]);
+  const mapVisible = intentBindingCurrent(mapIntent, privacy);
+  const mapFresh =
+    privacy.generation === 'unmanaged' || freshPresentationGrant(privacy);
+
   const hasOpenedRef = useRef(false);
   const expandedSelectedPathRef = useRef<string | null>(null);
   const searchRef = useRef<HTMLInputElement>(null);
@@ -527,50 +643,87 @@ export function LocationPicker({
           disabled={disabled || loading || Boolean(loadError)}
           onClick={() => {
             close();
-            setMapOpen(true);
+            const activation = latestPrivacy.current;
+            const unmanaged = activation.generation === 'unmanaged';
+            if (!unmanaged && !freshPresentationGrant(activation)) return;
+            let retired = false;
+            const intent: MapIntent = {
+              generation: activation.generation,
+              revision: unmanaged
+                ? readPrivacyRevocationRevision()
+                : activation.revocationRevision!,
+              epoch: unmanaged ? assignmentEpoch() : activation.verifiedEpoch!,
+              retired: () => retired,
+              retire: () => {
+                retired = true;
+              },
+            };
+            mapIntentRef.current?.retire();
+            mapIntentRef.current = intent;
+            setMountedIntent(null);
+            setMapIntent(intent);
           }}
         >
           Pick on map
         </button>
       )}
-      {mapOpen && (
-        <RoomRegionBoundary
-          fallback={
-            <p role="status" className="text-sm">
-              Map unavailable. Choose a location in the browser.
-            </p>
-          }
+      {mapVisible && mapIntent && (
+        <MapLoadingContext
+          value={{
+            cancel: () => retireIntent(mapIntent, true),
+          }}
         >
-          <LocationMapPicker
-            locations={locations}
-            excludeIds={excludeIds}
-            disabled={disabled || loading || Boolean(loadError)}
-            initialValue={selectedValue}
-            onClose={() => {
-              setMapOpen(false);
-              triggerRef.current?.focus();
-            }}
-            onUse={(code) => {
-              if (
-                disabled ||
-                loading ||
-                loadError ||
-                (privacy.generation !== 'unmanaged' &&
-                  !freshPresentationGrant(privacy))
-              )
-                return;
-              // Resolve from the latest complete eligibility model only at explicit confirmation.
-              const destination = pickerLocations(locations, 'destination', {
-                excludeIds,
-              }).find((location) => location.code === code);
-              if (!destination) return;
-              if (value === undefined) setLocalValue(destination.id);
-              onValueChange?.(destination.id);
-              setMapOpen(false);
-              triggerRef.current?.focus();
-            }}
-          />
-        </RoomRegionBoundary>
+          <RoomRegionBoundary
+            fallback={
+              <p role="status" className="text-sm">
+                Map unavailable. Choose a location in the browser.
+              </p>
+            }
+          >
+            {mountedIntent === mapIntent || mapFresh ? (
+              <LocationMapPicker
+                locations={locations}
+                excludeIds={excludeIds}
+                disabled={disabled || loading || Boolean(loadError)}
+                initialValue={selectedValue}
+                onMounted={() => {
+                  if (
+                    intentCurrent(mapIntent, privacy) &&
+                    (privacy.generation === 'unmanaged' ||
+                      freshPresentationGrant(privacy))
+                  )
+                    setMountedIntent(mapIntent);
+                }}
+                onClose={() => retireIntent(mapIntent, true)}
+                onUse={(code) => {
+                  if (
+                    !intentCurrent(mapIntent) ||
+                    disabled ||
+                    loading ||
+                    loadError ||
+                    (latestPrivacy.current.generation !== 'unmanaged' &&
+                      !freshPresentationGrant(latestPrivacy.current))
+                  )
+                    return;
+                  // Resolve from the latest complete eligibility model only at explicit confirmation.
+                  const destination = pickerLocations(
+                    locations,
+                    'destination',
+                    {
+                      excludeIds,
+                    },
+                  ).find((location) => location.code === code);
+                  if (!destination) return;
+                  if (value === undefined) setLocalValue(destination.id);
+                  onValueChange?.(destination.id);
+                  retireIntent(mapIntent, true);
+                }}
+              />
+            ) : (
+              <MapLoadingFeedback />
+            )}
+          </RoomRegionBoundary>
+        </MapLoadingContext>
       )}
       {validationMessage && (
         <p id={messageId} role="alert" className="text-sm text-amber-200">

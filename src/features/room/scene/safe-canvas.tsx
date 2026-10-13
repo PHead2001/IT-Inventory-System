@@ -131,6 +131,9 @@ export function SafeCanvas({
   }, [privacy, key, onLeaseChange]);
   const host = useRef<HTMLDivElement>(null);
   const [lease, setLease] = useState<SceneLease | null>(null);
+  const [requestStatus, setRequestStatus] = useState<
+    'starting' | 'queued' | 'withdrawn' | 'failed'
+  >('starting');
   const [retry, setRetry] = useState(0);
   const leaseRef = useRef<SceneLease | null>(null);
   useLayoutEffect(() => {
@@ -212,11 +215,13 @@ export function SafeCanvas({
       () => {
         if (live) {
           setLease(null);
+          setRequestStatus('withdrawn');
           latest.current.onLeaseChange?.(false);
         }
       },
     );
     leaseRef.current = request;
+    if (!granted && current()) setRequestStatus('queued');
     if (granted && current()) {
       setLease(request);
       latest.current.onLeaseChange?.(true);
@@ -244,6 +249,7 @@ export function SafeCanvas({
           onFailure={(message) => {
             if (current()) {
               setLease(null);
+              setRequestStatus('failed');
               latest.current.onLeaseChange?.(false);
               onFailure(message);
             }
@@ -257,20 +263,31 @@ export function SafeCanvas({
           </PrivacyReadinessContext>
         </CanvasRoot>
       ) : (
-        <div className="p-4 text-sm">
+        <div
+          className="p-4 text-sm"
+          aria-busy={requestStatus === 'starting' || requestStatus === 'queued'}
+        >
           <p role="status">
-            The map is paused while another map is in use. The location browser
-            remains available.
+            {requestStatus === 'starting'
+              ? 'Loading map… The location browser remains available.'
+              : requestStatus === 'failed'
+                ? 'The map could not initialize. The location browser remains available.'
+                : 'The map is paused while another map is in use. The location browser remains available.'}
           </p>
-          <button
-            type="button"
-            className="min-h-11 text-cyan-300 underline"
-            onClick={() => {
-              if (current()) setRetry((value) => value + 1);
-            }}
-          >
-            Resume map
-          </button>
+          {requestStatus !== 'starting' && (
+            <button
+              type="button"
+              className="min-h-11 text-cyan-300 underline"
+              onClick={() => {
+                if (current()) {
+                  setRequestStatus('starting');
+                  setRetry((value) => value + 1);
+                }
+              }}
+            >
+              Resume map
+            </button>
+          )}
         </div>
       )}
     </div>
