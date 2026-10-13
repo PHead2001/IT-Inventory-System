@@ -25,7 +25,7 @@ async function fixture() {
     }),
     fetch: vi.fn(async () => response),
     fulfill: vi.fn(async () => {}),
-    abort: vi.fn(async () => {}),
+    abort: vi.fn<Route['abort']>(async () => {}),
     continue: vi.fn(async () => {}),
     fallback: vi.fn(async () => {}),
   };
