@@ -129,6 +129,12 @@ focus and the explicit consumed-task handoff. Focus/readiness observers must not
 settle another owner's pending work. The additive database search requires the
 full canonical database gate, including pgTAP authorization/lifecycle/ranking
 fixtures, actual authenticated GiST/KNN plans and canonical type regeneration.
+The local palette integration gate also starts fresh PostgreSQL connections as
+the nonsuperuser authenticated role. It reproduces the unregistered trigram
+parameter failure, executes the actual breadcrumb migration prefix and function
+header in a temporary schema with rollback, and checks threshold restoration.
+A separate fresh caller proves nonmember denial and authorized search before
+the extension library has been loaded in that backend.
 Real Data API deadline/error proof and desktop/390px Full/Reduced staff/viewer
 browser/preview checks remain separate acceptance requirements; a declared SQL
 timeout or component mock is not that proof. See

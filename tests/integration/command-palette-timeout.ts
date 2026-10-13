@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
+import { readFileSync } from 'node:fs';
 import { createClient } from '@supabase/supabase-js';
 import { Client } from 'pg';
 import authFixture from '../fixtures/auth.json' with { type: 'json' };
@@ -42,9 +43,123 @@ const blocker = new Client({
 let actor: string | undefined;
 let release: ReturnType<typeof setTimeout> | undefined;
 let lockReleasedEarly = false;
+
+async function verifyFreshMigrationConnection(connection: Client) {
+  const migration = readFileSync(
+    new URL(
+      '../../supabase/migrations/20261013162931_command_palette_breadcrumb_context.sql',
+      import.meta.url,
+    ),
+    'utf8',
+  );
+  const parts = migration.match(
+    /^([\s\S]*?)(create or replace function public\.command_palette_search_v1\([\s\S]*?) as \$\$/,
+  );
+  assert.ok(
+    parts,
+    'The actual breadcrumb migration must contain its RPC header',
+  );
+  const probe =
+    parts[2].replace(
+      'public.command_palette_search_v1',
+      'pg_temp.command_palette_migration_probe',
+    ) +
+    " as $$ begin return jsonb_build_object('threshold',current_setting('pg_trgm.word_similarity_threshold')); end; $$;";
+  try {
+    await connection.query('begin');
+    await connection.query('set local role authenticated');
+    const role = await connection.query(
+      'select rolsuper from pg_roles where rolname=current_user',
+    );
+    assert.equal(role.rows[0].rolsuper, false, 'Probe must use a nonsuperuser');
+    await connection.query(
+      'create temporary table palette_migration_probe(id int)',
+    );
+    const before = await connection.query(
+      "select context from pg_settings where name='pg_trgm.word_similarity_threshold'",
+    );
+    assert.equal(
+      before.rowCount,
+      0,
+      'Fresh backend must not have loaded pg_trgm',
+    );
+    await connection.query('savepoint unregistered_parameter');
+    await assert.rejects(connection.query(probe), {
+      code: '42501',
+      message:
+        'permission denied to set parameter "pg_trgm.word_similarity_threshold"',
+    });
+    await connection.query('rollback to savepoint unregistered_parameter');
+    // Execute the repository prefix, not a duplicated load statement. Omitting
+    // it reproduces the provider's failure despite the extension being installed.
+    await connection.query(parts[1]);
+    const loaded = await connection.query(
+      "select context,setting from pg_settings where name='pg_trgm.word_similarity_threshold'",
+    );
+    assert.equal(loaded.rows[0].context, 'user');
+    const defaultThreshold = loaded.rows[0].setting;
+    await connection.query(probe);
+    const result = await connection.query(
+      "select pg_temp.command_palette_migration_probe('probe')->>'threshold' threshold",
+    );
+    assert.equal(Number(result.rows[0].threshold), 0.35);
+    const restored = await connection.query(
+      "select setting from pg_settings where name='pg_trgm.word_similarity_threshold'",
+    );
+    assert.equal(restored.rows[0].setting, defaultThreshold);
+  } finally {
+    await connection.query('rollback');
+  }
+}
+
+async function verifyFreshAuthenticatedSearch(member: string) {
+  const connection = new Client({
+    connectionString: database,
+    connectionTimeoutMillis: 3000,
+    query_timeout: 7000,
+  });
+  try {
+    await connection.connect();
+    await connection.query('begin');
+    await connection.query('set local role authenticated');
+    const before = await connection.query(
+      "select context from pg_settings where name='pg_trgm.word_similarity_threshold'",
+    );
+    assert.equal(
+      before.rowCount,
+      0,
+      'Caller must start without loaded pg_trgm',
+    );
+    await connection.query('savepoint nonmember');
+    await assert.rejects(
+      connection.query(
+        "select public.command_palette_search_v1('fresh backend')",
+      ),
+      { code: 'P1001', message: 'forbidden' },
+    );
+    await connection.query('rollback to savepoint nonmember');
+    await connection.query("select set_config('request.jwt.claims',$1,true)", [
+      JSON.stringify({ sub: member, role: 'authenticated' }),
+    ]);
+    const result = await connection.query(
+      "select public.command_palette_search_v1('fresh backend') answer",
+    );
+    assert.equal(result.rows[0].answer.version, 1);
+    assert.ok(Array.isArray(result.rows[0].answer.rows));
+    const loaded = await connection.query(
+      "select context from pg_settings where name='pg_trgm.word_similarity_threshold'",
+    );
+    assert.equal(loaded.rows[0].context, 'user');
+  } finally {
+    await connection.query('rollback').catch(() => {});
+    await connection.end();
+  }
+}
+
 try {
   await owner.connect();
   await blocker.connect();
+  await verifyFreshMigrationConnection(owner);
   const created = await admin.auth.admin.createUser({
     email: 'palette-timeout-' + randomUUID() + '@example.test',
     password: authFixture.password,
@@ -56,6 +171,7 @@ try {
     'insert into public.app_members(user_id,display_name,role) values($1,$2,$3)',
     [actor, 'Palette timeout fixture', 'viewer'],
   );
+  await verifyFreshAuthenticatedSearch(actor);
   const session = await caller.auth.signInWithPassword({
     email: created.data.user!.email!,
     password: authFixture.password,

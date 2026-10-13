@@ -8,7 +8,7 @@ select ok((select reloptions @> array['security_invoker=true'] from pg_class whe
 select ok(not has_function_privilege(role_name,'public.command_palette_search_v1(text,text,text)','EXECUTE'),role_name||' cannot search')
  from (values ('anon'),('service_role')) roles(role_name);
 select ok(has_function_privilege('authenticated','public.command_palette_search_v1(text,text,text)','EXECUTE'),'caller role can reach membership guard');
-select ok((select not prosecdef and proconfig @> array['search_path=""','statement_timeout=5s'] from pg_proc
+select ok((select not prosecdef and proconfig @> array['search_path=""','statement_timeout=5s','pg_trgm.word_similarity_threshold=0.35'] from pg_proc
  where oid='public.command_palette_search_v1(text,text,text)'::regprocedure),'invoker, empty search path and timeout declaration');
 
 insert into auth.users(id,email) values

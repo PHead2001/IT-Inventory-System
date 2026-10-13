@@ -1,4 +1,9 @@
 -- Forward breadcrumb enrichment reuses the caller-invoker inventory_locations view.
+-- Register pg_trgm's USERSET parameters in this migration connection before
+-- validating the function SET clause. An installed extension alone does not load
+-- its library in a fresh backend; unknown GUC placeholders require SET privilege.
+select extensions.word_similarity('','');
+
 create or replace function public.command_palette_search_v1(p_query text,p_scope text default 'active',p_purpose text default 'all')
 returns jsonb language plpgsql stable security invoker
 set search_path='' set statement_timeout='5s'
