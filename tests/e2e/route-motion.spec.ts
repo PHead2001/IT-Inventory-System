@@ -1386,9 +1386,18 @@ for (const mode of ['system-reduced', 'local-reduced'] as const) {
           const streamed = await earlyQuantityFallback(browserRequest);
           // Reduced mode reveals the ordinary fallback instead of retaining a
           // paired outgoing title, while real server primary data is blocked.
-          await expect(
-            page.locator('[data-loading-shape="record"]'),
-          ).toBeVisible();
+          const skeleton = page.locator('[data-loading-shape="record"]');
+          await expect(skeleton).toBeVisible();
+          await expect(skeleton).toHaveAttribute('data-shimmer', 'false');
+          // Inspect the actual block pseudo-elements: the OS media query alone
+          // would hide a broken browser-local preference in the system cases.
+          const blocks = skeleton.locator('[aria-hidden="true"] span');
+          expect(await blocks.count()).toBeGreaterThan(0);
+          for (const block of await blocks.all()) {
+            await expect(block).toHaveCSS('animation-name', 'none', {
+              pseudo: 'after',
+            });
+          }
           await expect(routeProgress(page)).toHaveAttribute(
             'data-visible',
             'true',
