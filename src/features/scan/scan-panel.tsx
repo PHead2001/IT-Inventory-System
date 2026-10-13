@@ -1,6 +1,7 @@
 'use client';
 import { useRouteRouter as useRouter } from '@/components/experience/route-pending';
 import { ScanMatchLabel } from './scan-match-label';
+import { afterTransitionCapture } from '@/components/forms/transition-capture';
 import { RecordStatus } from '@/components/record-status';
 import {
   useCallback,
@@ -75,13 +76,21 @@ export function ScanPanel() {
     };
   }, [stop]);
   useEffect(() => {
-    if (busy) cancelControl.current?.focus();
-    else if (completionFocus.current) {
-      if (completionFocus.current === 'match') firstMatch.current?.focus();
-      else inputControl.current?.focus();
-      completionFocus.current = null;
-    }
-  }, [busy, result]);
+    return afterTransitionCapture(document, () => {
+      if (
+        !mounted.current ||
+        scopeInvalidated.current ||
+        scopeEpoch.current !== assignmentEpoch()
+      )
+        return;
+      if (busy) cancelControl.current?.focus();
+      else if (completionFocus.current) {
+        if (completionFocus.current === 'match') firstMatch.current?.focus();
+        else inputControl.current?.focus();
+        completionFocus.current = null;
+      }
+    });
+  }, [busy, result, scopeBlocked]);
 
   const open = useCallback(
     async (

@@ -25,6 +25,7 @@ import { AssignmentScopeGuard } from './assignment-scope-guard';
 import { ProtectedPrivacyBoundary } from '@/components/auth/auth-privacy';
 import { ProtectedPrivacyContent } from '@/components/auth/privacy-content';
 import { useEffect } from 'react';
+import { holdTransitionCapture } from '../../../tests/helpers/transition-capture';
 const mocks = vi.hoisted(() => ({
   find: vi.fn(),
   inspect: vi.fn(),
@@ -2590,6 +2591,50 @@ it('halts at capacity without eviction and allows settled Finish/End', () => {
   expect(readBatch(scope).value).toBeNull();
   expect(mocks.submit).not.toHaveBeenCalled();
 });
+it.each(['release', 'cancel', 'unmount'])(
+  'retains assignment review focus through capture and retires it on %s',
+  async (outcome) => {
+    const view = render(<AssignmentWorkspace {...props} />);
+    const capture = holdTransitionCapture();
+    try {
+      await inspect();
+      const review = screen.getByRole('region', { name: 'Review assignment' });
+      expect(review).not.toHaveFocus();
+      if (outcome === 'cancel')
+        fireEvent.click(
+          screen.getByRole('button', { name: 'Skip inspection / review' }),
+        );
+      if (outcome === 'unmount') view.unmount();
+      await act(capture.release);
+      if (outcome === 'release') expect(review).toHaveFocus();
+      else expect(review).not.toHaveFocus();
+      if (outcome === 'cancel')
+        expect(
+          screen.getByLabelText('Scan, paste, or search inventory'),
+        ).toHaveFocus();
+    } finally {
+      view.unmount();
+      await act(capture.release);
+      capture.dispose();
+    }
+  },
+);
+it('retains the new batch destination focus intent until native capture completes', async () => {
+  render(<AssignmentWorkspace {...props} />);
+  fireEvent.click(screen.getByRole('button', { name: 'Finish batch' }));
+  const capture = holdTransitionCapture();
+  try {
+    fireEvent.click(screen.getByRole('button', { name: 'End batch' }));
+    const destination = screen.getByLabelText('Destination site');
+    expect(destination).not.toHaveFocus();
+    await act(capture.release);
+    expect(destination).toHaveFocus();
+  } finally {
+    await act(capture.release);
+    capture.dispose();
+  }
+});
+
 it('keeps ticket typing focus after a confirmed receipt and focuses summary/destination on Finish/End', async () => {
   const user = userEvent.setup();
   render(<AssignmentWorkspace {...props} />);

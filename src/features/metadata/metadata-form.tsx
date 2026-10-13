@@ -1,4 +1,5 @@
 'use client';
+import { afterTransitionCapture } from '@/components/forms/transition-capture';
 import {
   LoadingReveal,
   LoadingSkeleton,
@@ -308,10 +309,12 @@ export function MetadataForm({
   );
   useLayoutEffect(() => {
     if (!creating || preview || !review) return;
-    creationReviewHeading.current?.focus({ preventScroll: true });
-    creationReviewHeading.current?.scrollIntoView?.({
-      block: 'start',
-      behavior: 'auto',
+    return afterTransitionCapture(document, () => {
+      creationReviewHeading.current?.focus({ preventScroll: true });
+      creationReviewHeading.current?.scrollIntoView?.({
+        block: 'start',
+        behavior: 'auto',
+      });
     });
   }, [creating, preview, review]);
   const [creationIntent, setCreationIntent] = useState<Record<
@@ -1674,7 +1677,8 @@ export function MetadataForm({
     else discard();
   };
   useEffect(() => {
-    if (discardOpen) keepRef.current?.focus();
+    if (discardOpen)
+      return afterTransitionCapture(document, () => keepRef.current?.focus());
   }, [discardOpen]);
   useEffect(() => {
     if (

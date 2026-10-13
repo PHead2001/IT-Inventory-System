@@ -25,6 +25,7 @@ import {
   usePrivacyRevocationRevision,
 } from '@/components/auth/privacy-readiness';
 import { Button } from '@/components/ui/button';
+import { afterTransitionCapture } from '@/components/forms/transition-capture';
 import { Input } from '@/components/ui/input';
 import { field, panel } from '@/features/inventory/components/read-ui';
 import { submitCustody, loadCustodyReceipt } from '@/features/custody/actions';
@@ -164,10 +165,10 @@ function AssignmentFields({
   const deferredReviewFocus = useRef<number | null>(null);
   const reviewRef = useRef<HTMLElement>(null);
   const chooserRef = useRef<HTMLUListElement>(null);
+  const pendingResumeFocus = useRef<(() => void) | null>(null);
   const resumeReviewFocus = useCallback(() => {
     if (cancelPress.current !== null) return;
     const token = deferredReviewFocus.current;
-    deferredReviewFocus.current = null;
     if (
       token === null ||
       !mounted.current ||
@@ -177,10 +178,23 @@ function AssignmentFields({
       document.activeElement !== cancelRef.current
     )
       return;
-    if (stateRef.current.phase === 'review') reviewRef.current?.focus();
-    else if (stateRef.current.phase === 'choose') chooserRef.current?.focus();
-    else if (stateRef.current.phase === 'ready' && stateRef.current.message)
-      inputRef.current?.focus();
+    pendingResumeFocus.current?.();
+    pendingResumeFocus.current = afterTransitionCapture(document, () => {
+      if (
+        !mounted.current ||
+        epoch.current !== assignmentEpoch() ||
+        generation.current !== token ||
+        stateRef.current.generation !== token ||
+        cancelPress.current !== null ||
+        document.activeElement !== cancelRef.current
+      )
+        return;
+      deferredReviewFocus.current = null;
+      if (stateRef.current.phase === 'review') reviewRef.current?.focus();
+      else if (stateRef.current.phase === 'choose') chooserRef.current?.focus();
+      else if (stateRef.current.phase === 'ready' && stateRef.current.message)
+        inputRef.current?.focus();
+    });
   }, []);
   useEffect(() => {
     const release = (event: PointerEvent) => {
@@ -218,6 +232,8 @@ function AssignmentFields({
       cancelPress.current = null;
       abortedCancelClick.current = null;
       deferredReviewFocus.current = null;
+      pendingResumeFocus.current?.();
+      pendingResumeFocus.current = null;
     };
   }, [resumeReviewFocus]);
   const [ready, setReady] = useState(false);
@@ -231,20 +247,23 @@ function AssignmentFields({
   const [receiptIssue, setReceiptIssue] = useState('');
   const [restoring, setRestoring] = useState(false);
   useLayoutEffect(() => {
-    if (restoring) cancelRef.current?.focus();
+    if (restoring)
+      return afterTransitionCapture(document, () => cancelRef.current?.focus());
   }, [restoring]);
   useLayoutEffect(() => {
     stateRef.current = state;
   });
   useLayoutEffect(() => {
-    if (focusDestination.current) {
-      focusDestination.current = false;
-      destinationRef.current?.focus();
-    }
-    if (focusInput.current && state.phase === 'ready') {
-      focusInput.current = false;
-      inputRef.current?.focus();
-    }
+    return afterTransitionCapture(document, () => {
+      if (focusDestination.current) {
+        focusDestination.current = false;
+        destinationRef.current?.focus();
+      }
+      if (focusInput.current && state.phase === 'ready') {
+        focusInput.current = false;
+        inputRef.current?.focus();
+      }
+    });
   }, [state.phase, state.generation, state.context]);
   useLayoutEffect(() => {
     const eventId = state.receipt?.result.eventId;
@@ -254,24 +273,32 @@ function AssignmentFields({
       eventId &&
       eventId !== previousReceiptId.current
     )
-      inputRef.current?.focus();
+      return afterTransitionCapture(document, () => {
+        inputRef.current?.focus();
+        previousReceiptId.current = eventId;
+      });
     previousReceiptId.current = eventId;
   }, [state.phase, state.receipt?.result.eventId, batch?.finished]);
   useLayoutEffect(() => {
-    if (batch?.finished) summaryRef.current?.focus();
+    if (batch?.finished)
+      return afterTransitionCapture(document, () =>
+        summaryRef.current?.focus(),
+      );
   }, [batch?.finished]);
   useLayoutEffect(() => {
     // Keep the pressed Cancel target in place until release. Review focus can
     // scroll the form away between pointerdown and the accepted click.
-    deferredReviewFocus.current = null;
-    if (cancelPress.current !== null) {
-      deferredReviewFocus.current = state.generation;
-      return;
-    }
-    if (state.phase === 'review') reviewRef.current?.focus();
-    else if (state.phase === 'choose') chooserRef.current?.focus();
-    else if (state.phase === 'ready' && state.message)
-      inputRef.current?.focus();
+    return afterTransitionCapture(document, () => {
+      deferredReviewFocus.current = null;
+      if (cancelPress.current !== null) {
+        deferredReviewFocus.current = state.generation;
+        return;
+      }
+      if (state.phase === 'review') reviewRef.current?.focus();
+      else if (state.phase === 'choose') chooserRef.current?.focus();
+      else if (state.phase === 'ready' && state.message)
+        inputRef.current?.focus();
+    });
   }, [state.phase, state.message, state.generation]);
   const alive = () => mounted.current && epoch.current === assignmentEpoch();
   const resetReceiptRead = () => {

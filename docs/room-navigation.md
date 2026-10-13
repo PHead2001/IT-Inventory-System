@@ -20,6 +20,10 @@ an authorized empty snapshot: saved pans restore exactly, while an empty snapsho
 uses canonical framing. A selected-location return focuses only after applying
 that saved baseline. A same-session recheck preserves an already initialized camera;
 the snapshot provider continues to deny writes and retire stale owners as before.
+Reactivating a bare `/room` page reapplies its optional saved-space preference
+without creating another focus request when the space and location are unchanged.
+This preserves the manual camera pose and completed focus state; a genuinely
+different saved space still restores normally, and explicit URL selection wins.
 Initialization belongs to the committed room, camera and controls resource tuple.
 Replacing either graphics resource waits for the same authorized saved-view grant
 and reapplies that baseline before explicit selection focus. Outgoing resource

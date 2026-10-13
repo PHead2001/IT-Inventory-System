@@ -1,4 +1,5 @@
 'use client';
+import { afterTransitionCapture } from '@/components/forms/transition-capture';
 
 import { useEffect, useId, useMemo, useRef, useState } from 'react';
 import { RequiredMark } from '@/components/forms/validation';
@@ -178,7 +179,10 @@ export function LocationPicker({
       !activeTreeStillVisible &&
       document.activeElement === document.body
     )
-      searchRef.current?.focus();
+      return afterTransitionCapture(document, () => {
+        if (document.activeElement === document.body)
+          searchRef.current?.focus();
+      });
   }, [visibleOpen, searching, activeTreeId, activeTreeStillVisible]);
   const activeOptionIndex = Math.min(activeIndex, options.length - 1);
   const selected = locations.find(
@@ -203,12 +207,17 @@ export function LocationPicker({
 
   useEffect(() => {
     if (!visibleOpen) return;
-    searchRef.current?.focus();
+    const cancelFocus = afterTransitionCapture(document, () =>
+      searchRef.current?.focus(),
+    );
     function outside(event: PointerEvent) {
       if (!rootRef.current?.contains(event.target as Node)) setOpen(false);
     }
     document.addEventListener('pointerdown', outside);
-    return () => document.removeEventListener('pointerdown', outside);
+    return () => {
+      cancelFocus();
+      document.removeEventListener('pointerdown', outside);
+    };
   }, [visibleOpen]);
   useEffect(() => {
     if (!visibleOpen || !window.visualViewport) return;

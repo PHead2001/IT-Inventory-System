@@ -1,4 +1,5 @@
 'use client';
+import { afterTransitionCapture } from '@/components/forms/transition-capture';
 import { useCallback, useEffect, useId, useRef, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { fieldTypes, type MetadataDefinition } from './contracts';
@@ -76,10 +77,13 @@ export function AddFieldDialog({
   }, [destination, field, tab, datetimeDraft, onDraftChange]);
   useEffect(() => {
     const element = dialog.current;
-    if (element?.showModal) element.showModal();
-    else element?.setAttribute('open', '');
-    element?.querySelector<HTMLInputElement>('input')?.focus();
+    const cancelFocus = afterTransitionCapture(document, () => {
+      if (element?.showModal) element.showModal();
+      else element?.setAttribute('open', '');
+      element?.querySelector<HTMLInputElement>('input')?.focus();
+    });
     return () => {
+      cancelFocus();
       // Successful additions/navigation hand focus to the parent placement.
       // Cancellation alone returns to the trigger or its visible fallback.
       if (placementHandoff.current) return;

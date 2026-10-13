@@ -14,6 +14,7 @@ import {
 import { AssignmentScopeGuard } from './assignment-scope-guard';
 import { readFileSync } from 'node:fs';
 import { PNG } from 'pngjs';
+import { holdTransitionCapture } from '../../../tests/helpers/transition-capture';
 const mocks = vi.hoisted(() => ({
   decode: vi.fn(),
   stop: vi.fn(),
@@ -167,6 +168,36 @@ it('focuses and announces the ambiguous chooser after inspection', async () => {
   );
   expect(mocks.push).not.toHaveBeenCalled();
 });
+it.each(['release', 'unmount', 'account'])(
+  'retains completion focus through native capture and retires it on %s',
+  async (outcome) => {
+    const pending = deferred<unknown>();
+    mocks.resolve.mockReturnValue(pending.promise);
+    const view = render(<ScanPanel />);
+    fireEvent.click(screen.getByRole('button', { name: 'Open' }));
+    const capture = holdTransitionCapture();
+    try {
+      await act(async () =>
+        pending.resolve({
+          status: 'ambiguous',
+          matches: [
+            found.matches[0],
+            { path: '/locations/OTHER', state: 'active', label: 'Other' },
+          ],
+        }),
+      );
+      const match = screen.getByRole('link', { name: 'IT Closet' });
+      expect(match).not.toHaveFocus();
+      if (outcome === 'unmount') view.unmount();
+      if (outcome === 'account') act(() => invalidateAssignmentCallbacks());
+      await act(capture.release);
+      if (outcome === 'release') expect(match).toHaveFocus();
+      else expect(match).not.toHaveFocus();
+    } finally {
+      capture.dispose();
+    }
+  },
+);
 it.each(['cancel', 'text', 'mode', 'account'])(
   'invalidates a pending lookup on %s without late navigation or context changes',
   async (action) => {

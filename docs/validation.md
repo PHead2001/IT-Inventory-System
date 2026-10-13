@@ -1134,6 +1134,41 @@ do not certify real browser cookie delivery, local/hosted request-origin routing
 database behavior, the full production build/E2E gate, or final committed-SHA
 remote checks and fresh review. Root integration owns those remaining boundaries.
 
+## Native capture interactivity and focus
+
+The focused native fixture in `transition-capture.spec.ts` bundles the installed
+Next React runtime and real capture boundary without a database. It reproduces
+dropped controlled input without the guard, checks guarded input/selection,
+domain-disabled controls, destination layout-effect focus and outside focus/pointer
+cancellation, and distinguishes
+capture release from animation completion. The fixture imports the compiler
+provided transitively by the existing locked toolchain; no dependency was added.
+Default Playwright discovery must retain this spec. This isolated fixture does
+not certify actual application routes, production-server navigation, authorized
+data, real form drafts or the complete local Supabase/browser gate.
+
+Consumer regressions hold the public capture observer through pending DOM updates
+and prove deferred focus, superseding task/picker state, unmount and account-change
+cancellation. Guard regressions prove native-call/error identity and release of
+later subscribers after an earlier callback throws, with sanitized reporting.
+Boundary tests distinguish native capture blur from outside focus followed by blur,
+outside nonfocusable pointer input and history cancellation. jsdom's disabled-input
+blur is explicitly modeled; actual application native-browser focus remains a separate gate.
+The broad consumer map covers Scan and assignment, task return/discard focus,
+pickers, settings rename, file dialogs, inventory completion, metadata review and
+designer entry/placement, and the room toolbar. Immediate pointer/keyboard handlers
+retain their existing semantics because capture interactivity blocks their targets.
+
+On the 2026-10-13 working tree, the focused consumer/sibling batch passed 673 tests
+in 17 suites, and the room/navigation/camera batch passed 122 tests in eight suites.
+Both used one Vitest worker and a 768 MiB heap. Canonical typechecking passed at
+1536 MiB, and scoped zero-warning lint and formatting passed. The five isolated
+Chromium capture tests passed using ignored
+`.local-tools/pr54-capture.playwright.config.ts` with one worker and no application
+web server, database or build; canonical default discovery retained all five.
+These results precede the final integration commit and do not certify the complete
+application/database/browser gate or exact committed-SHA remote checks.
+
 ## Room Back camera retention with the configured router
 
 Cache Components is not enabled in this app. Installed Next 16.3.6 defaults it

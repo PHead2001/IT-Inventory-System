@@ -1,4 +1,5 @@
 'use client';
+import { afterTransitionCapture } from '@/components/forms/transition-capture';
 import { useRouteTask } from '@/components/experience/route-pending';
 import { useRouteRouter as useRouter } from '@/components/experience/route-pending';
 
@@ -621,12 +622,15 @@ export function MetadataSettings({
   const panesRef = useRef<HTMLDivElement>(null);
   const inspectorRef = useRef<HTMLElement>(null);
   const pendingDesignerFocus = useRef<number | null>(null);
+  const pendingCaptureFocus = useRef<(() => void) | null>(null);
   const focusIntent = useRef(0);
   const cancelDesignerFocus = useCallback(() => {
     focusIntent.current++;
     if (pendingDesignerFocus.current !== null)
       cancelAnimationFrame(pendingDesignerFocus.current);
     pendingDesignerFocus.current = null;
+    pendingCaptureFocus.current?.();
+    pendingCaptureFocus.current = null;
   }, []);
   useEffect(() => cancelDesignerFocus, [cancelDesignerFocus]);
   const scheduleDesignerFocus = useCallback(
@@ -635,7 +639,10 @@ export function MetadataSettings({
       const intent = focusIntent.current;
       pendingDesignerFocus.current = requestAnimationFrame(() => {
         pendingDesignerFocus.current = null;
-        if (intent === focusIntent.current) focus();
+        if (intent === focusIntent.current)
+          pendingCaptureFocus.current = afterTransitionCapture(document, () => {
+            if (intent === focusIntent.current) focus();
+          });
       });
     },
     [cancelDesignerFocus],
@@ -721,14 +728,16 @@ export function MetadataSettings({
   useEffect(() => {
     const dialog = recoveryToolsRef.current;
     if (!dialog) return;
-    if (recoveryToolsOpen && identityStatus !== 'blocked') {
-      if (dialog.showModal) dialog.showModal();
-      else dialog.setAttribute('open', '');
-    } else if (dialog.open) {
-      if (dialog.close) dialog.close();
-      else dialog.removeAttribute('open');
-      recoveryToolsTrigger.current?.focus();
-    }
+    return afterTransitionCapture(document, () => {
+      if (recoveryToolsOpen && identityStatus !== 'blocked') {
+        if (dialog.showModal) dialog.showModal();
+        else dialog.setAttribute('open', '');
+      } else if (dialog.open) {
+        if (dialog.close) dialog.close();
+        else dialog.removeAttribute('open');
+        recoveryToolsTrigger.current?.focus();
+      }
+    });
   }, [recoveryToolsOpen, identityStatus]);
   const identityCheck = useRef(0);
   const identityInFlight = useRef(false);

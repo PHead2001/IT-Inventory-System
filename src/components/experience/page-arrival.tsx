@@ -3,6 +3,7 @@
 import { ViewTransition, useEffect, useState } from 'react';
 import { usePathname } from 'next/navigation';
 import { useRouteMotion } from './route-motion';
+import { TransitionCaptureBoundary } from '@/components/forms/transition-capture-boundary';
 import {
   RoutePresentationSourceContext,
   useRoutePresentationSource,
@@ -130,7 +131,7 @@ export function PageArrival({
           data-route-path={pathname ?? ''}
         >
           <ViewTransition default="none" update="none">
-            {children}
+            <TransitionCaptureBoundary>{children}</TransitionCaptureBoundary>
           </ViewTransition>
         </div>
       </ViewTransition>

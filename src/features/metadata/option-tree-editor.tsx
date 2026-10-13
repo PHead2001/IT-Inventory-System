@@ -1,4 +1,5 @@
 'use client';
+import { afterTransitionCapture } from '@/components/forms/transition-capture';
 import { useEffect, useId, useMemo, useRef, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import {
@@ -67,6 +68,12 @@ export function OptionTreeEditor({
     setPasteText('');
     pasteTrigger.current?.focus();
   };
+  useEffect(() => {
+    if (pasteOpen)
+      return afterTransitionCapture(document, () =>
+        pasteInput.current?.focus(),
+      );
+  }, [pasteOpen]);
   const [destinationSearch, setDestinationSearch] = useState('');
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [moving, setMoving] = useState(false);
@@ -77,7 +84,10 @@ export function OptionTreeEditor({
   const addOptionButton = useRef<HTMLButtonElement>(null);
   const removing = removalId ? index.byId.get(removalId) : undefined;
   useEffect(() => {
-    if (removalId) keepOptionButton.current?.focus();
+    if (removalId)
+      return afterTransitionCapture(document, () =>
+        keepOptionButton.current?.focus(),
+      );
   }, [removalId]);
   const cancelRemoval = () => {
     if (removalId) rowInputs.current.get(removalId)?.focus();
@@ -151,12 +161,14 @@ export function OptionTreeEditor({
   useEffect(() => {
     const focusId = pendingFocus.current;
     if (!focusId) return;
-    const row = rowInputs.current.get(focusId);
-    if (row) {
-      row.focus();
-      row.scrollIntoView?.({ block: 'nearest' });
-      pendingFocus.current = null;
-    }
+    return afterTransitionCapture(document, () => {
+      const row = rowInputs.current.get(focusId);
+      if (row && pendingFocus.current === focusId) {
+        row.focus();
+        row.scrollIntoView?.({ block: 'nearest' });
+        pendingFocus.current = null;
+      }
+    });
   }, [listed]);
   const patch = (optionId: string, next: Partial<Field['options'][number]>) =>
     change({
@@ -596,7 +608,6 @@ export function OptionTreeEditor({
           ref={pasteTrigger}
           onClick={() => {
             setPasteOpen(true);
-            requestAnimationFrame(() => pasteInput.current?.focus());
           }}
         >
           Paste option paths

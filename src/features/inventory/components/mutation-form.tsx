@@ -1,4 +1,5 @@
 'use client';
+import { afterTransitionCapture } from '@/components/forms/transition-capture';
 import { useRouteTask } from '@/components/experience/route-pending';
 import { useRouteRouter as useRouter } from '@/components/experience/route-pending';
 
@@ -446,7 +447,10 @@ function MutationFormFields({
     completedVersion: state?.ok ? state.version : undefined,
   });
   useEffect(() => {
-    if (completed) completionRef.current?.focus();
+    if (completed)
+      return afterTransitionCapture(document, () =>
+        completionRef.current?.focus(),
+      );
   }, [completed]);
   // A verified action snapshot may be newer than unchanged route props. Only
   // a newly observed prop catalog supersedes it; any changed review stays invalid.

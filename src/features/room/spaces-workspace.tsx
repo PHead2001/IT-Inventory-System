@@ -352,10 +352,25 @@ export function SpacesWorkspace({
             window.location.search
           )
             return;
-          setFocusCompletion({ scope: '', request: '', code: null, count: 0 });
-          setFocusOnRestore(false);
-          setFocusEpoch((epoch) => epoch + 1);
-          setSelection({ space, code: null, page: 1 });
+          // Activity recreates this effect on return. Reapplying the current
+          // preference must not create a room-fit request over a saved pan.
+          const current = selectionRef.current;
+          if (space.id !== current.space.id || current.code !== null) {
+            setFocusCompletion({
+              scope: '',
+              request: '',
+              code: null,
+              count: 0,
+            });
+            setFocusOnRestore(false);
+            setFocusEpoch((epoch) => epoch + 1);
+          }
+          if (
+            space.id !== current.space.id ||
+            current.code !== null ||
+            current.page !== 1
+          )
+            setSelection({ space, code: null, page: 1 });
         });
     }
     return () => {

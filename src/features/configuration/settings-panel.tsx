@@ -1,4 +1,5 @@
 'use client';
+import { afterTransitionCapture } from '@/components/forms/transition-capture';
 import { useRouteTask } from '@/components/experience/route-pending';
 import { useRouteRouter as useRouter } from '@/components/experience/route-pending';
 
@@ -70,14 +71,16 @@ export function SettingsPanel({
   const returnToCategory = useRef<string | null>(null);
   const categoryList = useRef<HTMLUListElement>(null);
   useLayoutEffect(() => {
-    if (editing) renameInput.current?.focus();
-    else if (!pending && returnToCategory.current) {
-      (
-        renameTriggers.current.get(returnToCategory.current) ??
-        categoryList.current
-      )?.focus();
-      returnToCategory.current = null;
-    }
+    return afterTransitionCapture(document, () => {
+      if (editing) renameInput.current?.focus();
+      else if (!pending && returnToCategory.current) {
+        (
+          renameTriggers.current.get(returnToCategory.current) ??
+          categoryList.current
+        )?.focus();
+        returnToCategory.current = null;
+      }
+    });
   }, [editing, pending]);
   const closeRename = () => {
     setEditing(null);

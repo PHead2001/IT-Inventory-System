@@ -17,6 +17,7 @@ import {
   type TaskDiscard,
 } from './task-state';
 import { Button } from '@/components/ui/button';
+import { afterTransitionCapture } from '@/components/forms/transition-capture';
 export type TaskChoice = {
   id: string;
   label: string;
@@ -75,11 +76,19 @@ export function TaskWorkspace({
   const heading = useRef<HTMLHeadingElement | null>(null);
   const tasksHeading = useRef<HTMLHeadingElement | null>(null);
   const returnFocusRequested = useRef(false);
-  useEffect(() => {
-    if (selected) heading.current?.focus();
-  }, [selected, instance, invalidated]);
-  const launcher = useRef<HTMLButtonElement | null>(null);
+  const stayButton = useRef<HTMLButtonElement>(null);
   const locked = state.pending || state.uncertain;
+  useEffect(() => {
+    if (selected)
+      return afterTransitionCapture(document, () => heading.current?.focus());
+  }, [selected, instance, invalidated]);
+  useEffect(() => {
+    if (requested !== undefined && !locked)
+      return afterTransitionCapture(document, () =>
+        stayButton.current?.focus(),
+      );
+  }, [requested, locked]);
+  const launcher = useRef<HTMLButtonElement | null>(null);
   const unavailable = invalidated && !locked && !state.completed;
   useEffect(() => {
     if (
@@ -91,12 +100,14 @@ export function TaskWorkspace({
       !returnFocusRequested.current
     )
       return;
-    // Return focus after the closed task's clean state commits.
-    returnFocusRequested.current = false;
-    const target = launcher.current;
-    if (target?.isConnected && !target.disabled) target.focus();
-    if (!target || target.ownerDocument.activeElement !== target)
-      tasksHeading.current?.focus();
+    return afterTransitionCapture(document, () => {
+      // Consume only after capture permits the closed task's focus transfer.
+      returnFocusRequested.current = false;
+      const target = launcher.current;
+      if (target?.isConnected && !target.disabled) target.focus();
+      if (!target || target.ownerDocument.activeElement !== target)
+        tasksHeading.current?.focus();
+    });
   }, [selected, state]);
   const report = useCallback((next: TaskState) => {
     if (
@@ -250,7 +261,7 @@ export function TaskWorkspace({
           <p>Your current task has unsaved entries.</p>
           <Button
             type="button"
-            autoFocus
+            ref={stayButton}
             disabled={locked}
             onClick={() => {
               setRequested(undefined);

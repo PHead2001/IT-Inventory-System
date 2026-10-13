@@ -9,6 +9,7 @@ import {
 } from 'react';
 import type { createRouteReadiness } from './route-readiness';
 import { RouteContentIdentityContext } from './route-content-identity';
+import { afterTransitionCapture } from '@/components/forms/transition-capture';
 
 export const RouteReadyContext = createContext<ReturnType<
   typeof createRouteReadiness
@@ -44,13 +45,21 @@ export function RouteReady({
   // Runs for actual mount/update/Activity reactivation. Presentation generation
   // changes alone neither rerender this content nor acknowledge readiness.
   useLayoutEffect(() => {
-    if (ready && root.current)
-      return readiness?.register({
+    if (!ready || !root.current || !readiness) return;
+    const committedRoot = root.current;
+    let unregister: (() => void) | undefined;
+    const cancel = afterTransitionCapture(committedRoot.ownerDocument, () => {
+      unregister = readiness.register({
         actorId,
         routeKey,
         contentIdentity,
-        root: root.current,
+        root: committedRoot,
       });
+    });
+    return () => {
+      cancel();
+      unregister?.();
+    };
   });
   return (
     <RouteContentIdentityContext value={identity}>

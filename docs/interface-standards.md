@@ -355,6 +355,19 @@ anchors, external links, modified/new-tab navigation, no-JavaScript document loa
 authentication forms outside the protected shell and API/file requests without an
 owned presentation boundary remain native; they do not fabricate global route pending.
 
+Native view-transition DOM capture briefly disables and inerts conventional page
+content through a display-contents fieldset. Release follows the actual
+`updateCallbackDone` settlement, including rejection; it never waits for animation
+completion or acknowledges a backend request. Domain-disabled controls stay
+disabled. Effect-driven focus, dialog entry, designer placement and primary route
+readiness retain cancellable intent until capture releases. Superseded effects,
+Activity retirement and unmount cancel their own queued intent. The prior focused
+control returns only while the boundary still owns focus: outside focus, outside
+pointer input and history/page exit retire restoration even if focus later moves
+to the document body. Subscriber failures are isolated and reported with a bounded
+generic error; they cannot replace the native API's result/error or strand another
+capture owner. No native focus method or React/router implementation is patched.
+
 React/DOM/types 19.3 and Fiber 9.8.1 replace the previous canary type reference;
 Drei/Three are unchanged. Fiber's [React 19.3 compatibility release](https://github.com/pmndrs/react-three-fiber/releases/tag/v9.8.0)
 and Activity/Canvas lifecycle fix require real WebGL/cache-Back/camera regression
