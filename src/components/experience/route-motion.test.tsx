@@ -1221,8 +1221,10 @@ it('native retirement keeps real destination readiness and a fresh app Back titl
       backName,
     );
     expect(
-      runtime.boundaries.some(
-        (boundary) => boundary.update === 'route-content',
+      // The detail route can retain a canvas ancestor. Fresh shared-title
+      // approval must not also authorize a snapshot of the whole page.
+      runtime.boundaries.every(
+        (boundary) => boundary.update !== 'route-content',
       ),
     ).toBe(true);
   } finally {

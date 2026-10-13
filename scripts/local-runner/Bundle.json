@@ -1,7 +1,7 @@
 {
   "schema": 1,
   "tag": "it-inventory-local-runner-v1",
-  "version": "2026-10-12.1",
+  "version": "2026-10-13.1",
   "files": [
     {
       "name": "Common.ps1",
@@ -25,7 +25,7 @@
     },
     {
       "name": "Image.Inputs.json",
-      "hash": "3EE322131A71E8253F5069E7B7AD1B280E543088B456E4F123532CEB27E0C0D5"
+      "hash": "0E6632E90939F371CB2A2D0E0FACA4E23A5F1A72A590C386B19D120CB4A77096"
     },
     {
       "name": "Image.Package.json",
@@ -33,7 +33,7 @@
     },
     {
       "name": "Image.PackageLock.json",
-      "hash": "9DE0B6388043898426FEACAD4DB44E984FEA9C77F54CA8D456D175821F54A3EB"
+      "hash": "DA78904DFAF4CF34C0CB7085B5921072E11E92B35ABF7C1BA201CB0BCB8A53B2"
     },
     {
       "name": "Image.Supabase.toml",

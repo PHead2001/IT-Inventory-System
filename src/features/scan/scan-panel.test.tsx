@@ -177,8 +177,45 @@ it('a saturated result never claims a unique match and offers ordinary inventory
   expect(
     screen.getByRole('link', { name: 'Search inventory' }),
   ).toHaveAttribute('href', '/inventory');
-  expect(screen.getByRole('link', { name: 'Laptop' })).toHaveFocus();
+  // The result commit precedes its passive completion-focus effect.
+  await waitFor(() =>
+    expect(screen.getByRole('link', { name: 'Laptop' })).toHaveFocus(),
+  );
   expect(mocks.push).not.toHaveBeenCalled();
+});
+it('retains saturated chooser focus until a deferred lookup capture releases', async () => {
+  const pending = deferred<unknown>();
+  mocks.resolve.mockReturnValue(pending.promise);
+  render(<ScanPanel />);
+  fireEvent.click(screen.getByRole('button', { name: 'Open' }));
+  const capture = holdTransitionCapture();
+  try {
+    await act(async () =>
+      pending.resolve({
+        status: 'found',
+        truncated: true,
+        matches: [
+          {
+            kind: 'asset',
+            path: '/inventory/assets/70000000-0000-4000-8000-000000000001',
+            label: 'Laptop',
+            state: 'active',
+          },
+        ],
+      }),
+    );
+    const match = screen.getByRole('link', { name: 'Laptop' });
+    expect(match).not.toHaveFocus();
+    expect(
+      screen.getByRole('link', { name: 'Search inventory' }),
+    ).toBeVisible();
+    expect(mocks.push).not.toHaveBeenCalled();
+    await act(capture.release);
+    expect(match).toHaveFocus();
+    expect(mocks.push).not.toHaveBeenCalled();
+  } finally {
+    capture.dispose();
+  }
 });
 it('reports changed scope when an earlier sibling guard invalidates during mount before Scan subscribes', () => {
   const actorId = '00000000-0000-4000-8000-000000000001';
