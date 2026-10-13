@@ -25,7 +25,7 @@ import {
   useRouteTask,
   useRouteActionResult,
 } from './route-pending';
-import { PageArrival } from './page-arrival';
+import { CanvasFreeRouteContent, PageArrival } from './page-arrival';
 import RouteLink from './route-link';
 import { QueueLogoutForm } from '@/features/labels/queue-logout-form';
 import { PrivacyReadinessContext } from '@/components/auth/privacy-readiness';
@@ -254,7 +254,9 @@ it('generic snapshot completion before a late inner primary preserves its exact 
     view(
       <>
         <Observe />
-        <PageArrival pathname={runtime.pathname}>
+        {/* This fixture contains conventional title/list content only. The
+            actual detail page is canvas-bearing and cannot own a page snapshot. */}
+        <CanvasFreeRouteContent>
           <RouteContentIdentityContext
             value={{
               pathname: primaryKey,
@@ -264,7 +266,7 @@ it('generic snapshot completion before a late inner primary preserves its exact 
           >
             {primaryKey === '/inventory' ? <List /> : <Detail />}
           </RouteContentIdentityContext>
-        </PageArrival>
+        </CanvasFreeRouteContent>
       </>,
     );
   let finishGeneric!: () => void;
@@ -287,12 +289,13 @@ it('generic snapshot completion before a late inner primary preserves its exact 
     const titleArrival = motion.titleArrival;
     runtime.pathname = detailPath;
     page.rerender(fixture());
+    expect(motion.arrival).not.toBeNull();
     const generic = runtime.boundaries.findLast(
-      (boundary) => boundary.update === 'route-content',
+      (boundary) => boundary.enter === 'route-content',
     );
-    expect(generic?.onUpdate).toBeDefined();
+    expect(generic?.onEnter).toBeDefined();
     await act(async () => {
-      generic!.onUpdate!({ name: 'generic-route' }, []);
+      generic!.onEnter!({ name: 'generic-route' }, []);
     });
     await act(async () => {
       finishGeneric();
