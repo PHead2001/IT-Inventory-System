@@ -1856,8 +1856,9 @@ export type Database = {
         Args: { p_payload: Json; p_request_id: string }
         Returns: Json
       }
+      command_palette_normalize: { Args: { p_value: string }; Returns: string }
       command_palette_search_v1: {
-        Args: { p_query: string; p_scope?: string; p_purpose?: string }
+        Args: { p_purpose?: string; p_query: string; p_scope?: string }
         Returns: Json
       }
       inventory_asset_tag_lookup: { Args: { p_tag: string }; Returns: Json }
