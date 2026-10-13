@@ -28,7 +28,14 @@ import {
   readFallbackMarker,
 } from './quantity-flight-probe';
 
-type Capture = { name: string; tag: string; canvas: boolean; shell: boolean };
+type Capture = {
+  name: string;
+  tag: string;
+  canvas: boolean;
+  shell: boolean;
+  primary?: boolean;
+  primaryHeading?: 'Inventory' | 'Inventory history';
+};
 type ColdTitleGeometry = {
   x: number;
   y: number;
@@ -107,6 +114,7 @@ async function observeMotion(page: Page, unsupported = false) {
         Array.from(document.querySelectorAll('*')).flatMap((element) => {
           const name = getComputedStyle(element).viewTransitionName;
           if (!name || name === 'none') return [];
+          const heading = element.querySelector('h1')?.textContent?.trim();
           return [
             {
               name,
@@ -114,6 +122,13 @@ async function observeMotion(page: Page, unsupported = false) {
               canvas:
                 element.tagName === 'CANVAS' ||
                 !!element.querySelector('canvas'),
+              primaryHeading:
+                heading === 'Inventory' || heading === 'Inventory history'
+                  ? heading
+                  : undefined,
+              primary: element.classList.contains(
+                'experience-paired-inventory-content',
+              ),
               shell:
                 !!element.querySelector('.experience-header') ||
                 element.classList.contains('experience-header'),
@@ -719,6 +734,93 @@ async function navigationLink(page: Page, name: string) {
 }
 
 for (const width of [1280, 390]) {
+  test(`ordinary Inventory and History primaries capture real bodies once at ${width}px`, async ({
+    page,
+  }, info) => {
+    await page.setViewportSize({ width, height: 900 });
+    await page.emulateMedia({ reducedMotion: 'no-preference' });
+    await observeMotion(page);
+    await auditLogin(page);
+    await page.goto('/settings');
+    await page
+      .getByRole('switch', { name: 'Reduce motion in this browser' })
+      .uncheck();
+    await page.goto('/inventory');
+    for (const [label, heading] of [
+      ['History', 'Inventory history'],
+      ['Inventory', 'Inventory'],
+    ]) {
+      await expect(page.locator('html')).toHaveAttribute(
+        'data-route-motion-private',
+        'true',
+      );
+      await expect(
+        page.locator('.experience-paired-inventory-content:visible'),
+      ).toHaveCount(1);
+      await settled(page);
+      await resetProof(page);
+      const { completed } = await atNextNativeReady(page, async () => {
+        await info.attach(`ordinary-${label}-native-ready`, {
+          body: await page.screenshot({ animations: 'allow' }),
+          contentType: 'image/png',
+        });
+      });
+      await (await navigationLink(page, label)).click();
+      await expect(
+        page.getByRole('heading', { name: heading, exact: true }),
+      ).toBeVisible();
+      await completed;
+      await settled(page);
+      await expect(
+        page.locator('.experience-page-arrival:visible').last(),
+      ).toHaveAttribute('data-route-path', new URL(page.url()).pathname);
+      await settled(page);
+      const observed = await proof(page);
+      await info.attach(`ordinary-${label}-capture`, {
+        body: JSON.stringify(observed),
+        contentType: 'application/json',
+      });
+      const timing = routePresentationTiming(observed.transitions);
+      expect(timing.animatedStages).toBe(1);
+      expect(timing.durationMs).toBeLessThanOrEqual(250);
+      const pair = observed.transitions.find((entry) =>
+        entry.old.some(
+          (old) =>
+            old.primary &&
+            old.name.startsWith('route-primary-') &&
+            entry.next.some((next) => next.primary && next.name === old.name),
+        ),
+      );
+      expect(
+        pair,
+        'Actual source and destination conventional body must share this capture',
+      ).toBeDefined();
+      const name = pair!.old.find(
+        (old) => old.primary && old.name.startsWith('route-primary-'),
+      )!.name;
+      expect(pair!.old.find((c) => c.name === name)?.primaryHeading).toBe(
+        label === 'History' ? 'Inventory' : 'Inventory history',
+      );
+      expect(pair!.next.find((c) => c.name === name)?.primaryHeading).toBe(
+        heading,
+      );
+      for (const kind of ['old', 'new'])
+        expect(
+          pair!.effects.some(
+            (effect) =>
+              effect.pseudo === `::view-transition-${kind}(${name})` &&
+              effect.opacityFrames?.[0] === (kind === 'old' ? 1 : 0) &&
+              effect.opacityFrames?.at(-1) === (kind === 'old' ? 0 : 1),
+          ),
+        ).toBe(true);
+      expect(
+        observed.transitions
+          .flatMap((entry) => [...entry.old, ...entry.next])
+          .some((c) => c.canvas || c.shell),
+      ).toBe(false);
+    }
+  });
+
   test(`permitted logout cancels a running native snapshot before leaving the protected shell at ${width}px`, async ({
     page,
   }, info) => {

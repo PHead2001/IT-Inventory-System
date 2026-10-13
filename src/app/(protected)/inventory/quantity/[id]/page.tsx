@@ -76,7 +76,7 @@ export default async function QuantityPage({
   );
   return (
     <ProtectedPrivacyContent routeKey={readiness.routeKey}>
-      <RouteReady {...readiness} pairedInventory>
+      <RouteReady {...readiness} pairedInventory conventionalPrimary>
         <PrivateDocumentTitle
           routePath={`/inventory/quantity/${encodeURIComponent(id)}`}
           title={recordTitle(detail.item.name).title.absolute}

@@ -1,6 +1,7 @@
 import { act, render, screen } from '@testing-library/react';
 import { beforeEach, expect, it, vi } from 'vitest';
 import type { ViewTransitionProps } from 'react';
+import type { RouteArrivalIntent } from './route-motion-state';
 import { PairedInventoryContent } from './paired-inventory-content';
 import { RouteContentIdentityContext } from './route-content-identity';
 import {
@@ -13,31 +14,49 @@ const state = vi.hoisted(() => ({
   boundaries: [] as ViewTransitionProps[],
   enabled: true,
   current: true,
+  primary: null as RouteArrivalIntent | null,
+  primaryFinish: vi.fn(),
   finish: vi.fn(),
   cancel: vi.fn(),
 }));
 vi.mock('./route-motion', () => ({
-  useRouteMotion: () => ({
-    enabled: state.enabled,
-    current: () => state.current,
-    intent: {
-      name: 'inventory-title-proof',
-      kind: 'quantity',
-      id: 'one',
-      detailPath: '/inventory/quantity/one',
-      listHref: '/inventory?q=x',
-      rawSourceRouteKey: '/inventory?q=++x++',
-    },
-    titleArrival: state.enabled
-      ? {
-          sourceKey: '/inventory?q=++x++',
-          destinationKey: '/inventory/quantity/one',
-          epoch: 1,
-        }
-      : null,
-    cancelIfInvalid: state.cancel,
-    finishPairedContentAfterSnapshot: state.finish,
-  }),
+  useRouteMotion: () => {
+    const primary = state.primary;
+    return {
+      enabled: state.enabled,
+      current: () => state.current,
+      intent: primary
+        ? null
+        : {
+            name: 'inventory-title-proof',
+            kind: 'quantity',
+            id: 'one',
+            detailPath: '/inventory/quantity/one',
+            listHref: '/inventory?q=x',
+            rawSourceRouteKey: '/inventory?q=++x++',
+          },
+      arrival: primary,
+      finishPrimaryAfterSnapshot: (instance: { name: string }) => {
+        state.primaryFinish(instance);
+        return (
+          state.current &&
+          !!primary &&
+          primary === state.primary &&
+          instance.name === primary.name
+        );
+      },
+      titleArrival:
+        state.enabled && !primary
+          ? {
+              sourceKey: '/inventory?q=++x++',
+              destinationKey: '/inventory/quantity/one',
+              epoch: 1,
+            }
+          : null,
+      cancelIfInvalid: state.cancel,
+      finishPairedContentAfterSnapshot: state.finish,
+    };
+  },
 }));
 vi.mock('react', async (importOriginal) => {
   const actual = await importOriginal<typeof import('react')>();
@@ -53,6 +72,8 @@ beforeEach(() => {
   state.boundaries = [];
   state.enabled = true;
   state.current = true;
+  state.primary = null;
+  state.primaryFinish.mockClear();
   state.finish.mockClear();
 });
 const identity = (key: string) => ({
@@ -154,4 +175,48 @@ it('rejects unrelated or retired callbacks before acquiring a source handoff', (
   state.current = false;
   callback({ name: 'inventory-title-proof-content' } as never, []);
   expect(state.finish).not.toHaveBeenCalled();
+});
+
+it('rejects an old exact primary callback before acquiring the renewed source exit lease', () => {
+  const lifetime = createRoutePresentationLifetime(),
+    source = Symbol('primary');
+  const unmount = lifetime.mount(source);
+  const handoff = vi.spyOn(lifetime, 'handoff');
+  state.primary = {
+    name: 'route-primary-first',
+    presentation: 'primary',
+    sourceKey: '/inventory?q=++x++',
+    destinationKey: '/history',
+    epoch: 0,
+  };
+  const fixture = () => (
+    <RoutePresentationLifetimeContext value={lifetime}>
+      <RoutePresentationSourceContext value={source}>
+        <RouteContentIdentityContext value={identity('/inventory?q=++x++')}>
+          <PairedInventoryContent enabled conventionalPrimary>
+            <input aria-label="Retained primary draft" defaultValue="draft" />
+          </PairedInventoryContent>
+        </RouteContentIdentityContext>
+      </RoutePresentationSourceContext>
+    </RoutePresentationLifetimeContext>
+  );
+  const view = render(fixture());
+  const first = state.boundaries.at(-1)!.onShare!;
+  const draft = screen.getByRole('textbox');
+  state.primary = { ...state.primary, name: 'route-primary-next' };
+  view.rerender(fixture());
+  act(() => {
+    first({ name: 'route-primary-first' } as never, []);
+  });
+  expect(handoff).not.toHaveBeenCalled();
+  expect(screen.getByRole('textbox')).toBe(draft);
+  act(() => {
+    state.boundaries.at(-1)!.onShare!(
+      { name: 'route-primary-next' } as never,
+      [],
+    );
+  });
+  expect(handoff).toHaveBeenCalledTimes(1);
+  unmount();
+  handoff.mockRestore();
 });

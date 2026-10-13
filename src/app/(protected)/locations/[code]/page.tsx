@@ -68,14 +68,10 @@ export default async function LocationPage({
     ...filters,
     location: undefined,
   });
+  const readiness = await routeReadyProps(base, searchParams);
   return (
-    <ProtectedPrivacyContent>
-      <RouteReady
-        {...await routeReadyProps(
-          '/locations/' + encodeURIComponent(code),
-          searchParams,
-        )}
-      >
+    <ProtectedPrivacyContent routeKey={readiness.routeKey}>
+      <RouteReady {...readiness} conventionalPrimary>
         <PrivateDocumentTitle
           routePath={`/locations/${encodeURIComponent(code)}`}
           title={recordTitle(location.name, 'Locations').title.absolute}

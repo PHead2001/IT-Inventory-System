@@ -10,9 +10,11 @@ import { useRoutePresentationSource } from './route-presentation-source';
 export function PairedInventoryContent({
   children,
   enabled,
+  conventionalPrimary = false,
 }: {
   children: React.ReactNode;
   enabled: boolean;
+  conventionalPrimary?: boolean;
 }) {
   const motion = useRouteMotion();
   const identity = useContext(RouteContentIdentityContext);
@@ -31,7 +33,21 @@ export function PairedInventoryContent({
       identity.rawRouteKey === approval.destinationKey) &&
     (identity.pathname === intent.detailPath ||
       matchesTitleListRoute(intent, identity.rawRouteKey));
-  const name = matches ? intent.name + '-content' : undefined;
+  const arrival = motion.arrival;
+  const primary =
+    conventionalPrimary &&
+    enabled &&
+    motion.enabled &&
+    motion.current() &&
+    arrival?.presentation === 'primary' &&
+    identity &&
+    (identity.rawRouteKey === arrival.sourceKey ||
+      identity.rawRouteKey === arrival.destinationKey);
+  const name = matches
+    ? intent.name + '-content'
+    : primary
+      ? arrival.name
+      : undefined;
   return (
     <ViewTransition
       default="none"
@@ -40,9 +56,12 @@ export function PairedInventoryContent({
       share={name ? 'route-content' : 'none'}
       onShare={(instance) => {
         if (!name || instance.name !== name || !motion.current()) return;
+        // Exact primary ownership is checked before acquiring an exit lease.
+        // An older same-provider callback cannot affect a renewed source.
+        if (!matches && !motion.finishPrimaryAfterSnapshot(instance)) return;
         const finish = handoff();
         motion.cancelIfInvalid();
-        motion.finishPairedContentAfterSnapshot(instance);
+        if (matches) motion.finishPairedContentAfterSnapshot(instance);
         return finish;
       }}
     >

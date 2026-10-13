@@ -23,6 +23,7 @@ export function RouteReady({
   children,
   ready = true,
   pairedInventory = false,
+  conventionalPrimary = false,
 }: {
   actorId: string;
   routeKey: string;
@@ -33,6 +34,8 @@ export function RouteReady({
   ready?: boolean;
   /** Explicit opt-in for successful list/quantity/asset primaries, never fallback. */
   pairedInventory?: boolean;
+  /** Successful conventional primary capability, never canvas/loading/error. */
+  conventionalPrimary?: boolean;
 }) {
   const readiness = useContext(RouteReadyContext);
   const root = useRef<HTMLDivElement>(null);
@@ -58,6 +61,7 @@ export function RouteReady({
         routeKey,
         contentIdentity,
         root: committedRoot,
+        conventionalPrimary,
       });
     });
     return () => {
@@ -68,8 +72,11 @@ export function RouteReady({
   return (
     <RouteContentIdentityContext value={identity}>
       <div ref={root} data-route-ready="true" style={{ display: 'contents' }}>
-        {pairedInventory ? (
-          <PairedInventoryContent enabled={ready}>
+        {pairedInventory || conventionalPrimary ? (
+          <PairedInventoryContent
+            enabled={ready}
+            conventionalPrimary={conventionalPrimary}
+          >
             {children}
           </PairedInventoryContent>
         ) : (

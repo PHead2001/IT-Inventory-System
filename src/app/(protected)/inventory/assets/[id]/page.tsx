@@ -64,7 +64,7 @@ export default async function AssetPage({
   );
   return (
     <ProtectedPrivacyContent routeKey={readiness.routeKey}>
-      <RouteReady {...readiness} pairedInventory>
+      <RouteReady {...readiness} pairedInventory conventionalPrimary>
         <PrivateDocumentTitle
           routePath={`/inventory/assets/${encodeURIComponent(id)}`}
           title={recordTitle(detail.asset.name).title.absolute}

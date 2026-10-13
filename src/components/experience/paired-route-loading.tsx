@@ -26,7 +26,7 @@ export function supportsPairedRouteLoading() {
   );
 }
 
-/** Only paired inventory boundaries may bubble to the persistent outer Suspense. */
+/** Only accepted opted-in conventional arrivals bubble to the persistent outer Suspense. */
 export function PairedRouteLoading(
   props: React.ComponentProps<typeof RouteLoading>,
 ) {

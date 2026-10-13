@@ -136,6 +136,27 @@ and returns its outgoing native cleanup lease; it never mounts a competing sourc
 Room, loading/error boundaries and mismatched/retired approvals do not opt in.
 Location and history list/detail pairing remain a required Audit 4.2 follow-up.
 
+Conventional cross-path navigation between explicitly capable Inventory, History
+and Locations primaries reuses that same event-owned loading/readiness engine
+without a title pair. The existing exact raw source/destination/epoch arrival
+object carries its unique capture name and primary presentation mode. Only an
+actual current authorized visible opted-in source, supported destination, fresh
+privacy and supported Full motion may arm retention. Room/canvas, new-item forms,
+unsupported routes, query-only updates, anchors and interrupted retained navigation
+do not acquire this capability. Successful History and Locations primaries use
+one identical raw key for canonical privacy and readiness; unavailable/error
+responses never opt in.
+
+The mounted inner body shares the exact primary arrival name and inherits its
+source handoff. Capture consumes only that exact approval; real visible primary
+readiness releases its loading wait, never the approval or backend work. Outer
+pathname commits cannot animate or retire a primary approval. Redirect/query
+mismatch, terminal failure, native traversal, Reduced motion, privacy withdrawal
+and provider retirement release the owned presentation wait and retire its approval.
+No extra private node cache, cloned source, deadline-based readiness or new privacy
+decision is introduced. Inventory title/body pairing keeps its existing capture
+and completion contract.
+
 Native browser Back/Forward uses the installed Next/React eager history restore
 and is instant. The route provider observes popstate only to retire departing
 presentation, cancel a paired wait and register real authorized primary readiness.

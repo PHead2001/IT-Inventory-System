@@ -40,6 +40,7 @@ import {
   supportsPairedRouteLoading,
 } from './paired-route-loading';
 import { routeKey } from './route-key';
+import { supportsConventionalRoutePrimary } from './conventional-route-primary';
 import { createRoutePresentationLifetime } from './route-presentation-lifetime';
 import { RoutePresentationLifetimeContext } from './route-presentation-source';
 import {
@@ -133,17 +134,34 @@ export function RouteMotionProvider({
   const [providerToken] = useState(() => Symbol());
   const [loading] = useState(() => createPairedRouteLoading(pending));
   const [readiness] = useState(() => {
-    const value = createRouteReadiness(actorId, pending, (key) => {
-      loading.ready(key);
-      const intent = state.snapshot();
-      if (!intent) return;
-      const destination = new URL(key, location.origin);
-      if (
-        destination.pathname !== intent.detailPath &&
-        !matchesTitleListRoute(intent, key)
-      )
-        state.finish(intent.name);
-    });
+    const value = createRouteReadiness(
+      actorId,
+      pending,
+      (key) => {
+        loading.ready(key);
+        const intent = state.snapshot();
+        if (!intent) return;
+        const destination = new URL(key, location.origin);
+        if (
+          destination.pathname !== intent.detailPath &&
+          !matchesTitleListRoute(intent, key)
+        )
+          state.finish(intent.name);
+      },
+      (primary) => {
+        const owner = loading.snapshot();
+        if (
+          owner?.kind === 'primary' &&
+          owner.destination === primary.routeKey &&
+          pending.current(owner.epoch) &&
+          primary.conventionalPrimary !== true
+        ) {
+          // Real authorized readiness still releases its wait normally below.
+          // An unavailable primary cannot complete a shared body capture.
+          state.finishArrival(owner.arrival);
+        }
+      },
+    );
     value.suspend();
     return value;
   });
@@ -168,6 +186,11 @@ export function RouteMotionProvider({
     owners.snapshot,
     owners.snapshot,
   );
+  const reduced = useEffectiveReducedMotion();
+  const latestReduced = useRef(reduced);
+  useLayoutEffect(() => {
+    latestReduced.current = reduced;
+  }, [reduced]);
   const scope = useMemo(
     () => ({
       state: pending,
@@ -200,6 +223,32 @@ export function RouteMotionProvider({
         loading.cancel();
         readiness.cancel();
         const target = state.acceptNavigation(href, pending.snapshot().epoch);
+        const sourcePrimary = readiness.currentPrimary();
+        let destination: URL | undefined;
+        try {
+          destination = new URL(href, location.origin);
+        } catch {
+          /* Unsupported URLs keep ordinary navigation. */
+        }
+        const primaryPresentation =
+          !target &&
+          !interruptedPair &&
+          sourcePrimary?.conventionalPrimary === true &&
+          sourcePrimary.routeKey === liveRouteKey.current &&
+          supportsConventionalRoutePrimary(
+            sourcePrimary.routeKey.split('?')[0],
+          ) &&
+          destination &&
+          supportsConventionalRoutePrimary(destination.pathname) &&
+          destination.origin === location.origin &&
+          !destination.hash &&
+          destination.pathname !== sourcePrimary.routeKey.split('?')[0] &&
+          state.arrivalSupportSnapshot() &&
+          !latestReduced.current &&
+          supportsPairedRouteLoading() &&
+          freshPresentationGrant(latestPrivacy.current) &&
+          !suspended.current &&
+          document.documentElement.dataset.motion === 'full';
         // Pair approval lives only inside this accepted Link event. Plain detail
         // links/router calls retire an older origin instead of reusing its holding.
         // A second accepted navigation retires the unfinished pair. Its original
@@ -231,7 +280,10 @@ export function RouteMotionProvider({
             liveRouteKey.current,
             pending.snapshot().epoch,
             location.href,
+            primaryPresentation ? 'primary' : 'outer',
           );
+          const approval = state.arrivalSnapshot();
+          if (primaryPresentation && approval) loading.armPrimary(approval);
         });
         if (loading.snapshot())
           latestPrivacy.current.navigation?.prepare(href, providerToken);
@@ -261,6 +313,7 @@ export function RouteMotionProvider({
       readiness,
       loading,
       owners,
+      latestReduced,
       lifecycleRef,
       providerToken,
       presentation,
@@ -272,7 +325,6 @@ export function RouteMotionProvider({
     pending.snapshot,
     pending.snapshot,
   );
-  const reduced = useEffectiveReducedMotion();
   useInsertionEffect(() => {
     // Child primary layout effects may notify readiness before this provider's
     // layout effect. Publish only committed authority before those callbacks.
@@ -577,7 +629,8 @@ export function RouteMotionProvider({
     const owner = loading.snapshot();
     if (owner && owner.destination !== committedRouteKey) {
       loading.cancel();
-      state.finish(owner.name);
+      if (owner.kind === 'primary') state.finishArrival(owner.arrival);
+      else state.finish(owner.name);
     }
   }, [committedRouteKey, loading, state]);
   useEffect(() => {
@@ -642,7 +695,10 @@ export function RouteMotionProvider({
                     privacy,
                     acceptedGrant.current,
                   ) &&
-                  state.snapshot()?.name === owner.name &&
+                  (owner.kind === 'primary'
+                    ? state.arrivalSnapshot() === owner.arrival &&
+                      owner.arrival.presentation === 'primary'
+                    : state.snapshot()?.name === owner.name) &&
                   document.documentElement.dataset.routeMotionPrivate ===
                     'true',
               }}
@@ -746,6 +802,7 @@ export function useRouteMotion() {
     arrivalEnabled:
       enabled &&
       !pairedArrivalEnabled &&
+      arrival?.presentation !== 'primary' &&
       !!arrival &&
       context?.pending.current(arrival.epoch) === true &&
       (key === arrival.sourceKey || key === arrival.destinationKey),
@@ -759,6 +816,7 @@ export function useRouteMotion() {
       if (
         current() &&
         arrival &&
+        arrival.presentation !== 'primary' &&
         (key === arrival.destinationKey || key !== arrival.sourceKey)
       )
         state?.finishArrival(arrival);
@@ -797,8 +855,20 @@ export function useRouteMotion() {
       )
         cancelRouteSnapshots();
     },
+    finishPrimaryAfterSnapshot: (instance: { name: string }) => {
+      if (
+        current() &&
+        arrival?.presentation === 'primary' &&
+        instance.name === arrival.name &&
+        state?.arrivalSnapshot() === arrival
+      ) {
+        state.finishArrival(arrival);
+        return true;
+      }
+      return false;
+    },
     finishArrivalAfterSnapshot: (instance: { name: string }) => {
-      if (!arrival) return;
+      if (!arrival || arrival.presentation === 'primary') return;
       // Generic page snapshots own only their exact arrival. Their completion
       // can precede an inner shared title's commit and must not consume it.
       queueMicrotask(() => {
