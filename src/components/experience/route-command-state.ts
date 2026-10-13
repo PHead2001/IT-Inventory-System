@@ -5,7 +5,11 @@ export function createRouteCommandState() {
   let navigationIdentity = 0;
   let navigationDestination: string | null = null;
   const listeners = new Set<() => void>();
-  const notify = () => listeners.forEach((listener) => listener());
+  let unpublished = false;
+  const notify = () => {
+    unpublished = false;
+    listeners.forEach((listener) => listener());
+  };
   return {
     snapshot: () => ({ serial, generation }),
     navigationIdentity: () => navigationIdentity,
@@ -22,9 +26,13 @@ export function createRouteCommandState() {
       navigationDestination = destination;
       notify();
     },
-    retire() {
+    retire(publish = true) {
       generation++;
-      notify();
+      if (publish) notify();
+      else unpublished = true;
+    },
+    publish() {
+      if (unpublished) notify();
     },
     history(destination: string | null) {
       navigationIdentity++;

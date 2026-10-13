@@ -135,12 +135,12 @@ export function createRouteReadiness(
       if (!closed) suspended = false;
       notify();
     },
-    close: () => {
+    close: (publish = true) => {
       closed = true;
       history?.finish();
       history = undefined;
       roots.clear();
-      notify();
+      if (publish) notify();
       listeners.clear();
     },
   };

@@ -32,6 +32,7 @@ export const entityRow = z
     serialNumber: boundedText(200).nullable(),
     status: z.enum(['active', 'retired', 'archived', 'inactive']),
     matchedField: z.enum(['name', 'code', 'assetTag', 'serialNumber']),
+    breadcrumb: boundedText(65536).nullable().optional(),
     context: z
       .object({
         places: z
@@ -42,6 +43,7 @@ export const entityRow = z
                 id: z.string().uuid(),
                 name: boundedText(200),
                 code: boundedText(200),
+                breadcrumb: boundedText(65536).nullable().optional(),
               })
               .strict(),
           )

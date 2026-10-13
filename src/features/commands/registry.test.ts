@@ -172,6 +172,7 @@ it.each(['dialog', 'alertdialog', 'menu', 'listbox'])(
   (role) => {
     const target = document.createElement('div');
     target.setAttribute('role', role);
+    target.getClientRects = () => [{}] as unknown as DOMRectList;
     document.body.append(target);
     expect(
       ignoresShortcut(new KeyboardEvent('keydown', { key: 's' }), document),
@@ -196,6 +197,7 @@ it('ignores repeat, composition, legacy IME, prevented events, and an active sca
   expect(ignoresShortcut(event, document)).toBe(true);
   const camera = document.createElement('div');
   camera.dataset.scannerActive = 'true';
+  camera.getClientRects = () => [{}] as unknown as DOMRectList;
   document.body.append(camera);
   expect(
     ignoresShortcut(new KeyboardEvent('keydown', { key: 'n' }), document),

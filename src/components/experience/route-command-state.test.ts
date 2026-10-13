@@ -1,0 +1,22 @@
+import { expect, it, vi } from 'vitest';
+import { createRouteCommandState } from './route-command-state';
+it('retires authority synchronously but coalesces deferred subscriber publication', () => {
+  const state = createRouteCommandState();
+  const notify = vi.fn();
+  state.subscribe(notify);
+  state.retire(false);
+  state.retire(false);
+  expect(state.snapshot().generation).toBe(2);
+  expect(notify).not.toHaveBeenCalled();
+  state.publish();
+  expect(notify).toHaveBeenCalledTimes(1);
+  state.publish();
+  expect(notify).toHaveBeenCalledTimes(1);
+  state.retire();
+  expect(notify).toHaveBeenCalledTimes(2);
+  state.retire(false);
+  state.navigation('/inventory');
+  expect(notify).toHaveBeenCalledTimes(3);
+  state.publish();
+  expect(notify).toHaveBeenCalledTimes(3);
+});

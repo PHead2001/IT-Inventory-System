@@ -302,9 +302,12 @@ export function RouteMotionProvider({
       latestPrivacy.current.generation !== privacy.generation ||
       mountedActor !== actorId
     )
-      commands.retire();
+      commands.retire(false);
     latestPrivacy.current = privacy;
     liveScrollActor.current = actorId;
+  }, [privacy, actorId, commands]);
+  useLayoutEffect(() => {
+    commands.publish();
   }, [privacy, actorId, commands]);
   useInsertionEffect(() => {
     lifecycleRef.current = true;
@@ -395,7 +398,7 @@ export function RouteMotionProvider({
       },
     );
     return () => {
-      commands.retire();
+      commands.retire(false);
       unbindPrivacy();
       unbindNavigation?.();
       unbind();
@@ -410,7 +413,7 @@ export function RouteMotionProvider({
       pending.cancel(true, false);
       loading.cancel(false);
       owners.dispose();
-      readiness.close();
+      readiness.close(false);
       if (ownsDocument) {
         currentRouteProvider = undefined;
         invalidateRouteMotion(state, false);

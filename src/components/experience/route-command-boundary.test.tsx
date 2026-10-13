@@ -1,5 +1,10 @@
 import { act, cleanup, render, screen } from '@testing-library/react';
-import { Activity, useContext, useLayoutEffect } from 'react';
+import {
+  Activity,
+  useContext,
+  useLayoutEffect,
+  useSyncExternalStore,
+} from 'react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import {
   RouteMotionProvider,
@@ -54,6 +59,28 @@ function ConsumptionProbe() {
   return null;
 }
 let scope: NonNullable<React.ContextType<typeof RoutePendingContext>>;
+function PublicationProbe({
+  ticket,
+  onLayout,
+}: {
+  ticket: RouteCommandTicket;
+  onLayout: () => void;
+}) {
+  const value = useRouteCommandBoundary('actor', 'backend');
+  const current = useSyncExternalStore(
+    value.subscribe,
+    () => ticket.current(),
+    () => false,
+  );
+  useLayoutEffect(() => {
+    onLayout();
+  });
+  return (
+    <output data-testid="command-publication">
+      {current ? 'current' : 'retired'}
+    </output>
+  );
+}
 function Probe({ backend }: { backend: string }) {
   const value = useRouteCommandBoundary('actor', backend);
   const navigation = useRouteRouter();
@@ -73,12 +100,16 @@ function Fixture({
   fresh = true,
   backend = 'backend',
   hidden = false,
+  actorId = 'actor',
+  publication,
 }: {
   ready?: boolean;
   generation?: string;
   fresh?: boolean;
   backend?: string;
   hidden?: boolean;
+  actorId?: string;
+  publication?: { ticket: RouteCommandTicket; onLayout: () => void };
 }) {
   return (
     <PrivacyReadinessContext
@@ -90,8 +121,9 @@ function Fixture({
         verifiedEpoch: assignmentEpoch(),
       }}
     >
-      <RouteMotionProvider actorId="actor">
+      <RouteMotionProvider actorId={actorId}>
         <Probe backend={backend} />
+        {publication && <PublicationProbe {...publication} />}
         <div hidden={hidden}>
           <RouteReady
             actorId="actor"
@@ -122,6 +154,42 @@ function accept(href: string) {
   expect(ticket).not.toBeNull();
   return ticket!;
 }
+it.each(['generation', 'actor'] as const)(
+  'retires command authority before child layout on %s change without insertion updates',
+  (change) => {
+    const errors = vi.spyOn(console, 'error');
+    const view = render(<Fixture />);
+    const ticket = accept('/inventory?task=quantity_move');
+    const publication = { ticket, onLayout: vi.fn() };
+    view.rerender(<Fixture publication={publication} />);
+    expect(screen.getByTestId('command-publication')).toHaveTextContent(
+      'current',
+    );
+    const observed: boolean[] = [];
+    publication.onLayout = vi.fn(() => observed.push(ticket.current()));
+    view.rerender(
+      <Fixture
+        publication={publication}
+        generation={
+          change === 'generation' ? 'new-generation' : 'actor:backend'
+        }
+        actorId={change === 'actor' ? 'other' : 'actor'}
+      />,
+    );
+    expect(observed.length).toBeGreaterThan(0);
+    expect(observed.every((value) => value === false)).toBe(true);
+    expect(ticket.current()).toBe(false);
+    expect(screen.getByTestId('command-publication')).toHaveTextContent(
+      'retired',
+    );
+    view.unmount();
+    expect(
+      errors.mock.calls.map((args) => args.join(' ')).join('\n'),
+    ).not.toMatch(
+      /useInsertionEffect.*(?:schedule|update)|must not schedule updates/i,
+    );
+  },
+);
 beforeEach(() => {
   runtime.pathname = '/inventory';
   runtime.query = '';

@@ -3,6 +3,8 @@ create extension if not exists pgtap with schema extensions;
 set local search_path=public,extensions;
 select no_plan();
 select has_function('public','command_palette_search_v1',array['text','text','text']);
+select ok((select reloptions @> array['security_invoker=true'] from pg_class where oid='public.inventory_locations'::regclass),'canonical breadcrumb view retains caller RLS');
+
 select ok(not has_function_privilege(role_name,'public.command_palette_search_v1(text,text,text)','EXECUTE'),role_name||' cannot search')
  from (values ('anon'),('service_role')) roles(role_name);
 select ok(has_function_privilege('authenticated','public.command_palette_search_v1(text,text,text)','EXECUTE'),'caller role can reach membership guard');
@@ -67,6 +69,16 @@ insert into public.serialized_assets(id,name,asset_tag,category_id,site_id,statu
  ('a3010000-0000-4000-8000-000000000024','Palette site asset','PAL-SITE-ASSET',(select id from public.categories where code='OTHER'),'a3010000-0000-4000-8000-000000000030','active');
 insert into public.site_quantity_holdings(item_id,site_id,quantity) values
  ('a3010000-0000-4000-8000-000000000011','a3010000-0000-4000-8000-000000000030',1);
+insert into public.locations(id,code,name,parent_id,kind,can_hold_inventory) values
+ ('a3010000-0000-4000-8000-000000000040','PAL-PATH-WEST','Palette west',(select id from public.locations where code='ITC'),'storage_group',false),
+ ('a3010000-0000-4000-8000-000000000041','PAL-PATH-EAST','Palette east',(select id from public.locations where code='ITC'),'storage_group',false),
+ ('a3010000-0000-4000-8000-000000000042','PAL-PATH-A','Palette duplicate drawer','a3010000-0000-4000-8000-000000000040','drawer',true),
+ ('a3010000-0000-4000-8000-000000000043','PAL-PATH-B','Palette duplicate drawer','a3010000-0000-4000-8000-000000000041','drawer',true);
+insert into public.quantity_items(id,name,item_code,category_id) values
+ ('a3010000-0000-4000-8000-000000000014','Palette path holdings','PAL-PATH-ITEM',(select id from public.categories where code='OTHER'));
+insert into public.stock_balances(item_id,location_id,quantity) values
+ ('a3010000-0000-4000-8000-000000000014','a3010000-0000-4000-8000-000000000042',1),
+ ('a3010000-0000-4000-8000-000000000014','a3010000-0000-4000-8000-000000000043',1);
 analyze public.quantity_items;
 analyze public.serialized_assets;
 analyze public.locations;
@@ -74,6 +86,11 @@ analyze public.sites;
 select set_config('request.jwt.claims','{"sub":"a3010000-0000-4000-8000-000000000001","role":"authenticated"}',true);
 set local role authenticated;
 select is(public.command_palette_search_v1('  ')->'rows','[]'::jsonb,'blank query is empty');
+select is(public.command_palette_search_v1('PAL-PATH-A')->'rows'->0->>'breadcrumb','IT Closet / Palette west / Palette duplicate drawer','location result distinguishes identical leaf names by full authorized path');
+select is(public.command_palette_search_v1('PAL-PATH-B')->'rows'->0->>'breadcrumb','IT Closet / Palette east / Palette duplicate drawer','other parent retains its distinct full breadcrumb');
+select is(public.command_palette_search_v1('PAL-PATH-ITEM')->'rows'->0->'context'->'places'->0->>'breadcrumb','IT Closet / Palette west / Palette duplicate drawer','first bounded holding has canonical breadcrumb');
+select is(public.command_palette_search_v1('PAL-PATH-ITEM')->'rows'->0->'context'->'places'->1->>'breadcrumb','IT Closet / Palette east / Palette duplicate drawer','second bounded holding has distinct canonical breadcrumb');
+
 select is(public.command_palette_normalize(chr(160)||'Z9'||chr(65279)),'z9','same immutable Unicode trim for query, indexed fields and exact match');
 select is(public.command_palette_normalize(chr(code)||'Z9'||chr(code)),'z9','explicit Unicode normalization codepoint '||code) from (values (9),(10),(11),(12),(13),(32),(160),(5760),(8192),(8193),(8194),(8195),(8196),(8197),(8198),(8199),(8200),(8201),(8202),(8232),(8233),(8239),(8287),(12288),(65279)) whitespace(code);
 

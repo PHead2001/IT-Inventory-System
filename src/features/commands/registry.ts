@@ -148,6 +148,14 @@ export function commandMatches(query: string, staff: boolean) {
     .sort((a, b) => b.score - a.score || a.entry.id.localeCompare(b.entry.id))
     .map(({ entry }) => entry);
 }
+export function isVisibleCommandOwner(element: HTMLElement) {
+  return (
+    element.isConnected &&
+    !element.closest('[hidden], [inert]') &&
+    element.getClientRects().length > 0 &&
+    getComputedStyle(element).visibility !== 'hidden'
+  );
+}
 export function ignoresShortcut(event: KeyboardEvent, doc: Document) {
   const target = event.target instanceof Element ? event.target : null;
   return (
@@ -160,11 +168,11 @@ export function ignoresShortcut(event: KeyboardEvent, doc: Document) {
         'input, textarea, select, [contenteditable]:not([contenteditable="false"]), [data-shortcut-scope="exclusive"], [data-scanner-active="true"], [role="combobox"], [role="menu"], [role="listbox"]',
       ),
     ) ||
-    Boolean(
-      doc.querySelector(
+    Array.from(
+      doc.querySelectorAll<HTMLElement>(
         '[role="dialog"], [role="alertdialog"], dialog[open], [role="menu"], [role="listbox"], [data-shortcut-scope="exclusive"], [data-scanner-active="true"]',
       ),
-    )
+    ).some(isVisibleCommandOwner)
   );
 }
 export function shortcutCommand(

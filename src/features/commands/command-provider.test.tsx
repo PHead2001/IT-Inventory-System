@@ -174,6 +174,110 @@ function open() {
   fireEvent.click(screen.getByRole('button', { name: 'Search and commands' }));
   return screen.getByRole('combobox');
 }
+it('distinguishes identical location and holding names by canonical breadcrumbs and omits unknown legacy paths', async () => {
+  const locations = ['West', 'East'].map((parent, index) => ({
+    ...row,
+    kind: 'location',
+    id: row.id.slice(0, -1) + String(index + 2),
+    code: 'PAL-PATH-' + parent,
+    name: 'Drawer',
+    breadcrumb: 'IT Closet / ' + parent + ' / Drawer',
+  }));
+  const item = {
+    ...row,
+    context: {
+      places: locations.map((location) => ({
+        kind: 'location',
+        id: location.id,
+        name: location.name,
+        code: location.code,
+        breadcrumb: location.breadcrumb,
+      })),
+      hasMore: false,
+    },
+  };
+  vi.mocked(fetch).mockResolvedValue(
+    new Response(
+      JSON.stringify({
+        identity: { actorId: 'actor', backend: 'local-backend' },
+        result: {
+          version: 1,
+          rows: [
+            ...locations,
+            item,
+            {
+              ...row,
+              id: row.id.slice(0, -1) + '9',
+              kind: 'location',
+              code: 'LEGACY',
+              name: 'Legacy drawer',
+            },
+          ],
+          hasMore: false,
+        },
+      }),
+    ),
+  );
+  render(<Workspace />);
+  fireEvent.change(open(), { target: { value: 'drawer' } });
+  await settle();
+  expect(
+    screen.getByRole('option', {
+      name: /^Drawer.*IT Closet \/ West \/ Drawer/,
+    }),
+  ).toBeVisible();
+  expect(
+    screen.getByRole('option', {
+      name: /^Drawer.*IT Closet \/ East \/ Drawer/,
+    }),
+  ).toBeVisible();
+  expect(
+    screen.getByRole('option', { name: /Camera laptop/ }),
+  ).toHaveTextContent('Storage: IT Closet / West / Drawer');
+  expect(
+    screen.getByRole('option', { name: /Camera laptop/ }),
+  ).toHaveTextContent('Storage: IT Closet / East / Drawer');
+  expect(
+    screen.getByRole('option', { name: /Legacy drawer/ }),
+  ).not.toHaveTextContent('IT Closet');
+});
+it.each([
+  'dialog',
+  'alertdialog',
+  'menu',
+  'listbox',
+  'scanner',
+  'exclusive',
+] as const)(
+  'Ctrl+K ignores hidden/inert retained %s but respects its visible ownership',
+  (kind) => {
+    render(<Workspace />);
+    const wrapper = document.createElement('div');
+    const owner = document.createElement('div');
+    if (kind === 'scanner') owner.dataset.scannerActive = 'true';
+    else if (kind === 'exclusive') owner.dataset.shortcutScope = 'exclusive';
+    else owner.setAttribute('role', kind);
+    wrapper.append(owner);
+    document.body.append(wrapper);
+    try {
+      for (const state of ['hidden', 'inert', 'visible']) {
+        wrapper.hidden = state === 'hidden';
+        if (state === 'inert') wrapper.setAttribute('inert', '');
+        else wrapper.removeAttribute('inert');
+        fireEvent.keyDown(window, { key: 'k', ctrlKey: true });
+        if (state === 'visible')
+          expect(screen.queryByRole('combobox')).toBeNull();
+        else {
+          expect(screen.getByRole('combobox')).toBeVisible();
+          fireEvent.keyDown(screen.getByRole('combobox'), { key: 'Escape' });
+          expect(screen.queryByRole('combobox')).toBeNull();
+        }
+      }
+    } finally {
+      wrapper.remove();
+    }
+  },
+);
 it.each(['query', 'native'] as const)(
   'retires palette requests on %s traversal of the same pathname',
   async (kind) => {

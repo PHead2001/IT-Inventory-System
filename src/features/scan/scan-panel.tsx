@@ -256,7 +256,7 @@ export function ScanPanel() {
   return (
     <div
       className={styles.workspace}
-      data-scanner-active={camera !== 'idle' ? 'true' : undefined}
+      data-scanner-active={camera !== 'idle' || busy ? 'true' : undefined}
     >
       <section
         className={styles.columns}

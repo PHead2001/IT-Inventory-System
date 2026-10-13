@@ -95,7 +95,7 @@ accepted application navigation and native traversal advance it and capture the
 exact destination. A later matching original task URL rearms the same source
 only after the React router commits that full key, the original primary remains
 connected/visible and fresh privacy returns. Identical cached children require
-no remount or forced refresh. A raw URL change or unrelated navigation cannot
+no remount or forced refresh. Command authority retirement is synchronous during insertion effects, while subscriber publication is coalesced into the following layout phase. Dying-provider cleanup retires without publication; ordinary navigation/privacy events still notify immediately. A raw URL change or unrelated navigation cannot
 rearm it; outgoing pending work retains its clean alias. Native history can
 restore functional readiness while permanently retiring old command focus.
 
@@ -140,7 +140,7 @@ and 20-row cap. Response text limits count Unicode codepoints, matching PostgreS
 rendered as normal text.
 
 Inventory rows add optional current context: up to three authorized named storage
-locations or sites, plus `hasMore` from a fourth-place sentinel. Assets use their
+locations or sites, plus `hasMore` from a fourth-place sentinel. Location rows and displayed storage contexts add optional canonical full breadcrumbs from caller-invoker `inventory_locations`; only the deduplicated twenty results and three displayed places are enriched. Missing legacy breadcrumbs remain unknown and are omitted, never reconstructed from leaf names. Assets use their
 current storage/site fields; quantity items use positive storage and site holdings.
 Enrichment follows entity deduplication and the twenty-result cap; it never
 aggregates all holdings or reads event history. An explicit empty context means
@@ -161,6 +161,23 @@ clears private search and dismisses the palette; another explicit opening still
 requires a fresh canonical presentation grant and caller session verification.
 The SQL five-second statement_timeout declaration is defense and convention,
 not proof of actual PostgREST timeout enforcement.
+
+PostgREST must hoist `statement_timeout` from the function settings before its
+main query. PostgREST 14 includes it in the default `db-hoisted-tx-settings`, but
+an environment/database override can remove it. See [hoisted function settings](https://docs.postgrest.org/en/v14/references/transactions.html#hoisted-function-settings)
+and [the configuration allowlist](https://docs.postgrest.org/en/v14/references/configuration.html#db-hoisted-tx-settings).
+No role/global timeout is changed by the command migration.
+
+`tests/integration/command-palette-timeout.ts` is part of the canonical local
+database gate. It signs in an owned viewer, verifies normal RPC access, holds an
+independent local table lock and observes the actual authenticated Data API request
+waiting. It requires database `57014`/statement-timeout failure around five seconds,
+before either client cancellation or forced lock release, and cleans up its lock
+and actor. It refuses nonloopback endpoints. This authored proof has not yet run.
+The nine authenticated large-fixture KNN plans remain in `command_palette.test.sql`.
+A hosted timeout run requires independent approval of its exclusive window,
+verified isolated PR backend and caller/SQL access; this local gate does not
+authorize a hosted lock or establish hosted timeout acceptance.
 
 The browser debounces 150ms and cancels on close/new query/scope/purpose.
 Actor/backend/query/scope/request generations reject stale callbacks. Results

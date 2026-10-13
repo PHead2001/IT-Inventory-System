@@ -42,6 +42,7 @@ import {
   commandMatches,
   commands,
   ignoresShortcut,
+  isVisibleCommandOwner,
   shortcutCommand,
   type Command,
 } from './registry';
@@ -298,13 +299,7 @@ export function CommandProvider({
         document.querySelectorAll<HTMLElement>(
           '[role="dialog"], [role="alertdialog"], dialog[open], [role="menu"], [role="listbox"]',
         ),
-      ).some(
-        (element) =>
-          element.isConnected &&
-          !element.closest('[hidden], [inert]') &&
-          element.getClientRects().length > 0 &&
-          getComputedStyle(element).visibility !== 'hidden',
-      )
+      ).some(isVisibleCommandOwner)
     )
       return;
     cancelSessionWork();
@@ -995,6 +990,11 @@ export function CommandProvider({
                           <span className="block break-words font-semibold">
                             {row.name}
                           </span>
+                          {row.kind === 'location' && row.breadcrumb && (
+                            <span className="block break-words text-sm">
+                              {row.breadcrumb}
+                            </span>
+                          )}
                           {row.context &&
                             (row.kind === 'asset' ||
                               row.kind === 'quantity') && (
@@ -1007,7 +1007,9 @@ export function CommandProvider({
                                           (place.kind === 'site'
                                             ? 'Site: '
                                             : 'Storage: ') +
-                                          place.name +
+                                          (place.kind === 'location'
+                                            ? (place.breadcrumb ?? place.name)
+                                            : place.name) +
                                           ' (' +
                                           place.code +
                                           ')',
