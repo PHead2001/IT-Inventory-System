@@ -315,6 +315,7 @@ beforeEach(() => {
   }));
   Object.defineProperty(document, 'startViewTransition', {
     configurable: true,
+    writable: true,
     value: vi.fn(),
   });
   document.documentElement.dataset.motion = 'full';
