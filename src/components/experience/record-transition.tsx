@@ -22,6 +22,7 @@ import { RouteContentIdentityContext } from './route-content-identity';
 import { routeKey } from './route-key';
 import { usePrivacyReadiness } from '@/components/auth/privacy-readiness';
 import { freshPresentationGrant } from './presentation-privacy';
+import { hasBlockingPresentationAncestor } from '@/components/forms/transition-capture-boundary';
 
 function sameRecord(intent: RecordIdentity | null, record: RecordIdentity) {
   return intent?.kind === record.kind && intent.id === record.id;
@@ -118,7 +119,7 @@ export function RecordTitle({
 } & ComponentProps<'h1'>) {
   const {
     intent,
-    arrival,
+    titleArrival,
     enabled,
     validNow,
     pathname,
@@ -142,15 +143,15 @@ export function RecordTitle({
       !enabled ||
       !matches ||
       !intent ||
-      !arrival ||
+      !titleArrival ||
       revealed.current === intent.name ||
-      !matchesTitleListRoute(intent, arrival.sourceKey) ||
-      arrival.destinationKey !== contentIdentity?.rawRouteKey ||
+      !matchesTitleListRoute(intent, titleArrival.sourceKey) ||
+      titleArrival.destinationKey !== contentIdentity?.rawRouteKey ||
       !freshPresentationGrant(privacy) ||
       !current() ||
       !validNow() ||
       !element.isConnected ||
-      element.closest('[hidden], [inert]') ||
+      hasBlockingPresentationAncestor(element) ||
       !element.getClientRects().length
     )
       return;

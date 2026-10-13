@@ -1,7 +1,36 @@
 import { act, fireEvent, render, screen } from '@testing-library/react';
 import { expect, it, vi } from 'vitest';
-import { TransitionCaptureBoundary } from './transition-capture-boundary';
+import {
+  hasBlockingPresentationAncestor,
+  TransitionCaptureBoundary,
+} from './transition-capture-boundary';
 import { holdTransitionCapture } from '../../../tests/helpers/transition-capture';
+
+it.each(['release', 'unmount'])(
+  'retires the capture-only inert capability on %s',
+  async (ending) => {
+    const capture = holdTransitionCapture(false);
+    const page = render(
+      <TransitionCaptureBoundary>
+        <p>Title geometry</p>
+      </TransitionCaptureBoundary>,
+    );
+    const title = screen.getByText('Title geometry');
+    const fieldset = title.closest('fieldset')!;
+    capture.begin();
+    expect(hasBlockingPresentationAncestor(title)).toBe(false);
+    try {
+      if (ending === 'release') await act(capture.release);
+      else page.unmount();
+      fieldset.inert = true;
+      expect(hasBlockingPresentationAncestor(title)).toBe(true);
+    } finally {
+      page.unmount();
+      await act(capture.release);
+      capture.dispose();
+    }
+  },
+);
 
 it.each(['capture-blur', 'outside-focus-blur', 'outside-pointer', 'history'])(
   'restores focus only while the boundary owns it after %s',

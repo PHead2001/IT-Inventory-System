@@ -3,6 +3,26 @@
 import { useCallback, type ReactNode } from 'react';
 import { observeTransitionCapture } from './transition-capture';
 
+const captureInertOwners = new WeakSet<HTMLElement>();
+
+/** Only capture-owned interactivity may be ignored for snapshot geometry.
+ * Privacy/hidden ancestors, including a previously inert fieldset, still block. */
+export function hasBlockingPresentationAncestor(element: HTMLElement) {
+  for (
+    let node: HTMLElement | null = element;
+    node;
+    node = node.parentElement
+  ) {
+    if (
+      node.hidden ||
+      ((node.inert || node.hasAttribute('inert')) &&
+        !captureInertOwners.has(node))
+    )
+      return true;
+  }
+  return false;
+}
+
 /** Owns only capture interactivity. Child controls retain domain disabled state. */
 export function TransitionCaptureBoundary({
   children,
@@ -12,6 +32,7 @@ export function TransitionCaptureBoundary({
   const bind = useCallback((node: HTMLFieldSetElement | null) => {
     if (!node) return;
     let active = false;
+    let previousInert = false;
     let focus: HTMLElement | null = null;
     const document = node.ownerDocument;
     const outsideIntent = (event: Event) => {
@@ -35,6 +56,8 @@ export function TransitionCaptureBoundary({
         if (active === capturing) return;
         active = capturing;
         if (capturing) {
+          previousInert = node.inert || node.hasAttribute('inert');
+          if (!previousInert) captureInertOwners.add(node);
           const candidate = node.ownerDocument.activeElement;
           focus =
             candidate instanceof HTMLElement && node.contains(candidate)
@@ -42,7 +65,8 @@ export function TransitionCaptureBoundary({
               : null;
         }
         node.disabled = capturing;
-        node.inert = capturing;
+        if (!capturing) captureInertOwners.delete(node);
+        node.inert = capturing || previousInert;
         if (capturing) node.setAttribute('aria-busy', 'true');
         else node.removeAttribute('aria-busy');
         if (!capturing) {
@@ -68,7 +92,8 @@ export function TransitionCaptureBoundary({
       document.defaultView?.removeEventListener('pagehide', navigation);
       focus = null;
       node.disabled = false;
-      node.inert = false;
+      captureInertOwners.delete(node);
+      if (active) node.inert = previousInert;
       node.removeAttribute('aria-busy');
     };
   }, []);
