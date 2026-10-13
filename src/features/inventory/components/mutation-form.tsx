@@ -51,6 +51,7 @@ import {
   retirementReason,
 } from './retirement-reason';
 import { OperationalTimestamp } from '@/components/operational-time';
+import { AssetTagAdvisory, useAssetTagAdvisory } from './asset-tag-advisory';
 
 type Operation = MutationCommand['operation'];
 const labels: Record<string, string> = {
@@ -283,6 +284,7 @@ function MoveRecovery(props: Props) {
 function MutationFormFields({
   onRecordPage,
   actorId,
+  backendScope,
   operation,
   categories,
   locations: latestLocations,
@@ -399,6 +401,15 @@ function MutationFormFields({
     null,
   );
   const [duplicates, setDuplicates] = useState<DuplicateSerial[]>([]);
+  const tagAdvisory = useAssetTagAdvisory({
+    value: values.asset_tag,
+    owner: JSON.stringify([actorId, backendScope, asset?.id, operation]),
+    excludeId: asset?.id,
+    enabled:
+      (operation === 'asset_create' || operation === 'asset_update') &&
+      state?.ok !== true,
+  });
+  const invalidateTagAdvisory = tagAdvisory.invalidate;
   const [pending, startTask] = useRouteTask();
   const inFlight = useRef(false);
   const submitted = useRef<MutationCommand | null>(null);
@@ -697,13 +708,14 @@ function MutationFormFields({
     (name: string, value: string) => {
       if (pending || inFlight.current || uncertain || completed) return;
       setValues((v) => ({ ...v, [name]: value }));
+      if (name === 'asset_tag') invalidateTagAdvisory();
       if (name === 'reorder_threshold') setThresholdTouched(true);
       setReview(false);
       setState(null);
       setLocationError('');
       if (name === 'serial_number') setDuplicates([]);
     },
-    [pending, uncertain, completed],
+    [pending, uncertain, completed, invalidateTagAdvisory],
   );
   const input = (
     name: string,
@@ -731,6 +743,9 @@ function MutationFormFields({
         name={name}
         value={values[name] ?? ''}
         onChange={(event) => update(name, event.target.value)}
+        onBlur={
+          name === 'asset_tag' ? () => void tagAdvisory.check() : undefined
+        }
         required={options.required}
         maxLength={options.numeric ? undefined : options.max}
         type={options.numeric ? 'number' : 'text'}
@@ -748,11 +763,19 @@ function MutationFormFields({
             operation + '-' + name,
             moving && name === 'quantity'
               ? operation + '-availability'
-              : undefined,
+              : name === 'asset_tag'
+                ? operation + '-asset-tag-check'
+                : undefined,
           )['aria-describedby']
         }
       />
       {validation.error(operation + '-' + name)}
+      {name === 'asset_tag' && (
+        <AssetTagAdvisory
+          id={operation + '-asset-tag-check'}
+          result={tagAdvisory.result}
+        />
+      )}
     </div>
   );
   const selectLocation = (

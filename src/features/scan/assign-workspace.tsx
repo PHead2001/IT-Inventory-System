@@ -6,7 +6,7 @@ import {
 } from '@/components/ui/loading-skeleton';
 
 import { useRouteActionResult } from '@/components/experience/route-pending';
-import { ScanMatchLabel } from './scan-match-label';
+import { ScanMatchLabel, ScanMatchContext } from './scan-match-label';
 import { RecordStatus } from '@/components/record-status';
 import {
   useEffect,
@@ -140,9 +140,9 @@ function AssignmentFields({
         .map((location) => location.id),
     [locations],
   );
-  const [mode, setMode] = useState<'identifier' | 'item_code' | 'search'>(
-    'identifier',
-  );
+  const [mode, setMode] = useState<
+    'identifier' | 'item_code' | 'serial' | 'search'
+  >('identifier');
   const resolving = useRef(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const focusInput = useRef(false);
@@ -852,6 +852,7 @@ function AssignmentFields({
         });
       } else if (
         resolution.status === 'found' &&
+        !resolution.truncated &&
         resolution.matches.length === 1
       )
         await inspect(resolution.matches[0], token);
@@ -866,8 +867,10 @@ function AssignmentFields({
           generation: token,
           matches: resolution.matches,
           searchPage: resolution.searchPage,
-          message:
-            resolution.status === 'invalid'
+          truncated: resolution.truncated,
+          message: resolution.truncated
+            ? 'Additional matches exist. Showing up to 20 records; use an asset tag or record QR to identify the intended equipment.'
+            : resolution.status === 'invalid'
               ? 'This is not a supported inventory label or identifier.'
               : resolution.searchPage &&
                   !resolution.matches.length &&
@@ -1107,7 +1110,7 @@ function AssignmentFields({
     }
   };
   const next = () => {
-    if (!alive() || submitting.current || unresolved) return;
+    if (!alive() || submitting.current || unresolved) return false;
     const saved = batchRef.current;
     if (
       saved &&
@@ -1125,7 +1128,7 @@ function AssignmentFields({
         ),
       })
     )
-      return;
+      return false;
     entryId.current = null;
     focusInput.current = true;
     resetReceiptRead();
@@ -1135,6 +1138,7 @@ function AssignmentFields({
     setInput('');
     gate.rescan();
     inputRef.current?.focus();
+    return true;
   };
   const candidate = state.candidate;
   const problem = candidate
@@ -1488,7 +1492,7 @@ function AssignmentFields({
       </section>
       {ready && !fatalStorageError && !batch?.finished && (
         <AssignCamera
-          scope={actorId + ':' + backend}
+          scope={actorId + ':' + backend + ':' + mode}
           onDetection={(value) => {
             if (
               gate.observe(
@@ -1498,7 +1502,7 @@ function AssignmentFields({
                   !!stateRef.current.context,
               )
             )
-              void lookup(value!, 'identifier');
+              void lookup(value!, mode === 'serial' ? 'serial' : 'identifier');
           }}
         />
       )}
@@ -1571,15 +1575,22 @@ function AssignmentFields({
             disabled={busy}
             value={mode}
             onChange={(e) => {
-              next();
-              setMode(e.target.value as typeof mode);
+              if (next()) setMode(e.target.value as typeof mode);
             }}
           >
             <option value="identifier">Label or exact identifier</option>
             <option value="item_code">Exact quantity item code (SKU)</option>
+            <option value="serial">Exact serial number</option>
             <option value="search">Search inventory</option>
           </select>
         </label>
+        {mode === 'serial' && (
+          <p className="text-sm text-[var(--muted)]">
+            Camera and manual text match only stored serial numbers, including
+            colons and LOC: or AST: prefixes. QR URLs are treated as serial
+            text; duplicate matches need a choice.
+          </p>
+        )}
         <label className="space-y-2">
           Scan, paste, or search inventory
           <Input
@@ -1635,11 +1646,14 @@ function AssignmentFields({
             ref={chooserRef}
             tabIndex={-1}
           >
-            {state.matches.map((match) => (
+            {state.matches.map((match, index) => (
               <li key={match.path}>
                 <Button
                   variant="outline"
                   type="button"
+                  aria-describedby={
+                    match.context ? `assign-match-context-${index}` : undefined
+                  }
                   onClick={() => {
                     if (!alive() || resolving.current || submitting.current)
                       return;
@@ -1662,9 +1676,22 @@ function AssignmentFields({
                       : 'Individual asset'}{' '}
                   · <RecordStatus status={match.state} />
                 </Button>
+                {match.context && (
+                  <p
+                    id={`assign-match-context-${index}`}
+                    className="break-words text-sm text-[var(--muted)]"
+                  >
+                    <ScanMatchContext match={match} />
+                  </p>
+                )}
               </li>
             ))}
           </ul>
+        )}
+        {state.truncated && (
+          <Link href="/inventory" className="underline">
+            Search inventory
+          </Link>
         )}
         {state.search && (
           <nav

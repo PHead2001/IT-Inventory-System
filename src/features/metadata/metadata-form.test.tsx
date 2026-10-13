@@ -35,6 +35,9 @@ vi.mock('@/features/inventory/actions', () => ({
   submitInventory: vi.fn(),
   findDuplicateSerials: vi.fn(),
 }));
+vi.mock('@/features/inventory/asset-tag.actions', () => ({
+  checkAssetTag: vi.fn().mockResolvedValue(null),
+}));
 vi.mock('@/features/custody/actions', () => ({ submitCustody: vi.fn() }));
 vi.mock('./form-fetch.actions', () => ({ fetchCategoryForm: vi.fn() }));
 vi.mock('./record-refresh.actions', () => ({ refreshMetadataRecord: vi.fn() }));
@@ -1623,6 +1626,9 @@ describe('published metadata form', () => {
       />,
     );
     expect(screen.getByLabelText('Asset tag')).toHaveValue('');
+    expect(screen.getByLabelText('Asset tag')).not.toHaveAttribute(
+      'aria-describedby',
+    );
     expect(screen.getByLabelText('Serial number')).toBeInTheDocument();
     expect(screen.queryByLabelText('Item code (SKU)')).toBeNull();
     expect(screen.queryByLabelText('Reorder threshold (optional)')).toBeNull();
@@ -3643,6 +3649,14 @@ describe('creation intent review', () => {
       />,
     );
     await waitFor(() => expect(screen.getByLabelText('Name')).toBeEnabled());
+    const tagDescription = screen
+      .getByLabelText('Asset tag')
+      .getAttribute('aria-describedby');
+    expect(tagDescription).toBeTruthy();
+    expect(document.getElementById(tagDescription!)).toHaveAttribute(
+      'role',
+      'status',
+    );
     fireEvent.change(screen.getByLabelText('Name'), {
       target: { value: '  Device  ' },
     });
