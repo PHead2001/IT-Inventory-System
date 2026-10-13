@@ -89,7 +89,9 @@ Modeled selection uses one immutable scope/generation/request/code token for a
 camera commands and manual input retire an older flight before it can open the
 wrong location. Reduced motion applies the complete endpoint immediately.
 Drawers and containers translate through bounded visual offsets; shelf sections
-lift gently. Resting measurements, logical bindings and room coordinates stay
+lift gently. Reveal metadata is valid only on box nodes, including zero offsets;
+recursive groups cannot declare a reveal because the renderer moves box bodies.
+Resting measurements, logical bindings and room coordinates stay
 unchanged. Moving child geometry retains one verified logical pointer owner.
 Selected labels and known selected counts follow the opened body. Rack and
 aggregate selections use their existing focus/highlight rather than a fabricated
@@ -180,6 +182,9 @@ late loading, selection or focus callbacks cannot adopt a reauthorized owner or
 clear a successor intent. Ordinary same-authority rechecks retain intent, but a
 fresh grant is required before first dialog mount, confirmation and focus transfer. Renderer startup uses loading feedback until a budget request
 actually queues or is withdrawn; Resume is reserved for genuine paused/retry states.
+Queued maps announce that they are waiting, remain busy and keep their queue
+position without a Resume control. They allocate automatically after the occupied
+renderer finishes disposal, subject to fresh verification.
 Once an allocation is withdrawn by a higher-priority map, it stays paused through
 ordinary privacy refresh and slot release. Only an explicit Resume map with a
 fresh original grant can request a new lease. A queued request withheld before

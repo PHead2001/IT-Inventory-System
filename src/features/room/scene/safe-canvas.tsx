@@ -328,9 +328,11 @@ export function SafeCanvas({
               ? 'Loading map… The location browser remains available.'
               : requestStatus === 'failed'
                 ? 'The map could not initialize. The location browser remains available.'
-                : 'The map is paused while another map is in use. The location browser remains available.'}
+                : requestStatus === 'queued'
+                  ? 'Waiting for another map to finish. The location browser remains available.'
+                  : 'The map is paused while another map is in use. The location browser remains available.'}
           </p>
-          {requestStatus !== 'starting' && (
+          {(requestStatus === 'withdrawn' || requestStatus === 'failed') && (
             <button
               type="button"
               className="min-h-11 text-cyan-300 underline"

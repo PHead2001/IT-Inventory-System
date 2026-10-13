@@ -2,6 +2,21 @@
 
 ## Spatial composition source slice
 
+### Review repairs: reveal contract and waiting maps
+
+Node-schema regressions reject both zero and nonzero group reveal metadata at
+standalone and nested depths, while retaining ordinary recursive groups and
+canonical drawer, container and shelf box metadata. Existing visual-reveal and
+ray-selection regressions cover resting bindings, presentation bounds, legacy
+v1 data without metadata and moved-body selection. Graphics regressions require
+queued maps to remain busy without Resume, retain admission order across
+rerenders and allocate once automatically only after prior teardown completes.
+Existing preemption and privacy-withholding regressions retain explicit fresh
+Resume for withdrawn allocations and automatic fresh admission for withheld
+unallocated requests. Focused jsdom execution proves these source assertions;
+it does not certify native WebGL disposal, visual copy at desktop/390 px or
+exact-HEAD PR acceptance.
+
 ### Draw and temporal evidence harness
 
 The W14 journey now uses an independently witnessed surface and a trusted mouse

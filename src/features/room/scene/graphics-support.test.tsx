@@ -865,31 +865,77 @@ it('announces startup before the passive budget request without false contention
   expect(html).not.toContain('Resume map');
   expect(driver.create).not.toHaveBeenCalled();
 });
-it('retains genuine queued feedback until the active allocation actually completes', async () => {
-  let finish!: () => void;
+it('keeps queued maps busy in order and automatically allocates each once after disposal', async () => {
+  const completions: (() => void)[] = [];
+  const firstLease = vi.fn();
+  const secondLease = vi.fn();
   driver.teardown.mockImplementation((_canvas, complete) => {
-    finish = complete;
+    completions.push(complete);
   });
-  const ui = (primary: boolean) => (
+  const ui = (primary: boolean, first = true) => (
     <RoomSceneBudgetProvider>
       {primary && (
-        <ScenePriorityContext value={2}>
+        <ScenePriorityContext key="primary" value={2}>
           <SafeCanvas onFailure={vi.fn()}>primary</SafeCanvas>
         </ScenePriorityContext>
       )}
-      <ScenePriorityContext value={0}>
-        <SafeCanvas onFailure={vi.fn()}>queued</SafeCanvas>
+      {first && (
+        <ScenePriorityContext key="first" value={0}>
+          <SafeCanvas onFailure={vi.fn()} onLeaseChange={firstLease}>
+            first queued
+          </SafeCanvas>
+        </ScenePriorityContext>
+      )}
+      <ScenePriorityContext key="second" value={0}>
+        <SafeCanvas onFailure={vi.fn()} onLeaseChange={secondLease}>
+          second queued
+        </SafeCanvas>
       </ScenePriorityContext>
     </RoomSceneBudgetProvider>
   );
   const view = render(ui(true));
   await waitFor(() => expect(driver.create).toHaveBeenCalledOnce());
-  expect(screen.getByRole('status')).toHaveTextContent('another map');
-  expect(screen.getByRole('button', { name: 'Resume map' })).toBeVisible();
+  const expectWaiting = (count: number) => {
+    const statuses = screen.getAllByRole('status');
+    expect(statuses).toHaveLength(count);
+    for (const status of statuses) {
+      expect(status).toHaveTextContent('Waiting for another map to finish');
+      expect(status).not.toHaveTextContent('paused');
+      expect(status.parentElement).toHaveAttribute('aria-busy', 'true');
+    }
+    expect(screen.queryByRole('button', { name: 'Resume map' })).toBeNull();
+  };
+  expectWaiting(2);
+  view.rerender(ui(true));
+  expectWaiting(2);
   view.rerender(ui(false));
   await waitFor(() => expect(driver.teardown).toHaveBeenCalledOnce());
-  expect(screen.getByRole('status')).toHaveTextContent('another map');
-  act(() => finish());
+  expectWaiting(2);
+  expect(driver.create).toHaveBeenCalledOnce();
+  expect(firstLease).not.toHaveBeenCalledWith(true);
+  expect(secondLease).not.toHaveBeenCalledWith(true);
+  act(() => {
+    completions[0]();
+    completions[0]();
+  });
   await waitFor(() => expect(driver.create).toHaveBeenCalledTimes(2));
+  expect(firstLease.mock.calls.filter(([granted]) => granted)).toHaveLength(1);
+  expect(secondLease).not.toHaveBeenCalledWith(true);
+  expectWaiting(1);
+  view.rerender(ui(false, false));
+  await waitFor(() => expect(driver.teardown).toHaveBeenCalledTimes(2));
+  expect(driver.create).toHaveBeenCalledTimes(2);
+  expectWaiting(1);
+  act(() => {
+    completions[1]();
+    completions[1]();
+  });
+  await waitFor(() => expect(driver.create).toHaveBeenCalledTimes(3));
+  expect(secondLease.mock.calls.filter(([granted]) => granted)).toHaveLength(1);
+  expect(screen.queryByRole('status')).toBeNull();
   expect(screen.queryByRole('button', { name: 'Resume map' })).toBeNull();
+  view.unmount();
+  await waitFor(() => expect(driver.teardown).toHaveBeenCalledTimes(3));
+  act(() => completions[2]());
+  expect(driver.create).toHaveBeenCalledTimes(3);
 });

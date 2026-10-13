@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import raw from '../../../data/rooms/it-closet.json';
-import { roomSchema, type RoomNode } from './schema';
+import { roomSchema, roomNodeSchema, type RoomNode } from './schema';
 import { toScenePosition, toSceneSize } from './coordinates';
 import { canHoldInventory } from '../locations/eligibility';
 const flatten = (nodes: RoomNode[]): RoomNode[] =>
@@ -9,6 +9,50 @@ describe('IT closet contract', () => {
   const room = roomSchema.parse(raw);
   const nodes = flatten(room.nodes);
   const get = (code: string) => nodes.find((n) => n.locationCode === code)!;
+  it.each([
+    [0, 0, 0],
+    [4, 0, 0],
+  ])('rejects group reveal metadata at every node depth (%j)', (...offset) => {
+    const group = structuredClone(nodes.find((node) => node.kind === 'group')!);
+    group.visual = {
+      color: '#475569',
+      opacity: 1,
+      edges: true,
+      reveal: { offset: offset as [number, number, number] },
+    };
+    const standalone = roomNodeSchema.safeParse(group);
+    expect(standalone.success).toBe(false);
+    if (!standalone.success)
+      expect(standalone.error.issues[0].path).toEqual(['visual', 'reveal']);
+    const parent: RoomNode = {
+      id: 'outer-group',
+      kind: 'group',
+      position: [0, 0, 0],
+      rotationZDegrees: 0,
+      children: [group],
+    };
+    const nested = roomNodeSchema.safeParse(parent);
+    expect(nested.success).toBe(false);
+    if (!nested.success)
+      expect(nested.error.issues[0].path).toEqual([
+        'children',
+        0,
+        'visual',
+        'reveal',
+      ]);
+    expect(roomSchema.safeParse({ ...room, nodes: [parent] }).success).toBe(
+      false,
+    );
+  });
+  it('accepts ordinary recursive groups and current box reveal styles', () => {
+    for (const node of nodes) expect(roomNodeSchema.parse(node)).toEqual(node);
+    for (const style of ['drawer', 'container', 'shelf-section']) {
+      const box = nodes.find((node) => node.visual?.style === style)!;
+      expect(box.kind).toBe('box');
+      expect(box.visual?.reveal).toBeDefined();
+      expect(roomNodeSchema.parse(box)).toEqual(box);
+    }
+  });
   it('preserves measured envelope and opening', () => {
     expect(room.dimensions).toEqual([84, 126, 102]);
     expect(room.units).toBe('in');
