@@ -14,7 +14,7 @@ vi.mock('@/features/inventory/queries.server', () => ({
   getLocations: async () => [{ code: 'PRIVATE-CODE' }],
 }));
 vi.mock('@/features/room/spaces', () => ({
-  availableSpaces: () => [{ id: 'private-space' }],
+  roomSelectionNotice: () => null,
   resolveSpace: () => ({ id: 'private-space', name: 'Private physical space' }),
   spaceLocations: () => [{ code: 'PRIVATE-CODE' }],
 }));

@@ -86,6 +86,7 @@ export type RoomSceneProps = {
   canFocusSelected: boolean;
   onRequestFocus(): void;
   initialView?: CameraView | null;
+  initialViewReady?: boolean;
   onViewChange?: (view: CameraView) => void;
 };
 type ViewCommand = {
@@ -560,6 +561,7 @@ export function CameraRig({
   onReady,
   onFailure,
   initialView,
+  initialViewReady = true,
   focusOnRestore,
   onViewChange,
   command,
@@ -579,6 +581,7 @@ export function CameraRig({
   | 'onReady'
   | 'onFailure'
   | 'initialView'
+  | 'initialViewReady'
   | 'focusOnRestore'
   | 'onViewChange'
 > & {
@@ -601,7 +604,45 @@ export function CameraRig({
   const animation = useRef<Animation | null>(null);
   const fitZoom = useRef(1);
   const fitTarget = useRef(new Vector3());
-  const initializedRoom = useRef<RoomDefinition | null>(null);
+  type CameraResource = {
+    room: RoomDefinition;
+    camera: typeof camera;
+    control: ComponentRef<typeof OrbitControls>;
+  };
+  const [resource, setResource] = useState<CameraResource | null>(null);
+  const committedResource = useRef<CameraResource | null>(null);
+  const initializedResource = useRef<CameraResource | null>(null);
+  const commitControls = useCallback(
+    (control: ComponentRef<typeof OrbitControls> | null) => {
+      if (!control) return;
+      controls.current = control;
+      const owner = { room, camera, control };
+      // Ref attachment commits the actual resource. Retire before passive
+      // cleanup can emit an outgoing camera through replacement controls.
+      committedResource.current = owner;
+      setResource(owner);
+      return () => {
+        if (committedResource.current !== owner) return;
+        controls.current = null;
+        committedResource.current = null;
+        setResource((current) => (current === owner ? null : current));
+      };
+    },
+    [room, camera],
+  );
+  const resourceCurrent = useCallback(() => {
+    const current = committedResource.current;
+    const initialized = initializedResource.current;
+    return (
+      current?.room === room &&
+      current.camera === camera &&
+      current.control === controls.current &&
+      resource?.room === room &&
+      resource.camera === camera &&
+      resource.control === controls.current &&
+      initialized === resource
+    );
+  }, [room, camera, resource]);
   const lastCommandId = useRef(0);
   const lastFocusRequest = useRef<{
     code: string | null;
@@ -627,12 +668,12 @@ export function CameraRig({
     if (
       modeValue.current !== orbitMode &&
       hasMeasuredViewport(size.width, size.height) &&
-      initializedRoom.current === room
+      resourceCurrent()
     )
       initialFrame.current.manual();
     // Retain the newest mode while the first measured frame is still pending.
     modeValue.current = orbitMode;
-  }, [orbitMode, room, size.width, size.height]);
+  }, [orbitMode, room, size.width, size.height, resourceCurrent]);
   const reduced = useEffectiveReducedMotion();
   const initialTarget = useMemo(
     () => new Vector3(...toScenePosition(room.camera.target)),
@@ -665,7 +706,7 @@ export function CameraRig({
     if (
       !controls.current ||
       !(camera instanceof OrthographicCamera) ||
-      initializedRoom.current !== room
+      !resourceCurrent()
     )
       return;
     const offset = camera.position.clone().sub(controls.current.target);
@@ -700,12 +741,12 @@ export function CameraRig({
     // Mark placement pending in the same turn as the camera transform, before
     // a caller can treat the previous projected labels as settled.
     labelRegistry.schedule();
-  }, [camera, gl, labelRegistry, room]);
+  }, [camera, gl, labelRegistry, resourceCurrent]);
   const emitView = useCallback(() => {
     if (
       !controls.current ||
       !(camera instanceof OrthographicCamera) ||
-      initializedRoom.current !== room
+      !resourceCurrent()
     )
       return;
     const view: CameraView = {
@@ -717,7 +758,7 @@ export function CameraRig({
     if (!validCameraView(view)) return;
     gl.domElement.dataset.cameraView = JSON.stringify(view);
     viewCallback.current?.(view);
-  }, [camera, gl, room]);
+  }, [camera, gl, resourceCurrent]);
   useEffect(
     () => () => {
       if (!animation.current) emitView();
@@ -730,7 +771,8 @@ export function CameraRig({
       !reduced ||
       !motion ||
       !controls.current ||
-      !(camera instanceof OrthographicCamera)
+      !(camera instanceof OrthographicCamera) ||
+      !resourceCurrent()
     )
       return;
     animation.current = null;
@@ -740,7 +782,15 @@ export function CameraRig({
     emitView();
     onFocusComplete(motion.code);
     invalidate();
-  }, [reduced, camera, writeTelemetry, emitView, onFocusComplete, invalidate]);
+  }, [
+    reduced,
+    camera,
+    writeTelemetry,
+    emitView,
+    onFocusComplete,
+    invalidate,
+    resourceCurrent,
+  ]);
   useEffect(() => {
     const canvas = gl.domElement;
     const lost = (event: Event) => {
@@ -760,8 +810,18 @@ export function CameraRig({
       !hasMeasuredViewport(size.width, size.height)
     )
       return;
-    const freshRoom = initializedRoom.current !== room;
-    if (freshRoom && initializedRoom.current !== null)
+    if (
+      resource?.room !== room ||
+      resource.camera !== camera ||
+      resource.control !== controls.current
+    )
+      return;
+    const freshRoom = !resourceCurrent();
+    // A withheld snapshot is not an authorized empty snapshot. Do not consume
+    // the first measured frame or publish its default pose before restoration
+    // and its committed writer are available. An existing camera stays intact.
+    if (freshRoom && !initialViewReady) return;
+    if (freshRoom && initializedResource.current !== null)
       initialFrame.current.reset();
     const initialAction = initialFrame.current.measure(
       size.width,
@@ -786,8 +846,12 @@ export function CameraRig({
         camera.lookAt(initialTarget);
         controls.current.target.copy(initialTarget);
       }
-      initializedRoom.current = room;
+      initializedResource.current = resource;
       animation.current = null;
+      manualStart.current = null;
+      lastFocusRequest.current = null;
+      ready.current = false;
+      renderedOnce.current = false;
     }
     const frame = currentFrame();
     fitTarget.current.copy(frame.target);
@@ -823,11 +887,14 @@ export function CameraRig({
     invalidate,
     writeTelemetry,
     initialView,
+    initialViewReady,
     focusOnRestore,
     focusRequest,
     emitView,
     size.width,
     size.height,
+    resource,
+    resourceCurrent,
   ]);
   useEffect(() => {
     gl.domElement.dataset.orbitMode = orbitMode;
@@ -837,7 +904,7 @@ export function CameraRig({
       !(camera instanceof OrthographicCamera) ||
       !controls.current ||
       !hasMeasuredViewport(size.width, size.height) ||
-      initializedRoom.current !== room
+      !resourceCurrent()
     )
       return;
     if (orbitMode !== 'guided') {
@@ -878,6 +945,8 @@ export function CameraRig({
     onFocusCancel,
     size.width,
     size.height,
+    resource,
+    resourceCurrent,
   ]);
   useEffect(() => {
     if (!(camera instanceof OrthographicCamera) || !controls.current) return;
@@ -887,10 +956,7 @@ export function CameraRig({
       lastFocusRequest.current.room === room
     )
       return;
-    if (
-      !hasMeasuredViewport(size.width, size.height) ||
-      initializedRoom.current !== room
-    )
+    if (!hasMeasuredViewport(size.width, size.height) || !resourceCurrent())
       return;
     lastFocusRequest.current = { ...focusRequest, room };
     if (focusRequest.code || focusRequest.requestId > 0)
@@ -948,6 +1014,7 @@ export function CameraRig({
     invalidate();
   }, [
     focusRequest,
+    initialViewReady,
     focusRequest.requestId,
     focusRequest.code,
     bindings,
@@ -960,6 +1027,8 @@ export function CameraRig({
     writeTelemetry,
     emitView,
     reduced,
+    resource,
+    resourceCurrent,
   ]);
   useEffect(() => {
     if (
@@ -968,7 +1037,7 @@ export function CameraRig({
       !(camera instanceof OrthographicCamera) ||
       !controls.current ||
       !hasMeasuredViewport(size.width, size.height) ||
-      initializedRoom.current !== room
+      !resourceCurrent()
     )
       return;
     initialFrame.current.manual();
@@ -1039,6 +1108,7 @@ export function CameraRig({
     invalidate();
   }, [
     command,
+    initialViewReady,
     camera,
     size.width,
     size.height,
@@ -1049,8 +1119,11 @@ export function CameraRig({
     writeTelemetry,
     emitView,
     onFocusCancel,
+    resource,
+    resourceCurrent,
   ]);
   useFrame(() => {
+    if (!resourceCurrent()) return;
     if (!ready.current) {
       if (renderedOnce.current && gl.info.render.calls > 0) {
         ready.current = true;
@@ -1083,7 +1156,7 @@ export function CameraRig({
   }, -0.75);
   return (
     <OrbitControls
-      ref={controls}
+      ref={commitControls}
       makeDefault
       domElement={gl.domElement}
       enabled={active && hasMeasuredViewport(size.width, size.height)}
@@ -1113,10 +1186,7 @@ export function CameraRig({
       screenSpacePanning
       zoomSpeed={0.7}
       onStart={() => {
-        if (
-          !hasMeasuredViewport(size.width, size.height) ||
-          initializedRoom.current !== room
-        )
+        if (!hasMeasuredViewport(size.width, size.height) || !resourceCurrent())
           return;
         initialFrame.current.manual();
         if (animation.current) onFocusCancel?.();
@@ -1131,10 +1201,7 @@ export function CameraRig({
           };
       }}
       onChange={() => {
-        if (
-          !hasMeasuredViewport(size.width, size.height) ||
-          initializedRoom.current !== room
-        )
+        if (!hasMeasuredViewport(size.width, size.height) || !resourceCurrent())
           return;
         if (
           manualStart.current &&
@@ -1153,10 +1220,7 @@ export function CameraRig({
         manualGesture.current.active = false;
         onDraggingChange(false);
         manualStart.current = null;
-        if (
-          hasMeasuredViewport(size.width, size.height) &&
-          initializedRoom.current === room
-        )
+        if (hasMeasuredViewport(size.width, size.height) && resourceCurrent())
           emitView();
       }}
     />

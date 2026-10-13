@@ -30,6 +30,45 @@ export const candidate: AssignmentCandidate = {
   sources: [{ id: id(3), name: 'Red', active: false, quantity: 2 }],
 };
 describe('assignment review/commit state', () => {
+  it('clears saturated lookup guidance on rescan and rejects its late old-generation results', () => {
+    const reading = assignReducer(initialAssignState(context), {
+      type: 'lookup',
+      generation: 1,
+    });
+    const saturated = assignReducer(reading, {
+      type: 'matches',
+      generation: 1,
+      matches: Array.from({ length: 20 }, (_, index) => ({
+        kind: 'quantity' as const,
+        path: '/inventory/quantity/' + id(index + 20),
+        label: 'Serial match ' + index,
+        state: 'active' as const,
+      })),
+      truncated: true,
+      message: 'More matches may exist. Search inventory.',
+    });
+    expect(saturated.phase).toBe('choose');
+    expect(saturated.truncated).toBe(true);
+    const next = assignReducer(saturated, { type: 'next', generation: 2 });
+    expect(next).toMatchObject({
+      phase: 'ready',
+      generation: 2,
+      context,
+      matches: [],
+      search: null,
+      truncated: false,
+      message: '',
+    });
+    expect(
+      assignReducer(next, {
+        type: 'matches',
+        generation: 1,
+        matches: saturated.matches,
+        truncated: true,
+        message: saturated.message,
+      }),
+    ).toBe(next);
+  });
   it('marks only a completed read of the exact current confirmed receipt and preserves that state across receipt-preserving actions', () => {
     const state = {
       ...initialAssignState(context),

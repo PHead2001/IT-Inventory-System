@@ -6,6 +6,8 @@ import { createRouteReadiness } from './route-readiness';
 import { createRoutePendingState } from './route-pending-state';
 import { RouteContentIdentityContext } from './route-content-identity';
 import { routeKey } from './route-key';
+import { holdTransitionCapture } from '../../../tests/helpers/transition-capture';
+import { TransitionCaptureBoundary } from '../forms/transition-capture-boundary';
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -16,6 +18,48 @@ function PresentationIdentity() {
   const identity = useContext(RouteContentIdentityContext);
   return <p>{identity?.listHref}</p>;
 }
+it.each(['release', 'unmount', 'withdraw'])(
+  'registers a revealed primary after capture and cancels registration on %s',
+  async (outcome) => {
+    vi.spyOn(HTMLElement.prototype, 'getClientRects').mockReturnValue([
+      { width: 30, height: 20 },
+    ] as unknown as DOMRectList);
+    history.replaceState(null, '', '/inventory');
+    const pending = createRoutePendingState();
+    const committed = vi.fn();
+    const readiness = createRouteReadiness('actor', pending, committed);
+    readiness.history();
+    const capture = holdTransitionCapture();
+    const page = (ready: boolean) => (
+      <RouteReadyContext value={readiness}>
+        <TransitionCaptureBoundary>
+          <RouteReady
+            actorId="actor"
+            routeKey="/inventory"
+            contentIdentity="primary"
+            ready={ready}
+          >
+            <h1>Inventory</h1>
+          </RouteReady>
+        </TransitionCaptureBoundary>
+      </RouteReadyContext>
+    );
+    const view = render(page(true));
+    try {
+      expect(committed).not.toHaveBeenCalled();
+      expect(pending.snapshot().pending).toBe(true);
+      if (outcome === 'unmount') view.unmount();
+      if (outcome === 'withdraw') view.rerender(page(false));
+      await act(capture.release);
+      expect(committed).toHaveBeenCalledTimes(outcome === 'release' ? 1 : 0);
+      expect(pending.snapshot().pending).toBe(outcome !== 'release');
+    } finally {
+      view.unmount();
+      await act(capture.release);
+      capture.dispose();
+    }
+  },
+);
 it('uses canonical pairing presentation while readiness still requires the exact raw query', () => {
   vi.spyOn(HTMLElement.prototype, 'getClientRects').mockReturnValue([
     { width: 30, height: 20 },

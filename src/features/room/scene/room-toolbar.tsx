@@ -1,4 +1,5 @@
 'use client';
+import { afterTransitionCapture } from '@/components/forms/transition-capture';
 import {
   useEffect,
   useLayoutEffect,
@@ -214,9 +215,11 @@ export function RoomToolbar({
   useEffect(() => {
     onOverlayChange?.();
     if (!open) return;
-    panel.current
-      ?.querySelector<HTMLButtonElement>('button')
-      ?.focus({ preventScroll: true });
+    const cancelFocus = afterTransitionCapture(document, () =>
+      panel.current
+        ?.querySelector<HTMLButtonElement>('button')
+        ?.focus({ preventScroll: true }),
+    );
     const outside = (event: PointerEvent) => {
       if (
         event.target instanceof Node &&
@@ -227,7 +230,10 @@ export function RoomToolbar({
       }
     };
     document.addEventListener('pointerdown', outside, true);
-    return () => document.removeEventListener('pointerdown', outside, true);
+    return () => {
+      cancelFocus();
+      document.removeEventListener('pointerdown', outside, true);
+    };
   }, [open, onOverlayChange]);
   useEffect(() => {
     const escape = (event: KeyboardEvent) => {

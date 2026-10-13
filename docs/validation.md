@@ -1,5 +1,16 @@
 # Validation
 
+## Room label transition correctness
+
+Captured selected-label transition regressions use a deterministic injected clock
+and a 150,000-operation cap to verify complete coverage, collision-free placement,
+pointer containment, the full selected footprint and stable settled pins. These
+are geometry and bounded-work assertions, not host timing benchmarks. Separate
+injected-deadline regressions verify cooperative expiry and safe retained pins;
+the runtime's 16 ms deadline is unchanged. Browser placement and performance
+acceptance require the populated room E2E checks and are not established by these
+unit tests.
+
 ## C403 live-search timing coverage
 
 `tests/e2e/inventory-search.spec.ts` uses applied URL, input, row count,
@@ -352,6 +363,14 @@ this journey does not require a positive snapshot count. Eligible paired-title
 journeys retain their positive native-capture assertions. It also requires an
 exact camera roundtrip and zero document navigation fallback; it does not claim
 Next's Activity cache was used. These corrections still require browser reruns.
+The camera journey now covers Full and Reduced motion at both widths, including
+Free Orbit, Pan right, Close controls, Search inventory and native Back before
+Hide/Show recreates the renderer. It compares the live canvas pose with the saved
+workspace pose. CameraRig regressions cover replacement camera/controls resources,
+withheld restoration grants, outgoing-resource cleanup, explicit selection focus
+and consumed-command preservation in both motion modes. Passing these local
+resource regressions does not establish that the hosted reduced-motion failure
+used that resource replacement path; the exact hosted journey remains required.
 Repository runner image inputs were regenerated;
 Bundle coherence/version requires root-owned integration with the current runner
 baseline before final certification.
@@ -717,6 +736,43 @@ record names or UUIDs. Authorized successful D304 routes have named titles as
 described above; their missing-resource branches retain these privacy checks.
 Keep real direct missing-resource document requests (including their HTTP 404
 status), anonymous access checks, and client navigation evidence distinct.
+Fallback unit regressions hold the membership guard and separately reject login
+and inactive-member access before returning protected/inventory bodies or
+inventory-specific metadata. The inventory browser journey retains the full
+anonymous redirect-body assertion for image-like quantity and asset paths with
+a forged document selector. Those actual responses must exclude inventory
+fallback identity; mocked guard tests alone do not establish Next serialization.
+Proxy matcher regressions also cover formerly excluded public image and internal
+asset paths: URL-derived selectors replace forged headers without Auth/cookie
+reads or asset cache-policy changes. Protected image-like record paths retain
+their claims refresh and private/no-store response. The inventory browser journey
+checks anonymous and authenticated generic missing JPEG/SVG responses with forged
+inventory headers: HTTP 404, generic fallback identity and no requested UUID.
+The scoped compiled fixture reproduced the forged-selector redirect/private
+fallback on generic JPEG/SVG URLs before broad normalization, then returned
+generic 404s for anonymous and authorized requests afterward. Its real public
+SVG retained `public, max-age=0`; its Next chunk retained public immutable caching.
+The updated focused boundary batch passed 107 tests in eight files. This fixture
+uses simulated membership; final application CI remains the actual Auth/browser
+proof.
+The scoped installed-Next production fixture reproduced fallback identity in
+both login and inactive-member 307 response bodies before the guard, then excluded
+body and metadata markers after it. Both builds used one build worker; guarded
+browser probes retained public/authenticated 404, one main, zero-document client
+recovery, query navigation, native Back/Forward, a formerly missing record becoming
+valid and Flight delivery before the delayed read completed. The focused fallback,
+layout, admission, session and proxy batch passed 93 tests in eight files; canonical
+typechecking and scoped lint/format checks passed. These working-tree checks do
+not certify actual application Supabase/browser responses or replace final-SHA
+application CI and independent review.
+The two retained pristine-site and mapped-location journeys include failure-only
+input handoff diagnostics. A 128-entry buffer records allowlisted field identity,
+focus/input delivery, value lengths/match booleans, native transition milestones
+and matching site-draft write sequences. Raw values, identifiers and action bodies
+are excluded. The observer preserves native transition/storage results and errors;
+four focused tests cover its bounds, privacy, scoping and restoration. It logs once
+on journey failure without extra waits, input retries or altered assertions. This
+is diagnostic coverage for the unresolved input-loss flakes, not a proven fix.
 The navigation-workflow E2E uses a clearly synthetic navigation-boundary fixture: a real
 owned inventory NextLink receives the server's real missing-record RSC response
 through a scoped non-prefetch request rewrite. It requires unavailable content,
@@ -1101,6 +1157,41 @@ do not certify real browser cookie delivery, local/hosted request-origin routing
 database behavior, the full production build/E2E gate, or final committed-SHA
 remote checks and fresh review. Root integration owns those remaining boundaries.
 
+## Native capture interactivity and focus
+
+The focused native fixture in `transition-capture.spec.ts` bundles the installed
+Next React runtime and real capture boundary without a database. It reproduces
+dropped controlled input without the guard, checks guarded input/selection,
+domain-disabled controls, destination layout-effect focus and outside focus/pointer
+cancellation, and distinguishes
+capture release from animation completion. The fixture imports the compiler
+provided transitively by the existing locked toolchain; no dependency was added.
+Default Playwright discovery must retain this spec. This isolated fixture does
+not certify actual application routes, production-server navigation, authorized
+data, real form drafts or the complete local Supabase/browser gate.
+
+Consumer regressions hold the public capture observer through pending DOM updates
+and prove deferred focus, superseding task/picker state, unmount and account-change
+cancellation. Guard regressions prove native-call/error identity and release of
+later subscribers after an earlier callback throws, with sanitized reporting.
+Boundary tests distinguish native capture blur from outside focus followed by blur,
+outside nonfocusable pointer input and history cancellation. jsdom's disabled-input
+blur is explicitly modeled; actual application native-browser focus remains a separate gate.
+The broad consumer map covers Scan and assignment, task return/discard focus,
+pickers, settings rename, file dialogs, inventory completion, metadata review and
+designer entry/placement, and the room toolbar. Immediate pointer/keyboard handlers
+retain their existing semantics because capture interactivity blocks their targets.
+
+On the 2026-10-13 working tree, the focused consumer/sibling batch passed 673 tests
+in 17 suites, and the room/navigation/camera batch passed 122 tests in eight suites.
+Both used one Vitest worker and a 768 MiB heap. Canonical typechecking passed at
+1536 MiB, and scoped zero-warning lint and formatting passed. The five isolated
+Chromium capture tests passed using ignored
+`.local-tools/pr54-capture.playwright.config.ts` with one worker and no application
+web server, database or build; canonical default discovery retained all five.
+These results precede the final integration commit and do not certify the complete
+application/database/browser gate or exact committed-SHA remote checks.
+
 ## Room Back camera retention with the configured router
 
 Cache Components is not enabled in this app. Installed Next 16.3.6 defaults it
@@ -1125,3 +1216,20 @@ typechecking passed with a 1536 MiB heap; scoped zero-warning lint, formatting
 and diff whitespace checks passed. Independent architecture review found no
 actionable source issue. These are local working-tree results based on
 `43874f64`, not committed-SHA CI or native browser acceptance.
+
+## A306/A310 serial identification integration
+
+The following records PR55 iteration coverage and local limitations before final
+acceptance. Its pending-gate statements are historical; the accepted final-candidate
+CI and hosted evidence are recorded in the [PR55 acceptance checkpoint](audit-4-2-acceptance.md#pr55-a306a310-acceptance-checkpoint).
+
+Serial-mode regressions cover literal colon/prefix/URL serials, caller denial,
+Unicode bounds, contextual duplicates/overflow and unchanged automatic URL guards.
+Both entry points cover deliberate camera/manual serial lookup, old camera frame
+retirement and assignment mode preservation after a failed durable reset. The
+browser identifier-guidance journey adds a persisted `SN:` serial at desktop/phone
+widths in Full/Reduced motion; report its execution separately from unit coverage.
+
+Focused resolver/parser/chooser/assignment and tag-advisory regressions cover exact spelling, Unicode lengths, legal duplicates, cross-namespace collisions, typed-prefix isolation, unknowns, errors, overflow and retained cancellation/privacy guards. `supabase/tests/serial_scan.test.sql` adds transactional fixtures for stable invoker/empty-search-path grants, active viewer/staff reads, nonmember/inactive/anonymous denial, exact case/whitespace lookup, 200 supplementary Unicode characters, deterministic first21 results, truthful site/retired context and nonmutating reads. The migration and provisional generated-type addition require canonical clean-database execution and `db:types:check`; they have not been validated against local PostgreSQL here because its Docker daemon is unavailable.
+
+`tests/e2e/audit-four-identifier-guidance.spec.ts` retains owned new fixtures for duplicate serials, serial/tag/SKU collisions, tag blur guidance and a synthetic camera QR frame. Scan and tag-blur cases are defined at 1280/390 px with Full/Reduced motion. A separate 390 px Reduced-motion Scan-and-assign journey enters a duplicate serial through the real input, requires a named/contextual chooser, deliberately selects the intended asset, checks the review's immutable record link and storage source, then cancels with **Skip inspection / review**. Caller-scoped reads compare both assets, their versions and their inventory/assignment events before choice, after inspection and after cancellation to prove that no assignment was made. These are durable test definitions; browser/hosted execution and physical-camera testing remain pending. SQL timeout configuration likewise requires effective REST hoisting and elapsed-time proof before it establishes any request-time bound. This is iteration evidence, not final PR certification.

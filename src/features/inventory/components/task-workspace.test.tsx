@@ -15,6 +15,7 @@ import {
   readPrivacyRevocationRevision,
 } from '@/features/scan/assign-batch';
 import { useReportTaskState, useTaskReset } from './task-state';
+import { holdTransitionCapture } from '../../../../tests/helpers/transition-capture';
 function IntentWorkspace({
   intent,
   fresh = true,
@@ -81,6 +82,62 @@ function intentUrl(intent: string) {
       '#tasks',
   );
 }
+it('holds command task consumption through capture, then opens it once after primary registration', async () => {
+  intentUrl('quantity_move');
+  const capture = holdTransitionCapture();
+  const view = render(<IntentWorkspace intent="quantity_move" />);
+  try {
+    await act(async () => {});
+    expect(window.location.search).toContain('task=quantity_move');
+    expect(screen.queryByLabelText('quantity_move entry')).toBeNull();
+    await act(capture.release);
+    expect(window.location.search).not.toContain('task=');
+    expect(screen.getByRole('heading', { name: 'Move stock' })).toHaveFocus();
+    fireEvent.change(screen.getByLabelText('quantity_move entry'), {
+      target: { value: 'Keep this opened instance' },
+    });
+    view.rerender(<IntentWorkspace intent="quantity_move" />);
+    await act(async () => {});
+    expect(screen.getByLabelText('quantity_move entry')).toHaveValue(
+      'Keep this opened instance',
+    );
+  } finally {
+    view.unmount();
+    capture.dispose();
+  }
+});
+it.each(['unmount', 'supersede', 'privacy'] as const)(
+  'cancels capture-held command consumption on %s',
+  async (change) => {
+    intentUrl('quantity_move');
+    const capture = holdTransitionCapture();
+    const view = render(<IntentWorkspace intent="quantity_move" />);
+    try {
+      await act(async () => {});
+      expect(window.location.search).toContain('task=quantity_move');
+      if (change === 'unmount') view.unmount();
+      else if (change === 'supersede') {
+        intentUrl('asset_move');
+        view.rerender(<IntentWorkspace intent="asset_move" />);
+      } else {
+        view.rerender(<IntentWorkspace intent="quantity_move" fresh={false} />);
+      }
+      await act(capture.release);
+      expect(screen.queryByLabelText('quantity_move entry')).toBeNull();
+      if (change === 'supersede') {
+        expect(screen.getByRole('alert')).toHaveTextContent(
+          'unavailable for this item',
+        );
+        expect(window.location.search).not.toContain('task=');
+      } else {
+        expect(window.location.search).toContain('task=quantity_move');
+      }
+    } finally {
+      view.unmount();
+      capture.dispose();
+    }
+  },
+);
 it('consumes a move intent once, opens an eligible task, and never reopens on rerender', async () => {
   window.history.replaceState(
     {},
@@ -240,6 +297,64 @@ function Workspace({ tasks = choices }: { tasks?: typeof choices }) {
     </TaskWorkspace>
   );
 }
+it.each(['release', 'switch', 'unmount'])(
+  'defers task heading focus through capture and cancels stale intent on %s',
+  async (outcome) => {
+    const view = render(<Workspace />);
+    const capture = holdTransitionCapture();
+    try {
+      fireEvent.click(screen.getByRole('button', { name: 'Receive stock' }));
+      const heading = screen.getByRole('heading', { name: 'Receive stock' });
+      expect(heading).not.toHaveFocus();
+      if (outcome === 'switch')
+        fireEvent.click(screen.getByRole('button', { name: 'Move stock' }));
+      if (outcome === 'unmount') view.unmount();
+      await act(capture.release);
+      if (outcome === 'release') expect(heading).toHaveFocus();
+      else expect(heading).not.toHaveFocus();
+      if (outcome === 'switch')
+        expect(
+          screen.getByRole('heading', { name: 'Move stock' }),
+        ).toHaveFocus();
+    } finally {
+      capture.dispose();
+    }
+  },
+);
+it('returns focus to the launcher after capture without consuming the intent early', async () => {
+  render(<Workspace />);
+  const launcher = screen.getByRole('button', { name: 'Receive stock' });
+  fireEvent.click(launcher);
+  const capture = holdTransitionCapture();
+  try {
+    fireEvent.click(screen.getByRole('button', { name: 'Close task' }));
+    expect(launcher).not.toHaveFocus();
+    await act(capture.release);
+    expect(launcher).toHaveFocus();
+  } finally {
+    capture.dispose();
+  }
+});
+it('defers discard-dialog autofocus until capture completes', async () => {
+  const view = render(<Workspace />);
+  fireEvent.click(screen.getByRole('button', { name: 'Receive stock' }));
+  fireEvent.change(screen.getByLabelText('receive entry'), {
+    target: { value: 'Draft' },
+  });
+  const capture = holdTransitionCapture();
+  try {
+    fireEvent.click(screen.getByRole('button', { name: 'Move stock' }));
+    const stay = screen.getByRole('button', { name: 'Stay with this task' });
+    expect(stay).not.toHaveFocus();
+    await act(capture.release);
+    expect(stay).toHaveFocus();
+    expect(screen.getByLabelText('receive entry')).toHaveValue('Draft');
+  } finally {
+    view.unmount();
+    await act(capture.release);
+    capture.dispose();
+  }
+});
 it('does not steal focus on the initial clean workspace mount', () => {
   const outside = document.createElement('button');
   document.body.append(outside);

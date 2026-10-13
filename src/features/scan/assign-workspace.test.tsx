@@ -25,6 +25,7 @@ import { AssignmentScopeGuard } from './assignment-scope-guard';
 import { ProtectedPrivacyBoundary } from '@/components/auth/auth-privacy';
 import { ProtectedPrivacyContent } from '@/components/auth/privacy-content';
 import { useEffect } from 'react';
+import { holdTransitionCapture } from '../../../tests/helpers/transition-capture';
 const mocks = vi.hoisted(() => ({
   find: vi.fn(),
   inspect: vi.fn(),
@@ -218,6 +219,178 @@ async function inspect() {
   fireEvent.submit(screen.getByRole('form', { name: 'Inspect equipment' }));
   await screen.findByRole('region', { name: 'Review assignment' });
 }
+it.each(['manual', 'camera'])(
+  'explicit serial %s mode keeps duplicates in the chooser until deliberate inspection',
+  async (entry) => {
+    mocks.find.mockResolvedValue({
+      ok: true,
+      status: 'ambiguous',
+      matches: [
+        match,
+        {
+          ...match,
+          path: '/inventory/assets/' + id(12),
+          name: 'Second device',
+          label: 'Second device',
+          kind: 'asset',
+          serialNumber: 'SN:12345',
+        },
+      ],
+    });
+    render(<AssignmentWorkspace {...props} />);
+    fireEvent.change(screen.getByLabelText('Lookup method'), {
+      target: { value: 'serial' },
+    });
+    expect(
+      screen.getByText(/QR URLs are treated as serial text/),
+    ).toBeVisible();
+    if (entry === 'manual') {
+      fireEvent.change(
+        screen.getByLabelText('Scan, paste, or search inventory'),
+        { target: { value: 'SN:12345' } },
+      );
+      fireEvent.submit(screen.getByRole('form', { name: 'Inspect equipment' }));
+    } else await act(async () => mocks.detection?.('SN:12345'));
+    await screen.findByRole('list', { name: 'Choose inventory record' });
+    expect(mocks.find).toHaveBeenCalledExactlyOnceWith({
+      actorId: props.actorId,
+      text: 'SN:12345',
+      mode: 'serial',
+    });
+    expect(mocks.inspect).not.toHaveBeenCalled();
+    expect(mocks.submit).not.toHaveBeenCalled();
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Adapters · Quantity item · Active' }),
+    );
+    await screen.findByRole('region', { name: 'Review assignment' });
+    expect(mocks.inspect).toHaveBeenCalledWith({
+      actorId: props.actorId,
+      path: match.path,
+      siteId: site.id,
+    });
+    expect(mocks.submit).not.toHaveBeenCalled();
+  },
+);
+it.each(['serial', 'item_code'])(
+  'a failed reset preserves the prior lookup mode and chooser when switching to %s',
+  async (mode) => {
+    mocks.find.mockResolvedValue({
+      ok: true,
+      status: 'ambiguous',
+      matches: [
+        match,
+        {
+          ...match,
+          path: '/inventory/assets/' + id(12),
+          label: 'Second device',
+        },
+      ],
+    });
+    render(<AssignmentWorkspace {...props} />);
+    fireEvent.change(
+      screen.getByLabelText('Scan, paste, or search inventory'),
+      { target: { value: 'OLD' } },
+    );
+    fireEvent.submit(screen.getByRole('form', { name: 'Inspect equipment' }));
+    await screen.findByRole('list', { name: 'Choose inventory record' });
+    const before = sessionStorage.getItem(batchKey(scope));
+    const fail = vi
+      .spyOn(Storage.prototype, 'setItem')
+      .mockImplementation(() => {
+        throw new Error('storage full');
+      });
+    try {
+      fireEvent.change(screen.getByLabelText('Lookup method'), {
+        target: { value: mode },
+      });
+      expect(screen.getByLabelText('Lookup method')).toHaveValue('identifier');
+      expect(
+        screen.getByRole('list', { name: 'Choose inventory record' }),
+      ).toBeInTheDocument();
+      expect(sessionStorage.getItem(batchKey(scope))).toBe(before);
+      expect(mocks.inspect).not.toHaveBeenCalled();
+      expect(mocks.submit).not.toHaveBeenCalled();
+    } finally {
+      fail.mockRestore();
+    }
+  },
+);
+it('switching camera serial mode stops old capture and ignores its late frame', async () => {
+  mocks.realCamera = true;
+  const track = { stop: vi.fn() };
+  Object.defineProperty(navigator, 'mediaDevices', {
+    configurable: true,
+    value: {
+      getUserMedia: vi.fn().mockResolvedValue({ getTracks: () => [track] }),
+    },
+  });
+  mocks.decode.mockResolvedValue({ stop: mocks.stop });
+  render(<AssignmentWorkspace {...props} />);
+  fireEvent.click(screen.getByRole('button', { name: 'Start camera' }));
+  await waitFor(() => expect(mocks.decode).toHaveBeenCalled());
+  const oldFrame = mocks.decode.mock.calls[0][2];
+  fireEvent.change(screen.getByLabelText('Lookup method'), {
+    target: { value: 'serial' },
+  });
+  expect(track.stop).toHaveBeenCalled();
+  await act(async () => oldFrame({ getText: () => 'LOC:ITC' }));
+  expect(mocks.find).not.toHaveBeenCalled();
+  expect(screen.getByRole('button', { name: 'Start camera' })).toBeVisible();
+});
+it.each(['found', 'ambiguous'] as const)(
+  'a saturated %s serial result focuses the contextual chooser without inspecting or assigning automatically',
+  async (status) => {
+    mocks.find.mockResolvedValue({
+      ok: true,
+      status,
+      truncated: true,
+      matches: [
+        {
+          ...match,
+          serialNumber: 'Serial-Mixed',
+          context: 'Manufacturer: Dell · Closet / Red',
+        },
+      ],
+    });
+    render(<AssignmentWorkspace {...props} />);
+    fireEvent.change(
+      screen.getByLabelText('Scan, paste, or search inventory'),
+      {
+        target: { value: 'Serial' },
+      },
+    );
+    fireEvent.submit(screen.getByRole('form', { name: 'Inspect equipment' }));
+    expect(
+      await screen.findByText(
+        /Additional matches exist.*up to 20 records.*asset tag or record QR/,
+      ),
+    ).toBeVisible();
+    expect(
+      screen.getByRole('list', { name: 'Choose inventory record' }),
+    ).toHaveTextContent('Manufacturer: Dell · Closet / Red');
+    expect(
+      screen.getByRole('link', { name: 'Search inventory' }),
+    ).toHaveAttribute('href', '/inventory');
+    const chooser = screen.getByRole('list', {
+      name: 'Choose inventory record',
+    });
+    expect(chooser).toHaveFocus();
+    expect(
+      within(chooser).getByRole('button', {
+        name: 'Adapters · Quantity item · Active',
+      }),
+    ).toBeVisible();
+    expect(
+      within(chooser).getByRole('button', {
+        name: 'Adapters · Quantity item · Active',
+      }),
+    ).toHaveAccessibleDescription(
+      'Serial: Serial-Mixed · Manufacturer: Dell · Closet / Red',
+    );
+    expect(mocks.inspect).not.toHaveBeenCalled();
+    expect(mocks.submit).not.toHaveBeenCalled();
+  },
+);
 it.each(['subscription', 'adoption'] as const)(
   'catches an earlier sibling guard %s invalidation during initial mount without exposing private saved context or camera',
   async (failure) => {
@@ -2590,6 +2763,50 @@ it('halts at capacity without eviction and allows settled Finish/End', () => {
   expect(readBatch(scope).value).toBeNull();
   expect(mocks.submit).not.toHaveBeenCalled();
 });
+it.each(['release', 'cancel', 'unmount'])(
+  'retains assignment review focus through capture and retires it on %s',
+  async (outcome) => {
+    const view = render(<AssignmentWorkspace {...props} />);
+    const capture = holdTransitionCapture();
+    try {
+      await inspect();
+      const review = screen.getByRole('region', { name: 'Review assignment' });
+      expect(review).not.toHaveFocus();
+      if (outcome === 'cancel')
+        fireEvent.click(
+          screen.getByRole('button', { name: 'Skip inspection / review' }),
+        );
+      if (outcome === 'unmount') view.unmount();
+      await act(capture.release);
+      if (outcome === 'release') expect(review).toHaveFocus();
+      else expect(review).not.toHaveFocus();
+      if (outcome === 'cancel')
+        expect(
+          screen.getByLabelText('Scan, paste, or search inventory'),
+        ).toHaveFocus();
+    } finally {
+      view.unmount();
+      await act(capture.release);
+      capture.dispose();
+    }
+  },
+);
+it('retains the new batch destination focus intent until native capture completes', async () => {
+  render(<AssignmentWorkspace {...props} />);
+  fireEvent.click(screen.getByRole('button', { name: 'Finish batch' }));
+  const capture = holdTransitionCapture();
+  try {
+    fireEvent.click(screen.getByRole('button', { name: 'End batch' }));
+    const destination = screen.getByLabelText('Destination site');
+    expect(destination).not.toHaveFocus();
+    await act(capture.release);
+    expect(destination).toHaveFocus();
+  } finally {
+    await act(capture.release);
+    capture.dispose();
+  }
+});
+
 it('keeps ticket typing focus after a confirmed receipt and focuses summary/destination on Finish/End', async () => {
   const user = userEvent.setup();
   render(<AssignmentWorkspace {...props} />);

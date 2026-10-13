@@ -4,6 +4,7 @@ import {
   acceptanceFixtures,
   acceptanceLogin,
 } from './audit-three-acceptance-fixtures';
+import { installFormHandoffDiagnostics } from './form-handoff-diagnostics';
 
 // Shared canonical ITC-RED is renamed and restored. Keep this spec outside the
 // parallel allowlist and never run the reference round trip against hosted data.
@@ -20,6 +21,7 @@ test('local mapped storage rename keeps keyboard focus, corrects sibling collisi
     parent_id: string | null;
     version: number | string;
   } | null = null;
+  let reportInputFailure = async () => {};
   try {
     const before = await owned.caller
       .from('locations')
@@ -38,6 +40,11 @@ test('local mapped storage rename keeps keyboard focus, corrects sibling collisi
     expect(sibling.data!.active).toBe(true);
     expect(sibling.data!.parent_id).toBe(before.data!.parent_id);
     const renamed = `Red container acceptance ${owned.suffix}`;
+    const collisionName = ` ${sibling.data!.name.toLowerCase()} `;
+    reportInputFailure = await installFormHandoffDiagnostics(page, {
+      pathname: `/settings/locations/${before.data!.code}`,
+      expected: { name: collisionName },
+    });
     await acceptanceLogin(page);
     await page.goto('/settings/locations');
     const search = page.getByRole('searchbox', {
@@ -59,7 +66,6 @@ test('local mapped storage rename keeps keyboard focus, corrects sibling collisi
     await page.keyboard.press('Enter');
     const form = page.locator('form');
     const name = form.getByRole('textbox', { name: 'Name', exact: true });
-    const collisionName = ` ${sibling.data!.name.toLowerCase()} `;
     await name.fill(collisionName);
     await expect(name).toHaveValue(collisionName);
     let submittedNameMatches = false;
@@ -246,6 +252,9 @@ test('local mapped storage rename keeps keyboard focus, corrects sibling collisi
       }),
       contentType: 'application/json',
     });
+  } catch (error) {
+    await reportInputFailure();
+    throw error;
   } finally {
     try {
       if (original) {

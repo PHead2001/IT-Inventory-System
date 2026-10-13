@@ -2176,6 +2176,7 @@ export type Database = {
         }
         Returns: Json
       }
+      inventory_serial_lookup_v1: { Args: { p_serial: string }; Returns: Json }
       inventory_serial_matches: {
         Args: { p_exclude_id?: string; p_serial: string }
         Returns: {

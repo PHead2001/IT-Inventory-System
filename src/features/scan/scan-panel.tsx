@@ -1,6 +1,7 @@
 'use client';
 import { useRouteRouter as useRouter } from '@/components/experience/route-pending';
-import { ScanMatchLabel } from './scan-match-label';
+import { ScanMatchLabel, ScanMatchContext } from './scan-match-label';
+import { afterTransitionCapture } from '@/components/forms/transition-capture';
 import { RecordStatus } from '@/components/record-status';
 import {
   useCallback,
@@ -16,6 +17,7 @@ import { assignmentEpoch } from './assign-batch';
 import { createCameraSession } from './camera-session';
 import {
   resolveItemCode,
+  resolveSerial,
   resolveScan,
   type ScanResolution,
 } from './resolve.server';
@@ -36,7 +38,9 @@ export function ScanPanel() {
   const [camera, setCamera] = useState<'idle' | 'starting' | 'running'>('idle');
   const [cameraIssue, setCameraIssue] = useState(false);
   const [input, setInput] = useState('');
-  const [mode, setMode] = useState<'identifier' | 'item_code'>('identifier');
+  const [mode, setMode] = useState<'identifier' | 'item_code' | 'serial'>(
+    'identifier',
+  );
   const [message, setMessage] = useState('');
   const [result, setResult] = useState<ScanResolution | null>(null);
   const [busy, setBusy] = useState(false);
@@ -75,18 +79,26 @@ export function ScanPanel() {
     };
   }, [stop]);
   useEffect(() => {
-    if (busy) cancelControl.current?.focus();
-    else if (completionFocus.current) {
-      if (completionFocus.current === 'match') firstMatch.current?.focus();
-      else inputControl.current?.focus();
-      completionFocus.current = null;
-    }
-  }, [busy, result]);
+    return afterTransitionCapture(document, () => {
+      if (
+        !mounted.current ||
+        scopeInvalidated.current ||
+        scopeEpoch.current !== assignmentEpoch()
+      )
+        return;
+      if (busy) cancelControl.current?.focus();
+      else if (completionFocus.current) {
+        if (completionFocus.current === 'match') firstMatch.current?.focus();
+        else inputControl.current?.focus();
+        completionFocus.current = null;
+      }
+    });
+  }, [busy, result, scopeBlocked]);
 
   const open = useCallback(
     async (
       text: string,
-      lookupMode: 'identifier' | 'item_code' = 'identifier',
+      lookupMode: 'identifier' | 'item_code' | 'serial' = 'identifier',
     ) => {
       if (
         consumed.current ||
@@ -105,7 +117,9 @@ export function ScanPanel() {
         const resolution =
           lookupMode === 'item_code'
             ? await resolveItemCode(text)
-            : await resolveScan(text);
+            : lookupMode === 'serial'
+              ? await resolveSerial(text)
+              : await resolveScan(text);
         if (
           !mounted.current ||
           token !== generation.current ||
@@ -115,6 +129,7 @@ export function ScanPanel() {
         setResult(resolution);
         if (
           resolution.status === 'found' &&
+          !resolution.truncated &&
           resolution.matches[0].state === 'active'
         ) {
           setMessage(
@@ -125,17 +140,25 @@ export function ScanPanel() {
           completionFocus.current = resolution.matches.length
             ? 'match'
             : 'input';
-          if (resolution.status === 'invalid')
+          if (resolution.truncated)
+            setMessage(
+              'Additional matches exist. Showing up to 20 records; use an asset tag or record QR to identify the intended equipment.',
+            );
+          else if (resolution.status === 'invalid')
             setMessage(
               lookupMode === 'item_code'
                 ? 'Enter an Item code (SKU) with at most 100 characters and no control characters.'
-                : 'This is not a supported inventory label or identifier.',
+                : lookupMode === 'serial'
+                  ? 'Enter a serial number with at most 200 characters and no control characters.'
+                  : 'This is not a supported inventory label or identifier.',
             );
           else if (resolution.status === 'unknown')
             setMessage(
               lookupMode === 'item_code'
                 ? 'No quantity item has that exact Item code (SKU).'
-                : 'No matching location, asset, or quantity item was found.',
+                : lookupMode === 'serial'
+                  ? 'No asset has that exact serial number.'
+                  : 'No matching location, asset, or quantity item was found.',
             );
           else if (resolution.status === 'ambiguous')
             setMessage(
@@ -200,7 +223,10 @@ export function ScanPanel() {
           token === generation.current &&
           !consumed.current
         )
-          void open(decoded.getText());
+          void open(
+            decoded.getText(),
+            mode === 'serial' ? 'serial' : 'identifier',
+          );
       });
       session.current = current;
       const running = await current.start();
@@ -288,7 +314,9 @@ export function ScanPanel() {
             </p>
           )}
           <p className={styles.hint}>
-            Camera access starts only when you choose Start camera.
+            {mode === 'serial'
+              ? 'Serial number mode matches camera text only against stored serials. QR URLs are treated as serial text.'
+              : 'Camera access starts only when you choose Start camera.'}
           </p>
         </section>
         <form onSubmit={submit} className={styles.card}>
@@ -329,11 +357,28 @@ export function ScanPanel() {
               />
               Quantity item code (SKU)
             </label>
+            <label className={styles.radioChoice}>
+              <input
+                type="radio"
+                name="scan-mode"
+                checked={mode === 'serial'}
+                onChange={() => {
+                  stop();
+                  consumed.current = false;
+                  setResult(null);
+                  setMessage('');
+                  setMode('serial');
+                }}
+              />
+              Serial number
+            </label>
           </fieldset>
           <label htmlFor="scan-text" className={styles.fieldLabel}>
             {mode === 'item_code'
               ? 'Enter the exact Item code (SKU)'
-              : 'Paste a label URL, barcode text, or exact identifier'}
+              : mode === 'serial'
+                ? 'Enter the exact serial number'
+                : 'Paste a label URL, barcode text, or exact identifier'}
           </label>
           <input
             ref={inputControl}
@@ -354,7 +399,9 @@ export function ScanPanel() {
           <p className={styles.hint}>
             {mode === 'item_code'
               ? 'Use this mode for quantity codes beginning with / or containing a colon. Text that looks like a URL is matched only against stored Item codes.'
-              : 'Locations use LOC:CODE; asset tags use AST:tag. Bare identifiers are checked for exact matches across locations, assets, and quantity items.'}
+              : mode === 'serial'
+                ? 'Use this mode for serials beginning with / or containing a colon, including LOC: and AST:. Camera and manual text match only stored serials; duplicate matches need a choice.'
+                : 'Locations use LOC:CODE; asset tags use AST:tag. Bare text checks exact locations, tags, serial numbers and Item codes; collisions need a choice. Use Serial number mode for serials containing a colon or beginning with /.'}
           </p>
           <div className={styles.submitRow}>
             <button
@@ -386,18 +433,33 @@ export function ScanPanel() {
           Cancel inspection
         </button>
       )}
+      {result?.truncated && (
+        <Link href="/inventory" onClick={stop} className="underline">
+          Search inventory
+        </Link>
+      )}
       {result && result.matches.length > 0 && (
         <ul className={styles.results} aria-label="Matching records">
           {result.matches.map((match, index) => (
             <li key={match.path} className={styles.result}>
-              <Link
-                ref={index === 0 ? firstMatch : undefined}
-                href={match.path}
-                onClick={stop}
-                className="underline"
-              >
-                <ScanMatchLabel match={match} />
-              </Link>
+              <div className="min-w-0 break-words">
+                <Link
+                  ref={index === 0 ? firstMatch : undefined}
+                  href={match.path}
+                  aria-describedby={
+                    match.context ? `scan-match-context-${index}` : undefined
+                  }
+                  onClick={stop}
+                  className="underline"
+                >
+                  <ScanMatchLabel match={match} />
+                </Link>
+                {match.context && (
+                  <p id={`scan-match-context-${index}`} className={styles.hint}>
+                    <ScanMatchContext match={match} />
+                  </p>
+                )}
+              </div>
               <span className={styles.state}>
                 <RecordStatus status={match.state} />
               </span>

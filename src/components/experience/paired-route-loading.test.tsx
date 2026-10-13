@@ -554,6 +554,7 @@ beforeEach(() => {
   }));
   Object.defineProperty(document, 'startViewTransition', {
     configurable: true,
+    writable: true,
     value: vi.fn(),
   });
   vi.spyOn(HTMLElement.prototype, 'getClientRects').mockReturnValue([

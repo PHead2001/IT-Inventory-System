@@ -13,6 +13,7 @@ import {
 } from 'react';
 import type { createRouteReadiness } from './route-readiness';
 import { RouteContentIdentityContext } from './route-content-identity';
+import { afterTransitionCapture } from '@/components/forms/transition-capture';
 import { usePrivacyReadiness } from '@/components/auth/privacy-readiness';
 import { freshPresentationGrant } from './presentation-privacy';
 import { replaceAppHistoryUrl } from '@/lib/navigation/history';
@@ -119,12 +120,15 @@ export function RouteReady({
   // matching React router commit, including cache reuse without Activity changes.
   useLayoutEffect(() => {
     if (rearmConsumed()) return;
-    if (ready && root.current)
-      return readiness?.register({
+    if (!ready || !root.current || !readiness) return;
+    const committedRoot = root.current;
+    let unregister: (() => void) | undefined;
+    const cancel = afterTransitionCapture(committedRoot.ownerDocument, () => {
+      unregister = readiness.register({
         actorId,
         routeKey: effective,
         contentIdentity,
-        root: root.current,
+        root: committedRoot,
         ...(consumed &&
         (consumed.sourceKey === routeKey ||
           consumed.destinationKey === routeKey)
@@ -136,6 +140,11 @@ export function RouteReady({
             }
           : {}),
       });
+    });
+    return () => {
+      cancel();
+      unregister?.();
+    };
   });
   return (
     <RouteTaskConsumptionContext

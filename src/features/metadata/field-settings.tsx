@@ -1,5 +1,6 @@
 'use client';
-import { useId, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useId, useRef, useState, type ReactNode } from 'react';
+import { afterTransitionCapture } from '@/components/forms/transition-capture';
 import { fieldTypes, type FieldType } from './contracts';
 import {
   newId,
@@ -61,6 +62,11 @@ export function FieldSettings({
   onValidityChange?: (message: string) => void;
 }) {
   const prefix = useId();
+  const nameInput = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    if (autoFocus)
+      return afterTransitionCapture(document, () => nameInput.current?.focus());
+  }, [autoFocus]);
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [draftRules, setDraftRules] = useState<Record<string, string>>({});
   const errorsRef = useRef<Record<string, string>>({});
@@ -113,7 +119,7 @@ export function FieldSettings({
         <label className="block text-sm">
           Field name
           <input
-            autoFocus={autoFocus}
+            ref={nameInput}
             maxLength={200}
             className={input}
             value={field.label}

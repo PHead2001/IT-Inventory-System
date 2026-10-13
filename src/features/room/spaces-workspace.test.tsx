@@ -1132,6 +1132,70 @@ it('refreshes a restored contents page without refocusing a manually adjusted ca
   );
 });
 
+it.each([
+  {
+    from: '/room?space=missing',
+    to: '/room?space=it-closet',
+    initial: 'The requested space is unavailable. Showing IT Closet instead.',
+    expected: null,
+  },
+  {
+    from: '/room?space=it-closet',
+    to: '/room?space=missing',
+    initial: null,
+    expected: 'The requested space is unavailable. Showing IT Closet instead.',
+  },
+  {
+    from: '/room?space=it-closet',
+    to: '/room?space=it-closet&location=ITC-MISSING',
+    initial: null,
+    expected:
+      'The requested location is unavailable in this space. Choose a location below.',
+  },
+  {
+    from: '/room?space=it-closet&location=ITC-MISSING',
+    to: '/room?space=it-closet',
+    initial:
+      'The requested location is unavailable in this space. Choose a location below.',
+    expected: null,
+  },
+])(
+  'reconciles fallback notices on retained history: $from → $to',
+  async ({ from, to, initial, expected }) => {
+    window.history.replaceState(null, '', from);
+    const workspace = (mode: 'visible' | 'hidden') => (
+      <Activity mode={mode}>
+        <SpacesWorkspace
+          backend="https://backend.example"
+          locations={locations}
+          userId="test-user"
+          initialSpace={spaces[0]}
+          initialCode={null}
+          initialRouteKey={from}
+          initialNotice={initial}
+        />
+      </Activity>
+    );
+    const view = render(workspace('visible'));
+    if (initial) await screen.findByText(initial);
+    view.rerender(workspace('hidden'));
+    act(() => {
+      window.history.replaceState(null, '', to);
+      window.dispatchEvent(new PopStateEvent('popstate'));
+    });
+    view.rerender(workspace('visible'));
+    if (expected) expect(await screen.findByText(expected)).toBeVisible();
+    else
+      await waitFor(() =>
+        expect(
+          screen.queryByText(/The requested (space|location) is unavailable/),
+        ).not.toBeInTheDocument(),
+      );
+    expect(screen.getByLabelText('Space')).toHaveValue('it-closet');
+    expect(window.location.pathname + window.location.search).toBe(to);
+  },
+);
+
 it('ignores another route history event while the room is departing', async () => {
   window.history.replaceState(null, '', '/room?location=ITC-RACK');
   vi.stubGlobal(
@@ -1157,6 +1221,168 @@ it('ignores another route history event while the room is departing', async () =
     'ITC-RACK',
   );
   expect(screen.getByText('Rack stock')).toBeVisible();
+});
+
+it.each(['/room', '/room?space=it-closet'])(
+  'preserves a panned camera without synthesizing focus when the same saved space reactivates at %s',
+  async (url) => {
+    window.history.replaceState(null, '', url);
+    const preferenceKey = 'inventory-space:test-user:' + window.location.origin;
+    window.localStorage.setItem(preferenceKey, 'it-closet');
+    const workspace = (mode: 'visible' | 'hidden') => (
+      <Activity mode={mode}>
+        <SpacesWorkspace
+          backend="https://backend.example"
+          locations={locations}
+          userId="test-user"
+          initialSpace={spaces[0]}
+          initialCode={null}
+          initialRouteKey={url}
+        />
+      </Activity>
+    );
+    const view = render(workspace('visible'));
+    // Flush initial URL/preference restoration before recording manual intent.
+    await act(async () => {});
+    act(() => focusCallbacks.at(-1)!(null));
+    await userEvent
+      .setup()
+      .click(screen.getByRole('button', { name: 'Record camera view' }));
+    const scene = screen.getByTestId('scene-selection');
+    const savedView = scene.getAttribute('data-initial-view');
+    expect(JSON.parse(savedView!)).toEqual({
+      position: [155, 175, 205],
+      target: [20, 30, 40],
+      zoom: 2,
+      mode: 'free',
+    });
+    const focus = scene.getAttribute('data-focus');
+    expect(focus).toBe('0');
+    const completed = screen
+      .getByTestId('room-viewer')
+      .getAttribute('data-focus-count');
+    expect(window.localStorage.getItem(preferenceKey)).toBe('it-closet');
+    view.rerender(workspace('hidden'));
+    expect(scene).not.toBeVisible();
+    act(() => {
+      window.history.replaceState(null, '', '/inventory');
+      window.history.replaceState(null, '', url);
+      // Native Back can precede the reactivated page's listener.
+      window.dispatchEvent(new PopStateEvent('popstate'));
+    });
+    view.rerender(workspace('visible'));
+    await act(async () => {});
+    expect(scene).toBeVisible();
+    // A new null-code request makes CameraRig fit the room over the saved pan.
+    expect(scene).toHaveAttribute('data-focus', focus!);
+    expect(scene).toHaveAttribute('data-focus-on-restore', 'false');
+    expect(scene).toHaveAttribute('data-initial-view', savedView!);
+    expect(screen.getByTestId('room-viewer')).toHaveAttribute(
+      'data-camera-view',
+      savedView!,
+    );
+    expect(screen.getByTestId('room-viewer')).toHaveAttribute(
+      'data-focus-count',
+      completed!,
+    );
+    expect(window.location.pathname + window.location.search).toBe(url);
+  },
+);
+
+it.each([
+  { initialSpace: spaces[0], saved: 'it-office', modeled: false },
+  { initialSpace: spaces[1], saved: 'it-closet', modeled: true },
+])(
+  'restores a different saved space ($saved) on an initial bare room visit',
+  async ({ initialSpace, saved, modeled }) => {
+    window.history.replaceState(null, '', '/room');
+    window.localStorage.setItem(
+      'inventory-space:test-user:' + window.location.origin,
+      saved,
+    );
+    render(
+      <SpacesWorkspace
+        backend="https://backend.example"
+        locations={locations}
+        userId="test-user"
+        initialSpace={initialSpace}
+        initialCode={null}
+      />,
+    );
+    await waitFor(() =>
+      expect(screen.getByLabelText('Space')).toHaveValue(saved),
+    );
+    if (modeled)
+      expect(
+        Number(
+          screen.getByTestId('scene-selection').getAttribute('data-focus'),
+        ),
+      ).toBeGreaterThan(0);
+    else expect(screen.queryByTestId('room-viewer')).not.toBeInTheDocument();
+    expect(window.location.pathname + window.location.search).toBe('/room');
+  },
+);
+
+it('keeps an explicit location deep link ahead of a different saved space', async () => {
+  window.history.replaceState(
+    null,
+    '',
+    '/room?space=it-closet&location=ITC-RACK',
+  );
+  window.localStorage.setItem(
+    'inventory-space:test-user:' + window.location.origin,
+    'it-office',
+  );
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async () => response('Linked rack stock', 'ITC-RACK')),
+  );
+  render(
+    <SpacesWorkspace
+      backend="https://backend.example"
+      locations={locations}
+      userId="test-user"
+      initialSpace={spaces[0]}
+      initialCode="ITC-RACK"
+    />,
+  );
+  await screen.findByText('Linked rack stock');
+  expect(screen.getByLabelText('Space')).toHaveValue('it-closet');
+  expect(screen.getByTestId('scene-selection')).toHaveAttribute(
+    'data-code',
+    'ITC-RACK',
+  );
+  expect(screen.getByTestId('scene-selection')).toHaveAttribute(
+    'data-focus-on-restore',
+    'true',
+  );
+});
+
+it('reports an unavailable saved space without refocusing the current default', async () => {
+  window.history.replaceState(null, '', '/room');
+  window.localStorage.setItem(
+    'inventory-space:test-user:' + window.location.origin,
+    'missing',
+  );
+  render(
+    <SpacesWorkspace
+      backend="https://backend.example"
+      locations={locations}
+      userId="test-user"
+      initialSpace={spaces[0]}
+      initialCode={null}
+    />,
+  );
+  expect(
+    await screen.findByText(
+      'The saved space is unavailable. Showing IT Closet instead.',
+    ),
+  ).toBeVisible();
+  expect(screen.getByLabelText('Space')).toHaveValue('it-closet');
+  expect(screen.getByTestId('scene-selection')).toHaveAttribute(
+    'data-focus',
+    '0',
+  );
 });
 
 it('does not let a queued saved-space fallback replace a newer restored selection', async () => {

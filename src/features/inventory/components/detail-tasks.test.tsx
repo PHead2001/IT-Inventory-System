@@ -1,14 +1,18 @@
 import { fireEvent, render, screen } from '@testing-library/react';
-import { expect, it, vi } from 'vitest';
+import { beforeEach, expect, it, vi } from 'vitest';
 import { DetailTasks } from './detail-tasks';
+const mocks = vi.hoisted(() => ({ tagCheck: vi.fn(), submit: vi.fn() }));
 vi.mock('next/navigation', () => ({
   useRouter: () => ({ refresh: vi.fn() }),
   useSearchParams: () => null,
 }));
 vi.mock('../actions', () => ({
-  submitInventory: vi.fn(),
+  submitInventory: mocks.submit,
   findDuplicateSerials: vi.fn(),
 }));
+// Keep the real client advisory hook; this suite owns task composition rather
+// than executing the caller-authorized server action in jsdom.
+vi.mock('../asset-tag.actions', () => ({ checkAssetTag: mocks.tagCheck }));
 vi.mock('@/features/metadata/metadata-form', () => ({
   MetadataForm: () => null,
 }));
@@ -37,6 +41,30 @@ const props = {
   sites: [],
   forms: {},
 };
+beforeEach(() => {
+  vi.clearAllMocks();
+  sessionStorage.clear();
+  mocks.tagCheck.mockResolvedValue(null);
+});
+it('mounts the real asset move form through its task launcher without checking a tag or submitting', () => {
+  render(
+    <DetailTasks
+      {...props}
+      item={undefined}
+      asset={{
+        ...item,
+        name: 'Laptop',
+        status: 'active',
+        assetTag: 'LAP-01',
+        serialNumber: null,
+      }}
+    />,
+  );
+  fireEvent.click(screen.getByRole('button', { name: 'Move asset' }));
+  expect(screen.getByRole('form', { name: 'Move asset' })).toBeVisible();
+  expect(mocks.tagCheck).not.toHaveBeenCalled();
+  expect(mocks.submit).not.toHaveBeenCalled();
+});
 it('explains physical asset movement on the primary launcher before a task is chosen', () => {
   render(
     <DetailTasks
