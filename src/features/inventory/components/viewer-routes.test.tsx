@@ -109,6 +109,7 @@ vi.mock('../actions', () => ({
 }));
 vi.mock('next/navigation', () => ({
   useRouter: () => ({ refresh: vi.fn(), push: vi.fn() }),
+  useSearchParams: () => new URLSearchParams(window.location.search),
   notFound: () => {
     throw new Error('not found');
   },
