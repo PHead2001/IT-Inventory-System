@@ -41,9 +41,12 @@ export async function holdRouteWork(
         ? request.method() !== 'POST' || !headers['next-action']
         : request.method() !== 'GET' ||
           headers.rsc !== '1' ||
-          !!headers['next-router-prefetch'])
+          !!headers['next-router-prefetch'] ||
+          !!headers['next-router-segment-prefetch'])
     )
-      return route.continue();
+      // Preserve earlier observers, including the partial-prefetch cancellation
+      // probe. continue() would bypass every remaining matching handler.
+      return route.fallback();
     claimed = true;
     try {
       const response = await route.fetch({ timeout: 15_000 });

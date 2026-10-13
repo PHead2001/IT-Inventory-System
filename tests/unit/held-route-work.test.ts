@@ -27,6 +27,7 @@ async function fixture() {
     fulfill: vi.fn(async () => {}),
     abort: vi.fn(async () => {}),
     continue: vi.fn(async () => {}),
+    fallback: vi.fn(async () => {}),
   };
   const held = await holdRouteWork(page, '/inventory/quantity/owned');
   return {
@@ -53,6 +54,88 @@ it('rejects late delivery when fulfillment fails after successful arrival, while
   expect(route.abort).toHaveBeenCalledWith('failed');
   await held.dispose();
   expect(page.unroute).toHaveBeenCalledOnce();
+});
+
+it.each(['next-router-prefetch', 'next-router-segment-prefetch'])(
+  'delivers %s attempts to an earlier observer before and after claiming real Flight',
+  async (prefetchHeader) => {
+    const { route, held, invoke } = await fixture();
+    const attempts: string[] = [];
+    // Playwright runs the newest matching handler first. fallback invokes the
+    // older observer; continue goes straight to the network without invoking it.
+    const olderObserver = vi.fn(async () => {
+      attempts.push(prefetchHeader);
+      await route.abort('aborted');
+    });
+    route.fallback.mockImplementation(olderObserver);
+    const request = route.request;
+    route.request = () => ({
+      ...request(),
+      headers: () => ({ rsc: '1', [prefetchHeader]: '1' }),
+    });
+    try {
+      await invoke();
+      expect(attempts).toEqual([prefetchHeader]);
+      expect(route.fetch).not.toHaveBeenCalled();
+      expect(route.continue).not.toHaveBeenCalled();
+
+      route.request = request;
+      const handling = invoke();
+      await held.arrival;
+      expect(route.fetch).toHaveBeenCalledOnce();
+      expect(route.fulfill).not.toHaveBeenCalled();
+      expect(olderObserver).toHaveBeenCalledOnce();
+
+      route.request = () => ({
+        ...request(),
+        headers: () => ({ rsc: '1', [prefetchHeader]: '1' }),
+      });
+      await invoke();
+      expect(attempts).toEqual([prefetchHeader, prefetchHeader]);
+      expect(route.fetch).toHaveBeenCalledOnce();
+      expect(route.continue).not.toHaveBeenCalled();
+      held.release();
+      await held.delivery;
+      await handling;
+      expect(route.fulfill).toHaveBeenCalledOnce();
+      expect(olderObserver).toHaveBeenCalledTimes(2);
+    } finally {
+      await held.dispose();
+    }
+  },
+);
+
+it('preserves older observers for unrelated requests and subsequent real Flight', async () => {
+  const { route, held, invoke } = await fixture();
+  const observed: string[] = [];
+  route.fallback.mockImplementation(async () => {
+    observed.push(route.request().url());
+  });
+  const request = route.request;
+  route.request = () => ({
+    ...request(),
+    url: () => 'http://localhost:3000/inventory',
+  });
+  try {
+    await invoke();
+    expect(observed).toEqual(['http://localhost:3000/inventory']);
+    route.request = request;
+    const handling = invoke();
+    await held.arrival;
+    await invoke();
+    expect(observed).toEqual([
+      'http://localhost:3000/inventory',
+      'http://localhost:3000/inventory/quantity/owned',
+    ]);
+    expect(route.fetch).toHaveBeenCalledOnce();
+    expect(route.continue).not.toHaveBeenCalled();
+    held.release();
+    await held.delivery;
+    await handling;
+    expect(route.fulfill).toHaveBeenCalledOnce();
+  } finally {
+    await held.dispose();
+  }
 });
 
 it('resolves delivery only after released fulfillment actually completes', async () => {

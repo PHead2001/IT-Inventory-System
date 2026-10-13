@@ -43,6 +43,7 @@ Use the existing tokens (`--background`, `--surface`, `--foreground`, `--muted`,
 - **One primary action per region.** The cyan filled button marks the single most likely next step. Peer choices use the outline style.
 - **Destructive and lifecycle confirmations** (retire, archive, remove, discard) use `--danger` (or `--warning` for reversible states) and name the record, for example "Retire CLAUDE-REVIEW Dell Latitude 5450".
 - **Status is visible.** Retired, archived, low-stock and pending states get a badge or banner, not only muted text.
+- Protected-workspace privacy cleanup uses a bounded fixed status surface so its completion does not displace admitted page content. Pending status, errors, Retry and retained-workspace recovery instructions remain accessible; long messages scroll within the viewport. Cleanup on unprotected Auth routes retains its existing placement.
 - **Atmosphere is earned.** Glow, grid texture and ambient effects belong to Overview, sign-in and Spaces. Working forms and tables use calm, opaque surfaces. Avoid nesting cards more than two levels deep.
 - Verify contrast for muted text on surface tokens at the actual size used (WCAG AA: 4.5:1 below 18 px).
 
