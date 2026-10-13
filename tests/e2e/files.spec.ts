@@ -231,9 +231,65 @@ test('quantity recognition photo uploads, previews for viewers, replaces and rem
     exact: true,
   });
   await expect(browse).toHaveCount(1);
+  try {
+    // Native capture temporarily disables/inerts the page fieldset. A one-shot
+    // focus before release is ignored; waiting for focus alone cannot replay it.
+    await expect(browse).toBeEnabled();
+    await expect
+      .poll(
+        () =>
+          browse.evaluate((button) => {
+            for (
+              let node: Element | null = button;
+              node;
+              node = node.parentElement
+            )
+              if (
+                (node instanceof HTMLElement && (node.hidden || node.inert)) ||
+                node.hasAttribute('hidden') ||
+                node.hasAttribute('inert') ||
+                node.matches(':disabled')
+              )
+                return false;
+            return true;
+          }),
+        { timeout: 5000 },
+      )
+      .toBe(true);
+    await browse.focus();
+    await expect(browse).toBeFocused();
+  } catch (error) {
+    // The original CI trace was unavailable. Capture structure/state only,
+    // without filenames, record text, URLs or user-entered values.
+    const diagnostics = await browse
+      .evaluate((button) => {
+        const ancestors = [];
+        for (let node: Element | null = button; node; node = node.parentElement)
+          ancestors.push({
+            tag: node.tagName,
+            hidden:
+              (node instanceof HTMLElement && node.hidden) ||
+              node.hasAttribute('hidden'),
+            inert:
+              (node instanceof HTMLElement && node.inert) ||
+              node.hasAttribute('inert'),
+            disabled: node.matches(':disabled'),
+          });
+        return {
+          connected: button.isConnected,
+          focused: document.activeElement === button,
+          activeTag: document.activeElement?.tagName,
+          ancestors,
+        };
+      })
+      .catch(() => ({ unavailable: true }));
+    await testInfo.attach('browse-focus-admission', {
+      body: JSON.stringify(diagnostics),
+      contentType: 'application/json',
+    });
+    throw error;
+  }
   const chooserEvent = page.waitForEvent('filechooser');
-  await browse.focus();
-  await expect(browse).toBeFocused();
   await page.keyboard.press('Enter');
   const chooser = await chooserEvent;
   await chooser.setFiles({
