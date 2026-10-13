@@ -730,6 +730,11 @@ export function useRouteMotion() {
     state?.arrivalSnapshot ?? emptyIntent,
     emptyIntent,
   );
+  const titleArrival = useSyncExternalStore(
+    state?.subscribe ?? emptySubscribe,
+    state?.titleArrivalSnapshot ?? emptyIntent,
+    emptyIntent,
+  );
   const epoch = context?.pending.snapshot().epoch;
   const key = context?.listHref
     ? (() => {
@@ -750,6 +755,10 @@ export function useRouteMotion() {
       context?.pending.current(arrival.epoch) === true &&
       (key === arrival.sourceKey || key === arrival.destinationKey),
     arrival,
+    titleArrival:
+      enabled && titleArrival && context?.pending.current(titleArrival.epoch)
+        ? titleArrival
+        : null,
     finishArrival: () => {
       if (
         current() &&

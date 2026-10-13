@@ -1,7 +1,9 @@
-import { render, screen } from '@testing-library/react';
+import { act, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { createRef, useLayoutEffect, type ReactNode } from 'react';
 import { RecordTitle } from './record-transition';
+import { TransitionCaptureBoundary } from '@/components/forms/transition-capture-boundary';
+import { holdTransitionCapture } from '../../../tests/helpers/transition-capture';
 import { RouteContentIdentityContext } from './route-content-identity';
 import { PrivacyReadinessContext } from '@/components/auth/privacy-readiness';
 import {
@@ -20,7 +22,7 @@ const motion = vi.hoisted(() => ({
     detailPath: '/inventory/quantity/cable',
     listHref: '/inventory',
   },
-  arrival: {
+  titleArrival: {
     sourceKey: '/inventory',
     destinationKey: '/inventory/quantity/cable',
     epoch: 1,
@@ -39,7 +41,9 @@ const scroll = vi.fn((options: ScrollToOptions) => {
 });
 function CaptureAfterLayout({ children }: { children: ReactNode }) {
   useLayoutEffect(() => {
-    measuredTop = screen.getByRole('heading').getBoundingClientRect().top;
+    measuredTop = screen
+      .getByRole('heading', { hidden: true })
+      .getBoundingClientRect().top;
   });
   return children;
 }
@@ -77,7 +81,7 @@ beforeEach(() => {
   motion.enabled = true;
   motion.current = () => true;
   motion.validNow = () => true;
-  motion.arrival = {
+  motion.titleArrival = {
     sourceKey: '/inventory',
     destinationKey: '/inventory/quantity/cable',
     epoch: 1,
@@ -120,6 +124,65 @@ it('leaves an already visible heading and ordinary scrolling untouched', () => {
   render(content());
   expect(scroll).not.toHaveBeenCalled();
 });
+it('reveals the incoming title while its exact capture boundary stays inert', async () => {
+  const capture = holdTransitionCapture(false);
+  const page = render(
+    <TransitionCaptureBoundary>
+      <p>Source</p>
+    </TransitionCaptureBoundary>,
+  );
+  capture.begin();
+  // jsdom's inert property does not reflect the attribute like the browser's.
+  screen.getByText('Source').closest('fieldset')!.setAttribute('inert', '');
+  try {
+    page.rerender(
+      <TransitionCaptureBoundary>{content()}</TransitionCaptureBoundary>,
+    );
+    expect(screen.getByRole('heading').closest('fieldset')!.inert).toBe(true);
+    expect(scroll).toHaveBeenCalledWith({ top: -364, behavior: 'instant' });
+    expect(measuredTop).toBe(0);
+  } finally {
+    page.unmount();
+    await act(capture.release);
+    capture.dispose();
+  }
+});
+it.each(['inert parent', 'hidden parent', 'previously inert capture boundary'])(
+  'does not reveal through %s during capture',
+  async (mode) => {
+    const capture = holdTransitionCapture(false);
+    const page = render(
+      <div>
+        <TransitionCaptureBoundary>
+          <p>Source</p>
+        </TransitionCaptureBoundary>
+      </div>,
+    );
+    const parent = screen
+      .getByText('Source')
+      .closest('fieldset')!.parentElement!;
+    const fieldset = screen.getByText('Source').closest('fieldset')!;
+    if (mode === 'inert parent') parent.inert = true;
+    if (mode === 'hidden parent') parent.hidden = true;
+    if (mode === 'previously inert capture boundary') fieldset.inert = true;
+    capture.begin();
+    try {
+      page.rerender(
+        <div>
+          <TransitionCaptureBoundary>{content()}</TransitionCaptureBoundary>
+        </div>,
+      );
+      expect(scroll).not.toHaveBeenCalled();
+      await act(capture.release);
+      if (mode === 'previously inert capture boundary')
+        expect(fieldset.inert).toBe(true);
+    } finally {
+      page.unmount();
+      await act(capture.release);
+      capture.dispose();
+    }
+  },
+);
 it('preserves the caller heading ref used for multiline measurement', () => {
   const ref = createRef<HTMLHeadingElement>();
   render(
@@ -156,9 +219,9 @@ it.each([
   'invalid',
   'wrong-query',
 ])('does not scroll for %s', (mode) => {
-  if (mode === 'native') motion.arrival = null;
+  if (mode === 'native') motion.titleArrival = null;
   if (mode === 'reverse')
-    motion.arrival = {
+    motion.titleArrival = {
       sourceKey: '/inventory/quantity/cable',
       destinationKey: '/inventory',
       epoch: 1,

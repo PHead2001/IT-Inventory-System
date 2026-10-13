@@ -239,6 +239,95 @@ function Probe() {
   const { enabled } = useRouteMotion();
   return <output>{enabled ? 'enabled' : 'instant'}</output>;
 }
+
+it.each(['forward', 'native traverse', 'privacy revocation'])(
+  'a late inner title after generic arrival consumption respects %s',
+  (mode) => {
+    let primaryKey = '/inventory';
+    let top = -364;
+    const scroll = vi
+      .spyOn(window, 'scrollBy')
+      .mockImplementation((options) => {
+        top -= (options as ScrollToOptions).top ?? 0;
+      });
+    vi.spyOn(HTMLElement.prototype, 'getClientRects').mockReturnValue({
+      length: 1,
+    } as DOMRectList);
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(
+      () => ({
+        top,
+        bottom: top + 104,
+        left: 0,
+        right: 200,
+        width: 200,
+        height: 104,
+        x: 0,
+        y: top,
+        toJSON: () => ({}),
+      }),
+    );
+    vi.stubGlobal('innerHeight', 480);
+    let observed!: ReturnType<typeof useRouteMotion>;
+    function Observe() {
+      const motion = useRouteMotion();
+      useLayoutEffect(() => {
+        observed = motion;
+      });
+      return null;
+    }
+    const fixture = () =>
+      view(
+        <>
+          <Observe />
+          <PageArrival pathname={runtime.pathname}>
+            <RouteContentIdentityContext
+              value={{
+                pathname: primaryKey,
+                listHref: primaryKey,
+                rawRouteKey: primaryKey,
+              }}
+            >
+              {primaryKey === '/inventory' ? <List /> : <Detail />}
+            </RouteContentIdentityContext>
+          </PageArrival>
+        </>,
+      );
+    try {
+      const page = render(fixture());
+      fireEvent.click(screen.getByRole('link', { name: 'Cable row 2' }));
+      const name = observed.intent!.name;
+      runtime.pathname = detailPath;
+      page.rerender(fixture());
+      expect(observed.arrival).toBeNull();
+      expect(observed.intent?.name).toBe(name);
+      if (mode === 'native traverse') {
+        const event = new Event('navigate');
+        Object.defineProperty(event, 'navigationType', { value: 'traverse' });
+        act(() => runtime.navigation!.dispatchEvent(event));
+      }
+      if (mode === 'privacy revocation')
+        act(() => runtime.callbacks[0]('SIGNED_OUT', null));
+      primaryKey = detailPath;
+      page.rerender(fixture());
+      if (mode === 'forward') {
+        expect(screen.getByRole('heading')).toHaveAttribute(
+          'data-test-transition-name',
+          name,
+        );
+        expect(scroll).toHaveBeenCalledWith({ top: -364, behavior: 'instant' });
+        expect(top).toBe(0);
+      } else {
+        expect(observed.titleArrival).toBeNull();
+        expect(screen.getByRole('heading')).not.toHaveAttribute(
+          'data-test-transition-name',
+        );
+        expect(scroll).not.toHaveBeenCalled();
+      }
+    } finally {
+      vi.restoreAllMocks();
+    }
+  },
+);
 type CapturedControls = { logout: () => void; terminal: () => void };
 function CaptureControls({
   capture,

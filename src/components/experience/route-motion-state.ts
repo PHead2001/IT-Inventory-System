@@ -108,6 +108,7 @@ export function matchesTitleListRoute(
 export function createRouteMotionState() {
   let intent: TitleIntent | null = null;
   let arrival: RouteArrivalIntent | null = null;
+  let titleArrival: RouteArrivalIntent | null = null;
   let arrivalSupported = false;
   let origin: Omit<TitleIntent, 'name'> | null = null;
   let navigation: {
@@ -129,12 +130,14 @@ export function createRouteMotionState() {
     },
     snapshot: () => intent,
     arrivalSnapshot: () => arrival,
+    titleArrivalSnapshot: () => titleArrival,
     arrivalSupportSnapshot: () => arrivalSupported,
     supportArrival(supported: boolean) {
       arrivalSupported = supported;
       if (!supported) {
         arrival = null;
         intent = null;
+        titleArrival = null;
       }
       notify();
     },
@@ -145,6 +148,7 @@ export function createRouteMotionState() {
       base: string,
     ) {
       arrival = null;
+      titleArrival = null;
       if (valid && !suspended && arrivalSupported) {
         try {
           const destination = new URL(href, base);
@@ -161,6 +165,10 @@ export function createRouteMotionState() {
           // Unsupported destinations retain ordinary navigation without capture.
         }
       }
+      // The outer pathname can consume generic arrival before Next reveals its
+      // inner primary. Keep this exact accepted gesture with its title owner;
+      // it cannot authorize a generic capture or survive title retirement.
+      if (intent && arrival) titleArrival = arrival;
       notify();
     },
     finishArrival(expected?: RouteArrivalIntent) {
@@ -174,6 +182,7 @@ export function createRouteMotionState() {
       navigation = null;
       arrival = null;
       intent = null;
+      titleArrival = null;
       origin = null;
       if (notifyListeners) notify();
     },
@@ -206,18 +215,21 @@ export function createRouteMotionState() {
     arm(target: Omit<TitleIntent, 'name'>) {
       if (!valid || suspended) return;
       intent = { ...target, name: `inventory-title-${crypto.randomUUID()}` };
+      titleArrival = null;
       origin = target;
       notify();
     },
     finish(name?: string) {
       if (name && intent?.name !== name) return;
       intent = null;
+      titleArrival = null;
       notify();
     },
     retire() {
       navigation = null;
       arrival = null;
       intent = null;
+      titleArrival = null;
       origin = null;
       notify();
     },
@@ -236,6 +248,7 @@ export function createRouteMotionState() {
       arrival = null;
       valid = false;
       intent = null;
+      titleArrival = null;
       origin = null;
       if (notifyListeners) notify();
     },
