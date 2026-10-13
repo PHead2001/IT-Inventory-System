@@ -1,5 +1,6 @@
 import { expect, test, type Page, type Request } from '@playwright/test';
 import { withHeldQuantityPrimary } from './route-primary-delay';
+import { holdRouteWork } from './held-route-work';
 import { createClient } from '@supabase/supabase-js';
 import fixture from '../fixtures/auth.json' with { type: 'json' };
 import { withDisposablePasswordAccount } from './disposable-password-account';
@@ -1231,6 +1232,254 @@ for (const width of [1280, 390]) {
   });
 }
 
+for (const mode of ['system-reduced', 'local-reduced'] as const) {
+  for (const width of [1280, 390]) {
+    test(`${mode} delayed record arrival and native/app Back at ${width}px`, async ({
+      page,
+    }, info) => {
+      test.setTimeout(150_000);
+      await page.setViewportSize({ width, height: width === 390 ? 480 : 900 });
+      await page.emulateMedia({
+        reducedMotion: mode === 'system-reduced' ? 'reduce' : 'no-preference',
+      });
+      await page.addInitScript((localReduced) => {
+        localStorage.setItem(
+          'it-inventory-reduce-motion',
+          String(localReduced),
+        );
+      }, mode === 'local-reduced');
+      await observeMotion(page);
+      await auditLogin(page);
+      await expect(page.locator('html')).toHaveAttribute(
+        'data-motion',
+        'reduced',
+      );
+      const category = await auditCategory(page);
+      const name = `Reduced route ${crypto.randomUUID()} long cable name for multiline title matching`;
+      const record = await auditCreateRecord(
+        page,
+        'quantity',
+        category.name,
+        name,
+      );
+      const client = await auditReadback();
+      try {
+        const locations = await client
+          .from('inventory_locations')
+          .select('id,code')
+          .in('code', ['ITC-S1A', 'ITC-S1B'])
+          .order('code');
+        expect(locations.error).toBeNull();
+        expect(locations.data).toHaveLength(2);
+        let version = 1;
+        for (const location of locations.data!) {
+          const received = await client.rpc('quantity_receive', {
+            p_request_id: crypto.randomUUID(),
+            p_payload: {
+              item_id: record.id,
+              expected_version: version,
+              location_id: location.id,
+              quantity: 1,
+              reason: 'Reduced route duplicate holding proof',
+            },
+          });
+          expect(received.error).toBeNull();
+          version = (received.data as { version: number }).version;
+        }
+      } finally {
+        await client.auth.signOut({ scope: 'local' });
+      }
+      const scope = `/inventory?${new URLSearchParams({ q: name, type: 'quantity' })}`;
+      const anchoredScope = scope + '#inventory-row-2';
+      const row = page
+        .locator('#inventory-row-2')
+        .getByRole('link', { name, exact: true });
+      const heading = page.getByRole('heading', { name, exact: true });
+      const instant = async () => {
+        await settled(page);
+        const observed = await proof(page);
+        expect(observed.transitions).toHaveLength(0);
+        expect(observed.replacements).toHaveLength(0);
+        expect(
+          await page.evaluate(
+            () =>
+              document
+                .getAnimations()
+                .filter((animation) =>
+                  (
+                    animation.effect as KeyframeEffect | null
+                  )?.pseudoElement?.startsWith('::view-transition'),
+                ).length,
+          ),
+        ).toBe(0);
+        return observed;
+      };
+      const results = async (href: string) => {
+        await expect(page).toHaveURL(new URL(href, page.url()).href);
+        await expect(row).toBeVisible();
+        await expect(page.getByRole('link', { name, exact: true })).toHaveCount(
+          2,
+        );
+        await expect(
+          page.getByRole('textbox', { name: 'Search inventory' }),
+        ).toHaveValue(name);
+        await expect(
+          page.getByRole('combobox', { name: 'Tracking type' }),
+        ).toHaveValue('quantity');
+        await expect(routeProgress(page)).toHaveAttribute(
+          'data-visible',
+          'false',
+        );
+      };
+      const appBack = async () => {
+        const back = page.getByRole('link', { name: 'Back to results' });
+        await expect(back).toHaveAttribute('href', anchoredScope);
+        await back.focus();
+        await expect(back).toBeFocused();
+        await page.keyboard.press('Enter');
+        await results(anchoredScope);
+        // The installed Next scroll handler leaves focus untouched. Its
+        // departing Back link is removed, so normal focus falls to the body;
+        // the restored result remains focusable without a presentation trap.
+        await expect(page.locator('body')).toBeFocused();
+        await row.focus();
+        await expect(row).toBeFocused();
+        return instant();
+      };
+      await page.goto(scope);
+      await results(scope);
+      if (width === 390) {
+        await page.mouse.move(width / 2, 240);
+        await page.mouse.wheel(0, 400);
+        await expect
+          .poll(() => page.evaluate(() => window.scrollY))
+          .toBeGreaterThan(0);
+      }
+      await row.scrollIntoViewIfNeeded();
+      await row.focus();
+      await expect(row).toBeFocused();
+      const sourceScroll = await page.evaluate(() => window.scrollY);
+      if (width === 390) expect(sourceScroll).toBeGreaterThan(0);
+      const destination = new URL(
+        (await row.getAttribute('href'))!,
+        page.url(),
+      );
+      expect(destination.pathname).toBe(`/inventory/quantity/${record.id}`);
+      await resetProof(page);
+      const streaming = await withHeldQuantityPrimary(info, async (held) => {
+        const requested = page.waitForRequest(
+          (request) =>
+            new URL(request.url()).pathname === destination.pathname &&
+            request.headers().rsc === '1' &&
+            !request.headers()['next-router-prefetch'],
+          { timeout: 1000 },
+        );
+        try {
+          await page.keyboard.press('Enter');
+          const browserRequest = await requested;
+          await expect
+            .poll(held.blockedReads, {
+              timeout: 1000,
+              intervals: [25, 50, 100],
+            })
+            .toBeGreaterThan(0);
+          const streamed = await earlyQuantityFallback(browserRequest);
+          // Reduced mode reveals the ordinary fallback instead of retaining a
+          // paired outgoing title, while real server primary data is blocked.
+          await expect(
+            page.locator('[data-loading-shape="record"]'),
+          ).toBeVisible();
+          await expect(routeProgress(page)).toHaveAttribute(
+            'data-visible',
+            'true',
+          );
+          await instant();
+          return streamed;
+        } finally {
+          await held.release();
+        }
+      });
+      await expect(page).toHaveURL(destination.href);
+      await expect(heading).toBeVisible();
+      await expect(page.locator('[data-loading-shape]')).toHaveCount(0);
+      await expect(routeProgress(page)).toHaveAttribute(
+        'data-visible',
+        'false',
+      );
+      const arrival = await instant();
+      await resetProof(page);
+      await page.goBack();
+      await results(scope);
+      await expect
+        .poll(() => page.evaluate(() => window.scrollY))
+        .toBe(sourceScroll);
+      const nativeBack = await instant();
+      await resetProof(page);
+      await page.goForward();
+      await expect(page).toHaveURL(destination.href);
+      await expect(heading).toBeVisible();
+      const nativeForward = await instant();
+      await resetProof(page);
+      const applicationBack = await appBack();
+      // History is [detail, anchored results]. Interrupt a genuine results ->
+      // detail request with native Back to the earlier detail entry, then deliver
+      // the real late Flight response. Neither path may revive title motion.
+      const interrupted = await holdRouteWork(page, destination.pathname);
+      let pendingBack: Proof | undefined;
+      let lateDelivery: Proof | undefined;
+      let finalAppBack: Proof | undefined;
+      try {
+        await resetProof(page);
+        await row.focus();
+        await expect(row).toBeFocused();
+        await page.keyboard.press('Enter');
+        await interrupted.arrival;
+        await expect(routeProgress(page)).toHaveAttribute(
+          'data-visible',
+          'true',
+        );
+        await instant();
+        await page.goBack();
+        await expect(page).toHaveURL(destination.href);
+        pendingBack = await instant();
+        interrupted.release();
+        await interrupted.delivery;
+        await expect(page).toHaveURL(destination.href);
+        await expect(heading).toBeVisible();
+        await expect(routeProgress(page)).toHaveAttribute(
+          'data-visible',
+          'false',
+        );
+        lateDelivery = await instant();
+        await resetProof(page);
+        finalAppBack = await appBack();
+      } finally {
+        await interrupted.dispose();
+      }
+      await info.attach('reduced-delayed-record-route-proof', {
+        body: JSON.stringify({
+          mode,
+          width,
+          sourceScroll,
+          streaming,
+          arrival,
+          nativeBack,
+          nativeForward,
+          applicationBack,
+          pendingBack,
+          lateDelivery,
+          finalAppBack,
+        }),
+        contentType: 'application/json',
+      });
+      await info.attach('reduced-after-app-back', {
+        body: await page.screenshot(),
+        contentType: 'image/png',
+      });
+    });
+  }
+}
+
 for (const mode of [
   'system-reduced',
   'local-reduced',
@@ -1262,65 +1511,6 @@ for (const mode of [
   });
 }
 
-/** Holds one genuine navigation/action response; never invents Flight or readiness. */
-async function holdRouteWork(page: Page, pathname: string, action = false) {
-  let release!: () => void;
-  let received!: () => void;
-  let failed!: (error: unknown) => void;
-  let finished!: () => void;
-  const gate = new Promise<void>((resolve) => {
-    release = resolve;
-  });
-  const arrival = new Promise<void>((resolve, reject) => {
-    received = resolve;
-    failed = reject;
-  });
-  const delivery = new Promise<void>((resolve) => {
-    finished = resolve;
-  });
-  void arrival.catch(() => {});
-  let claimed = false;
-  const pattern = '**/*';
-  const handler: Parameters<Page['route']>[1] = async (route) => {
-    const request = route.request();
-    const headers = request.headers();
-    if (
-      claimed ||
-      new URL(request.url()).pathname !== pathname ||
-      (action
-        ? request.method() !== 'POST' || !headers['next-action']
-        : request.method() !== 'GET' ||
-          headers.rsc !== '1' ||
-          !!headers['next-router-prefetch'])
-    ) {
-      return route.continue();
-    }
-    claimed = true;
-    try {
-      const response = await route.fetch({ timeout: 15_000 });
-      expect(response.ok()).toBe(true);
-      received();
-      await gate;
-      await route.fulfill({ response });
-    } catch (error) {
-      failed(error);
-      await route.abort('failed').catch(() => {});
-    } finally {
-      finished();
-    }
-  };
-  await page.route(pattern, handler);
-  return {
-    arrival,
-    delivery,
-    release,
-    dispose: async () => {
-      release();
-      if (claimed) await delivery;
-      await page.unroute(pattern, handler);
-    },
-  };
-}
 const routeProgress = (page: Page) =>
   page.locator('.experience-route-progress');
 
