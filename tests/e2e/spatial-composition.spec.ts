@@ -571,6 +571,18 @@ test('W14 actual Full flight precedes reveal, newer selection retires it, and Re
   await page.clock.pauseAt(await page.evaluate(() => Date.now() + 10_000));
   const initialTarget = await canvas.getAttribute('data-camera-target');
   await selectRoom(page, 'ITC-D01');
+  // The workspace and Fiber are separate React roots. Wait for this request,
+  // not the workspace selection or a phase left over from the previous flight,
+  // before advancing the paused clock through its physical motion budget.
+  const expectAcceptedRequest = async (code: string) => {
+    await expect
+      .poll(async () => {
+        const raw = await canvas.getAttribute('data-spatial-request');
+        return raw ? (JSON.parse(raw) as { code: string | null }).code : null;
+      })
+      .toBe(code);
+  };
+  await expectAcceptedRequest('ITC-D01');
   await page.clock.runFor(16);
   await expect(canvas).toHaveAttribute('data-spatial-phase', 'flying');
   await expectRevealPosition(canvas, revealNode('ITC-D01').id, [0, 0, 0]);
@@ -629,6 +641,10 @@ test('W14 actual Full flight precedes reveal, newer selection retires it, and Re
   const requestedAt = await page.evaluate(() => performance.now());
   await page.mouse.click(replacementPoint.x, replacementPoint.y);
   await expect(viewer).toHaveAttribute('data-selected-code', replacementCode);
+  await expectAcceptedRequest(replacementCode);
+  const acceptedAt = await page.evaluate(() => performance.now());
+  // Synchronization must not consume or restart the click-to-reveal budget.
+  expect(acceptedAt).toBe(requestedAt);
   await page.clock.runFor(16);
   await expect(canvas).toHaveAttribute('data-spatial-phase', 'flying');
   await page.clock.runFor(728);
@@ -680,6 +696,7 @@ test('W14 actual Full flight precedes reveal, newer selection retires it, and Re
     body: JSON.stringify({
       replacementCode,
       requestedAt,
+      acceptedAt,
       revealAt,
       flightMs: revealAt - requestedAt,
       beforeRevealCompletionMs: 384,
