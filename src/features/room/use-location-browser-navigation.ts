@@ -12,7 +12,10 @@ import {
   RoutePendingContext,
 } from '@/components/experience/route-pending';
 import { usePrivacyReadiness } from '@/components/auth/privacy-readiness';
-import { freshPresentationGrant } from '@/components/experience/presentation-privacy';
+import {
+  freshPresentationGrant,
+  retainedPresentationGrantCurrent,
+} from '@/components/experience/presentation-privacy';
 import type { LocationRef } from '@/features/inventory/contracts-ui';
 import type { LocationBrowserState } from './location-browser-state';
 import { createLocationBrowserNavigation } from './location-browser-navigation';
@@ -34,6 +37,16 @@ export function useLocationBrowserNavigation(
     idleSnapshot,
   );
   const privacy = usePrivacyReadiness();
+  const [mountedScope] = useState(scope);
+  const accepted = useRef<{
+    revision: number;
+    epoch: number;
+    generation: string;
+  } | null>(null);
+  const mountedGeneration = useRef<string | null>(null);
+  const drifted = useRef(false);
+  const departed = useRef(false);
+  const live = useRef(false);
   const [draft, setDraft] = useState(initial);
   const [limited, setLimited] = useState(false);
   const [controller] = useState(() =>
@@ -48,18 +61,27 @@ export function useLocationBrowserNavigation(
     ),
   );
   useLayoutEffect(() => {
+    const ownerCurrent = () =>
+      live.current &&
+      !departed.current &&
+      !drifted.current &&
+      scope === mountedScope &&
+      mountedGeneration.current === privacy.generation &&
+      location.pathname === '/locations' &&
+      (!scope || scope.state.current(scope.state.snapshot().epoch));
     controller.bind({
       locations: () => locations,
       replace: (href) => run(() => router.replace(href, { scroll: false })),
       valid: () =>
-        location.pathname === '/locations' &&
-        freshPresentationGrant(privacy) &&
-        (!scope || scope.state.current(scope.state.snapshot().epoch)),
+        ownerCurrent() &&
+        retainedPresentationGrantCurrent(privacy, accepted.current),
+      writable: () => ownerCurrent() && freshPresentationGrant(privacy),
     });
   });
   const previousKey = useRef(rawKey);
-  const scopeWasBlocked = useRef(false);
   useLayoutEffect(() => {
+    live.current = true;
+    departed.current = false;
     controller.activate();
     const native = () => controller.cancelPending();
     const traverse = (event: Event) => {
@@ -68,35 +90,57 @@ export function useLocationBrowserNavigation(
     window.addEventListener('popstate', native);
     window.navigation?.addEventListener('navigate', traverse);
     return () => {
+      live.current = false;
+      departed.current = true;
+      accepted.current = null;
       controller.close();
       window.removeEventListener('popstate', native);
       window.navigation?.removeEventListener('navigate', traverse);
     };
   }, [controller]);
   useLayoutEffect(() => {
+    if (
+      scope !== mountedScope ||
+      (mountedGeneration.current !== null &&
+        mountedGeneration.current !== privacy.generation)
+    )
+      drifted.current = true;
+    const ownerCurrent =
+      live.current &&
+      !departed.current &&
+      !drifted.current &&
+      location.pathname === '/locations' &&
+      (!scope || scope.state.current(scope.state.snapshot().epoch));
+    if (ownerCurrent && freshPresentationGrant(privacy)) {
+      // A new fresh receipt cannot replay work retained under a revoked epoch.
+      if (
+        accepted.current &&
+        !retainedPresentationGrantCurrent(privacy, accepted.current)
+      )
+        controller.leave();
+      // Initial unready mounts have no grant or generation to inherit. Bind
+      // the generation only when this exact mounted owner is genuinely fresh.
+      mountedGeneration.current = privacy.generation;
+      accepted.current = {
+        revision: privacy.revocationRevision!,
+        epoch: privacy.verifiedEpoch!,
+        generation: privacy.generation,
+      };
+      controller.activate();
+    } else if (!(
+      ownerCurrent &&
+      retainedPresentationGrantCurrent(privacy, accepted.current)
+    )) {
+      accepted.current = null;
+      controller.leave();
+    }
+  }, [controller, mountedScope, scope, pendingSnapshot, privacy]);
+  useLayoutEffect(() => {
     if (previousKey.current !== rawKey) {
       previousKey.current = rawKey;
       controller.reconcile(initial, rawKey);
     }
   }, [controller, initial, rawKey]);
-  useLayoutEffect(() => {
-    if (!freshPresentationGrant(privacy)) controller.leave();
-    else if (location.pathname === '/locations') controller.activate();
-  }, [controller, privacy]);
-  useLayoutEffect(() => {
-    const blocked =
-      !!scope &&
-      !!pendingSnapshot &&
-      !scope.state.current(pendingSnapshot.epoch);
-    if (blocked) controller.leave();
-    else if (
-      scopeWasBlocked.current &&
-      freshPresentationGrant(privacy) &&
-      location.pathname === '/locations'
-    )
-      controller.activate();
-    scopeWasBlocked.current = blocked;
-  }, [controller, scope, pendingSnapshot, privacy]);
   useLayoutEffect(
     () =>
       scope?.observeNavigation?.((href) => {
@@ -105,9 +149,14 @@ export function useLocationBrowserNavigation(
           if (
             target.origin !== location.origin ||
             target.pathname !== '/locations'
-          )
+          ) {
+            accepted.current = null;
+            departed.current = true;
             controller.leave();
+          }
         } catch {
+          accepted.current = null;
+          departed.current = true;
           controller.leave();
         }
       }),
@@ -116,5 +165,17 @@ export function useLocationBrowserNavigation(
   useLayoutEffect(() => {
     controller.refresh();
   }, [controller, locations]);
-  return { draft, change: controller.change, leave: controller.leave, limited };
+  useLayoutEffect(() => {
+    controller.resumeWrites();
+  }, [controller, privacy, scope, pendingSnapshot]);
+  return {
+    draft,
+    change: controller.change,
+    leave: () => {
+      departed.current = true;
+      accepted.current = null;
+      controller.leave();
+    },
+    limited,
+  };
 }

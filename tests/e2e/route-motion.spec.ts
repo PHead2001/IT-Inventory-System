@@ -1,5 +1,6 @@
 import { expect, test, type Page, type Request } from '@playwright/test';
 import { withHeldQuantityPrimary } from './route-primary-delay';
+import { armNativeReady } from './native-ready';
 import {
   routePresentationTiming,
   pairedBodyCrossfade,
@@ -679,17 +680,9 @@ async function assertNoNativeSnapshots(page: Page) {
 }
 
 async function atNextNativeReady(page: Page, run: () => Promise<void>) {
-  let done!: () => void;
-  let failed!: (error: unknown) => void;
-  const completed = new Promise<void>((resolve, reject) => {
-    done = resolve;
-    failed = reject;
-  });
-  let armed = true;
-  await page.exposeBinding('routeMotionReady', async () => {
-    if (!armed) return;
-    armed = false;
-    try {
+  return armNativeReady(
+    page,
+    async () => {
       const active = await page.evaluate(() => {
         const p = (window as Window & { routeMotionProof?: Proof })
           .routeMotionProof!;
@@ -710,15 +703,10 @@ async function atNextNativeReady(page: Page, run: () => Promise<void>) {
         active,
         'The operation must occur during an actual running native snapshot animation',
       ).toBe(true);
-      await run();
-      done();
-    } catch (error) {
-      failed(error);
-    }
-  });
-  return { completed };
+    },
+    run,
+  );
 }
-
 async function navigationLink(page: Page, name: string) {
   const navigation = page.getByRole('navigation', { name: 'Main navigation' });
   if (!(await navigation.isVisible())) {

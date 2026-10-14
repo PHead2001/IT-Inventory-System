@@ -1206,6 +1206,21 @@ web server, database or build; canonical default discovery retained all five.
 These results precede the final integration commit and do not certify the complete
 application/database/browser gate or exact committed-SHA remote checks.
 
+## Locations retained drafts and native-ready regressions
+
+Locations browser regressions distinguish retained local drafts from fresh URL
+write admission. An original mounted owner with a previously fresh privacy grant
+may edit its visible draft during a same-authority recheck; one coalesced unsent
+revision survives older server replies and writes only after fresh admission.
+Actual withdrawal, grant/provider drift, unmount or accepted departure discards
+queued writes. Accepted departure stays latched until real mount/Activity
+reactivation; native cancellation only discards queued work and preserves current
+controls. Hook/controller tests cover these boundaries without granting readiness.
+The native-ready E2E helper registers one binding per page and validates each real
+running snapshot animation independently, including repeated arming and closure.
+Its bounded Chromium smoke proves two actual transitions on one page; full
+application journeys and exact-SHA hosted acceptance remain separate gates.
+
 ## Room Back camera retention with the configured router
 
 Cache Components is not enabled in this app. Installed Next 16.3.6 defaults it

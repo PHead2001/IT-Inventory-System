@@ -898,9 +898,28 @@ test('configuration, site custody, and location browsing remain legible at deskt
     await expect(
       selectedLocation.getByText('ITC', { exact: true }),
     ).toBeVisible();
-    await expect(
-      selectedLocation.getByRole('link', { name: 'View contents and history' }),
-    ).toHaveAttribute('href', '/locations/ITC');
+    const detailLink = selectedLocation.getByRole('link', {
+      name: 'View IT Closet location details',
+      exact: true,
+    });
+    await expect(detailLink).toBeVisible();
+    const detailHref = await detailLink.getAttribute('href');
+    expect(detailHref).not.toBeNull();
+    const detailUrl = new URL(detailHref!, page.url());
+    expect(detailUrl.origin).toBe(new URL(page.url()).origin);
+    expect(detailUrl.pathname).toBe('/locations/ITC');
+    const returnUrl = new URL(
+      detailUrl.searchParams.get('returnTo')!,
+      page.url(),
+    );
+    expect(returnUrl.origin).toBe(detailUrl.origin);
+    expect(returnUrl.pathname).toBe('/locations');
+    expect(returnUrl.searchParams.get('selected')).toBe('ITC');
+    const sourceId = await selectedLocation
+      .getByRole('heading', { name: 'IT Closet', exact: true })
+      .getAttribute('id');
+    expect(sourceId).toMatch(/^location-row-selected-panel-/);
+    expect(returnUrl.hash).toBe(`#${sourceId}`);
     await expect(
       page.getByRole('region', { name: 'Selected location' }),
     ).toContainText('View contents and history');
@@ -915,8 +934,8 @@ test('configuration, site custody, and location browsing remain legible at deskt
       path: testInfo.outputPath(`locations-selected-${viewport.suffix}.png`),
       fullPage: true,
     });
-    await page.getByRole('link', { name: 'View contents and history' }).click();
-    await expect(page).toHaveURL(/\/locations\/[^/]+$/);
+    await detailLink.click();
+    await expect(page).toHaveURL(detailUrl.href);
     await noHorizontalOverflow(page);
     await page.screenshot({
       path: testInfo.outputPath(`location-detail-${viewport.suffix}.png`),

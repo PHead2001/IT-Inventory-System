@@ -187,3 +187,47 @@ it('delayed writes use only callbacks from the latest committed binding', () => 
   vi.advanceTimersByTime(300);
   expect(currentReplace).toHaveBeenCalledTimes(1);
 });
+
+it('retains one unsent revision across paused writes and old replies, then sends it once on fresh admission', () => {
+  const { controller, replace } = fixture();
+  let writable = false;
+  controller.bind({
+    locations: () => locations,
+    replace,
+    valid: () => true,
+    writable: () => writable,
+  });
+  controller.change({ query: 'draft' }, true);
+  vi.advanceTimersByTime(300);
+  controller.change({ selectedCode: 'ITC-S1A' });
+  controller.reconcile(emptyLocationBrowserState(), '/locations');
+  expect(controller.snapshot().query).toBe('draft');
+  expect(replace).not.toHaveBeenCalled();
+  writable = true;
+  controller.resumeWrites();
+  controller.resumeWrites();
+  expect(replace).toHaveBeenCalledExactlyOnceWith(
+    '/locations?q=draft&selected=ITC-S1A',
+  );
+});
+
+it.each(['cancelPending', 'leave', 'close'] as const)(
+  '%s discards paused work, including an expired search debounce',
+  (method) => {
+    const { controller, replace } = fixture();
+    let writable = false;
+    controller.bind({
+      locations: () => locations,
+      replace,
+      valid: () => true,
+      writable: () => writable,
+    });
+    controller.change({ query: 'draft' }, true);
+    vi.advanceTimersByTime(300);
+    controller[method]();
+    writable = true;
+    controller.activate();
+    controller.resumeWrites();
+    expect(replace).not.toHaveBeenCalled();
+  },
+);
