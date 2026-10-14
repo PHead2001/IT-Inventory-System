@@ -40,6 +40,94 @@ vi.mock('@/features/inventory/queries.server', () => ({
 }));
 vi.mock('next/navigation', () => ({ notFound: vi.fn(), redirect: m.redirect }));
 import Page from './page';
+
+const scopedOrigin =
+  '/locations?q=Office&selected=ITO&level=&expanded=ITO#location-row-selected-panel-00000000-0000-4000-8000-000000000001';
+
+it('retains the validated browser origin through status, pagination and child detail navigation while export keeps inventory filters', async () => {
+  m.inventory.mockResolvedValue({ rows: [], total: 75, page: 2, pageSize: 25 });
+  render(
+    await Page({
+      params: Promise.resolve({ code: 'ITO' }),
+      searchParams: Promise.resolve({
+        returnTo: scopedOrigin,
+        status: 'all',
+        q: 'Cable',
+        page: '2',
+      }),
+    }),
+  );
+  const navigation = [
+    screen.getByRole('link', { name: 'Active only' }),
+    screen.getByRole('link', { name: 'All statuses' }),
+    screen.getByRole('link', { name: 'Previous' }),
+    screen.getByRole('link', { name: 'Next' }),
+    screen.getByRole('link', { name: /IT Office \/ General Storage/ }),
+  ];
+  for (const link of navigation) {
+    const target = new URL(
+      link.getAttribute('href')!,
+      'https://inventory.invalid',
+    );
+    expect(target.searchParams.get('returnTo')).toBe(scopedOrigin);
+  }
+  const active = new URL(
+    navigation[0].getAttribute('href')!,
+    'https://inventory.invalid',
+  );
+  expect(active.searchParams.get('q')).toBe('Cable');
+  expect(active.searchParams.has('page')).toBe(false);
+  const previous = new URL(
+    navigation[2].getAttribute('href')!,
+    'https://inventory.invalid',
+  );
+  expect(previous.searchParams.get('page')).toBe('1');
+  const child = new URL(
+    navigation[4].getAttribute('href')!,
+    'https://inventory.invalid',
+  );
+  expect(child.pathname).toBe('/locations/ITO-GENERAL');
+  const exported = new URL(
+    screen.getByRole('link', { name: 'Export' }).getAttribute('href')!,
+    'https://inventory.invalid',
+  );
+  expect(exported.searchParams.has('returnTo')).toBe(false);
+  expect(exported.searchParams.get('location')).toBe('ITO');
+  expect(exported.searchParams.get('status')).toBe('all');
+});
+
+it.each([scopedOrigin, '/history?type=asset', '//outside.example/locations'])(
+  'page recovery carries only the validated origin from %s',
+  async (origin) => {
+    m.redirect.mockClear();
+    m.inventory.mockResolvedValue({
+      rows: [],
+      total: 50,
+      page: 99,
+      pageSize: 25,
+    });
+    await Page({
+      params: Promise.resolve({ code: 'ITO' }),
+      searchParams: Promise.resolve({
+        returnTo: origin,
+        status: 'all',
+        q: 'Cable',
+        page: '99',
+      }),
+    });
+    expect(m.redirect).toHaveBeenCalledOnce();
+    const recovery = new URL(
+      m.redirect.mock.calls[0][0],
+      'https://inventory.invalid',
+    );
+    expect(recovery.pathname).toBe('/locations/ITO');
+    expect(recovery.searchParams.get('page')).toBe('2');
+    expect(recovery.searchParams.get('q')).toBe('Cable');
+    expect(recovery.searchParams.get('returnTo')).toBe(
+      origin === scopedOrigin ? scopedOrigin : '/locations',
+    );
+  },
+);
 it('All locations retains only a bounded locations detail origin', async () => {
   m.inventory.mockResolvedValue({ rows: [], total: 0, page: 1, pageSize: 25 });
   const origin =

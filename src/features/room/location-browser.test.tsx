@@ -86,6 +86,62 @@ it('keeps normal codes on a separate intact line and gives long codes a separate
   }
 });
 
+it('search Details links distinguish duplicate location names by their readable paths without changing selection or occurrence identity', () => {
+  const left = {
+    ...shelf,
+    id: '00000000-0000-4000-8000-000000000001',
+    name: 'Shelf',
+    breadcrumb: 'IT Closet / Left Storage / Shelf',
+  };
+  const right = {
+    ...shelf,
+    id: '00000000-0000-4000-8000-000000000002',
+    code: 'ITC-S3A',
+    name: 'Shelf',
+    breadcrumb: 'IT Closet / Right Storage / Shelf',
+  };
+  const state = { ...emptyLocationBrowserState(), query: 'Shelf' };
+  const select = vi.fn();
+  render(
+    <LocationBrowser
+      locations={[root, left, right]}
+      selectedCode={null}
+      onSelect={select}
+      browserState={state}
+      detailPresentation={{
+        returnTo: (id, occurrence) =>
+          locationBrowserHref(state, locationRowAnchor(id, occurrence)),
+        leave: vi.fn(),
+      }}
+    />,
+  );
+  for (const location of [left, right]) {
+    const links = screen.getAllByRole('link', {
+      name: `View ${location.breadcrumb} location details`,
+    });
+    expect(links).toHaveLength(2); // Each responsive occurrence retains its own exact anchor.
+    expect(
+      new Set(
+        links.map((link) =>
+          new URL(
+            link.getAttribute('href')!,
+            'https://inventory.invalid',
+          ).searchParams.get('returnTo'),
+        ),
+      ).size,
+    ).toBe(2);
+    fireEvent.click(
+      screen.getAllByRole('button', {
+        name: `${location.breadcrumb} ${location.code}`,
+      })[0],
+    );
+    expect(select).toHaveBeenLastCalledWith(location.code);
+  }
+  expect(
+    screen.queryByRole('link', { name: 'View Shelf location details' }),
+  ).not.toBeInTheDocument();
+});
+
 it('focuses a stable visible navigation landmark and announces mobile Open and Back without focusing search', () => {
   const select = vi.fn();
   render(
