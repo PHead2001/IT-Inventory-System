@@ -60,6 +60,7 @@ export default async function LocationPage({
   const scopeParams = inventoryFilterParams({ ...filters, location: code });
   const normalizedParams = {
     ...Object.fromEntries(scopeParams),
+    ...(filters.returnTo ? { returnTo } : {}),
     page: String(filter.page),
   };
   const base = '/locations/' + encodeURIComponent(code);
@@ -68,8 +69,13 @@ export default async function LocationPage({
   const scopeHref = (status: string) => {
     const query = inventoryFilterParams({ ...filters, status });
     query.delete('location');
+    if (filters.returnTo) query.set('returnTo', returnTo);
     return base + (query.size ? '?' + query : '');
   };
+  const childHref = (childCode: string) =>
+    '/locations/' +
+    encodeURIComponent(childCode) +
+    (filters.returnTo ? '?' + new URLSearchParams({ returnTo }) : '');
   const constrained = hasInventoryConstraints({
     ...filters,
     location: undefined,
@@ -142,7 +148,7 @@ export default async function LocationPage({
                     <Link
                       className="break-words text-cyan-300 underline"
                       aria-label={`${child.breadcrumb} (${child.code})`}
-                      href={'/locations/' + encodeURIComponent(child.code)}
+                      href={childHref(child.code)}
                     >
                       {child.name}
                     </Link>

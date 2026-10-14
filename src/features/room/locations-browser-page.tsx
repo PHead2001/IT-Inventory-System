@@ -45,20 +45,22 @@ export function LocationsBrowserPage({
   const selected = locations.find((location) => location.code === code);
   return (
     <div className="grid min-w-0 gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(18rem,24rem)]">
-      <LocationBrowser
-        locations={locations}
-        selectedCode={code}
-        onSelect={setCode}
-        browserState={navigation.draft}
-        onBrowserStateChange={navigation.change}
-        detailPresentation={details}
-      />
-      {navigation.limited && (
-        <p role="status" className="text-sm text-amber-200">
-          This view has reached its saved-state limit. Shorten the search or
-          collapse a group before adding more state.
-        </p>
-      )}
+      <div className="min-w-0 space-y-2">
+        <LocationBrowser
+          locations={locations}
+          selectedCode={code}
+          onSelect={setCode}
+          browserState={navigation.draft}
+          onBrowserStateChange={navigation.change}
+          detailPresentation={details}
+        />
+        {navigation.limited && (
+          <p role="status" className="text-sm text-amber-200">
+            This view has reached its saved-state limit. Shorten the search or
+            collapse a group before adding more state.
+          </p>
+        )}
+      </div>
       <motion.section
         aria-label="Selected location"
         className="experience-surface min-w-0 self-start p-4"

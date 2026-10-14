@@ -80,7 +80,7 @@ function BrowserLocation({
       {detailPresentation && occurrence && (
         <LocationDetailLink
           location={{ kind: 'location', id: location.id, code: location.code }}
-          label={location.name}
+          label={search ? location.breadcrumb : location.name}
           occurrence={occurrence}
           returnTo={detailPresentation.returnTo(location.id, occurrence)}
           onLeave={detailPresentation.leave}
