@@ -24,6 +24,7 @@ import { notFound, redirect } from 'next/navigation';
 import Form from '@/components/experience/route-get-form';
 import Link from '@/components/experience/route-link';
 import styles from '@/features/inventory/components/inventory-visual.module.css';
+import { recordDetailReturnPath } from '@/features/inventory/detail-return';
 import { OperationalTimestamp } from '@/components/operational-time';
 const canonicalId =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
@@ -193,7 +194,11 @@ export default async function HistoryPage({
     params.entityId !== undefined
       ? await getHistoryRecord(params.entityId)
       : null;
-  const coherentParams = { ...params, type: record?.kind ?? filter.type };
+  const coherentParams: Record<string, string | undefined> & { type: string } =
+    {
+      ...params,
+      type: record?.kind ?? filter.type,
+    };
   const clearQuery = new URLSearchParams();
   if (coherentParams.type !== 'all')
     clearQuery.set('type', coherentParams.type);
@@ -228,6 +233,15 @@ export default async function HistoryPage({
   ]);
   const recovery = pageRecoveryHref('/history', coherentParams, result);
   if (recovery) redirect(recovery);
+  const historyScope = new URLSearchParams();
+  for (const key of ['type', 'location', 'entityId', 'page']) {
+    const value = coherentParams[key];
+    if (value) historyScope.set(key, value);
+  }
+  const returnTo = recordDetailReturnPath(
+    '/history' + (historyScope.size ? '?' + historyScope : ''),
+    '/history',
+  );
   return (
     <ProtectedPrivacyContent routeKey={readiness.routeKey}>
       <RouteReady {...readiness} conventionalPrimary>
@@ -353,7 +367,7 @@ export default async function HistoryPage({
             {countLabel(result.total, 'matching event')}
           </p>
           <div className={styles.history}>
-            <HistoryList events={result.rows} compact />
+            <HistoryList returnTo={returnTo} events={result.rows} compact />
           </div>
           <Pagination result={result} base="/history" params={coherentParams} />
         </>

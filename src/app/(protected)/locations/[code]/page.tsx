@@ -1,4 +1,9 @@
 import { RouteReady } from '@/components/experience/route-ready';
+import {
+  RecordTitle,
+  InventoryBackLink,
+} from '@/components/experience/record-transition';
+import { locationDetailReturnPath } from '@/features/inventory/detail-return';
 import { routeReadyProps } from '@/components/experience/route-ready.server';
 import { PrivateDocumentTitle } from '@/components/auth/private-document-title';
 import { readLocationPage } from './read.server';
@@ -43,6 +48,7 @@ export default async function LocationPage({
       Array.isArray(value) ? value[0] : value,
     ]),
   );
+  const returnTo = locationDetailReturnPath(filters.returnTo);
   const location = await readLocationPage(code);
   if (!location) notFound();
   const [result, locations] = await Promise.all([
@@ -77,16 +83,20 @@ export default async function LocationPage({
           title={recordTitle(location.name, 'Locations').title.absolute}
         />
         <>
-          <Link
+          <InventoryBackLink
+            record={{ kind: 'location', id: location.id, code: location.code }}
             className="inline-flex min-h-11 items-center text-cyan-300 underline"
-            href="/locations"
+            href={returnTo}
           >
             All locations
-          </Link>
+          </InventoryBackLink>
           <p className="experience-eyebrow mt-3">Storage / Location</p>
-          <h1 className="experience-heading mt-1 break-words">
+          <RecordTitle
+            record={{ kind: 'location', id: location.id, code: location.code }}
+            className="experience-heading mt-1 break-words"
+          >
             {location.name}
-          </h1>
+          </RecordTitle>
           <p className="my-3 break-words text-sm leading-6 text-slate-300">
             {location.breadcrumb} ·{' '}
             {!location.active

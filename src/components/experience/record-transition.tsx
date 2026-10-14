@@ -12,7 +12,13 @@ import Link from '@/components/experience/route-link';
 import { useRouteMotion } from './route-motion';
 import {
   titleTarget,
-  sameHolding,
+  sameTitleSource,
+  samePresentationTarget,
+  historyTitleTarget,
+  locationTitleTarget,
+  type PresentationTarget,
+  type LocationIdentity,
+  type TitleTarget,
   matchesTitleListRoute,
   type HoldingIdentity,
   type RecordIdentity,
@@ -20,12 +26,16 @@ import {
 import { sharedTitleMotion } from './shared-title-motion';
 import { RouteContentIdentityContext } from './route-content-identity';
 import { routeKey } from './route-key';
+import { recordDetailReturnPath } from '@/features/inventory/detail-return';
 import { usePrivacyReadiness } from '@/components/auth/privacy-readiness';
 import { freshPresentationGrant } from './presentation-privacy';
 import { hasBlockingPresentationAncestor } from '@/components/forms/transition-capture-boundary';
 
-function sameRecord(intent: RecordIdentity | null, record: RecordIdentity) {
-  return intent?.kind === record.kind && intent.id === record.id;
+function sameRecord(
+  intent: PresentationTarget | null,
+  record: PresentationTarget,
+) {
+  return samePresentationTarget(intent, record);
 }
 
 function listRouteKey(href: string | undefined) {
@@ -71,7 +81,7 @@ export function InventoryRecordLink({
     intent &&
     target &&
     sameRecord(intent, record) &&
-    sameHolding(intent.holding, target.holding) &&
+    sameTitleSource(intent, target) &&
     listRouteKey(intent.listHref) === targetListKey &&
     listRouteKey(contentIdentity ? contentIdentity.listHref : listHref) ===
       targetListKey;
@@ -115,7 +125,7 @@ export function RecordTitle({
   ref,
   ...headingProps
 }: {
-  record: RecordIdentity;
+  record: PresentationTarget;
 } & ComponentProps<'h1'>) {
   const {
     intent,
@@ -202,7 +212,7 @@ export function InventoryBackLink({
   className,
   children,
 }: {
-  record: RecordIdentity;
+  record: PresentationTarget;
   href: string;
   className?: string;
   children: React.ReactNode;
@@ -218,5 +228,190 @@ export function InventoryBackLink({
     >
       {children}
     </Link>
+  );
+}
+
+function visibleUniqueSource(anchor: string) {
+  const sources = document.querySelectorAll<HTMLElement>(`[id="${anchor}"]`);
+  const source = sources.length === 1 ? sources[0] : null;
+  return (
+    !!source &&
+    source.isConnected &&
+    !hasBlockingPresentationAncestor(source) &&
+    source.getClientRects().length > 0 &&
+    getComputedStyle(source).visibility !== 'hidden'
+  );
+}
+function scopedSourceMatches(
+  intent: ReturnType<typeof useRouteMotion>['intent'],
+  target: TitleTarget | null,
+  rawKey: string | undefined,
+) {
+  return (
+    !!intent &&
+    !!target &&
+    sameTitleSource(intent, target) &&
+    !!rawKey &&
+    matchesTitleListRoute(intent, rawKey)
+  );
+}
+export function HistoryRecordLink({
+  record,
+  event,
+  returnTo,
+  href,
+  className,
+  children,
+}: {
+  record: RecordIdentity;
+  event: { kind: 'asset' | 'quantity'; id: string };
+  returnTo: string;
+  href: string;
+  className?: string;
+  children: React.ReactNode;
+}) {
+  const motion = useRouteMotion();
+  const identity = useContext(RouteContentIdentityContext);
+  const target = historyTitleTarget(
+    record,
+    event,
+    returnTo,
+    identity?.rawRouteKey,
+  );
+  const matches = scopedSourceMatches(
+    motion.intent,
+    target,
+    identity?.rawRouteKey,
+  );
+  return (
+    <ViewTransition
+      default="none"
+      share={matches ? 'record-title' : 'none'}
+      name={matches ? motion.intent!.name : undefined}
+      onShare={(instance) => {
+        if (!motion.current()) return;
+        const cleanup = sharedTitleMotion(
+          instance,
+          motion.validNow,
+          motion.rejectTitleSnapshot,
+        );
+        motion.finishTitleAfterSnapshot(instance);
+        return cleanup;
+      }}
+    >
+      <Link
+        href={href}
+        className={className}
+        onNavigate={() => {
+          if (target && visibleUniqueSource(target.anchor)) motion.arm(target);
+          else motion.retireTitle();
+        }}
+      >
+        {children}
+      </Link>
+    </ViewTransition>
+  );
+}
+export function LocationTitleSourceName({
+  location,
+  occurrence,
+  returnTo,
+  as: Tag = 'span',
+  className,
+  children,
+}: {
+  location: LocationIdentity;
+  occurrence: import('@/features/inventory/detail-return').LocationOccurrence;
+  returnTo: string;
+  as?: 'span' | 'h2';
+  className?: string;
+  children: React.ReactNode;
+}) {
+  const motion = useRouteMotion();
+  const identity = useContext(RouteContentIdentityContext);
+  const target = locationTitleTarget(
+    location,
+    occurrence,
+    returnTo,
+    identity?.rawRouteKey,
+  );
+  const matches = scopedSourceMatches(
+    motion.intent,
+    target,
+    identity?.rawRouteKey,
+  );
+  // Even a mismatched/unfresh draft preserves one stable occurrence anchor.
+  const anchor = `location-row-${occurrence}-${location.id}`;
+  return (
+    <ViewTransition
+      default="none"
+      share={matches ? 'record-title' : 'none'}
+      name={matches ? motion.intent!.name : undefined}
+      onShare={(instance) => {
+        if (!motion.current()) return;
+        const cleanup = sharedTitleMotion(
+          instance,
+          motion.validNow,
+          motion.rejectTitleSnapshot,
+        );
+        motion.finishTitleAfterSnapshot(instance);
+        return cleanup;
+      }}
+    >
+      <Tag id={anchor} className={className}>
+        {children}
+      </Tag>
+    </ViewTransition>
+  );
+}
+export function LocationDetailLink({
+  location,
+  label,
+  occurrence,
+  returnTo,
+  onLeave,
+  className,
+  children,
+}: {
+  location: LocationIdentity;
+  label: string;
+  occurrence: import('@/features/inventory/detail-return').LocationOccurrence;
+  returnTo: string;
+  onLeave: () => void;
+  className?: string;
+  children: React.ReactNode;
+}) {
+  const motion = useRouteMotion();
+  const identity = useContext(RouteContentIdentityContext);
+  const target = locationTitleTarget(
+    location,
+    occurrence,
+    returnTo,
+    identity?.rawRouteKey,
+  );
+  const href = recordPathForLocation(location, returnTo);
+  return (
+    <Link
+      href={href}
+      aria-label={'View ' + label + ' location details'}
+      className={className}
+      onNavigate={() => {
+        onLeave();
+        if (target && visibleUniqueSource(target.anchor)) motion.arm(target);
+        else motion.retireTitle();
+      }}
+    >
+      {children}
+    </Link>
+  );
+}
+function recordPathForLocation(location: LocationIdentity, returnTo: string) {
+  return (
+    '/locations/' +
+    encodeURIComponent(location.code) +
+    '?' +
+    new URLSearchParams({
+      returnTo: recordDetailReturnPath(returnTo, '/locations'),
+    })
   );
 }

@@ -12,7 +12,7 @@ import { custodyEventLabel } from '@/features/custody/vocabulary';
 import { ProtectedPrivacyContent } from '@/components/auth/privacy-content';
 import { RecordStatus } from '@/components/record-status';
 import Link from '@/components/experience/route-link';
-import { inventoryReturnPath } from '@/features/inventory/create-return';
+import { recordDetailReturnPath } from '@/features/inventory/detail-return';
 import { notFound } from 'next/navigation';
 import { requireMember } from '@/lib/auth/session.server';
 import { countLabel } from '@/lib/count';
@@ -47,7 +47,7 @@ export default async function QuantityPage({
   const { member } = await requireMember();
   const { id } = await params;
   const query = await searchParams;
-  const returnTo = inventoryReturnPath(query?.returnTo);
+  const returnTo = recordDetailReturnPath(query?.returnTo);
   const detail = await readQuantityPage(id);
   if (!detail) notFound();
   const { item, balances, history, stockSummary } = detail;

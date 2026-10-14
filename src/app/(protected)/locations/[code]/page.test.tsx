@@ -40,6 +40,31 @@ vi.mock('@/features/inventory/queries.server', () => ({
 }));
 vi.mock('next/navigation', () => ({ notFound: vi.fn(), redirect: m.redirect }));
 import Page from './page';
+it('All locations retains only a bounded locations detail origin', async () => {
+  m.inventory.mockResolvedValue({ rows: [], total: 0, page: 1, pageSize: 25 });
+  const origin =
+    '/locations?q=Office&selected=ITO&level=&expanded=ITO#location-row-selected-panel-00000000-0000-4000-8000-000000000001';
+  const page = render(
+    await Page({
+      params: Promise.resolve({ code: 'ITO' }),
+      searchParams: Promise.resolve({ returnTo: origin }),
+    }),
+  );
+  expect(screen.getByRole('link', { name: 'All locations' })).toHaveAttribute(
+    'href',
+    origin,
+  );
+  page.rerender(
+    await Page({
+      params: Promise.resolve({ code: 'ITO' }),
+      searchParams: Promise.resolve({ returnTo: '/history?type=asset' }),
+    }),
+  );
+  expect(screen.getByRole('link', { name: 'All locations' })).toHaveAttribute(
+    'href',
+    '/locations',
+  );
+});
 it('shows selected normalized scope and matching CSV, retaining filters and resetting page', async () => {
   m.inventory.mockResolvedValue({ rows: [], total: 0, page: 1, pageSize: 25 });
   render(

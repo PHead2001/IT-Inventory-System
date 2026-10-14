@@ -38,6 +38,8 @@ type Scope = {
   owners: ReturnType<typeof createRoutePendingOwners>;
   terminal: () => void;
   navigation?: (href: string) => void;
+  /** Read-only notification at the existing accepted-navigation point. */
+  observeNavigation?: (observer: (href: string) => void) => () => void;
   beginNavigation?: (
     href: string,
   ) => { close: () => void; current: () => boolean } | undefined;
