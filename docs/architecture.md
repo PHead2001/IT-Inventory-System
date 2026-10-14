@@ -130,6 +130,66 @@ authorization and real visible readiness remain required. Supersede, cancellatio
 retire and settle the old ticket. Changed logout evidence starts distinct current-
 route recovery rather than rebasing the captured target proof.
 
+Successful inventory list, quantity detail and asset detail primaries explicitly
+opt into a consistently mounted paired body boundary inside their exact raw
+RouteReady identity. It shares `${intent.name}-content` while the matching title
+shares `intent.name`, so the body crossfade and title morph occupy one native
+capture even when the inner primary and outer pathname commit in either order.
+That accepted pair suppresses the outer generic fade. Capture consumes only its
+exact generic arrival approval; title/body effects finish together before retiring
+their intent. A body-only capture fades once and retires its unused title approval;
+a title without an opted-in body reveals instantly. Ordinary unpaired routes
+retain their generic arrival. No readiness or request state is granted by these
+presentation boundaries. The body inherits the accepted page's existing source
+and returns its outgoing native cleanup lease; it never mounts a competing source.
+Room, loading/error boundaries and mismatched/retired approvals do not opt in.
+The main History list and ordinary Locations browser/detail primaries use the
+same title/body ownership. Title targets distinguish a real inventory holding,
+a history event kind/UUID and its record UUID, or a location UUID/stable code
+and exact desktop-tree, mobile-level or selected-panel occurrence. History
+event/detail timelines remain ordinary links. Location selection buttons keep
+selection semantics; separate accessible Details links pair the existing visible
+name span or selected heading. Hidden, removed, duplicate or stale occurrences
+cannot borrow another source. Application Back accepts only the exact ephemeral
+origin; native traversal and Reduced motion remain instant.
+
+Detail-only return validation admits canonical main History filters
+(`type`, `location`, `entityId`, `page`) and bounded Locations browser state;
+whole-form Cancel and global inventory return validation are unchanged. Locations
+restores search, selected stable code, mobile level and expanded group codes from
+the URL, validated against freshly authorized locations. Search updates its local
+draft immediately and replaces the URL after 300 ms; explicit selection/tree
+changes coalesce the latest whole draft. Draft state is limited to 200 search
+characters, 32 expanded groups and 3600 serialized query characters. Over-budget
+updates retain the accepted draft and announce the limit rather than discard
+state. Detail return URLs encode that current draft even before its debounce
+settles. Pairing still requires the exact fresh server-primary raw key; a pending
+draft navigates ordinarily. Accepted cross-path navigation in every motion mode,
+native traversal, withdrawal and unmount cancel delayed replacements. The
+existing accepted-navigation scope has a read-only destination observer solely
+for this cancellation; it grants no readiness or presentation authority.
+
+Conventional cross-path navigation between explicitly capable Inventory, History
+and Locations primaries reuses that same event-owned loading/readiness engine
+without a title pair. The existing exact raw source/destination/epoch arrival
+object carries its unique capture name and primary presentation mode. Only an
+actual current authorized visible opted-in source, supported destination, fresh
+privacy and supported Full motion may arm retention. Room/canvas, new-item forms,
+unsupported routes, query-only updates, anchors and interrupted retained navigation
+do not acquire this capability. Successful History and Locations primaries use
+one identical raw key for canonical privacy and readiness; unavailable/error
+responses never opt in.
+
+The mounted inner body shares the exact primary arrival name and inherits its
+source handoff. Capture consumes only that exact approval; real visible primary
+readiness releases its loading wait, never the approval or backend work. Outer
+pathname commits cannot animate or retire a primary approval. Redirect/query
+mismatch, terminal failure, native traversal, Reduced motion, privacy withdrawal
+and provider retirement release the owned presentation wait and retire its approval.
+No extra private node cache, cloned source, deadline-based readiness or new privacy
+decision is introduced. Inventory title/body pairing keeps its existing capture
+and completion contract.
+
 Native browser Back/Forward uses the installed Next/React eager history restore
 and is instant. The route provider observes popstate only to retire departing
 presentation, cancel a paired wait and register real authorized primary readiness.

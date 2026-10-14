@@ -1,4 +1,4 @@
-import { RouteLoading } from '@/components/experience/route-pending';
+import { PairedRouteLoading } from '@/components/experience/paired-route-loading';
 export default function LoadingHistory() {
-  return <RouteLoading shape="history" label="Loading history…" />;
+  return <PairedRouteLoading shape="history" label="Loading history…" />;
 }

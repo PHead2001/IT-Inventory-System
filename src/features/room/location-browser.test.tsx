@@ -2,6 +2,11 @@ import { fireEvent, render, screen } from '@testing-library/react';
 import { expect, it, vi } from 'vitest';
 import { LocationBrowser } from './location-browser';
 import type { LocationRef } from '../inventory/contracts-ui';
+import {
+  emptyLocationBrowserState,
+  locationBrowserHref,
+} from './location-browser-state';
+import { locationRowAnchor } from '@/features/inventory/detail-return';
 
 const root: LocationRef = {
   id: 'root',
@@ -21,6 +26,48 @@ const shelf: LocationRef = {
   parentId: 'root',
   can_hold_inventory: true,
 };
+it('controlled browsing keeps selection buttons and separate accessible detail links with distinct responsive occurrences', () => {
+  const select = vi.fn(),
+    change = vi.fn();
+  const id = '00000000-0000-4000-8000-000000000001';
+  const item = { ...root, id };
+  const state = emptyLocationBrowserState();
+  const { container } = render(
+    <LocationBrowser
+      locations={[item]}
+      selectedCode={null}
+      onSelect={select}
+      browserState={state}
+      onBrowserStateChange={change}
+      detailPresentation={{
+        returnTo: (id, occurrence) =>
+          locationBrowserHref(state, locationRowAnchor(id, occurrence)),
+        leave: vi.fn(),
+      }}
+    />,
+  );
+  const buttons = screen.getAllByRole('button', { name: 'IT Closet ITC' });
+  fireEvent.click(buttons[0]);
+  expect(select).toHaveBeenCalledWith('ITC');
+  expect(change).not.toHaveBeenCalled();
+  const links = screen.getAllByRole('link', {
+    name: 'View IT Closet location details',
+  });
+  expect(links).toHaveLength(2);
+  for (const link of links) expect(link.closest('button')).toBeNull();
+  expect(
+    container.querySelectorAll('[id="location-row-desktop-tree-' + id + '"]')
+      .length,
+  ).toBe(1);
+  expect(
+    container.querySelectorAll('[id="location-row-mobile-level-' + id + '"]')
+      .length,
+  ).toBe(1);
+  fireEvent.change(screen.getByRole('searchbox'), {
+    target: { value: 'Closet' },
+  });
+  expect(change).toHaveBeenLastCalledWith({ query: 'Closet' }, true);
+});
 it('keeps normal codes on a separate intact line and gives long codes a separate keyboard scroll target', () => {
   const longCode = 'ITO-' + 'LONG'.repeat(24);
   render(
@@ -37,6 +84,62 @@ it('keeps normal codes on a separate intact line and gives long codes a separate
     expect(code.closest('button')).toBeNull();
     expect(code).toHaveTextContent(longCode);
   }
+});
+
+it('search Details links distinguish duplicate location names by their readable paths without changing selection or occurrence identity', () => {
+  const left = {
+    ...shelf,
+    id: '00000000-0000-4000-8000-000000000001',
+    name: 'Shelf',
+    breadcrumb: 'IT Closet / Left Storage / Shelf',
+  };
+  const right = {
+    ...shelf,
+    id: '00000000-0000-4000-8000-000000000002',
+    code: 'ITC-S3A',
+    name: 'Shelf',
+    breadcrumb: 'IT Closet / Right Storage / Shelf',
+  };
+  const state = { ...emptyLocationBrowserState(), query: 'Shelf' };
+  const select = vi.fn();
+  render(
+    <LocationBrowser
+      locations={[root, left, right]}
+      selectedCode={null}
+      onSelect={select}
+      browserState={state}
+      detailPresentation={{
+        returnTo: (id, occurrence) =>
+          locationBrowserHref(state, locationRowAnchor(id, occurrence)),
+        leave: vi.fn(),
+      }}
+    />,
+  );
+  for (const location of [left, right]) {
+    const links = screen.getAllByRole('link', {
+      name: `View ${location.breadcrumb} location details`,
+    });
+    expect(links).toHaveLength(2); // Each responsive occurrence retains its own exact anchor.
+    expect(
+      new Set(
+        links.map((link) =>
+          new URL(
+            link.getAttribute('href')!,
+            'https://inventory.invalid',
+          ).searchParams.get('returnTo'),
+        ),
+      ).size,
+    ).toBe(2);
+    fireEvent.click(
+      screen.getAllByRole('button', {
+        name: `${location.breadcrumb} ${location.code}`,
+      })[0],
+    );
+    expect(select).toHaveBeenLastCalledWith(location.code);
+  }
+  expect(
+    screen.queryByRole('link', { name: 'View Shelf location details' }),
+  ).not.toBeInTheDocument();
 });
 
 it('focuses a stable visible navigation landmark and announces mobile Open and Back without focusing search', () => {

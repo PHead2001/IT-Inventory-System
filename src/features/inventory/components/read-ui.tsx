@@ -5,7 +5,11 @@ import {
   assignmentEndpointSummary,
 } from '../history-summary';
 import { RecordStatus } from '@/components/record-status';
-import { InventoryRecordLink } from '@/components/experience/record-transition';
+import {
+  InventoryRecordLink,
+  HistoryRecordLink,
+} from '@/components/experience/record-transition';
+import { detailRecordHref } from '@/features/inventory/detail-return';
 import {
   inventoryHolding,
   recordHoldingKey,
@@ -366,11 +370,14 @@ export function HistoryList({
   events,
   compact = false,
   linkToEvent = false,
+  returnTo,
 }: {
   events: HistoryEvent[];
   compact?: boolean;
   /** Link to the immutable event identity, independent of history pagination. */
   linkToEvent?: boolean;
+  /** Main history list only; detail/event timelines remain ordinary. */
+  returnTo?: string;
 }) {
   const DetailTag = compact ? 'details' : 'div';
   if (!events.length)
@@ -392,17 +399,33 @@ export function HistoryList({
             />
           </div>
           <p className="mt-2 min-w-0 text-sm [overflow-wrap:anywhere]">
-            <Link
-              className="text-cyan-300 underline"
-              href={
-                '/inventory/' +
-                (event.kind === 'quantity' ? 'quantity' : 'assets') +
-                '/' +
-                event.entityId
-              }
-            >
-              {event.entityName}
-            </Link>{' '}
+            {returnTo ? (
+              <HistoryRecordLink
+                record={{ kind: event.kind, id: event.entityId }}
+                event={{ kind: event.kind, id: event.id }}
+                returnTo={`${returnTo}#history-event-${event.kind}-${event.id}`}
+                href={detailRecordHref(
+                  event.kind,
+                  event.entityId,
+                  `${returnTo}#history-event-${event.kind}-${event.id}`,
+                )}
+                className="text-cyan-300 underline"
+              >
+                {event.entityName}
+              </HistoryRecordLink>
+            ) : (
+              <Link
+                className="text-cyan-300 underline"
+                href={
+                  '/inventory/' +
+                  (event.kind === 'quantity' ? 'quantity' : 'assets') +
+                  '/' +
+                  event.entityId
+                }
+              >
+                {event.entityName}
+              </Link>
+            )}{' '}
             · {event.actorName}
           </p>
           {historySummary(event) && (

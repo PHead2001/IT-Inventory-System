@@ -7,11 +7,13 @@ export type ReadyContent = {
   contentIdentity: string;
   root: HTMLElement;
   consumedTask?: { sourceKey: string; destinationKey: string };
+  conventionalPrimary?: boolean;
 };
 export function createRouteReadiness(
   actorId: string,
   pending: RoutePendingState,
   committed: (key: string) => void,
+  observedPrimary?: (content: Readonly<ReadyContent>) => void,
 ) {
   const roots = new Map<symbol, ReadyContent>();
   const listeners = new Set<() => void>();
@@ -45,6 +47,7 @@ export function createRouteReadiness(
   };
   const acknowledge = (content: ReadyContent) => {
     if (!active(content)) return;
+    observedPrimary?.(Object.freeze({ ...content }));
     committed(content.routeKey);
     if (history && pending.current(history.epoch)) history.finish();
     history = undefined;

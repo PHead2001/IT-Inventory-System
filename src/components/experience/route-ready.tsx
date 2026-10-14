@@ -14,6 +14,7 @@ import {
 import type { createRouteReadiness } from './route-readiness';
 import { RouteContentIdentityContext } from './route-content-identity';
 import { afterTransitionCapture } from '@/components/forms/transition-capture';
+import { PairedInventoryContent } from './paired-inventory-content';
 import { usePrivacyReadiness } from '@/components/auth/privacy-readiness';
 import { freshPresentationGrant } from './presentation-privacy';
 import { replaceAppHistoryUrl } from '@/lib/navigation/history';
@@ -43,6 +44,8 @@ export function RouteReady({
   pairingHref,
   children,
   ready = true,
+  pairedInventory = false,
+  conventionalPrimary = false,
 }: {
   actorId: string;
   routeKey: string;
@@ -51,6 +54,10 @@ export function RouteReady({
   pairingHref?: string;
   children: React.ReactNode;
   ready?: boolean;
+  /** Explicit opt-in for successful list/quantity/asset primaries, never fallback. */
+  pairedInventory?: boolean;
+  /** Successful conventional primary capability, never canvas/loading/error. */
+  conventionalPrimary?: boolean;
 }) {
   const readiness = useContext(RouteReadyContext);
   const root = useRef<HTMLDivElement>(null);
@@ -139,6 +146,7 @@ export function RouteReady({
               },
             }
           : {}),
+        conventionalPrimary,
       });
     });
     return () => {
@@ -177,7 +185,16 @@ export function RouteReady({
     >
       <RouteContentIdentityContext value={identity}>
         <div ref={root} data-route-ready="true" style={{ display: 'contents' }}>
-          {children}
+          {pairedInventory || conventionalPrimary ? (
+            <PairedInventoryContent
+              enabled={ready}
+              conventionalPrimary={conventionalPrimary}
+            >
+              {children}
+            </PairedInventoryContent>
+          ) : (
+            children
+          )}
         </div>
       </RouteContentIdentityContext>
     </RouteTaskConsumptionContext>

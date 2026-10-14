@@ -1,6 +1,15 @@
 'use client';
 import Link from '@/components/experience/route-link';
-import { useState } from 'react';
+import {
+  LocationTitleSourceName,
+  LocationDetailLink,
+} from '@/components/experience/record-transition';
+import { locationRowAnchor } from '@/features/inventory/detail-return';
+import {
+  locationBrowserHref,
+  type LocationBrowserState,
+} from './location-browser-state';
+import { useLocationBrowserNavigation } from './use-location-browser-navigation';
 import { motion } from 'motion/react';
 import { useEffectiveReducedMotion } from '@/components/experience/motion-preference';
 import type { LocationRef } from '../inventory/contracts-ui';
@@ -10,19 +19,48 @@ import { LocationBrowser } from './location-browser';
 
 export function LocationsBrowserPage({
   locations,
+  initialState,
+  rawRouteKey,
 }: {
   locations: LocationRef[];
+  initialState: LocationBrowserState;
+  rawRouteKey: string;
 }) {
-  const [code, setCode] = useState<string | null>(null);
+  const navigation = useLocationBrowserNavigation(
+    initialState,
+    locations,
+    rawRouteKey,
+  );
+  const code = navigation.draft.selectedCode;
+  const setCode = (selectedCode: string) => navigation.change({ selectedCode });
+  const details = {
+    returnTo: (
+      id: string,
+      occurrence: import('@/features/inventory/detail-return').LocationOccurrence,
+    ) =>
+      locationBrowserHref(navigation.draft, locationRowAnchor(id, occurrence)),
+    leave: navigation.leave,
+  };
   const reducedMotion = useEffectiveReducedMotion();
   const selected = locations.find((location) => location.code === code);
   return (
     <div className="grid min-w-0 gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(18rem,24rem)]">
-      <LocationBrowser
-        locations={locations}
-        selectedCode={code}
-        onSelect={setCode}
-      />
+      <div className="min-w-0 space-y-2">
+        <LocationBrowser
+          locations={locations}
+          selectedCode={code}
+          onSelect={setCode}
+          browserState={navigation.draft}
+          onBrowserStateChange={navigation.change}
+          detailPresentation={details}
+        />
+        {navigation.limited && (
+          <p role="status" className="text-sm text-amber-200">
+            This view has reached its saved-state limit. Shorten the search or
+            collapse a group before adding more state.
+          </p>
+        )}
+      </div>
       <motion.section
         aria-label="Selected location"
         className="experience-surface min-w-0 self-start p-4"
@@ -36,9 +74,19 @@ export function LocationsBrowserPage({
             transition={{ duration: 0.2 }}
           >
             <p className="experience-eyebrow">Selected location</p>
-            <h2 className="mt-1 break-words text-xl font-semibold">
+            <LocationTitleSourceName
+              location={{
+                kind: 'location',
+                id: selected.id,
+                code: selected.code,
+              }}
+              occurrence="selected-panel"
+              returnTo={details.returnTo(selected.id, 'selected-panel')}
+              as="h2"
+              className="mt-1 break-words text-xl font-semibold"
+            >
               {selected.name}
-            </h2>
+            </LocationTitleSourceName>
             <p className="mt-2 break-words text-sm text-slate-300">
               {selected.breadcrumb}
             </p>
@@ -51,15 +99,24 @@ export function LocationsBrowserPage({
                   : 'Group: select to browse aggregate inventory; cannot directly hold stock.'}
             </p>
             <div className="mt-4 flex flex-wrap gap-4">
-              <Link
+              <LocationDetailLink
+                location={{
+                  kind: 'location',
+                  id: selected.id,
+                  code: selected.code,
+                }}
+                label={selected.name}
+                occurrence="selected-panel"
+                returnTo={details.returnTo(selected.id, 'selected-panel')}
+                onLeave={navigation.leave}
                 className="min-h-11 py-2 text-cyan-300 underline"
-                href={'/locations/' + encodeURIComponent(selected.code)}
               >
                 View contents and history
-              </Link>
+              </LocationDetailLink>
               <Link
                 className="min-h-11 py-2 text-cyan-300 underline"
                 href={'/room?location=' + encodeURIComponent(selected.code)}
+                onNavigate={navigation.leave}
               >
                 Open in Spaces
               </Link>
@@ -84,6 +141,7 @@ export function LocationsBrowserPage({
             </p>
             <Link
               href="/room"
+              onNavigate={navigation.leave}
               className="mt-4 inline-flex min-h-11 items-center text-sm font-semibold text-cyan-200 underline"
             >
               Open Spaces &amp; maps

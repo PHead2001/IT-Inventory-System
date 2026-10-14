@@ -7,6 +7,8 @@ export type RouteEffectTiming = {
   documentTimeline: boolean;
   paused: boolean;
   rateChanged: boolean;
+  delay?: number;
+  opacityFrames?: number[];
 };
 
 export type RoutePresentationStage = {
@@ -57,4 +59,40 @@ export function routePresentationTiming(stages: RoutePresentationStage[]) {
     animatedStages,
     durationMs: animatedStages ? latest - earliest : 0,
   };
+}
+
+/** The rest of the primary must actually fade in the same title capture. */
+export function pairedBodyCrossfade(
+  stages: RoutePresentationStage[],
+  titleName: string,
+) {
+  const interval = (effect: RouteEffectTiming) => [
+    effect.startTime! + (effect.delay ?? 0) / effect.playbackRate,
+    effect.startTime! +
+      ((effect.delay ?? 0) + effect.activeDuration) / effect.playbackRate,
+  ];
+  return stages.some((stage) => {
+    const titles = stage.effects.filter(
+      (effect) =>
+        effect.pseudo.endsWith(`(${titleName})`) && effect.activeDuration > 0,
+    );
+    const overlaps = (effect: RouteEffectTiming) =>
+      titles.some((title) => {
+        const [a, b] = interval(effect),
+          [c, d] = interval(title);
+        return Math.max(a, c) < Math.min(b, d);
+      });
+    return ['old', 'new'].every((kind) =>
+      stage.effects.some((effect) => {
+        const opacity = effect.opacityFrames ?? [];
+        return (
+          effect.pseudo === `::view-transition-${kind}(${titleName}-content)` &&
+          opacity.length >= 2 &&
+          opacity[0] === (kind === 'old' ? 1 : 0) &&
+          opacity.at(-1) === (kind === 'old' ? 0 : 1) &&
+          overlaps(effect)
+        );
+      }),
+    );
+  });
 }

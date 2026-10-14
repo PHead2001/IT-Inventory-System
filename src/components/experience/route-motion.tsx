@@ -44,6 +44,7 @@ import {
   supportsPairedRouteLoading,
 } from './paired-route-loading';
 import { routeKey } from './route-key';
+import { supportsConventionalRoutePrimary } from './conventional-route-primary';
 import { createRoutePresentationLifetime } from './route-presentation-lifetime';
 import { RoutePresentationLifetimeContext } from './route-presentation-source';
 import {
@@ -152,17 +153,34 @@ export function RouteMotionProvider({
   const [commands] = useState(createRouteCommandState);
   const [loading] = useState(() => createPairedRouteLoading(pending));
   const [readiness] = useState(() => {
-    const value = createRouteReadiness(actorId, pending, (key) => {
-      loading.ready(key);
-      const intent = state.snapshot();
-      if (!intent) return;
-      const destination = new URL(key, location.origin);
-      if (
-        destination.pathname !== intent.detailPath &&
-        !matchesTitleListRoute(intent, key)
-      )
-        state.finish(intent.name);
-    });
+    const value = createRouteReadiness(
+      actorId,
+      pending,
+      (key) => {
+        loading.ready(key);
+        const intent = state.snapshot();
+        if (!intent) return;
+        const destination = new URL(key, location.origin);
+        if (
+          destination.pathname !== intent.detailPath &&
+          !matchesTitleListRoute(intent, key)
+        )
+          state.finish(intent.name);
+      },
+      (primary) => {
+        const owner = loading.snapshot();
+        if (
+          owner?.kind === 'primary' &&
+          owner.destination === primary.routeKey &&
+          pending.current(owner.epoch) &&
+          primary.conventionalPrimary !== true
+        ) {
+          // Real authorized readiness still releases its wait normally below.
+          // An unavailable primary cannot complete a shared body capture.
+          state.finishArrival(owner.arrival);
+        }
+      },
+    );
     value.suspend();
     return value;
   });
@@ -171,6 +189,9 @@ export function RouteMotionProvider({
   );
   const [presentation] = useState(createRoutePresentationLifetime);
   const [owners] = useState(createRoutePendingOwners);
+  const [navigationObservers] = useState(
+    () => new Set<(href: string) => void>(),
+  );
   const pathname = usePathname();
   const query = useSearchParams();
   const listHref = pathname + (query?.size ? `?${query}` : '');
@@ -187,10 +208,21 @@ export function RouteMotionProvider({
     owners.snapshot,
     owners.snapshot,
   );
+  const reduced = useEffectiveReducedMotion();
+  const latestReduced = useRef(reduced);
+  useLayoutEffect(() => {
+    latestReduced.current = reduced;
+  }, [reduced]);
   const scope = useMemo(
     () => ({
       state: pending,
       owners,
+      observeNavigation: (observer: (href: string) => void) => {
+        navigationObservers.add(observer);
+        return () => {
+          navigationObservers.delete(observer);
+        };
+      },
       beginNavigation: (href: string) => {
         if (
           !lifecycleRef.current ||
@@ -215,11 +247,44 @@ export function RouteMotionProvider({
         )
           return;
         commands.navigation(commandDestination(href));
+        navigationObservers.forEach((observer) => {
+          try {
+            observer(href);
+          } catch {
+            /* UI observers cannot prevent accepted navigation. */
+          }
+        });
         presentation.navigation();
         const interruptedPair = loading.snapshot() !== null;
         loading.cancel();
         readiness.cancel();
         const target = state.acceptNavigation(href, pending.snapshot().epoch);
+        const sourcePrimary = readiness.currentPrimary();
+        let destination: URL | undefined;
+        try {
+          destination = new URL(href, location.origin);
+        } catch {
+          /* Unsupported URLs keep ordinary navigation. */
+        }
+        const primaryPresentation =
+          !target &&
+          !interruptedPair &&
+          sourcePrimary?.conventionalPrimary === true &&
+          sourcePrimary.routeKey === liveRouteKey.current &&
+          supportsConventionalRoutePrimary(
+            sourcePrimary.routeKey.split('?')[0],
+          ) &&
+          destination &&
+          supportsConventionalRoutePrimary(destination.pathname) &&
+          destination.origin === location.origin &&
+          !destination.hash &&
+          destination.pathname !== sourcePrimary.routeKey.split('?')[0] &&
+          state.arrivalSupportSnapshot() &&
+          !latestReduced.current &&
+          supportsPairedRouteLoading() &&
+          freshPresentationGrant(latestPrivacy.current) &&
+          !suspended.current &&
+          document.documentElement.dataset.motion === 'full';
         // Pair approval lives only inside this accepted Link event. Plain detail
         // links/router calls retire an older origin instead of reusing its holding.
         // A second accepted navigation retires the unfinished pair. Its original
@@ -251,7 +316,10 @@ export function RouteMotionProvider({
             liveRouteKey.current,
             pending.snapshot().epoch,
             location.href,
+            primaryPresentation ? 'primary' : 'outer',
           );
+          const approval = state.arrivalSnapshot();
+          if (primaryPresentation && approval) loading.armPrimary(approval);
         });
         if (loading.snapshot())
           latestPrivacy.current.navigation?.prepare(href, providerToken);
@@ -282,11 +350,13 @@ export function RouteMotionProvider({
       readiness,
       loading,
       owners,
+      latestReduced,
       lifecycleRef,
       providerToken,
       presentation,
       liveRouteKey,
       commands,
+      navigationObservers,
     ],
   );
   const pendingSnapshot = useSyncExternalStore(
@@ -294,7 +364,6 @@ export function RouteMotionProvider({
     pending.snapshot,
     pending.snapshot,
   );
-  const reduced = useEffectiveReducedMotion();
   useInsertionEffect(() => {
     // Child primary layout effects may notify readiness before this provider's
     // layout effect. Publish only committed authority before those callbacks.
@@ -404,6 +473,7 @@ export function RouteMotionProvider({
       unbind();
       const ownsDocument = currentRouteProvider === providerToken;
       lifecycleRef.current = false;
+      navigationObservers.clear();
       nativeScroll.dispose();
       latestPrivacy.current.navigation?.retire(providerToken);
       presentation.invalidate();
@@ -431,6 +501,7 @@ export function RouteMotionProvider({
     presentation,
     nativeScroll,
     commands,
+    navigationObservers,
   ]);
   useLayoutEffect(() => {
     if (!lifecycleRef.current || currentRouteProvider !== providerToken) return;
@@ -621,7 +692,8 @@ export function RouteMotionProvider({
     const owner = loading.snapshot();
     if (owner && owner.destination !== committedRouteKey) {
       loading.cancel();
-      state.finish(owner.name);
+      if (owner.kind === 'primary') state.finishArrival(owner.arrival);
+      else state.finish(owner.name);
     }
   }, [committedRouteKey, loading, state]);
   useEffect(() => {
@@ -693,7 +765,10 @@ export function RouteMotionProvider({
                       privacy,
                       acceptedGrant.current,
                     ) &&
-                    state.snapshot()?.name === owner.name &&
+                    (owner.kind === 'primary'
+                      ? state.arrivalSnapshot() === owner.arrival &&
+                        owner.arrival.presentation === 'primary'
+                      : state.snapshot()?.name === owner.name) &&
                     document.documentElement.dataset.routeMotionPrivate ===
                       'true',
                 }}
@@ -750,14 +825,60 @@ export function useRouteMotion() {
     currentRouteProvider === context.providerToken &&
     context.pending.current(epoch!) &&
     (!intent || state?.snapshot()?.name === intent.name);
+  const pairedArrivalEnabled =
+    enabled &&
+    !!intent &&
+    !!titleArrival &&
+    context?.pending.current(titleArrival.epoch) === true &&
+    (key === titleArrival.sourceKey || key === titleArrival.destinationKey);
+  const finishPairedAfterSnapshot = (
+    instance: { name: string },
+    body: boolean,
+  ) => {
+    const name = intent?.name;
+    const contentName = name + '-content';
+    if (!name || instance.name !== (body ? contentName : name) || !current())
+      return;
+    if (titleArrival) state?.finishArrival(titleArrival);
+    // All React capture callbacks (including the title's replacement effect)
+    // run before this microtask. Both names belong to this exact approval.
+    queueMicrotask(() => {
+      if (!current()) return;
+      const animations = document.getAnimations?.() ?? [];
+      const named = (candidate: string) =>
+        animations.filter((animation) =>
+          (animation.effect as KeyframeEffect | null)?.pseudoElement?.endsWith(
+            `(${candidate})`,
+          ),
+        );
+      const title = named(name),
+        content = named(contentName);
+      if (!content.length) {
+        // A title without its opted-in body cannot claim a paired page capture.
+        state?.finish(name);
+        cancelRouteSnapshots();
+        return;
+      }
+      // Missing/ambiguous titles retain a single body crossfade. Its completion
+      // retires the unused title approval; it never starts a later generic fade.
+      void Promise.allSettled(
+        [...title, ...content].map((animation) => animation.finished),
+      ).then(() => {
+        if (current()) state?.finish(name);
+      });
+    });
+  };
   return {
     enabled,
     arrivalEnabled:
       enabled &&
+      !pairedArrivalEnabled &&
+      arrival?.presentation !== 'primary' &&
       !!arrival &&
       context?.pending.current(arrival.epoch) === true &&
       (key === arrival.sourceKey || key === arrival.destinationKey),
     arrival,
+    pairedArrivalEnabled,
     titleArrival:
       enabled && titleArrival && context?.pending.current(titleArrival.epoch)
         ? titleArrival
@@ -766,6 +887,7 @@ export function useRouteMotion() {
       if (
         current() &&
         arrival &&
+        arrival.presentation !== 'primary' &&
         (key === arrival.destinationKey || key !== arrival.sourceKey)
       )
         state?.finishArrival(arrival);
@@ -804,8 +926,20 @@ export function useRouteMotion() {
       )
         cancelRouteSnapshots();
     },
+    finishPrimaryAfterSnapshot: (instance: { name: string }) => {
+      if (
+        current() &&
+        arrival?.presentation === 'primary' &&
+        instance.name === arrival.name &&
+        state?.arrivalSnapshot() === arrival
+      ) {
+        state.finishArrival(arrival);
+        return true;
+      }
+      return false;
+    },
     finishArrivalAfterSnapshot: (instance: { name: string }) => {
-      if (!arrival) return;
+      if (!arrival || arrival.presentation === 'primary') return;
       // Generic page snapshots own only their exact arrival. Their completion
       // can precede an inner shared title's commit and must not consume it.
       queueMicrotask(() => {
@@ -825,33 +959,10 @@ export function useRouteMotion() {
         });
       });
     },
-    finishTitleAfterSnapshot: (instance: { name: string }) => {
-      const name = intent?.name;
-      if (!name || instance.name !== name || !current()) return;
-      // A real shared-title capture already presents this navigation. Next can
-      // commit its outer pathname later; consume only the matching generic
-      // approval now so that follow-up commit cannot add a second route fade.
-      // Keep the title owner alive until its own native snapshot completes.
-      if (titleArrival) state?.finishArrival(titleArrival);
-      // React has captured the commit. Observe only its matching native
-      // snapshot lifetime; a late completion cannot consume another intent.
-      queueMicrotask(() => {
-        if (!current()) return;
-        const animations =
-          document
-            .getAnimations?.()
-            .filter((animation) =>
-              (
-                animation.effect as KeyframeEffect | null
-              )?.pseudoElement?.endsWith(`(${instance.name})`),
-            ) ?? [];
-        void Promise.allSettled(
-          animations.map((animation) => animation.finished),
-        ).then(() => {
-          if (current()) state?.finish(name);
-        });
-      });
-    },
+    finishTitleAfterSnapshot: (instance: { name: string }) =>
+      finishPairedAfterSnapshot(instance, false),
+    finishPairedContentAfterSnapshot: (instance: { name: string }) =>
+      finishPairedAfterSnapshot(instance, true),
     validNow: () =>
       current() &&
       !!state?.valid() &&

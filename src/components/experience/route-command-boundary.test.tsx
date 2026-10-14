@@ -102,6 +102,8 @@ function Fixture({
   hidden = false,
   actorId = 'actor',
   publication,
+  conventionalPrimary = false,
+  pairedInventory = false,
 }: {
   ready?: boolean;
   generation?: string;
@@ -110,6 +112,8 @@ function Fixture({
   hidden?: boolean;
   actorId?: string;
   publication?: { ticket: RouteCommandTicket; onLayout: () => void };
+  conventionalPrimary?: boolean;
+  pairedInventory?: boolean;
 }) {
   return (
     <PrivacyReadinessContext
@@ -132,6 +136,8 @@ function Fixture({
             }
             contentIdentity="primary"
             ready={ready}
+            conventionalPrimary={conventionalPrimary}
+            pairedInventory={pairedInventory}
           >
             <main>
               <ConsumptionProbe />
@@ -318,6 +324,92 @@ it('follows only the explicit same-primary task handoff and creates no new accep
     expect(scope.state.snapshot().pending).toBe(false);
   } finally {
     window.removeEventListener('popstate', pop);
+  }
+});
+
+it.each([
+  [true, false],
+  [false, true],
+  [true, true],
+])(
+  'preserves consumed-task command focus inside the conventional=%s paired=%s body wrapper without granting readiness',
+  (conventionalPrimary, pairedInventory) => {
+    const fixture = (
+      <Fixture
+        conventionalPrimary={conventionalPrimary}
+        pairedInventory={pairedInventory}
+      />
+    );
+    const view = render(fixture);
+    const destination =
+      '/inventory/quantity/record?keep=a&keep=b&task=quantity_move';
+    const ticket = accept(destination);
+    runtime.pathname = '/inventory/quantity/record';
+    runtime.query = 'keep=a&keep=b&task=quantity_move';
+    history.replaceState({ next: 'retained' }, '', destination + '#tasks');
+    view.rerender(
+      <Fixture
+        conventionalPrimary={conventionalPrimary}
+        pairedInventory={pairedInventory}
+      />,
+    );
+    expect(
+      document.querySelectorAll('.experience-paired-inventory-content'),
+    ).toHaveLength(1);
+    expect(primary()?.conventionalPrimary).toBe(conventionalPrimary);
+    const lifetime = boundary.capture();
+    const epoch = scope.state.snapshot().epoch;
+    let finishBusiness!: () => void;
+    act(() => {
+      finishBusiness = scope.state.register();
+      expect(
+        consume?.(
+          runtime.pathname,
+          'quantity_move',
+          screen.getByText('Authorized primary'),
+        ),
+      ).toBe(true);
+    });
+    expect(lifetime()).toBe(true);
+    expect(scope.state.snapshot().epoch).toBe(epoch);
+    expect(scope.state.snapshot().pending).toBe(true);
+    expect(primary()?.conventionalPrimary).toBe(conventionalPrimary);
+    expect(primary()?.consumedTask).toEqual({
+      sourceKey: destination,
+      destinationKey: '/inventory/quantity/record?keep=a&keep=b',
+    });
+    expect(boundary.focus(ticket, 'heading')).toBe(false);
+    runtime.query = 'keep=a&keep=b';
+    view.rerender(
+      <Fixture
+        conventionalPrimary={conventionalPrimary}
+        pairedInventory={pairedInventory}
+      />,
+    );
+    expect(boundary.focus(ticket, 'heading')).toBe(true);
+    expect(screen.getByText('Authorized primary')).toHaveFocus();
+    expect(scope.state.snapshot().pending).toBe(true);
+    expect(runtime.push).toHaveBeenCalledTimes(1);
+    expect(location.hash).toBe('#tasks');
+    expect(history.state).toEqual({ next: 'retained' });
+    act(() => finishBusiness());
+  },
+);
+
+it('keeps accepted command navigation authoritative when an incoming presentation observer throws', () => {
+  render(<Fixture conventionalPrimary />);
+  const older = accept('/inventory');
+  const stopObserving = scope.observeNavigation!(() => {
+    throw Error('Presentation observer failed');
+  });
+  try {
+    const newer = accept('/inventory');
+    expect(older.current()).toBe(false);
+    expect(newer.current()).toBe(true);
+    expect(boundary.focus(newer, 'heading')).toBe(true);
+    expect(runtime.push).toHaveBeenCalledTimes(2);
+  } finally {
+    stopObserving();
   }
 });
 

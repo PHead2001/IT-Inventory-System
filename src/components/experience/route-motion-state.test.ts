@@ -3,6 +3,9 @@ import {
   createRouteMotionState,
   titleTarget,
   matchesTitleListRoute,
+  historyTitleTarget,
+  locationTitleTarget,
+  sameTitleSource,
 } from './route-motion-state';
 import { routeKey } from './route-key';
 
@@ -13,6 +16,109 @@ const original =
 const rawAlias = routeKey(
   '/inventory',
   new URLSearchParams('type=all&status=active&q=++USB++&scopeAdjusted=true'),
+);
+
+const recordUuid = {
+  kind: 'quantity' as const,
+  id: '00000000-0000-4000-8000-000000000001',
+};
+const event = {
+  kind: 'quantity' as const,
+  id: '00000000-0000-4000-8000-000000000002',
+};
+const historyHref = `/history?type=quantity&entityId=${recordUuid.id}&page=2#history-event-quantity-${event.id}`;
+it('pairs a main history event occurrence without inventing an inventory holding', () => {
+  const target = historyTitleTarget(
+    recordUuid,
+    event,
+    historyHref,
+    routeKey(
+      '/history',
+      new URL(historyHref, 'https://inventory.invalid').searchParams,
+    ),
+  )!;
+  expect(target.source).toEqual({
+    kind: 'history-event',
+    eventKind: event.kind,
+    eventId: event.id,
+  });
+  expect(target).not.toHaveProperty('holding');
+  const state = createRouteMotionState();
+  state.arm(target);
+  state.finish();
+  expect(state.backTarget(recordUuid, historyHref)).toEqual(target);
+  expect(
+    state.backTarget(recordUuid, historyHref.replace('page=2', 'page=3')),
+  ).toBeNull();
+  const other = historyTitleTarget(
+    recordUuid,
+    { ...event, id: '00000000-0000-4000-8000-000000000003' },
+    historyHref.replace(event.id, '00000000-0000-4000-8000-000000000003'),
+  )!;
+  expect(sameTitleSource(target, other)).toBe(false);
+  expect(
+    historyTitleTarget(
+      recordUuid,
+      event,
+      historyHref,
+      historyHref.split('#')[0].replace('page=2', 'page=3'),
+    ),
+  ).toBeNull();
+  expect(
+    historyTitleTarget(recordUuid, { ...event, kind: 'asset' }, historyHref),
+  ).toBeNull();
+  expect(
+    historyTitleTarget(
+      recordUuid,
+      event,
+      historyHref.replace('type=quantity', 'type=asset'),
+    ),
+  ).toBeNull();
+  expect(
+    historyTitleTarget(
+      recordUuid,
+      event,
+      historyHref + '&event=quantity:' + event.id,
+    ),
+  ).toBeNull();
+});
+it.each(['desktop-tree', 'mobile-level', 'selected-panel'] as const)(
+  'keeps exact location UUID, stable code and %s occurrence for application Back',
+  (occurrence) => {
+    const location = {
+      kind: 'location' as const,
+      id: recordUuid.id,
+      code: 'ITC-S1A',
+    };
+    const href = `/locations?q=Shelf&selected=ITC-S1A#location-row-${occurrence}-${location.id}`;
+    const target = locationTitleTarget(
+      location,
+      occurrence,
+      href,
+      href.split('#')[0],
+    )!;
+    expect(target.detailPath).toBe('/locations/ITC-S1A');
+    expect(target).not.toHaveProperty('holding');
+    const state = createRouteMotionState();
+    state.arm(target);
+    state.finish();
+    expect(state.backTarget(location, href)).toEqual(target);
+    expect(state.backTarget({ ...location, code: 'other' }, href)).toBeNull();
+    expect(
+      state.backTarget(
+        location,
+        href.replace(
+          occurrence,
+          occurrence === 'desktop-tree' ? 'mobile-level' : 'desktop-tree',
+        ),
+      ),
+    ).toBeNull();
+    expect(
+      locationTitleTarget(location, occurrence, href, '/locations'),
+    ).toBeNull();
+    state.invalidate();
+    expect(state.backTarget(location, href)).toBeNull();
+  },
 );
 
 it('generic acceptance remains closed until observer registration and clears on observer retirement', () => {
@@ -47,6 +153,8 @@ it('generic arrival requires a fresh accepted navigation and cannot reuse a reti
   );
   const first = state.arrivalSnapshot()!;
   expect(first).toEqual({
+    name: expect.stringMatching(/^route-primary-/),
+    presentation: 'outer',
     sourceKey: '/inventory?q=cable',
     destinationKey: '/history?category=a&category=b',
     epoch: 4,
@@ -206,3 +314,31 @@ it.each([
     expect(state.backTarget(record, destination)).toBeNull();
   },
 );
+
+it('primary capture uses the same exact approval with a unique name across repeated destinations', () => {
+  const state = createRouteMotionState();
+  state.supportArrival(true);
+  state.acceptArrival(
+    '/history',
+    '/inventory',
+    3,
+    'https://inventory.invalid/inventory',
+    'primary',
+  );
+  const first = state.arrivalSnapshot()!;
+  expect(first).toMatchObject({
+    presentation: 'primary',
+    name: expect.stringMatching(/^route-primary-/),
+  });
+  state.acceptArrival(
+    '/history',
+    '/inventory',
+    3,
+    'https://inventory.invalid/inventory',
+    'primary',
+  );
+  const next = state.arrivalSnapshot()!;
+  expect(next.name).not.toBe(first.name);
+  state.finishArrival(first);
+  expect(state.arrivalSnapshot()).toBe(next);
+});

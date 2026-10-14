@@ -2,6 +2,7 @@ import { afterEach, expect, it, vi } from 'vitest';
 import { createRoutePendingState } from './route-pending-state';
 import { createRouteReadiness } from './route-readiness';
 import { routeKey, canonicalRecordPath } from './route-key';
+import { createRouteMotionState } from './route-motion-state';
 it('canonicalizes only UUID identity case on known record paths and retains query authority', () => {
   const upper = '/inventory/assets/A3010000-0000-4000-8000-0000000000AB';
   expect(canonicalRecordPath(upper)).toBe(upper.toLowerCase());
@@ -296,6 +297,132 @@ it.each([
     expect(location.search).toContain('task=quantity_move');
     if (reason !== 'hidden')
       expect(readiness.currentPrimary()?.routeKey).toBe(key);
+    expect(pending.snapshot().pending).toBe(false);
+  },
+);
+it('observes immutable actual primary only after canonical actor/raw-key/visible checks and before normal commit', () => {
+  history.replaceState(null, '', '/history?type=quantity');
+  const pending = createRoutePendingState();
+  const order: string[] = [];
+  const committed = vi.fn(() => order.push('commit'));
+  const observed = vi.fn((primary) => {
+    expect(Object.isFrozen(primary)).toBe(true);
+    order.push('observe');
+  });
+  const readiness = createRouteReadiness('actor', pending, committed, observed);
+  const element = root();
+  const content = {
+    actorId: 'actor',
+    routeKey: '/history?type=quantity',
+    contentIdentity: 'unavailable',
+    root: element,
+    conventionalPrimary: false,
+  };
+  readiness.register({ ...content, actorId: 'other' })();
+  readiness.register({ ...content, routeKey: '/history' })();
+  element.hidden = true;
+  readiness.register(content)();
+  element.hidden = false;
+  expect(observed).not.toHaveBeenCalled();
+  const business = pending.register();
+  readiness.register(content);
+  expect(order).toEqual(['observe', 'commit']);
+  expect(observed).toHaveBeenCalledOnce();
+  expect(pending.snapshot().pending).toBe(true);
+  business();
+});
+
+it('a late unavailable observation of an old exact loading arrival cannot retire a newer repeated arrival', () => {
+  history.replaceState(null, '', '/history');
+  const pending = createRoutePendingState(),
+    state = createRouteMotionState();
+  state.supportArrival(true);
+  state.acceptArrival('/history', '/inventory', 0, location.origin, 'primary');
+  const old = state.arrivalSnapshot()!;
+  state.acceptArrival('/history', '/inventory', 0, location.origin, 'primary');
+  const newer = state.arrivalSnapshot()!;
+  const readiness = createRouteReadiness(
+    'actor',
+    pending,
+    vi.fn(),
+    (primary) => {
+      expect(primary.conventionalPrimary).toBe(false);
+      state.finishArrival(old);
+    },
+  );
+  readiness.register({
+    actorId: 'actor',
+    routeKey: '/history',
+    contentIdentity: 'old-unavailable',
+    root: root(),
+    conventionalPrimary: false,
+  });
+  expect(state.arrivalSnapshot()).toBe(newer);
+});
+
+it.each([true, false])(
+  'retains conventional-primary capability %s across a consumed task without a new observation, receipt or pending settlement',
+  (conventionalPrimary) => {
+    history.replaceState(
+      { next: 'retained' },
+      '',
+      '/inventory/quantity/record?keep=a&keep=b&task=quantity_move#tasks',
+    );
+    const pending = createRoutePendingState();
+    const committed = vi.fn();
+    const observed = vi.fn();
+    const readiness = createRouteReadiness(
+      'actor',
+      pending,
+      committed,
+      observed,
+    );
+    const element = root();
+    const sourceKey = routeKey(
+      location.pathname,
+      new URLSearchParams(location.search),
+    );
+    readiness.register({
+      actorId: 'actor',
+      routeKey: sourceKey,
+      contentIdentity: 'record',
+      root: element,
+      conventionalPrimary,
+    });
+    const primary = readiness.currentPrimary();
+    const receipt = observed.mock.calls[0][0];
+    expect(Object.isFrozen(receipt)).toBe(true);
+    const finishBusiness = pending.register();
+    committed.mockClear();
+    observed.mockClear();
+
+    const handoff = readiness.consumeTask(
+      element,
+      sourceKey,
+      '/inventory/quantity/record',
+      'quantity_move',
+      (href) => history.replaceState(history.state, '', href),
+    );
+    expect(handoff).toEqual({
+      sourceKey,
+      destinationKey: '/inventory/quantity/record?keep=a&keep=b',
+    });
+    expect(readiness.currentPrimary()).toBe(primary);
+    expect(primary).toMatchObject({
+      routeKey: handoff!.destinationKey,
+      contentIdentity: 'record',
+      root: element,
+      conventionalPrimary,
+      consumedTask: handoff,
+    });
+    expect(receipt.routeKey).toBe(sourceKey);
+    expect(receipt.conventionalPrimary).toBe(conventionalPrimary);
+    expect(committed).not.toHaveBeenCalled();
+    expect(observed).not.toHaveBeenCalled();
+    expect(pending.snapshot().pending).toBe(true);
+    expect(history.state).toEqual({ next: 'retained' });
+    expect(location.hash).toBe('#tasks');
+    finishBusiness();
     expect(pending.snapshot().pending).toBe(false);
   },
 );

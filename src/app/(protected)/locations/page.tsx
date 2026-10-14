@@ -5,6 +5,11 @@ import { getLocations } from '@/features/inventory/queries.server';
 import { requireMember } from '@/lib/auth/session.server';
 import Link from '@/components/experience/route-link';
 import { LocationsBrowserPage } from '@/features/room/locations-browser-page';
+import {
+  parseLocationBrowserState,
+  emptyLocationBrowserState,
+} from '@/features/room/location-browser-state';
+import { routeKey } from '@/components/experience/route-key';
 
 export default async function LocationsPage({
   searchParams,
@@ -13,9 +18,18 @@ export default async function LocationsPage({
 } = {}) {
   const { member } = await requireMember();
   const locations = await getLocations();
+  const readiness = await routeReadyProps('/locations', searchParams);
+  const raw = await searchParams;
+  const browserParams = new URL(
+    routeKey('/locations', raw ?? {}),
+    'https://inventory.invalid',
+  ).searchParams;
+  const browserState =
+    parseLocationBrowserState(browserParams, locations) ??
+    emptyLocationBrowserState();
   return (
-    <ProtectedPrivacyContent>
-      <RouteReady {...await routeReadyProps('/locations', searchParams)}>
+    <ProtectedPrivacyContent routeKey={readiness.routeKey}>
+      <RouteReady {...readiness} conventionalPrimary>
         <>
           <p className="experience-eyebrow">Storage / Location hierarchy</p>
           <h1 className="experience-heading mt-1">Locations</h1>
@@ -31,7 +45,11 @@ export default async function LocationsPage({
               Manage locations
             </Link>
           )}
-          <LocationsBrowserPage locations={locations} />
+          <LocationsBrowserPage
+            locations={locations}
+            initialState={browserState}
+            rawRouteKey={readiness.routeKey}
+          />
         </>
       </RouteReady>
     </ProtectedPrivacyContent>

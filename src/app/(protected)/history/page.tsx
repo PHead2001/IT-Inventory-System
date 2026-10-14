@@ -24,6 +24,7 @@ import { notFound, redirect } from 'next/navigation';
 import Form from '@/components/experience/route-get-form';
 import Link from '@/components/experience/route-link';
 import styles from '@/features/inventory/components/inventory-visual.module.css';
+import { recordDetailReturnPath } from '@/features/inventory/detail-return';
 import { OperationalTimestamp } from '@/components/operational-time';
 const canonicalId =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
@@ -33,6 +34,7 @@ export default async function HistoryPage({
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
   const raw = await searchParams;
+  const readiness = await routeReadyProps('/history', searchParams);
   const params = Object.fromEntries(
     Object.entries(raw).map(([k, v]) => [k, Array.isArray(v) ? v[0] : v]),
   );
@@ -68,8 +70,8 @@ export default async function HistoryPage({
       (fieldId ? `&field=${fieldId}` : '') +
       (offset ? `&optionOffset=${offset}` : '');
     return (
-      <ProtectedPrivacyContent>
-        <RouteReady {...await routeReadyProps('/history', searchParams)}>
+      <ProtectedPrivacyContent routeKey={readiness.routeKey}>
+        <RouteReady {...readiness} conventionalPrimary>
           <>
             <h1 className="text-3xl font-semibold">Custom metadata at event</h1>
             <p className="my-4 text-slate-400">
@@ -192,7 +194,11 @@ export default async function HistoryPage({
     params.entityId !== undefined
       ? await getHistoryRecord(params.entityId)
       : null;
-  const coherentParams = { ...params, type: record?.kind ?? filter.type };
+  const coherentParams: Record<string, string | undefined> & { type: string } =
+    {
+      ...params,
+      type: record?.kind ?? filter.type,
+    };
   const clearQuery = new URLSearchParams();
   if (coherentParams.type !== 'all')
     clearQuery.set('type', coherentParams.type);
@@ -200,8 +206,8 @@ export default async function HistoryPage({
   const clearHref = '/history' + (clearQuery.size ? '?' + clearQuery : '');
   if (params.entityId !== undefined && !record) {
     return (
-      <ProtectedPrivacyContent>
-        <RouteReady {...await routeReadyProps('/history', searchParams)}>
+      <ProtectedPrivacyContent routeKey={readiness.routeKey}>
+        <RouteReady {...readiness}>
           <>
             <h1 className="experience-heading">Inventory history</h1>
             <div className={panel}>
@@ -227,9 +233,18 @@ export default async function HistoryPage({
   ]);
   const recovery = pageRecoveryHref('/history', coherentParams, result);
   if (recovery) redirect(recovery);
+  const historyScope = new URLSearchParams();
+  for (const key of ['type', 'location', 'entityId', 'page']) {
+    const value = coherentParams[key];
+    if (value) historyScope.set(key, value);
+  }
+  const returnTo = recordDetailReturnPath(
+    '/history' + (historyScope.size ? '?' + historyScope : ''),
+    '/history',
+  );
   return (
-    <ProtectedPrivacyContent>
-      <RouteReady {...await routeReadyProps('/history', searchParams)}>
+    <ProtectedPrivacyContent routeKey={readiness.routeKey}>
+      <RouteReady {...readiness} conventionalPrimary>
         <>
           <p className="experience-eyebrow">Inventory · Audit trail</p>
           <h1 className="experience-heading mt-3">Inventory history</h1>
@@ -352,7 +367,7 @@ export default async function HistoryPage({
             {countLabel(result.total, 'matching event')}
           </p>
           <div className={styles.history}>
-            <HistoryList events={result.rows} compact />
+            <HistoryList returnTo={returnTo} events={result.rows} compact />
           </div>
           <Pagination result={result} base="/history" params={coherentParams} />
         </>
