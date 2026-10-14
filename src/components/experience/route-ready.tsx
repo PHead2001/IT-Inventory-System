@@ -10,6 +10,8 @@ import {
 import type { createRouteReadiness } from './route-readiness';
 import { RouteContentIdentityContext } from './route-content-identity';
 import { afterTransitionCapture } from '@/components/forms/transition-capture';
+import { PairedInventoryContent } from './paired-inventory-content';
+import { InventoryCaptureRegionsContext } from './inventory-capture-region';
 
 export const RouteReadyContext = createContext<ReturnType<
   typeof createRouteReadiness
@@ -21,6 +23,9 @@ export function RouteReady({
   pairingHref,
   children,
   ready = true,
+  pairedInventory = false,
+  conventionalPrimary = false,
+  capture = 'body',
 }: {
   actorId: string;
   routeKey: string;
@@ -29,6 +34,12 @@ export function RouteReady({
   pairingHref?: string;
   children: React.ReactNode;
   ready?: boolean;
+  /** Explicit opt-in for successful list/quantity/asset primaries, never fallback. */
+  pairedInventory?: boolean;
+  /** Successful conventional primary capability, never canvas/loading/error. */
+  conventionalPrimary?: boolean;
+  /** Explicit canvas-free sibling regions under this one canonical owner. */
+  capture?: 'body' | 'regions';
 }) {
   const readiness = useContext(RouteReadyContext);
   const root = useRef<HTMLDivElement>(null);
@@ -54,6 +65,7 @@ export function RouteReady({
         routeKey,
         contentIdentity,
         root: committedRoot,
+        conventionalPrimary,
       });
     });
     return () => {
@@ -64,7 +76,22 @@ export function RouteReady({
   return (
     <RouteContentIdentityContext value={identity}>
       <div ref={root} data-route-ready="true" style={{ display: 'contents' }}>
-        {children}
+        {capture === 'regions' ? (
+          <InventoryCaptureRegionsContext
+            value={{ enabled: ready, pairedInventory, conventionalPrimary }}
+          >
+            {children}
+          </InventoryCaptureRegionsContext>
+        ) : pairedInventory || conventionalPrimary ? (
+          <PairedInventoryContent
+            enabled={ready}
+            conventionalPrimary={conventionalPrimary}
+          >
+            {children}
+          </PairedInventoryContent>
+        ) : (
+          children
+        )}
       </div>
     </RouteContentIdentityContext>
   );

@@ -210,9 +210,18 @@ remain free to grow; this is not a zero-layout-shift claim for every optional st
 
 Whole-page `PageArrival` capture excludes `/room`, asset/quantity record details
 and location details before their lazy previews load, including the preceding
-canvas-bearing route when leaving. The independent record-title pairing remains.
+canvas-bearing route when leaving. Root capture remains disabled. Detail pages
+also suppress their former whole-body `RouteReady` capture with the explicit
+`capture="regions"` capability under the unchanged canonical readiness/private
+identity. Header, downstream record content, preview text/navigation and task/form
+conventional controls have bounded sibling captures; preview section backgrounds,
+map slots, cold placeholders and live canvases have no active capture ancestor.
+LocationPicker keeps its existing inline loading surface and native dialog portal;
+conventional controls are split around that surface before the lazy chunk loads.
+No maps are cloned, cached, moved or remounted to create the effect. The independent
+record-title pairing and all eligible conventional region fades run concurrently.
 Real browser/WebGL, narrow-screen and Full/Reduced-motion acceptance is still
-required for these source changes.
+required; source regressions do not accept D303.2, W13 or A303.
 
 ## Validation
 

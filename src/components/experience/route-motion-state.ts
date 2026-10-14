@@ -43,6 +43,8 @@ export type TitleIntent = RecordIdentity & {
   detailPath: string;
 };
 export type RouteArrivalIntent = {
+  name: string;
+  presentation: 'outer' | 'primary';
   sourceKey: string;
   destinationKey: string;
   epoch: number;
@@ -146,6 +148,7 @@ export function createRouteMotionState() {
       sourceKey: string,
       epoch: number,
       base: string,
+      presentation: RouteArrivalIntent['presentation'] = 'outer',
     ) {
       arrival = null;
       titleArrival = null;
@@ -154,6 +157,8 @@ export function createRouteMotionState() {
           const destination = new URL(href, base);
           if (destination.origin === new URL(base).origin)
             arrival = {
+              name: `route-primary-${crypto.randomUUID()}`,
+              presentation,
               sourceKey,
               destinationKey: routeKey(
                 destination.pathname,

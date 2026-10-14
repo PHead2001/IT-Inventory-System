@@ -74,6 +74,8 @@ vi.mock('react', async () => {
   };
 });
 vi.mock('@react-three/fiber', () => ({
+  addAfterEffect: () => () => {},
+  addTail: () => () => {},
   useThree: (selector?: (state: unknown) => unknown) =>
     selector ? selector(probe.three) : probe.three,
   useFrame: (frame: () => void) => {

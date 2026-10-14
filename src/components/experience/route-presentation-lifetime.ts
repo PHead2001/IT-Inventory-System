@@ -9,7 +9,7 @@ type Source = {
   retired: boolean;
   departing: boolean;
   tickets: number;
-  lease: symbol | null;
+  leases: Set<symbol>;
 };
 
 /** No DOM/content cache. Business-owner retirement is distinct from the exact
@@ -28,11 +28,11 @@ export function createRoutePresentationLifetime() {
     retired: false,
     departing: false,
     tickets: 0,
-    lease: null,
+    leases: new Set(),
   });
   const retire = (source: Source) => {
     source.retired = true;
-    source.lease = null;
+    source.leases.clear();
     if (sources.get(source.token) === source) sources.delete(source.token);
     if (departing === source) departing = null;
   };
@@ -109,7 +109,7 @@ export function createRoutePresentationLifetime() {
           !source.retired &&
           grantCurrent() &&
           ((source === active && source.mounted && ownerCurrent()) ||
-            source.lease !== null),
+            source.leases.size > 0),
         release: () => {
           if (released) return;
           released = true;
@@ -122,23 +122,26 @@ export function createRoutePresentationLifetime() {
       // Captured by a committed layout effect, before cleanup. A later native
       // callback cannot borrow a renewed source with the same mounted token.
       const source = sources.get(token);
+      let acquired = false;
       return () => {
         if (
           !source ||
           source.retired ||
           sources.get(token) !== source ||
           source.tickets === 0 ||
-          source.lease ||
+          acquired ||
           (!source.mounted && departing !== source)
         )
           return undefined;
         const lease = Symbol();
+        acquired = true;
         source.departing = true;
-        source.lease = lease;
+        source.leases.add(lease);
         // React 19.3 invokes this return value through the matching native
         // transition.finished.finally, including rejection/cancellation.
         return () => {
-          if (source.lease === lease) renew(source);
+          if (source.leases.delete(lease) && source.leases.size === 0)
+            renew(source);
         };
       };
     },

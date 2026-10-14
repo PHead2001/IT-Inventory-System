@@ -131,6 +131,67 @@ authorization and real visible readiness remain required. Supersede, cancellatio
 retire and settle the old ticket. Changed logout evidence starts distinct current-
 route recovery rather than rebasing the captured target proof.
 
+Successful inventory list primaries opt into a consistently mounted paired body
+boundary inside their exact raw RouteReady identity. Asset, quantity and location
+details instead declare `capture="regions"` on that same single canonical owner.
+Their explicit conventional header and record-body regions are siblings of the
+storage-preview section; the preview's heading/chooser, recorded breadcrumb and
+Show in room link have bounded regions inside that uncaptured section. No region
+contains its map slot, cold placeholder or canvas. Record-task launchers and
+conventional form controls use the same explicit capability and split around the
+inline map picker. The existing native map dialog portal and task/grid ownership
+are unchanged. The closed region inventory bounds capture names before lazy
+chunks load; DOM discovery never grants capture capability.
+
+The body keeps `${intent.name}-content`; other regions use that exact name plus
+an explicit region suffix while the matching title shares `intent.name`. Shared
+and unmatched enter/exit regions crossfade concurrently with the title in one
+native capture, including either inner-primary/outer-pathname commit order. The
+accepted pair suppresses the outer generic fade. One exact-approval completion
+receipt accepts callbacks only during React 19.3's synchronous native capture
+callback batch, then seals its participant names and waits for all their effects.
+A presentation-only seal subscription withdraws title and region capture names
+immediately, even if the outer pathname already consumed the generic arrival.
+The exact intent remains only for effect completion, and native source leases
+remain until cleanup. A newly mounted local control cannot start another capture
+under that sealed approval.
+A duplicate or late callback cannot acquire another lease. A capture without an
+actual body region retires its unused title approval and reveals instantly.
+Ordinary unpaired routes retain their generic arrival. No readiness or request
+state is granted by presentation boundaries.
+
+Each outgoing region inherits the accepted page's existing source and acquires a
+single-use lease from its committed immutable exit descriptor. Every callback
+acquires its lease before approval retirement. The original source remains
+eligible through the final exact native `transition.finished` cleanup; privacy
+withdrawal and supersession dispose all leases immediately. Old callbacks and
+cleanups cannot borrow a renewed source or a later approval. Room and
+loading/error boundaries remain excluded. Location/history title pairing remains
+a required Audit 4.2 follow-up. These source contracts do not accept D303.2,
+W13 or A303 without the required real browser/WebGL and exact-candidate proof.
+
+Conventional cross-path navigation between explicitly capable Inventory, History
+and Locations primaries reuses that same event-owned loading/readiness engine
+without a title pair. The existing exact raw source/destination/epoch arrival
+object carries its unique capture name and primary presentation mode. Only an
+actual current authorized visible opted-in source, supported destination, fresh
+privacy and supported Full motion may arm retention. Room/canvas, new-item forms,
+unsupported routes, query-only updates, anchors and interrupted retained navigation
+do not acquire this capability. Successful History and Locations primaries use
+one identical raw key for canonical privacy and readiness; unavailable/error
+responses never opt in.
+
+The mounted inner body or explicit detail regions share the exact primary
+arrival name (plus bounded region suffixes) and inherit the source handoff. The
+capture batch consumes only that exact approval after every region callback; real visible primary
+readiness releases its loading wait, never the approval or backend work. Outer
+pathname commits cannot animate or retire a primary approval. Redirect/query
+mismatch, terminal failure, native traversal, Reduced motion, privacy withdrawal
+and provider retirement release the owned presentation wait and retire its approval.
+No extra private node cache, cloned source, deadline-based readiness or new privacy
+decision is introduced. Inventory title/body pairing keeps its existing capture
+and completion contract.
+
 Native browser Back/Forward uses the installed Next/React eager history restore
 and is instant. The route provider observes popstate only to retire departing
 presentation, cancel a paired wait and register real authorized primary readiness.

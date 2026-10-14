@@ -35,6 +35,8 @@ const probe = vi.hoisted(() => {
   };
 });
 vi.mock('@react-three/fiber', () => ({
+  addAfterEffect: () => () => {},
+  addTail: () => () => {},
   useThree: () => ({
     gl: {
       domElement: probe.canvas,

@@ -31,7 +31,7 @@ import {
   readPrivacyRevocationRevision,
   revokePrivatePresentation,
 } from '@/features/scan/assign-batch';
-import { RouteMotionProvider } from './route-motion';
+import { RouteMotionProvider, useRouteMotion } from './route-motion';
 import { ProtectedRouteArrival } from './protected-route-arrival';
 import {
   InventoryRecordLink,
@@ -45,7 +45,10 @@ import {
   RoutePendingTerminal,
 } from './route-pending';
 import { RouteReady } from './route-ready';
-import { PairedRouteLoadingContext } from './paired-route-loading';
+import {
+  PairedRouteLoading,
+  PairedRouteLoadingContext,
+} from './paired-route-loading';
 import InventoryLoading from '@/app/(protected)/inventory/loading';
 import QuantityLoading from '@/app/(protected)/inventory/quantity/[id]/loading';
 import { createPairedRouteLoading } from './paired-route-loading-state';
@@ -1311,4 +1314,343 @@ it('a committed pathname update cannot remove the native observer from an in-pro
   } finally {
     window.removeEventListener('popstate', restore, true);
   }
+});
+
+let ordinaryMotion: ReturnType<typeof useRouteMotion>;
+function OrdinaryObserve() {
+  const motion = useRouteMotion();
+  useLayoutEffect(() => {
+    ordinaryMotion = motion;
+  });
+  return null;
+}
+function OrdinaryPrimary({
+  href,
+  work,
+  redirectTo,
+  unavailable = false,
+}: {
+  href: string;
+  work?: ReturnType<typeof deferred>;
+  redirectTo?: string;
+  unavailable?: boolean;
+}) {
+  work?.read();
+  if (redirectTo) throw getRedirectError(redirectTo, 'replace');
+  const url = new URL(href, location.origin);
+  const key = routeKey(url.pathname, url.searchParams);
+  return (
+    <ProtectedPrivacyContent routeKey={key}>
+      <RouteReady
+        actorId="staff"
+        routeKey={key}
+        contentIdentity={key}
+        conventionalPrimary={!unavailable || url.pathname === '/inventory'}
+      >
+        <h1>{key}</h1>
+        {unavailable && url.pathname === '/history' && (
+          <p>History unavailable</p>
+        )}
+        <input
+          aria-label="Ordinary business draft"
+          defaultValue="retained ordinary draft"
+        />
+        <RouteLink href="/history">Ordinary History</RouteLink>
+        <RouteLink href="/locations">Ordinary Locations</RouteLink>
+        <RouteLink href="/inventory">Ordinary Inventory</RouteLink>
+      </RouteReady>
+    </ProtectedPrivacyContent>
+  );
+}
+function OrdinarySlot({
+  work,
+  redirectTo,
+  unavailable,
+}: {
+  work: ReturnType<typeof deferred>;
+  redirectTo?: string;
+  unavailable?: boolean;
+}) {
+  const route = useContext(NavigationContext);
+  const href = route.pathname + (route.query ? '?' + route.query : '');
+  return (
+    <Boundary key={href}>
+      <Suspense
+        key={href}
+        fallback={
+          <PairedRouteLoading shape="history" label="Ordinary fallback" />
+        }
+      >
+        <OrdinaryPrimary
+          unavailable={unavailable}
+          href={href}
+          work={href.startsWith('/inventory') ? undefined : work}
+          redirectTo={href === '/history' ? redirectTo : undefined}
+        />
+      </Suspense>
+    </Boundary>
+  );
+}
+function OrdinaryRouter({
+  work,
+  unavailable,
+  privacy = grant(),
+  actualPrivacy = false,
+  redirectTo,
+}: {
+  work: ReturnType<typeof deferred>;
+  privacy?: ReturnType<typeof grant>;
+  actualPrivacy?: boolean;
+  redirectTo?: string;
+  unavailable?: boolean;
+}) {
+  const [href, setHref] = useState(list);
+  const [slot] = useState(() => (
+    <OrdinarySlot
+      work={work}
+      redirectTo={redirectTo}
+      unavailable={unavailable}
+    />
+  ));
+  useLayoutEffect(() => {
+    runtime.restoreSync = (next) => setHref(next);
+    runtime.navigate = (next) => {
+      if (next === href) return;
+      history.replaceState(null, '', next);
+      startTransition(() => setHref(next));
+    };
+  });
+  const url = new URL(href, location.origin);
+  const body = (
+    <RouteMotionProvider actorId="staff">
+      <Controls />
+      <OrdinaryObserve />
+      <RedirectBoundary>
+        <ProtectedRouteArrival>{slot}</ProtectedRouteArrival>
+      </RedirectBoundary>
+    </RouteMotionProvider>
+  );
+  return (
+    <AppRouterContext
+      value={
+        {
+          push: (next: string) => runtime.navigate(next),
+          replace: (next: string) => runtime.navigate(next),
+        } as React.ContextType<typeof AppRouterContext>
+      }
+    >
+      <NavigationContext
+        value={{ pathname: url.pathname, query: url.search.slice(1) }}
+      >
+        {actualPrivacy ? (
+          <ProtectedPrivacyBoundary
+            serverGeneration={{ status: 'absent' }}
+            binding={{
+              actorId: 'staff',
+              backend: 'https://isolated.example',
+              role: 'staff',
+              canManageConfiguration: true,
+            }}
+          >
+            {body}
+          </ProtectedPrivacyBoundary>
+        ) : (
+          <PrivacyReadinessContext value={privacy}>
+            {body}
+          </PrivacyReadinessContext>
+        )}
+      </NavigationContext>
+    </AppRouterContext>
+  );
+}
+
+it('ordinary actual opaque primary loading retains the one source/draft and releases only its wait on real primary', async () => {
+  const work = deferred();
+  render(<OrdinaryRouter work={work} />);
+  const draft = screen.getByRole('textbox', {
+    name: 'Ordinary business draft',
+  });
+  fireEvent.change(draft, { target: { value: 'preserved' } });
+  fireEvent.click(screen.getByRole('link', { name: 'Ordinary History' }));
+  const approval = ordinaryMotion.arrival!;
+  expect(approval.presentation).toBe('primary');
+  const owner = gate.store.snapshot()!;
+  expect(owner).toMatchObject({ kind: 'primary', arrival: approval });
+  expect(screen.getByRole('textbox', { name: 'Ordinary business draft' })).toBe(
+    draft,
+  );
+  expect(screen.queryByText('Ordinary fallback')).toBeNull();
+  expect(work.settled()).toBe(false);
+  await act(work.resolve);
+  await screen.findByRole('heading', { name: '/history' });
+  expect(gate.store.snapshot()).toBeNull();
+  expect(ordinaryMotion.arrival).toBe(approval); // Readiness releases wait, never presentation approval.
+  await act(async () => {
+    ordinaryMotion.finishPrimaryAfterSnapshot({ name: approval.name });
+  });
+  expect(ordinaryMotion.arrival).toBeNull();
+  expect(draft).toHaveValue('preserved');
+});
+
+it.each(['native', 'reduced', 'revocation', 'terminal'] as const)(
+  'ordinary retained navigation releases only presentation on %s',
+  async (outcome) => {
+    const work = deferred();
+    const page = render(<OrdinaryRouter work={work} />);
+    const draft = screen.getByRole('textbox', {
+      name: 'Ordinary business draft',
+    });
+    fireEvent.click(screen.getByRole('link', { name: 'Ordinary History' }));
+    const owner = gate.store.snapshot()!;
+    expect(owner.kind).toBe('primary');
+    const originalScope = pending;
+    const unrelated =
+      outcome === 'reduced' ? pending.state.register() : undefined;
+    if (outcome === 'native')
+      act(() => {
+        history.replaceState(null, '', list);
+        window.dispatchEvent(new PopStateEvent('popstate'));
+        runtime.restoreSync(list);
+      });
+    else if (outcome === 'reduced')
+      act(() => {
+        localStorage.setItem('it-inventory-reduce-motion', 'true');
+        window.dispatchEvent(
+          new StorageEvent('storage', { key: 'it-inventory-reduce-motion' }),
+        );
+      });
+    else if (outcome === 'revocation')
+      act(() => {
+        revokePrivatePresentation();
+        page.rerender(<OrdinaryRouter work={work} privacy={grant(false)} />);
+      });
+    else await act(work.reject);
+    await owner.promise;
+    expect(gate.store.snapshot()).toBeNull();
+    expect(ordinaryMotion.arrival).toBeNull();
+    if (outcome !== 'terminal') expect(work.settled()).toBe(false);
+    if (outcome === 'native')
+      expect(
+        screen.getByRole('textbox', { name: 'Ordinary business draft' }),
+      ).toBe(draft);
+    if (outcome === 'reduced') {
+      expect(pending).toBe(originalScope);
+      expect(pending.state.snapshot().pending).toBe(true);
+      unrelated?.();
+    }
+    if (outcome === 'revocation') {
+      expect(draft.closest('[hidden][inert]')).not.toBeNull();
+      await act(work.resolve);
+      expect(screen.queryByRole('heading', { name: '/history' })).toBeNull();
+    }
+  },
+);
+
+it.each(['/locations', '/history?type=quantity'])(
+  'ordinary server redirect to %s retires old approval without releasing unrelated backend work',
+  async (redirectTo) => {
+    const work = deferred();
+    render(<OrdinaryRouter work={work} redirectTo={redirectTo} />);
+    fireEvent.click(screen.getByRole('link', { name: 'Ordinary History' }));
+    const approval = ordinaryMotion.arrival!;
+    await act(work.resolve);
+    await waitFor(() => expect(gate.store.snapshot()).toBeNull());
+    expect(ordinaryMotion.arrival).toBeNull();
+    act(() =>
+      ordinaryMotion.finishPrimaryAfterSnapshot({ name: approval.name }),
+    );
+    expect(ordinaryMotion.arrival).toBeNull();
+  },
+);
+
+it('ordinary primary before controller verification retains original source and cannot release the target gate early', async () => {
+  const work = deferred();
+  render(<OrdinaryRouter work={work} actualPrivacy />);
+  await screen.findByRole('textbox', { name: 'Ordinary business draft' });
+  await waitFor(() => expect(mountedPrivacy.ready).toBe(true));
+  let verified!: (value: { status: 'absent' }) => void;
+  runtime.read.mockImplementationOnce(
+    () =>
+      new Promise((resolve) => {
+        verified = resolve;
+      }),
+  );
+  const draft = screen.getByRole('textbox', {
+    name: 'Ordinary business draft',
+  });
+  fireEvent.click(screen.getByRole('link', { name: 'Ordinary History' }));
+  const owner = gate.store.snapshot()!;
+  await act(work.resolve);
+  expect(screen.getByRole('textbox', { name: 'Ordinary business draft' })).toBe(
+    draft,
+  );
+  expect(gate.store.snapshot()).toBe(owner);
+  await act(async () => {
+    verified({ status: 'absent' });
+  });
+  await screen.findByRole('heading', { name: '/history' });
+  expect(gate.store.snapshot()).toBeNull();
+});
+
+it('ordinary superseding navigation cannot invent a retained source and old capture cannot consume its new approval', async () => {
+  const work = deferred();
+  render(<OrdinaryRouter work={work} />);
+  fireEvent.click(screen.getByRole('link', { name: 'Ordinary History' }));
+  const first = ordinaryMotion.arrival!;
+  const finishOld = ordinaryMotion.finishPrimaryAfterSnapshot;
+  const firstOwner = gate.store.snapshot()!;
+  let newer!: NonNullable<typeof ordinaryMotion.arrival>;
+  const navigate = runtime.navigate;
+  runtime.navigate = (next) => {
+    newer = ordinaryMotion.arrival!;
+    finishOld({ name: first.name });
+    expect(ordinaryMotion.arrival).toBe(newer);
+    navigate(next);
+  };
+  fireEvent.click(screen.getByRole('link', { name: 'Ordinary Locations' }));
+  await firstOwner.promise;
+  expect(newer.name).not.toBe(first.name);
+  expect(newer.presentation).toBe('outer');
+  expect(gate.store.snapshot()).toBeNull();
+  await act(work.resolve);
+  await screen.findByRole('heading', { name: '/locations' });
+});
+
+it('ordinary controller verification before primary cannot acknowledge a genuine held Flight', async () => {
+  const work = deferred();
+  render(<OrdinaryRouter work={work} actualPrivacy />);
+  await screen.findByRole('textbox', { name: 'Ordinary business draft' });
+  await waitFor(() => expect(mountedPrivacy.ready).toBe(true));
+  const draft = screen.getByRole('textbox', {
+    name: 'Ordinary business draft',
+  });
+  fireEvent.click(screen.getByRole('link', { name: 'Ordinary History' }));
+  const owner = gate.store.snapshot()!;
+  await waitFor(() => expect(runtime.identity).toHaveBeenCalled());
+  expect(gate.store.snapshot()).toBe(owner);
+  expect(work.settled()).toBe(false);
+  expect(screen.getByRole('textbox', { name: 'Ordinary business draft' })).toBe(
+    draft,
+  );
+  await act(work.resolve);
+  await screen.findByRole('heading', { name: '/history' });
+  expect(gate.store.snapshot()).toBeNull();
+});
+
+it('an actual unavailable History primary retires only its exact approval while canonical readiness releases its wait', async () => {
+  const work = deferred();
+  render(<OrdinaryRouter work={work} unavailable />);
+  fireEvent.click(screen.getByRole('link', { name: 'Ordinary History' }));
+  const approval = ordinaryMotion.arrival!,
+    owner = gate.store.snapshot()!;
+  expect(owner.kind).toBe('primary');
+  const unrelated = pending.state.register();
+  await act(work.resolve);
+  await screen.findByText('History unavailable');
+  expect(gate.store.snapshot()).toBeNull();
+  expect(ordinaryMotion.arrival).toBeNull();
+  expect(pending.state.snapshot().pending).toBe(true);
+  act(() => ordinaryMotion.finishPrimaryAfterSnapshot({ name: approval.name }));
+  expect(ordinaryMotion.arrival).toBeNull();
+  unrelated();
 });

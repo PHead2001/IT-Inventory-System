@@ -1,6 +1,12 @@
 /* eslint-disable react-hooks/immutability -- Passive telemetry belongs to the owned imperative renderer boundary. */
 'use client';
-import { useFrame, useThree } from '@react-three/fiber';
+import {
+  addAfterEffect,
+  addTail,
+  useFrame,
+  useThree,
+  type RootState,
+} from '@react-three/fiber';
 import {
   Component,
   Suspense,
@@ -94,7 +100,42 @@ export function SceneEffectsOwner({
     },
     [effects, bloomCurrent],
   );
-  const previous = useRef({ camera: '', active: false, captures: 0 });
+  const previous = useRef({
+    camera: '',
+    active: false,
+    captures: 0,
+    continuous: false,
+  });
+  const renderedRoot = useRef<RootState | null>(null);
+  useLayoutEffect(() => {
+    const removeAfter = addAfterEffect(() => {
+      const rendered = renderedRoot.current;
+      renderedRoot.current = null;
+      if (!isCurrent()) return;
+      // Pinned Fiber 9.8.1 decrements this root's pending frames after its
+      // subscribers/render, before global after effects. Only our actual frame
+      // arms this observation. An unarmed global tick means our promised frame
+      // was withheld, so another root cannot preserve or grant continuity.
+      previous.current.continuous =
+        !!rendered &&
+        rendered.internal.active &&
+        (rendered.frameloop === 'always' || rendered.internal.frames > 0);
+    });
+    const removeTail = addTail(() => {
+      if (!isCurrent()) return;
+      // An after effect can queue frames after Fiber computed zero repetition.
+      // Its tail then cancels the loop; that queue is not continuity evidence.
+      renderedRoot.current = null;
+      previous.current.continuous = false;
+    });
+    return () => {
+      removeAfter();
+      removeTail();
+      renderedRoot.current = null;
+      previous.current.active = false;
+      previous.current.continuous = false;
+    };
+  }, [isCurrent]);
   const sceneFrames = useRef(0);
   useEffect(() => {
     if (!isCurrent()) return;
@@ -157,15 +198,17 @@ export function SceneEffectsOwner({
       delta * 1000,
       active &&
         previous.current.active &&
+        previous.current.continuous &&
         !captured &&
         previous.current.captures === current.captures,
     );
-    if (!active) effects.quality.resetWindow();
     previous.current = {
       camera: cameraKey,
       active: active && !captured,
       captures: current.captures,
+      continuous: false,
     };
+    renderedRoot.current = _frame;
     gl.domElement.dataset.sceneEffectFrames = String(++sceneFrames.current);
     gl.domElement.dataset.visualHoverCode = current.hoverCode ?? '';
     gl.domElement.dataset.effectsQualityEvidence = JSON.stringify(

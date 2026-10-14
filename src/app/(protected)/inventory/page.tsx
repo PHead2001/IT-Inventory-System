@@ -98,7 +98,12 @@ export default async function InventoryPage({
   const readiness = await routeReadyProps('/inventory', searchParams);
   return (
     <ProtectedPrivacyContent routeKey={readiness.routeKey}>
-      <RouteReady {...readiness} pairingHref={returnTo}>
+      <RouteReady
+        {...readiness}
+        pairingHref={returnTo}
+        pairedInventory
+        conventionalPrimary
+      >
         <>
           <p className="experience-eyebrow">Find equipment and stock</p>
           <h1 className="experience-heading mt-1 sm:mt-2">Inventory</h1>

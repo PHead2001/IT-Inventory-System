@@ -47,6 +47,8 @@ it('generic arrival requires a fresh accepted navigation and cannot reuse a reti
   );
   const first = state.arrivalSnapshot()!;
   expect(first).toEqual({
+    name: expect.stringMatching(/^route-primary-/),
+    presentation: 'outer',
     sourceKey: '/inventory?q=cable',
     destinationKey: '/history?category=a&category=b',
     epoch: 4,
@@ -206,3 +208,31 @@ it.each([
     expect(state.backTarget(record, destination)).toBeNull();
   },
 );
+
+it('primary capture uses the same exact approval with a unique name across repeated destinations', () => {
+  const state = createRouteMotionState();
+  state.supportArrival(true);
+  state.acceptArrival(
+    '/history',
+    '/inventory',
+    3,
+    'https://inventory.invalid/inventory',
+    'primary',
+  );
+  const first = state.arrivalSnapshot()!;
+  expect(first).toMatchObject({
+    presentation: 'primary',
+    name: expect.stringMatching(/^route-primary-/),
+  });
+  state.acceptArrival(
+    '/history',
+    '/inventory',
+    3,
+    'https://inventory.invalid/inventory',
+    'primary',
+  );
+  const next = state.arrivalSnapshot()!;
+  expect(next.name).not.toBe(first.name);
+  state.finishArrival(first);
+  expect(state.arrivalSnapshot()).toBe(next);
+});

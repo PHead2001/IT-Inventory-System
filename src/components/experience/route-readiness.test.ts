@@ -2,6 +2,7 @@ import { afterEach, expect, it, vi } from 'vitest';
 import { createRoutePendingState } from './route-pending-state';
 import { createRouteReadiness } from './route-readiness';
 import { routeKey } from './route-key';
+import { createRouteMotionState } from './route-motion-state';
 
 afterEach(() => {
   document.body.replaceChildren();
@@ -139,4 +140,64 @@ it('primary observation reuses eligibility without acknowledging a commit or fin
   readiness.close();
   expect(readiness.currentPrimary()).toBeNull();
   expect(notification).toHaveBeenCalledTimes(2);
+});
+
+it('observes immutable actual primary only after canonical actor/raw-key/visible checks and before normal commit', () => {
+  history.replaceState(null, '', '/history?type=quantity');
+  const pending = createRoutePendingState();
+  const order: string[] = [];
+  const committed = vi.fn(() => order.push('commit'));
+  const observed = vi.fn((primary) => {
+    expect(Object.isFrozen(primary)).toBe(true);
+    order.push('observe');
+  });
+  const readiness = createRouteReadiness('actor', pending, committed, observed);
+  const element = root();
+  const content = {
+    actorId: 'actor',
+    routeKey: '/history?type=quantity',
+    contentIdentity: 'unavailable',
+    root: element,
+    conventionalPrimary: false,
+  };
+  readiness.register({ ...content, actorId: 'other' })();
+  readiness.register({ ...content, routeKey: '/history' })();
+  element.hidden = true;
+  readiness.register(content)();
+  element.hidden = false;
+  expect(observed).not.toHaveBeenCalled();
+  const business = pending.register();
+  readiness.register(content);
+  expect(order).toEqual(['observe', 'commit']);
+  expect(observed).toHaveBeenCalledOnce();
+  expect(pending.snapshot().pending).toBe(true);
+  business();
+});
+
+it('a late unavailable observation of an old exact loading arrival cannot retire a newer repeated arrival', () => {
+  history.replaceState(null, '', '/history');
+  const pending = createRoutePendingState(),
+    state = createRouteMotionState();
+  state.supportArrival(true);
+  state.acceptArrival('/history', '/inventory', 0, location.origin, 'primary');
+  const old = state.arrivalSnapshot()!;
+  state.acceptArrival('/history', '/inventory', 0, location.origin, 'primary');
+  const newer = state.arrivalSnapshot()!;
+  const readiness = createRouteReadiness(
+    'actor',
+    pending,
+    vi.fn(),
+    (primary) => {
+      expect(primary.conventionalPrimary).toBe(false);
+      state.finishArrival(old);
+    },
+  );
+  readiness.register({
+    actorId: 'actor',
+    routeKey: '/history',
+    contentIdentity: 'old-unavailable',
+    root: root(),
+    conventionalPrimary: false,
+  });
+  expect(state.arrivalSnapshot()).toBe(newer);
 });

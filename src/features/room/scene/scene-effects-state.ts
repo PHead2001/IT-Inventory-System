@@ -36,7 +36,11 @@ export type EffectsSnapshot = Readonly<{
   captureMs: number | null;
 }>;
 
-/** Demand gaps are never samples. The owner supplies only adjacent active frames. */
+/**
+ * Demand gaps are never samples. The owner supplies only adjacent active frames
+ * with observed render-loop continuity. Partial windows span separate bursts;
+ * inactivity does not discard their already eligible intervals.
+ */
 export function createEffectsQualityMonitor(
   current: () => boolean = () => true,
 ) {

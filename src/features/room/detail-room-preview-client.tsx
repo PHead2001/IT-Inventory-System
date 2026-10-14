@@ -1,6 +1,10 @@
 'use client';
 import dynamic from 'next/dynamic';
 import {
+  InventoryCaptureGroup,
+  InventoryCaptureRegion,
+} from '@/components/experience/inventory-capture-region';
+import {
   useEffect,
   useRef,
   useState,
@@ -82,32 +86,36 @@ export function DetailRoomPreviewClient({
       aria-label="Storage preview"
       className="my-5 min-w-0 rounded-xl border border-slate-700 p-4"
     >
-      <h2 className="font-semibold">Storage preview</h2>
-      {context && <p className="my-3 text-sm text-slate-400">{context}</p>}
-      {choices.length > 1 && (
-        <label className="my-3 block text-sm">
-          Choose a recorded stock location
-          <select
-            className="mt-2 block min-h-11 w-full rounded-md border border-slate-600 bg-slate-950 px-3"
-            value={selected?.code ?? ''}
-            onChange={(event) => setChoice(event.target.value)}
-          >
-            <option value="">Choose location</option>
-            {choices.map((option) => (
-              <option key={option.code} value={option.code}>
-                {option.label}
-              </option>
-            ))}
-          </select>
-        </label>
-      )}
+      <InventoryCaptureGroup region="preview-controls">
+        <h2 className="font-semibold">Storage preview</h2>
+        {context && <p className="my-3 text-sm text-slate-400">{context}</p>}
+        {choices.length > 1 && (
+          <label className="my-3 block text-sm">
+            Choose a recorded stock location
+            <select
+              className="mt-2 block min-h-11 w-full rounded-md border border-slate-600 bg-slate-950 px-3"
+              value={selected?.code ?? ''}
+              onChange={(event) => setChoice(event.target.value)}
+            >
+              <option value="">Choose location</option>
+              {choices.map((option) => (
+                <option key={option.code} value={option.code}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </label>
+        )}
+      </InventoryCaptureGroup>
       {selected ? (
         <>
-          <p className="my-3 text-sm">
-            {selected.breadcrumb}
-            {!selected.active &&
-              ' · Inactive location; this is the recorded storage context.'}
-          </p>
+          <InventoryCaptureRegion region="preview-location">
+            <p className="my-3 text-sm">
+              {selected.breadcrumb}
+              {!selected.active &&
+                ' · Inactive location; this is the recorded storage context.'}
+            </p>
+          </InventoryCaptureRegion>
           {selectedChoice?.modeled ? (
             <CompactRoomContext
               value={{ code: selected.code, label: selected.name }}
@@ -133,14 +141,20 @@ export function DetailRoomPreviewClient({
           ) : (
             <UnmodeledRoomNotice />
           )}
-          {selectedChoice?.roomLink}
+          {selectedChoice?.roomLink && (
+            <InventoryCaptureGroup region="preview-link">
+              {selectedChoice.roomLink}
+            </InventoryCaptureGroup>
+          )}
         </>
       ) : (
-        <p className="my-3 text-sm">
-          {choices.length > 1
-            ? 'Choose a location to preview its map.'
-            : 'No current modeled storage location to preview.'}
-        </p>
+        <InventoryCaptureRegion region="preview-location">
+          <p className="my-3 text-sm">
+            {choices.length > 1
+              ? 'Choose a location to preview its map.'
+              : 'No current modeled storage location to preview.'}
+          </p>
+        </InventoryCaptureRegion>
       )}
     </section>
   );

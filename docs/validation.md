@@ -309,6 +309,25 @@ restores the actual history scope without pairing or approving a different query
 page, pairing-component and motion-state regressions cover these contracts and
 reject unrecorded aliases. They do not replace real browser/native capture proof.
 
+The explicit detail-region follow-up covers actual asset, quantity and location
+page composition with one canonical RouteReady marker. Cold compact slots and
+warm canvas sentinels have no active capture ancestor; actual task launchers,
+MutationForm/CustodyChangeForm and LocationPicker paths split around their lazy
+map surface. The fixed region inventory bounds participant names before capture.
+Coordinator regressions retain both original commit-order/raw-query proofs and
+add concurrent shared/unmatched regions, batch sealing, duplicate/late callbacks,
+final-participant completion and supersession/privacy fences. Both commit orders
+also consume the outer arrival before sealing, then require reliable seal
+publication, withdrawn title/region names and a newly mounted local region with
+no capture name or source handoff. Lifetime regressions
+prove every region receives an exact source lease, only final native cleanup
+retires it, and cancellation makes all old callbacks/cleanups inert. Installed
+React 19.3 dispatches queued native callbacks synchronously and attaches each
+returned cleanup to the same transition.finished promise; the receipt seals only
+after that batch. These component/source checks do not prove WebGL, native capture
+geometry, phone layout or W13/A303/D303.2 acceptance. Independent Astra integrity
+review, real browser/WebGL and exact-candidate certification remain required.
+
 The running local-reduction case uses a second signed-in Settings page in the
 same browser context. Its real motion switch is focused before the first page's
 History transition; Space changes the stored preference at native readiness and

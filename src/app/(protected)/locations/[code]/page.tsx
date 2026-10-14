@@ -1,3 +1,4 @@
+import { InventoryCaptureGroup } from '@/components/experience/inventory-capture-region';
 import { RouteReady } from '@/components/experience/route-ready';
 import { routeReadyProps } from '@/components/experience/route-ready.server';
 import { PrivateDocumentTitle } from '@/components/auth/private-document-title';
@@ -69,155 +70,157 @@ export default async function LocationPage({
     ...filters,
     location: undefined,
   });
+  const readiness = await routeReadyProps(base, searchParams);
   return (
-    <ProtectedPrivacyContent>
-      <RouteReady
-        {...await routeReadyProps(
-          '/locations/' + encodeURIComponent(code),
-          searchParams,
-        )}
-      >
+    <ProtectedPrivacyContent routeKey={readiness.routeKey}>
+      <RouteReady {...readiness} conventionalPrimary capture="regions">
         <PrivateDocumentTitle
           routePath={`/locations/${encodeURIComponent(code)}`}
           title={recordTitle(location.name, 'Locations').title.absolute}
         />
         <>
-          <Link
-            className="inline-flex min-h-11 items-center text-cyan-300 underline"
-            href="/locations"
-          >
-            All locations
-          </Link>
-          <p className="experience-eyebrow mt-3">Storage / Location</p>
-          <h1 className="experience-heading mt-1 break-words">
-            {location.name}
-          </h1>
-          <p className="my-3 break-words text-sm leading-6 text-slate-300">
-            {location.breadcrumb} ·{' '}
-            {!location.active
-              ? 'Inactive'
-              : location.can_hold_inventory
-                ? 'Inventory destination'
-                : 'Includes child locations'}
-          </p>
-          <LocationCode code={location.code} />
-          <nav
-            aria-label="Location actions"
-            className="my-4 flex flex-wrap items-center gap-x-5 gap-y-1 text-sm"
-          >
-            <ShowInRoom location={location} />
+          <InventoryCaptureGroup region="header">
             <Link
-              className="min-h-11 py-3 text-cyan-300 underline"
-              href={'/labels?location=' + encodeURIComponent(location.code)}
+              className="inline-flex min-h-11 items-center text-cyan-300 underline"
+              href="/locations"
             >
-              Print label
+              All locations
             </Link>
-            <Link
-              className="min-h-11 py-3 text-cyan-300 underline"
-              href={'/history?location=' + encodeURIComponent(code)}
+            <p className="experience-eyebrow mt-3">Storage / Location</p>
+            <h1 className="experience-heading mt-1 break-words">
+              {location.name}
+            </h1>
+            <p className="my-3 break-words text-sm leading-6 text-slate-300">
+              {location.breadcrumb} ·{' '}
+              {!location.active
+                ? 'Inactive'
+                : location.can_hold_inventory
+                  ? 'Inventory destination'
+                  : 'Includes child locations'}
+            </p>
+            <LocationCode code={location.code} />
+            <nav
+              aria-label="Location actions"
+              className="my-4 flex flex-wrap items-center gap-x-5 gap-y-1 text-sm"
             >
-              History
-            </Link>
-            <ExportLink
-              className="min-h-11 py-3 text-cyan-300 underline"
-              href={'/api/exports/inventory?' + scopeParams}
-            >
-              Export
-            </ExportLink>
-          </nav>
+              <ShowInRoom location={location} />
+              <Link
+                className="min-h-11 py-3 text-cyan-300 underline"
+                href={'/labels?location=' + encodeURIComponent(location.code)}
+              >
+                Print label
+              </Link>
+              <Link
+                className="min-h-11 py-3 text-cyan-300 underline"
+                href={'/history?location=' + encodeURIComponent(code)}
+              >
+                History
+              </Link>
+              <ExportLink
+                className="min-h-11 py-3 text-cyan-300 underline"
+                href={'/api/exports/inventory?' + scopeParams}
+              >
+                Export
+              </ExportLink>
+            </nav>
+          </InventoryCaptureGroup>
           <DetailRoomPreview
             showRoomLink={false}
             locations={locations}
             choices={[{ code: location.code, label: location.breadcrumb }]}
           />
-          {children.length > 0 && (
-            <section className={panel + ' mb-5'}>
-              <h2 className="mb-3 text-lg font-semibold">Child locations</h2>
-              <ul className="grid gap-2 sm:grid-cols-2">
-                {children.map((child) => (
-                  <li
-                    key={child.id}
-                    className="min-w-0 rounded-md border border-slate-700 p-3"
-                  >
-                    <Link
-                      className="break-words text-cyan-300 underline"
-                      aria-label={`${child.breadcrumb} (${child.code})`}
-                      href={'/locations/' + encodeURIComponent(child.code)}
+          <InventoryCaptureGroup region="body">
+            {children.length > 0 && (
+              <section className={panel + ' mb-5'}>
+                <h2 className="mb-3 text-lg font-semibold">Child locations</h2>
+                <ul className="grid gap-2 sm:grid-cols-2">
+                  {children.map((child) => (
+                    <li
+                      key={child.id}
+                      className="min-w-0 rounded-md border border-slate-700 p-3"
                     >
-                      {child.name}
-                    </Link>
-                    <LocationCode code={child.code} />
-                    <p className="mt-1 text-xs text-slate-400">
-                      {!child.active
-                        ? 'Inactive'
-                        : child.can_hold_inventory
-                          ? 'Inventory destination'
-                          : 'Location group'}
-                    </p>
-                  </li>
-                ))}
-              </ul>
-            </section>
-          )}
-          <nav
-            aria-label="Location inventory views"
-            className="my-5 flex flex-wrap gap-x-5 gap-y-1 text-sm"
-          >
-            {[
-              'active',
-              'all',
-              ...(filter.status === 'historical' ? ['historical'] : []),
-            ].map((status) => (
-              <Link
-                key={status}
-                aria-current={filter.status === status ? 'page' : undefined}
-                className="min-h-11 rounded-md border border-slate-600 px-3 py-3 text-cyan-300 aria-[current=page]:border-cyan-300 aria-[current=page]:bg-cyan-950 aria-[current=page]:font-semibold"
-                href={scopeHref(status)}
-              >
-                {statusScope(status)}
-              </Link>
-            ))}
-          </nav>
-          <div className="mb-3">
-            <h2 className="font-semibold">
-              {location.can_hold_inventory
-                ? 'Inventory at this location'
-                : 'Inventory in this area and its descendants'}
-            </h2>
-            <InventoryCount result={result} compact />
-          </div>
-          <InventoryRows
-            rows={result.rows}
-            currentLocationId={location.id}
-            emptyState={
-              <div className={panel}>
-                <p>
-                  {constrained
-                    ? 'No inventory here matches the selected filters.'
-                    : filter.status === 'active'
-                      ? 'No active inventory here.'
-                      : filter.status === 'historical'
-                        ? 'No archived or retired inventory here.'
-                        : 'No recorded inventory here.'}
-                </p>
+                      <Link
+                        className="break-words text-cyan-300 underline"
+                        aria-label={`${child.breadcrumb} (${child.code})`}
+                        href={'/locations/' + encodeURIComponent(child.code)}
+                      >
+                        {child.name}
+                      </Link>
+                      <LocationCode code={child.code} />
+                      <p className="mt-1 text-xs text-slate-400">
+                        {!child.active
+                          ? 'Inactive'
+                          : child.can_hold_inventory
+                            ? 'Inventory destination'
+                            : 'Location group'}
+                      </p>
+                    </li>
+                  ))}
+                </ul>
+              </section>
+            )}
+            <nav
+              aria-label="Location inventory views"
+              className="my-5 flex flex-wrap gap-x-5 gap-y-1 text-sm"
+            >
+              {[
+                'active',
+                'all',
+                ...(filter.status === 'historical' ? ['historical'] : []),
+              ].map((status) => (
                 <Link
-                  className="inline-flex min-h-11 items-center text-cyan-300 underline"
-                  href={
-                    filter.status === 'active' ? scopeHref('all') : '/inventory'
-                  }
+                  key={status}
+                  aria-current={filter.status === status ? 'page' : undefined}
+                  className="min-h-11 rounded-md border border-slate-600 px-3 py-3 text-cyan-300 aria-[current=page]:border-cyan-300 aria-[current=page]:bg-cyan-950 aria-[current=page]:font-semibold"
+                  href={scopeHref(status)}
                 >
-                  {filter.status === 'active'
-                    ? 'Include all statuses'
-                    : 'Search all inventory'}
+                  {statusScope(status)}
                 </Link>
-              </div>
-            }
-          />
-          <Pagination
-            result={result}
-            base={'/locations/' + encodeURIComponent(code)}
-            params={normalizedParams}
-          />
+              ))}
+            </nav>
+            <div className="mb-3">
+              <h2 className="font-semibold">
+                {location.can_hold_inventory
+                  ? 'Inventory at this location'
+                  : 'Inventory in this area and its descendants'}
+              </h2>
+              <InventoryCount result={result} compact />
+            </div>
+            <InventoryRows
+              rows={result.rows}
+              currentLocationId={location.id}
+              emptyState={
+                <div className={panel}>
+                  <p>
+                    {constrained
+                      ? 'No inventory here matches the selected filters.'
+                      : filter.status === 'active'
+                        ? 'No active inventory here.'
+                        : filter.status === 'historical'
+                          ? 'No archived or retired inventory here.'
+                          : 'No recorded inventory here.'}
+                  </p>
+                  <Link
+                    className="inline-flex min-h-11 items-center text-cyan-300 underline"
+                    href={
+                      filter.status === 'active'
+                        ? scopeHref('all')
+                        : '/inventory'
+                    }
+                  >
+                    {filter.status === 'active'
+                      ? 'Include all statuses'
+                      : 'Search all inventory'}
+                  </Link>
+                </div>
+              }
+            />
+            <Pagination
+              result={result}
+              base={'/locations/' + encodeURIComponent(code)}
+              params={normalizedParams}
+            />
+          </InventoryCaptureGroup>
         </>
       </RouteReady>
     </ProtectedPrivacyContent>

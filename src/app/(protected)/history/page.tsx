@@ -33,6 +33,7 @@ export default async function HistoryPage({
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
   const raw = await searchParams;
+  const readiness = await routeReadyProps('/history', searchParams);
   const params = Object.fromEntries(
     Object.entries(raw).map(([k, v]) => [k, Array.isArray(v) ? v[0] : v]),
   );
@@ -68,8 +69,8 @@ export default async function HistoryPage({
       (fieldId ? `&field=${fieldId}` : '') +
       (offset ? `&optionOffset=${offset}` : '');
     return (
-      <ProtectedPrivacyContent>
-        <RouteReady {...await routeReadyProps('/history', searchParams)}>
+      <ProtectedPrivacyContent routeKey={readiness.routeKey}>
+        <RouteReady {...readiness} conventionalPrimary>
           <>
             <h1 className="text-3xl font-semibold">Custom metadata at event</h1>
             <p className="my-4 text-slate-400">
@@ -200,8 +201,8 @@ export default async function HistoryPage({
   const clearHref = '/history' + (clearQuery.size ? '?' + clearQuery : '');
   if (params.entityId !== undefined && !record) {
     return (
-      <ProtectedPrivacyContent>
-        <RouteReady {...await routeReadyProps('/history', searchParams)}>
+      <ProtectedPrivacyContent routeKey={readiness.routeKey}>
+        <RouteReady {...readiness}>
           <>
             <h1 className="experience-heading">Inventory history</h1>
             <div className={panel}>
@@ -228,8 +229,8 @@ export default async function HistoryPage({
   const recovery = pageRecoveryHref('/history', coherentParams, result);
   if (recovery) redirect(recovery);
   return (
-    <ProtectedPrivacyContent>
-      <RouteReady {...await routeReadyProps('/history', searchParams)}>
+    <ProtectedPrivacyContent routeKey={readiness.routeKey}>
+      <RouteReady {...readiness} conventionalPrimary>
         <>
           <p className="experience-eyebrow">Inventory · Audit trail</p>
           <h1 className="experience-heading mt-3">Inventory history</h1>

@@ -13,9 +13,10 @@ export default async function LocationsPage({
 } = {}) {
   const { member } = await requireMember();
   const locations = await getLocations();
+  const readiness = await routeReadyProps('/locations', searchParams);
   return (
-    <ProtectedPrivacyContent>
-      <RouteReady {...await routeReadyProps('/locations', searchParams)}>
+    <ProtectedPrivacyContent routeKey={readiness.routeKey}>
+      <RouteReady {...readiness} conventionalPrimary>
         <>
           <p className="experience-eyebrow">Storage / Location hierarchy</p>
           <h1 className="experience-heading mt-1">Locations</h1>
