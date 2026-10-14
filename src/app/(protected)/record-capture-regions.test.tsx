@@ -9,6 +9,7 @@ const state = vi.hoisted(() => ({
   path: '/inventory/assets/asset',
   pending: true,
   site: false,
+  locationPair: false,
 }));
 vi.mock('server-only', () => ({}));
 vi.mock('react', async (original) => ({
@@ -36,7 +37,21 @@ vi.mock('@/components/experience/route-motion', () => ({
     current: () => true,
     validNow: () => true,
     intent: state.path.startsWith('/locations/')
-      ? null
+      ? state.locationPair
+        ? {
+            name: 'accepted-title',
+            kind: 'location',
+            id: 'drawer',
+            code: 'ITC-D01',
+            detailPath: state.path,
+            listHref: '/locations',
+            source: {
+              kind: 'location-row',
+              locationId: 'drawer',
+              occurrence: 'desktop-tree',
+            },
+          }
+        : null
       : {
           name: 'accepted-title',
           kind: state.path.includes('/assets/') ? 'asset' : 'quantity',
@@ -45,22 +60,24 @@ vi.mock('@/components/experience/route-motion', () => ({
           listHref: '/inventory',
           holding: { domain: 'storage', id: 'drawer' },
         },
-    titleArrival: state.path.startsWith('/locations/')
-      ? null
-      : {
-          sourceKey: '/inventory',
-          destinationKey: state.path,
-          epoch: 1,
-        },
-    arrival: state.path.startsWith('/locations/')
-      ? {
-          name: 'accepted-primary',
-          presentation: 'primary',
-          sourceKey: '/locations',
-          destinationKey: state.path,
-          epoch: 1,
-        }
-      : null,
+    titleArrival:
+      state.path.startsWith('/locations/') && !state.locationPair
+        ? null
+        : {
+            sourceKey: state.locationPair ? '/locations' : '/inventory',
+            destinationKey: state.path,
+            epoch: 1,
+          },
+    arrival:
+      state.path.startsWith('/locations/') && !state.locationPair
+        ? {
+            name: 'accepted-primary',
+            presentation: 'primary',
+            sourceKey: '/locations',
+            destinationKey: state.path,
+            epoch: 1,
+          }
+        : null,
     arm: () => {},
     armBack: () => {},
     retireTitle: () => {},
@@ -224,6 +241,7 @@ vi.mock('@/features/metadata/queries.server', () => ({
 beforeEach(() => {
   state.pending = true;
   state.site = false;
+  state.locationPair = false;
   sessionStorage.clear();
 });
 function expectOutsideCapture(element: Element) {
@@ -329,3 +347,27 @@ it.each(['asset', 'quantity', 'custody'] as const)(
     ).toBe(form);
   },
 );
+
+it('location title pairing captures only explicit header/body regions under its one canonical owner', async () => {
+  state.locationPair = true;
+  render(await page('location'));
+  expect(document.querySelectorAll('[data-route-ready]')).toHaveLength(1);
+  expect(
+    document.querySelector(
+      '[data-active-capture="accepted-title-content-header"]',
+    ),
+  ).not.toBeNull();
+  expect(
+    document.querySelector('[data-active-capture="accepted-title-content"]'),
+  ).not.toBeNull();
+  expect(
+    screen
+      .getByRole('heading', { name: 'Drawer 1' })
+      .closest('[data-active-capture="accepted-title"]'),
+  ).not.toBeNull();
+  const preview = screen.getByRole('region', { name: 'Storage preview' });
+  expectOutsideCapture(preview);
+  expectOutsideCapture(
+    preview.querySelector('[data-loading-shape="compact-room"]')!,
+  );
+});

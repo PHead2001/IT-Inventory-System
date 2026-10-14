@@ -175,6 +175,9 @@ export function RouteMotionProvider({
   const [presentation] = useState(createRoutePresentationLifetime);
   const [captures] = useState(createRouteCaptureCompletion);
   const [owners] = useState(createRoutePendingOwners);
+  const [navigationObservers] = useState(
+    () => new Set<(href: string) => void>(),
+  );
   const pathname = usePathname();
   const query = useSearchParams();
   const listHref = pathname + (query?.size ? `?${query}` : '');
@@ -200,6 +203,12 @@ export function RouteMotionProvider({
     () => ({
       state: pending,
       owners,
+      observeNavigation: (observer: (href: string) => void) => {
+        navigationObservers.add(observer);
+        return () => {
+          navigationObservers.delete(observer);
+        };
+      },
       beginNavigation: (href: string) => {
         if (
           !lifecycleRef.current ||
@@ -223,6 +232,13 @@ export function RouteMotionProvider({
           !state.valid()
         )
           return;
+        navigationObservers.forEach((observer) => {
+          try {
+            observer(href);
+          } catch {
+            /* UI observers cannot prevent accepted navigation. */
+          }
+        });
         presentation.navigation();
         const interruptedPair = loading.snapshot() !== null;
         loading.cancel();
@@ -323,6 +339,7 @@ export function RouteMotionProvider({
       providerToken,
       presentation,
       liveRouteKey,
+      navigationObservers,
     ],
   );
   const pendingSnapshot = useSyncExternalStore(
@@ -428,6 +445,7 @@ export function RouteMotionProvider({
       unbind();
       const ownsDocument = currentRouteProvider === providerToken;
       lifecycleRef.current = false;
+      navigationObservers.clear();
       nativeScroll.dispose();
       latestPrivacy.current.navigation?.retire(providerToken);
       presentation.invalidate();
@@ -454,6 +472,7 @@ export function RouteMotionProvider({
     providerToken,
     presentation,
     nativeScroll,
+    navigationObservers,
   ]);
   useLayoutEffect(() => {
     if (!lifecycleRef.current || currentRouteProvider !== providerToken) return;

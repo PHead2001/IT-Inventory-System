@@ -39,8 +39,13 @@ import {
   InventoryBackLink,
   InventoryRecordLink,
   RecordTitle,
+  HistoryRecordLink,
+  LocationTitleSourceName,
+  LocationDetailLink,
 } from './record-transition';
 import { RouteContentIdentityContext } from './route-content-identity';
+import { useLocationBrowserNavigation } from '@/features/room/use-location-browser-navigation';
+import { emptyLocationBrowserState } from '@/features/room/location-browser-state';
 import { RouteReady } from './route-ready';
 import { InventoryCaptureRegion } from './inventory-capture-region';
 import { RoutePresentationLifetimeContext } from './route-presentation-source';
@@ -54,6 +59,7 @@ import {
   inventoryHolding,
   recordHoldingKey,
   type HoldingIdentity,
+  type PresentationTarget,
 } from './route-motion-state';
 
 const runtime = vi.hoisted(() => ({
@@ -87,6 +93,7 @@ const runtime = vi.hoisted(() => ({
   logout: vi.fn(),
   submitConfiguration: vi.fn(),
   refresh: vi.fn(),
+  replace: vi.fn(),
   actionPrivacy: '',
 }));
 vi.mock('@/lib/auth/actions', () => ({
@@ -119,7 +126,7 @@ vi.mock('@/features/metadata/designer-recovery', () => ({
   clearAllDesignerRecovery: vi.fn(() => true),
 }));
 vi.mock('next/navigation', () => ({
-  useRouter: () => ({ refresh: runtime.refresh }),
+  useRouter: () => ({ refresh: runtime.refresh, replace: runtime.replace }),
   usePathname: () => runtime.pathname,
   useSearchParams: () => new URLSearchParams(runtime.query),
 }));
@@ -915,6 +922,7 @@ beforeEach(() => {
   runtime.boundaries = [];
   runtime.submitConfiguration.mockReset();
   runtime.refresh.mockReset();
+  runtime.replace.mockReset();
   vi.stubGlobal('CSS', { supports: () => true });
   vi.stubGlobal('matchMedia', () => ({
     matches: false,
@@ -935,6 +943,394 @@ afterEach(() => {
   delete (document as Partial<Document>).startViewTransition;
   localStorage.removeItem('it-inventory-reduce-motion');
 });
+
+it.each(['reduced', 'unsupported'] as const)(
+  '%s accepted navbar exit cancels a held-source search timer, while modified clicks and same-path writes remain ordinary',
+  (mode) => {
+    vi.useFakeTimers();
+    const previous = window.location.href;
+    window.history.replaceState(null, '', '/locations');
+    runtime.pathname = '/locations';
+    if (mode === 'reduced')
+      localStorage.setItem('it-inventory-reduce-motion', 'true');
+    else delete (document as Partial<Document>).startViewTransition;
+    function BrowserDraft() {
+      const nav = useLocationBrowserNavigation(
+        emptyLocationBrowserState(),
+        [],
+        '/locations',
+      );
+      return (
+        <>
+          <input
+            aria-label="Draft search"
+            value={nav.draft.query}
+            onChange={(e) => nav.change({ query: e.target.value }, true)}
+          />
+          <RouteLink href="/history">Held navbar exit</RouteLink>
+        </>
+      );
+    }
+    try {
+      render(view(<BrowserDraft />));
+      const search = screen.getByLabelText('Draft search');
+      fireEvent.change(search, { target: { value: 'first' } });
+      fireEvent.click(screen.getByRole('link', { name: 'Held navbar exit' }), {
+        ctrlKey: true,
+      });
+      act(() => vi.advanceTimersByTime(300));
+      expect(runtime.replace).toHaveBeenLastCalledWith('/locations?q=first', {
+        scroll: false,
+      });
+      fireEvent.change(search, { target: { value: 'latest' } });
+      fireEvent.click(screen.getByRole('link', { name: 'Held navbar exit' }));
+      act(() => vi.advanceTimersByTime(1000));
+      expect(runtime.replace).toHaveBeenCalledTimes(1);
+      expect(window.location.pathname).toBe('/locations');
+    } finally {
+      window.history.replaceState(null, '', previous);
+      vi.useRealTimers();
+    }
+  },
+);
+
+it('accepted-navigation observer failures cannot prevent navigation and unmounted observers are removed', () => {
+  const bad = vi.fn(() => {
+      throw new Error('Observer failure');
+    }),
+    good = vi.fn();
+  function Observe() {
+    const scope = useContext(RoutePendingContext);
+    useLayoutEffect(() => {
+      const a = scope?.observeNavigation?.(bad),
+        b = scope?.observeNavigation?.(good);
+      return () => {
+        a?.();
+        b?.();
+      };
+    }, [scope]);
+    return null;
+  }
+  const page = render(
+    view(
+      <>
+        <Observe />
+        <RouteLink href="/history">Go</RouteLink>
+      </>,
+    ),
+  );
+  fireEvent.click(screen.getByRole('link', { name: 'Go' }));
+  expect(bad).toHaveBeenCalledWith('/history');
+  expect(good).toHaveBeenCalledWith('/history');
+  page.rerender(view(<RouteLink href="/history">Go</RouteLink>));
+  fireEvent.click(screen.getByRole('link', { name: 'Go' }));
+  expect(good).toHaveBeenCalledTimes(1);
+});
+
+it.each(['privacy', 'native', 'unmount'] as const)(
+  'location draft cancellation on %s cannot later replace a held route',
+  (mode) => {
+    vi.useFakeTimers();
+    const previous = window.location.href;
+    window.history.replaceState(null, '', '/locations');
+    runtime.pathname = '/locations';
+    const items: import('@/features/inventory/contracts-ui').LocationRef[] = [];
+    function BrowserDraft() {
+      const nav = useLocationBrowserNavigation(
+        emptyLocationBrowserState(),
+        items,
+        '/locations',
+      );
+      return (
+        <input
+          aria-label="Draft"
+          value={nav.draft.query}
+          onChange={(e) => nav.change({ query: e.target.value }, true)}
+        />
+      );
+    }
+    try {
+      const page = render(view(<BrowserDraft />));
+      fireEvent.change(screen.getByLabelText('Draft'), {
+        target: { value: 'pending' },
+      });
+      if (mode === 'privacy')
+        act(() => runtime.callbacks[0]('SIGNED_OUT', null));
+      else if (mode === 'native')
+        act(() => window.dispatchEvent(new PopStateEvent('popstate')));
+      else page.unmount();
+      act(() => vi.advanceTimersByTime(1000));
+      expect(runtime.replace).not.toHaveBeenCalled();
+    } finally {
+      window.history.replaceState(null, '', previous);
+      vi.useRealTimers();
+    }
+  },
+);
+
+it.each(['history', 'location'] as const)(
+  '%s pairs only its initiating occurrence and exact authorized detail, then app Back',
+  async (kind) => {
+    const previousHref = window.location.href;
+    const id = '00000000-0000-4000-8000-000000000001',
+      eventId = '00000000-0000-4000-8000-000000000002';
+    const entity: PresentationTarget =
+      kind === 'history'
+        ? { kind: 'quantity', id }
+        : { kind: 'location', id, code: 'ITC-S1A' };
+    const source =
+      kind === 'history'
+        ? '/history?type=quantity'
+        : '/locations?selected=ITC-S1A';
+    const anchor =
+      kind === 'history'
+        ? `history-event-quantity-${eventId}`
+        : `location-row-desktop-tree-${id}`;
+    const href = source + '#' + anchor;
+    const dest =
+      kind === 'history' ? '/inventory/quantity/' + id : '/locations/ITC-S1A';
+    const leave = vi.fn();
+    let loading: React.ContextType<typeof PairedRouteLoadingContext>;
+    function ObserveLoading() {
+      const current = useContext(PairedRouteLoadingContext);
+      useLayoutEffect(() => {
+        loading = current;
+      });
+      return null;
+    }
+    let key = source;
+    runtime.pathname = source.split('?')[0];
+    runtime.query = source.split('?')[1];
+    vi.spyOn(HTMLElement.prototype, 'getClientRects').mockReturnValue({
+      length: 1,
+    } as DOMRectList);
+    const sourceView = () =>
+      kind === 'history' ? (
+        <>
+          <li id={anchor}>
+            <HistoryRecordLink
+              record={{ kind: 'quantity', id }}
+              event={{ kind: 'quantity', id: eventId }}
+              returnTo={href}
+              href={dest}
+            >
+              Initiating event
+            </HistoryRecordLink>
+          </li>
+          <li id={`history-event-quantity-${id}`}>
+            <HistoryRecordLink
+              record={{ kind: 'quantity', id }}
+              event={{ kind: 'quantity', id }}
+              returnTo={source + `#history-event-quantity-${id}`}
+              href={dest}
+            >
+              Other event
+            </HistoryRecordLink>
+          </li>
+        </>
+      ) : (
+        <>
+          <button>
+            <LocationTitleSourceName
+              location={{ kind: 'location', id, code: 'ITC-S1A' }}
+              occurrence="desktop-tree"
+              returnTo={href}
+            >
+              Initiating location
+            </LocationTitleSourceName>
+          </button>
+          <LocationDetailLink
+            location={{ kind: 'location', id, code: 'ITC-S1A' }}
+            label="Shelf 1A"
+            occurrence="desktop-tree"
+            returnTo={href}
+            onLeave={leave}
+          >
+            Details
+          </LocationDetailLink>
+          <LocationTitleSourceName
+            location={{ kind: 'location', id, code: 'ITC-S1A' }}
+            occurrence="mobile-level"
+            returnTo={source + `#location-row-mobile-level-${id}`}
+          >
+            Other occurrence
+          </LocationTitleSourceName>
+        </>
+      );
+    const fixture = () =>
+      view(
+        <>
+          <ObserveLoading />
+          <RouteReady
+            actorId="staff"
+            routeKey={key}
+            contentIdentity={key}
+            conventionalPrimary
+          >
+            {key === source ? (
+              sourceView()
+            ) : (
+              <>
+                <RecordTitle record={entity}>Authorized detail</RecordTitle>
+                <InventoryBackLink record={entity} href={href}>
+                  Back to source
+                </InventoryBackLink>
+              </>
+            )}
+          </RouteReady>
+        </>,
+      );
+    try {
+      window.history.replaceState(null, '', source);
+      const page = render(fixture());
+      fireEvent.click(
+        screen.getByRole('link', {
+          name:
+            kind === 'history'
+              ? 'Initiating event'
+              : 'View Shelf 1A location details',
+        }),
+      );
+      const sourceName = screen
+        .getByText(
+          kind === 'history' ? 'Initiating event' : 'Initiating location',
+        )
+        .getAttribute('data-test-transition-name');
+      expect(sourceName).toMatch(/^inventory-title-/);
+      expect(
+        screen.getByText(
+          kind === 'history' ? 'Other event' : 'Other occurrence',
+        ),
+      ).not.toHaveAttribute('data-test-transition-name');
+      if (kind === 'location') expect(leave).toHaveBeenCalledOnce();
+      const destinationUrl = new URL(
+        screen
+          .getByRole('link', {
+            name:
+              kind === 'history'
+                ? 'Initiating event'
+                : 'View Shelf 1A location details',
+          })
+          .getAttribute('href')!,
+        'https://inventory.invalid',
+      );
+      key = routeKey(dest, destinationUrl.searchParams);
+      runtime.pathname = dest;
+      runtime.query = destinationUrl.searchParams.toString();
+      window.history.replaceState(null, '', key);
+      page.rerender(fixture());
+      expect(screen.getByRole('heading')).toHaveAttribute(
+        'data-test-transition-name',
+        sourceName,
+      );
+      await waitFor(() => expect(loading?.store.snapshot()).toBeNull());
+      const nativeEvent = new Event('navigate');
+      Object.defineProperty(nativeEvent, 'navigationType', {
+        value: 'traverse',
+      });
+      act(() => runtime.navigation!.dispatchEvent(nativeEvent));
+      expect(screen.getByRole('heading')).not.toHaveAttribute(
+        'data-test-transition-name',
+      );
+      fireEvent.click(screen.getByRole('link', { name: 'Back to source' }));
+      key = source;
+      runtime.pathname = source.split('?')[0];
+      runtime.query = source.split('?')[1];
+      window.history.replaceState(null, '', href);
+      page.rerender(fixture());
+      expect(
+        screen
+          .getByText(
+            kind === 'history' ? 'Initiating event' : 'Initiating location',
+          )
+          .getAttribute('data-test-transition-name'),
+      ).toMatch(/^inventory-title-/);
+      expect(
+        screen.getByText(
+          kind === 'history' ? 'Other event' : 'Other occurrence',
+        ),
+      ).not.toHaveAttribute('data-test-transition-name');
+    } finally {
+      window.history.replaceState(null, '', previousHref);
+      vi.restoreAllMocks();
+    }
+  },
+);
+
+it.each(['absent', 'hidden', 'duplicate', 'stale draft', 'reduced'] as const)(
+  'location Details falls back for %s source rather than borrowing another occurrence',
+  (mode) => {
+    const id = '00000000-0000-4000-8000-000000000001',
+      location = { kind: 'location' as const, id, code: 'ITC-S1A' };
+    const href = '/locations?selected=ITC-S1A#location-row-desktop-tree-' + id;
+    runtime.pathname = '/locations';
+    runtime.query = 'selected=ITC-S1A';
+    vi.spyOn(HTMLElement.prototype, 'getClientRects').mockReturnValue({
+      length: mode === 'hidden' ? 0 : 1,
+    } as DOMRectList);
+    if (mode === 'reduced')
+      localStorage.setItem('it-inventory-reduce-motion', 'true');
+    try {
+      render(
+        view(
+          <RouteContentIdentityContext
+            value={{
+              pathname: '/locations',
+              listHref: '/locations?selected=ITC-S1A',
+              rawRouteKey:
+                mode === 'stale draft'
+                  ? '/locations'
+                  : '/locations?selected=ITC-S1A',
+            }}
+          >
+            {mode !== 'absent' && (
+              <LocationTitleSourceName
+                location={location}
+                occurrence="desktop-tree"
+                returnTo={href}
+              >
+                Desktop occurrence
+              </LocationTitleSourceName>
+            )}
+            {mode === 'duplicate' && (
+              <span id={'location-row-desktop-tree-' + id}>Duplicate</span>
+            )}
+            <LocationTitleSourceName
+              location={location}
+              occurrence="mobile-level"
+              returnTo={
+                '/locations?selected=ITC-S1A#location-row-mobile-level-' + id
+              }
+            >
+              Mobile occurrence
+            </LocationTitleSourceName>
+            <LocationDetailLink
+              location={location}
+              label="Shelf 1A"
+              occurrence="desktop-tree"
+              returnTo={href}
+              onLeave={vi.fn()}
+            >
+              Details
+            </LocationDetailLink>
+          </RouteContentIdentityContext>,
+        ),
+      );
+      fireEvent.click(
+        screen.getByRole('link', { name: 'View Shelf 1A location details' }),
+      );
+      expect(screen.getByText('Mobile occurrence')).not.toHaveAttribute(
+        'data-test-transition-name',
+      );
+      if (mode !== 'absent')
+        expect(screen.getByText('Desktop occurrence')).not.toHaveAttribute(
+          'data-test-transition-name',
+        );
+    } finally {
+      vi.restoreAllMocks();
+    }
+  },
+);
 
 it('names only the initiating holding and matching title before capture seal, retaining intent through native completion', async () => {
   let motion!: ReturnType<typeof useRouteMotion>;
@@ -3111,6 +3507,210 @@ it.each(['inner-first', 'outer-first'] as const)(
     } finally {
       handoff.mockRestore();
       Reflect.deleteProperty(document, 'getAnimations');
+    }
+  },
+);
+
+it.each(['history', 'location'] as const)(
+  '%s source and detail regions withdraw all names at seal and late callbacks cannot affect a fresh app Back',
+  async (kind) => {
+    const id = '00000000-0000-4000-8000-000000000001';
+    const eventId = '00000000-0000-4000-8000-000000000002';
+    const entity: PresentationTarget =
+      kind === 'history'
+        ? { kind: 'quantity', id }
+        : { kind: 'location', id, code: 'ITC-S1A' };
+    const source =
+      kind === 'history'
+        ? '/history?type=quantity'
+        : '/locations?selected=ITC-S1A';
+    const anchor =
+      kind === 'history'
+        ? `history-event-quantity-${eventId}`
+        : `location-row-desktop-tree-${id}`;
+    const href = source + '#' + anchor;
+    const dest =
+      kind === 'history' ? '/inventory/quantity/' + id : '/locations/ITC-S1A';
+    let key = source;
+    let motion!: ReturnType<typeof useRouteMotion>;
+    function ObserveSource() {
+      const next = useRouteMotion();
+      useLayoutEffect(() => {
+        motion = next;
+      });
+      return null;
+    }
+    const sourceView = () =>
+      kind === 'history' ? (
+        <li id={anchor}>
+          <HistoryRecordLink
+            record={{ kind: 'quantity', id }}
+            event={{ kind: 'quantity', id: eventId }}
+            returnTo={href}
+            href={dest}
+          >
+            Paired source
+          </HistoryRecordLink>
+        </li>
+      ) : (
+        <>
+          <button>
+            <LocationTitleSourceName
+              location={{ kind: 'location', id, code: 'ITC-S1A' }}
+              occurrence="desktop-tree"
+              returnTo={href}
+            >
+              Paired source
+            </LocationTitleSourceName>
+          </button>
+          <LocationDetailLink
+            location={{ kind: 'location', id, code: 'ITC-S1A' }}
+            label="Shelf 1A"
+            occurrence="desktop-tree"
+            returnTo={href}
+            onLeave={() => {}}
+          >
+            Details
+          </LocationDetailLink>
+        </>
+      );
+    const fixture = () =>
+      view(
+        <>
+          <ObserveSource />
+          <PageArrival pathname={runtime.pathname}>
+            <RouteReady
+              actorId="staff"
+              routeKey={key}
+              contentIdentity={key}
+              pairedInventory
+              conventionalPrimary
+              capture={key === source ? 'body' : 'regions'}
+            >
+              {key === source ? (
+                sourceView()
+              ) : (
+                <>
+                  <InventoryCaptureRegion region="header">
+                    <div>
+                      <RecordTitle record={entity}>Paired detail</RecordTitle>
+                      <InventoryBackLink record={entity} href={href}>
+                        Back to source
+                      </InventoryBackLink>
+                    </div>
+                  </InventoryCaptureRegion>
+                  <section aria-label="Uncaptured map">
+                    <canvas data-testid="paired-source-map" />
+                  </section>
+                  <InventoryCaptureRegion region="body">
+                    <div>Paired record body</div>
+                  </InventoryCaptureRegion>
+                </>
+              )}
+            </RouteReady>
+          </PageArrival>
+        </>,
+      );
+    const previous = location.href;
+    vi.spyOn(HTMLElement.prototype, 'getClientRects').mockReturnValue([
+      { width: 30, height: 20 },
+    ] as unknown as DOMRectList);
+    runtime.pathname = source.split('?')[0];
+    runtime.query = source.split('?')[1];
+    history.replaceState(null, '', source);
+    const page = render(fixture());
+    fireEvent.click(
+      screen.getByRole('link', {
+        name:
+          kind === 'history'
+            ? 'Paired source'
+            : 'View Shelf 1A location details',
+      }),
+    );
+    const original = motion.intent!;
+    const oldTitle = runtime.boundaries.findLast(
+      (boundary) => boundary.name === original.name,
+    )!;
+    const oldBody = runtime.boundaries.findLast(
+      (boundary) => boundary.name === original.name + '-content',
+    )!;
+    const link = screen.getByRole('link', {
+      name:
+        kind === 'history' ? 'Paired source' : 'View Shelf 1A location details',
+    });
+    const target = new URL(link.getAttribute('href')!, location.origin);
+    key = routeKey(dest, target.searchParams);
+    runtime.pathname = dest;
+    runtime.query = target.searchParams.toString();
+    history.replaceState(null, '', key);
+    page.rerender(fixture());
+    const header = runtime.boundaries.findLast(
+      (boundary) => boundary.name === original.name + '-content-header',
+    )!;
+    expect(header.enter).toBe('route-content');
+    expect(
+      screen
+        .getByTestId('paired-source-map')
+        .closest('[data-test-transition-name]'),
+    ).toBeNull();
+    let finish!: () => void;
+    const finished = new Promise<void>((resolve) => {
+      finish = resolve;
+    });
+    const effects = [
+      original.name,
+      original.name + '-content',
+      header.name!,
+    ].map((name) => ({
+      effect: { pseudoElement: `::view-transition-new(${name})` },
+      finished,
+      cancel: vi.fn(),
+    }));
+    Object.defineProperty(document, 'getAnimations', {
+      configurable: true,
+      value: () => effects,
+    });
+    try {
+      await act(async () => {
+        oldTitle.onShare!({ name: original.name });
+        oldBody.onShare!({ name: original.name + '-content' });
+        header.onEnter!({ name: header.name! }, []);
+      });
+      expect(motion.intent).toBe(original);
+      expect(motion.captureAvailable).toBe(false);
+      expect(
+        screen.getByRole('heading', { name: 'Paired detail' }),
+      ).not.toHaveAttribute('data-test-transition-name');
+      const shares = vi.mocked(sharedTitleMotion).mock.calls.length;
+      expect(oldTitle.onShare!({ name: original.name })).toBeUndefined();
+      expect(vi.mocked(sharedTitleMotion).mock.calls).toHaveLength(shares);
+      fireEvent.click(screen.getByRole('link', { name: 'Back to source' }));
+      const next = motion.intent!;
+      expect(next.name).not.toBe(original.name);
+      key = source;
+      runtime.pathname = source.split('?')[0];
+      runtime.query = source.split('?')[1];
+      history.replaceState(null, '', href);
+      page.rerender(fixture());
+      expect(screen.getByText('Paired source')).toHaveAttribute(
+        'data-test-transition-name',
+        next.name,
+      );
+      expect(motion.captureAvailable).toBe(true);
+      await act(async () => {
+        finish();
+        await finished;
+      });
+      expect(motion.intent).toBe(next);
+      expect(oldTitle.onShare!({ name: original.name })).toBeUndefined();
+      expect(screen.getByText('Paired source')).toHaveAttribute(
+        'data-test-transition-name',
+        next.name,
+      );
+    } finally {
+      Reflect.deleteProperty(document, 'getAnimations');
+      history.replaceState(null, '', previous);
+      vi.restoreAllMocks();
     }
   },
 );

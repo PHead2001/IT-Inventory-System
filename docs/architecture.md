@@ -131,7 +131,7 @@ authorization and real visible readiness remain required. Supersede, cancellatio
 retire and settle the old ticket. Changed logout evidence starts distinct current-
 route recovery rather than rebasing the captured target proof.
 
-Successful inventory list primaries opt into a consistently mounted paired body
+Successful Inventory, History and Locations list primaries opt into a consistently mounted paired body
 boundary inside their exact raw RouteReady identity. Asset, quantity and location
 details instead declare `capture="regions"` on that same single canonical owner.
 Their explicit conventional header and record-body regions are siblings of the
@@ -166,9 +166,35 @@ acquires its lease before approval retirement. The original source remains
 eligible through the final exact native `transition.finished` cleanup; privacy
 withdrawal and supersession dispose all leases immediately. Old callbacks and
 cleanups cannot borrow a renewed source or a later approval. Room and
-loading/error boundaries remain excluded. Location/history title pairing remains
-a required Audit 4.2 follow-up. These source contracts do not accept D303.2,
-W13 or A303 without the required real browser/WebGL and exact-candidate proof.
+loading/error boundaries remain excluded. These source contracts do not accept
+D303.2, W13 or A303 without the required real browser/WebGL and exact-candidate
+proof.
+
+The main History list and ordinary Locations browser/detail primaries use the
+same title/body ownership. Title targets distinguish a real inventory holding,
+a history event kind/UUID and its record UUID, or a location UUID/stable code
+and exact desktop-tree, mobile-level or selected-panel occurrence. History
+event/detail timelines remain ordinary links. Location selection buttons keep
+selection semantics; separate accessible Details links pair the existing visible
+name span or selected heading. Hidden, removed, duplicate or stale occurrences
+cannot borrow another source. Application Back accepts only the exact ephemeral
+origin; native traversal and Reduced motion remain instant.
+
+Detail-only return validation admits canonical main History filters
+(`type`, `location`, `entityId`, `page`) and bounded Locations browser state;
+whole-form Cancel and global inventory return validation are unchanged. Locations
+restores search, selected stable code, mobile level and expanded group codes from
+the URL, validated against freshly authorized locations. Search updates its local
+draft immediately and replaces the URL after 300 ms; explicit selection/tree
+changes coalesce the latest whole draft. Draft state is limited to 200 search
+characters, 32 expanded groups and 3600 serialized query characters. Over-budget
+updates retain the accepted draft and announce the limit rather than discard
+state. Detail return URLs encode that current draft even before its debounce
+settles. Pairing still requires the exact fresh server-primary raw key; a pending
+draft navigates ordinarily. Accepted cross-path navigation in every motion mode,
+native traversal, withdrawal and unmount cancel delayed replacements. The
+existing accepted-navigation scope has a read-only destination observer solely
+for this cancellation; it grants no readiness or presentation authority.
 
 Conventional cross-path navigation between explicitly capable Inventory, History
 and Locations primaries reuses that same event-owned loading/readiness engine

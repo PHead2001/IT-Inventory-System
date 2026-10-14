@@ -1,7 +1,7 @@
 import { fireEvent, render, screen, within } from '@testing-library/react';
 import { expect, it } from 'vitest';
 import styles from './inventory-visual.module.css';
-import type { InventoryResult } from '../contracts-ui';
+import type { InventoryResult, HistoryEvent } from '../contracts-ui';
 import {
   HistoryList,
   InventoryRows,
@@ -17,6 +17,51 @@ const location = {
   can_hold_inventory: true,
   parentId: null,
 };
+it('main-history entity links retain exact event return anchors while detail timelines remain ordinary', () => {
+  const id = '00000000-0000-4000-8000-000000000001',
+    eventId = '00000000-0000-4000-8000-000000000002';
+  const event: HistoryEvent = {
+    id: eventId,
+    kind: 'quantity',
+    entityId: id,
+    entityName: 'Scoped cable',
+    eventType: 'created',
+    at: '2026-10-13T10:00:00Z',
+    actorName: 'Staff',
+    reason: null,
+    assignment: null,
+    lines: [],
+    fromLocation: null,
+    toLocation: null,
+    metadataChanges: [],
+    customMetadataPresent: false,
+    customMetadataChanged: false,
+  };
+  const page = render(
+    <HistoryList
+      events={[event]}
+      returnTo="/history?type=quantity&location=ITC&page=2"
+    />,
+  );
+  const link = screen.getByRole('link', { name: 'Scoped cable' });
+  expect(link.closest('li')).toHaveAttribute(
+    'id',
+    'history-event-quantity-' + eventId,
+  );
+  expect(
+    new URL(
+      link.getAttribute('href')!,
+      'https://inventory.invalid',
+    ).searchParams.get('returnTo'),
+  ).toBe(
+    `/history?type=quantity&location=ITC&page=2#history-event-quantity-${eventId}`,
+  );
+  page.rerender(<HistoryList events={[event]} linkToEvent />);
+  expect(screen.getByRole('link', { name: 'Scoped cable' })).toHaveAttribute(
+    'href',
+    '/inventory/quantity/' + id,
+  );
+});
 it('identifies one local unit separately from overall available and assigned stock', () => {
   render(
     <InventoryRows

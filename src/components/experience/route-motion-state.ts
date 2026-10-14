@@ -1,4 +1,10 @@
 import { routeKey } from './route-key';
+import {
+  recordDetailReturnPath,
+  presentationUuid,
+  locationRowAnchor,
+  type LocationOccurrence,
+} from '@/features/inventory/detail-return';
 
 export type RecordIdentity = { kind: 'asset' | 'quantity'; id: string };
 export type HoldingIdentity =
@@ -33,15 +39,65 @@ export function recordHoldingKey(
       ])
     : null;
 }
-export type TitleIntent = RecordIdentity & {
-  holding: HoldingIdentity;
-  name: string;
+export type LocationIdentity = { kind: 'location'; id: string; code: string };
+export type PresentationTarget = RecordIdentity | LocationIdentity;
+type TitleFields = {
   listHref: string;
-  /** Recorded at the row gesture; never inferred from a later query. */
   rawSourceRouteKey?: string;
   anchor: string;
   detailPath: string;
 };
+export type TitleTarget = TitleFields &
+  (
+    | (RecordIdentity & {
+        source: { kind: 'inventory'; holding: HoldingIdentity };
+        holding: HoldingIdentity;
+      })
+    | (RecordIdentity & {
+        source: {
+          kind: 'history-event';
+          eventKind: 'asset' | 'quantity';
+          eventId: string;
+        };
+        holding?: never;
+      })
+    | (LocationIdentity & {
+        source: {
+          kind: 'location-row';
+          locationId: string;
+          occurrence: LocationOccurrence;
+        };
+        holding?: never;
+      })
+  );
+export type TitleIntent = TitleTarget & { name: string };
+export function samePresentationTarget(
+  left: PresentationTarget | null,
+  right: PresentationTarget,
+) {
+  return (
+    left?.kind === right.kind &&
+    left.id === right.id &&
+    (left.kind !== 'location' ||
+      (right.kind === 'location' && left.code === right.code))
+  );
+}
+export function sameTitleSource(left: TitleTarget, right: TitleTarget) {
+  if (!samePresentationTarget(left, right)) return false;
+  const a = left.source,
+    b = right.source;
+  if (a.kind !== b.kind) return false;
+  if (a.kind === 'inventory' && b.kind === 'inventory')
+    return sameHolding(a.holding, b.holding);
+  if (a.kind === 'history-event' && b.kind === 'history-event')
+    return a.eventKind === b.eventKind && a.eventId === b.eventId;
+  return (
+    a.kind === 'location-row' &&
+    b.kind === 'location-row' &&
+    a.locationId === b.locationId &&
+    a.occurrence === b.occurrence
+  );
+}
 export type RouteArrivalIntent = {
   name: string;
   presentation: 'outer' | 'primary';
@@ -50,7 +106,9 @@ export type RouteArrivalIntent = {
   epoch: number;
 };
 
-export function recordPath(record: RecordIdentity) {
+export function recordPath(record: PresentationTarget) {
+  if (record.kind === 'location')
+    return '/locations/' + encodeURIComponent(record.code);
   return `/inventory/${record.kind === 'asset' ? 'assets' : 'quantity'}/${encodeURIComponent(record.id)}`;
 }
 
@@ -59,7 +117,7 @@ export function titleTarget(
   returnTo: string,
   holding: HoldingIdentity | null,
   rawSourceRouteKey?: string,
-): Omit<TitleIntent, 'name'> | null {
+): Extract<TitleTarget, { source: { kind: 'inventory' } }> | null {
   let url: URL;
   try {
     url = new URL(returnTo, 'https://inventory.invalid');
@@ -90,12 +148,130 @@ export function titleTarget(
   }
   return {
     ...record,
+    source: { kind: 'inventory', holding },
     holding,
     listHref: routeKey(url.pathname, url.searchParams),
     anchor: url.hash.slice(1),
     detailPath: recordPath(record),
     ...(rawSourceRouteKey === undefined ? {} : { rawSourceRouteKey }),
   };
+}
+
+function scopedTitleFields(
+  record: PresentationTarget,
+  returnTo: string,
+  anchor: string,
+  pathname: string,
+  rawSourceRouteKey?: string,
+): TitleFields | null {
+  const accepted = recordDetailReturnPath(returnTo, '/invalid-return');
+  if (accepted === '/invalid-return') return null;
+  const url = new URL(accepted, 'https://inventory.invalid');
+  if (url.pathname !== pathname || url.hash !== '#' + anchor) return null;
+  if (rawSourceRouteKey !== undefined) {
+    let raw: URL;
+    try {
+      raw = new URL(rawSourceRouteKey, 'https://inventory.invalid');
+    } catch {
+      return null;
+    }
+    if (
+      raw.origin !== 'https://inventory.invalid' ||
+      raw.pathname !== pathname ||
+      raw.hash ||
+      rawSourceRouteKey !== routeKey(raw.pathname, raw.searchParams) ||
+      recordDetailReturnPath(rawSourceRouteKey, '/invalid-return') ===
+        '/invalid-return'
+    )
+      return null;
+    const canonicalRaw = new URL(
+      recordDetailReturnPath(rawSourceRouteKey),
+      'https://inventory.invalid',
+    );
+    if (
+      routeKey(url.pathname, url.searchParams) !==
+      routeKey(canonicalRaw.pathname, canonicalRaw.searchParams)
+    )
+      return null;
+  }
+  return {
+    listHref: routeKey(url.pathname, url.searchParams),
+    anchor,
+    detailPath: recordPath(record),
+    ...(rawSourceRouteKey === undefined ? {} : { rawSourceRouteKey }),
+  };
+}
+export function historyTitleTarget(
+  record: RecordIdentity,
+  event: { kind: 'asset' | 'quantity'; id: string },
+  returnTo: string,
+  rawSourceRouteKey?: string,
+): TitleTarget | null {
+  if (
+    !presentationUuid.test(record.id) ||
+    !presentationUuid.test(event.id) ||
+    event.kind !== record.kind
+  )
+    return null;
+  const scope = new URL(
+    recordDetailReturnPath(returnTo, '/invalid-return'),
+    'https://inventory.invalid',
+  );
+  if (
+    (scope.searchParams.get('type') &&
+      scope.searchParams.get('type') !== record.kind) ||
+    (scope.searchParams.get('entityId') &&
+      scope.searchParams.get('entityId') !== record.id)
+  )
+    return null;
+  const fields = scopedTitleFields(
+    record,
+    returnTo,
+    `history-event-${event.kind}-${event.id}`,
+    '/history',
+    rawSourceRouteKey,
+  );
+  return fields
+    ? {
+        ...record,
+        ...fields,
+        source: {
+          kind: 'history-event',
+          eventKind: event.kind,
+          eventId: event.id,
+        },
+      }
+    : null;
+}
+export function locationTitleTarget(
+  record: LocationIdentity,
+  occurrence: LocationOccurrence,
+  returnTo: string,
+  rawSourceRouteKey?: string,
+): TitleTarget | null {
+  if (
+    !presentationUuid.test(record.id) ||
+    !record.code ||
+    record.code.length > 160 ||
+    /[\\/\x00-\x1f\x7f]/.test(record.code) ||
+    record.code === '.' ||
+    record.code === '..'
+  )
+    return null;
+  const fields = scopedTitleFields(
+    record,
+    returnTo,
+    locationRowAnchor(record.id, occurrence),
+    '/locations',
+    rawSourceRouteKey,
+  );
+  return fields
+    ? {
+        ...record,
+        ...fields,
+        source: { kind: 'location-row', locationId: record.id, occurrence },
+      }
+    : null;
 }
 
 /** Presentation-only approval, after exact raw readiness/privacy checks. */
@@ -112,12 +288,12 @@ export function createRouteMotionState() {
   let arrival: RouteArrivalIntent | null = null;
   let titleArrival: RouteArrivalIntent | null = null;
   let arrivalSupported = false;
-  let origin: Omit<TitleIntent, 'name'> | null = null;
+  let origin: TitleTarget | null = null;
   let navigation: {
     token: symbol;
     href: string;
     epoch: number;
-    target: Omit<TitleIntent, 'name'> | null;
+    target: TitleTarget | null;
   } | null = null;
   let valid = true;
   let suspended = false;
@@ -205,7 +381,7 @@ export function createRouteMotionState() {
         if (navigation?.token === token) navigation = null;
       };
     },
-    stageNavigation(target: Omit<TitleIntent, 'name'> | null) {
+    stageNavigation(target: TitleTarget | null) {
       if (!valid || suspended) return;
       if (navigation) navigation.target = target;
     },
@@ -217,7 +393,7 @@ export function createRouteMotionState() {
         ? accepted.target
         : null;
     },
-    arm(target: Omit<TitleIntent, 'name'>) {
+    arm(target: TitleTarget) {
       if (!valid || suspended) return;
       intent = { ...target, name: `inventory-title-${crypto.randomUUID()}` };
       titleArrival = null;
@@ -238,11 +414,22 @@ export function createRouteMotionState() {
       origin = null;
       notify();
     },
-    backTarget(record: RecordIdentity, returnTo: string) {
+    backTarget(record: PresentationTarget, returnTo: string) {
       if (!valid || suspended) return null;
-      if (!origin || record.kind !== origin.kind || record.id !== origin.id)
-        return null;
-      const target = titleTarget(record, returnTo, origin.holding);
+      if (!origin || !samePresentationTarget(origin, record)) return null;
+      const target =
+        origin.source.kind === 'inventory' && record.kind !== 'location'
+          ? titleTarget(record, returnTo, origin.source.holding)
+          : origin.source.kind === 'history-event' && record.kind !== 'location'
+            ? historyTitleTarget(
+                record,
+                { kind: origin.source.eventKind, id: origin.source.eventId },
+                returnTo,
+              )
+            : origin.source.kind === 'location-row' &&
+                record.kind === 'location'
+              ? locationTitleTarget(record, origin.source.occurrence, returnTo)
+              : null;
       return target?.listHref === origin.listHref &&
         target.anchor === origin.anchor
         ? origin
