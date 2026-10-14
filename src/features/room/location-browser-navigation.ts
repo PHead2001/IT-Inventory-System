@@ -21,15 +21,18 @@ export function createLocationBrowserNavigation(
     revision = 0,
     active = true;
   let requested: { href: string; revision: number } | null = null;
+  let writable = valid;
+  let unsent = false;
   const cancel = () => {
     revision++;
     if (timer !== undefined) clearTimeout(timer);
     timer = undefined;
   };
   const write = () => {
-    if (!active || !valid()) return;
+    if (!active || !valid() || !writable() || !unsent) return;
     const href = locationBrowserHref(draft);
     requested = { href, revision };
+    unsent = false;
     replace(href);
   };
   return {
@@ -38,14 +41,20 @@ export function createLocationBrowserNavigation(
       locations: () => LocationRef[];
       replace: (href: string) => void;
       valid: () => boolean;
+      writable?: () => boolean;
     }) => {
       locations = next.locations;
       replace = next.replace;
       valid = next.valid;
+      writable = next.writable ?? next.valid;
     },
     snapshot: () => draft,
     activate: () => {
       active = true;
+    },
+    /** Fresh admission can send a retained draft after its debounce expired. */
+    resumeWrites: () => {
+      if (timer === undefined) write();
     },
     refresh: () => {
       const fresh = freshLocationBrowserState(draft, locations());
@@ -70,6 +79,7 @@ export function createLocationBrowserNavigation(
       rejected(false);
       cancel();
       draft = candidate;
+      unsent = true;
       emit(draft);
       if (search) {
         const ticket = revision;
@@ -81,7 +91,7 @@ export function createLocationBrowserNavigation(
     },
     reconcile: (state: LocationBrowserState, key: string) => {
       const canonical = locationBrowserHref(state);
-      if (active && timer !== undefined) {
+      if (active && (timer !== undefined || unsent)) {
         draft = freshLocationBrowserState(draft, locations());
         emit(draft);
         return;
@@ -103,6 +113,7 @@ export function createLocationBrowserNavigation(
       }
       cancel();
       requested = null;
+      unsent = false;
       draft = freshLocationBrowserState(state, locations());
       emit(draft);
     },
@@ -111,15 +122,18 @@ export function createLocationBrowserNavigation(
     cancelPending: () => {
       cancel();
       requested = null;
+      unsent = false;
     },
     leave: () => {
       cancel();
       requested = null;
+      unsent = false;
       active = false;
     },
     close: () => {
       cancel();
       requested = null;
+      unsent = false;
       active = false;
     },
   };
