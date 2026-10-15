@@ -11,7 +11,21 @@ function Assert-Rejected([scriptblock] $Work, [string] $Case) {
     if (-not $rejected) { throw "Resource profiles accepted $Case." }
 }
 $script:freeKiB = 0
-function Get-CimInstance { return [pscustomobject]@{ FreePhysicalMemory = $script:freeKiB; TotalVisibleMemorySize = [uint64](32GB / 1KB) } }
+# Actual supervisor reconciliation uses only this synthetic offline state lock.
+$script:stateLocked = $false
+$script:fixtureStateDepth = 0
+function Enter-RunnerLock { $script:fixtureStateDepth++; $script:stateLocked = $true; return 'fixture' }
+function Exit-RunnerLock {
+    if ($script:fixtureStateDepth -le 0) { throw 'Unbalanced fixture state release.' }
+    $script:fixtureStateDepth--; $script:stateLocked = $script:fixtureStateDepth -gt 0
+}
+$fixtureOuter = Enter-RunnerLock; $fixtureInner = Enter-RunnerLock
+Exit-RunnerLock $fixtureInner
+if (-not $script:stateLocked) { throw 'Nested state release exposed memory IO.' }
+Exit-RunnerLock $fixtureOuter
+if ($script:stateLocked -or $script:fixtureStateDepth -ne 0) { throw 'State fixture did not balance.' }
+function Assert-ProfileMemoryUnlocked { if ($script:stateLocked) { throw 'Profile memory inspection held the reconciliation state mutex.' } }
+function Get-CimInstance { Assert-ProfileMemoryUnlocked; return [pscustomobject]@{ FreePhysicalMemory = $script:freeKiB; TotalVisibleMemorySize = [uint64](32GB / 1KB) } }
 function New-VM {
     param($Name, $Generation, $VHDPath, $Path, $MemoryStartupBytes, $SwitchName)
     $script:vmStartup = $MemoryStartupBytes
@@ -76,6 +90,10 @@ function Invoke-GitHub {
     if ($Uri -match '/runs/12/jobs\?') { return [pscustomobject]@{ total_count = $script:jobs.Count; jobs = $script:jobs } }
     throw 'Unexpected profile API probe.'
 }
+$base = Join-Path ([IO.Path]::GetTempPath()) ('ITIR-profiles-' + [guid]::NewGuid().ToString('N'))
+[void][IO.Directory]::CreateDirectory($base)
+$script:RunnerRoot = $base; $script:RunnerStatePath = Join-Path $base 'state.json'
+try {
 foreach ($case in @(@{ free = 4GB; id = 3 }, @{ free = 6GB; id = 2 }, @{ free = 7GB; id = 1 }, @{ free = ([decimal]7.76 * 1GB); id = 1 })) {
     $selected = Get-QueuedRunnerJob $config 'dummy' $case.free
     if ($selected.id -ne $case.id -or $selected.resourceLabel -cne $selected.labels[1]) { throw 'Capacity traversal failed to skip a nonfitting job.' }
@@ -83,10 +101,6 @@ foreach ($case in @(@{ free = 4GB; id = 3 }, @{ free = 6GB; id = 2 }, @{ free = 
 if ($null -ne (Get-QueuedRunnerJob $config 'dummy' (4GB - 1KB))) { throw 'Queue admitted insufficient host headroom.' }
 $script:jobs = @((New-Job 4 'it-inventory-ephemeral'), (New-Job 3 'it-inventory-light'))
 if ((Get-QueuedRunnerJob $config 'dummy' 4GB).id -ne 3 -or (Get-QueuedRunnerJob $config 'dummy' 10GB).id -ne 4) { throw 'Legacy generic capacity changed.' }
-$base = Join-Path ([IO.Path]::GetTempPath()) ('ITIR-profiles-' + [guid]::NewGuid().ToString('N'))
-[void][IO.Directory]::CreateDirectory($base)
-$script:RunnerRoot = $base; $script:RunnerStatePath = Join-Path $base 'state.json'
-try {
     $legacy = [pscustomobject]@{ tag = $script:RunnerTag; vmName = ('ITIR-' + ('c' * 32)); instancePath = (Join-Path $base ('ITIR-' + ('c' * 32))) }
     Assert-StateIdentity $legacy # Recovery must not require newly introduced profile fields.
     Complete-RunnerPilotClaim $legacy
@@ -95,7 +109,7 @@ try {
     function Get-RunnerState { return $null }
     function Get-OwnerToken { return 'dummy' }
     function Write-EventLog {}
-    function Start-Sleep { param($Seconds) if ($Seconds -ne 30) { throw 'Profile loop changed its wait interval.' }; [IO.File]::WriteAllText((Join-Path $base 'stop.requested'), 'stop') }
+    function Start-Sleep { param($Seconds) if ($Seconds -ne 1) { throw 'Profile loop changed its stop-aware wait interval.' }; [IO.File]::WriteAllText((Join-Path $base 'stop.requested'), 'stop') }
     function Invoke-RunnerSession {
         param($Config, $PilotAttempt, $ProfileLabel)
         if ($ProfileLabel -cne 'it-inventory-light' -or $null -ne $PilotAttempt) { throw 'Selected profile was not propagated to its session.' }
@@ -109,6 +123,7 @@ try {
     Remove-Item -LiteralPath (Join-Path $base 'stop.requested')
     $script:probes = 0
     function Get-CimInstance {
+        Assert-ProfileMemoryUnlocked
         $script:probes++
         return [pscustomobject]@{ FreePhysicalMemory = [uint64]($(if ($script:probes -eq 1) { 4GB } else { 3GB }) / 1KB); TotalVisibleMemorySize = [uint64](32GB / 1KB) }
     }
@@ -148,4 +163,5 @@ $preview = [IO.File]::ReadAllText((Join-Path $root '.github/workflows/preview-ac
 foreach ($contract in @('github.event.pull_request.head.sha || github.sha', 'run: npm run validate:app', 'run: npm run test:db', 'run: npm run db:types:check', 'run: npm run test:e2e', 'run: node scripts/ci-gates.mjs', 'FOUNDATION_APP: ${{ steps.app.outcome }}', 'FOUNDATION_DB_TESTS: ${{ steps.db_tests.outcome }}', 'FOUNDATION_E2E: ${{ steps.e2e.outcome }}', 'environment: production-database', "github.ref == 'refs/heads/main'", 'needs: [required]', 'test "$REQUIRED_RESULT" = success')) { if (-not $ci.Contains($contract)) { throw 'CI exact-SHA/required/production gate changed.' } }
 foreach ($contract in @('pull_request_target:', 'ref: refs/heads/main', 'environment: preview-access', "github.ref == 'refs/heads/main'")) { if (-not $preview.Contains($contract)) { throw 'Trusted preview gate changed.' } }
 foreach ($contract in @('run: node scripts/ci-required.mjs', 'run: node scripts/ci-reuse.mjs --reverify', "if: needs.reuse_evidence.outputs.reuse != 'true'", "if: needs.reuse_evidence.outputs.reuse == 'true'", 'EVIDENCE_RESULT: ${{ needs.reuse_evidence.result }}', "if: `${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}")) { if (-not $ci.Contains($contract)) { throw 'CI reuse evidence/fallback/decision gate changed.' } }
+if ($script:fixtureStateDepth -ne 0 -or $script:stateLocked) { throw 'Fixture leaked state recursion.' }
 Write-Host 'Resource profiles passed: fixed boundaries, strict labels, queue skipping, VM/JIT readback, session propagation, capacity loss, legacy recovery and five validation/preview workflow gates.'

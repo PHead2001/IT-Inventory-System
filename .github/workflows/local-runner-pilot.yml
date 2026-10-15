@@ -8,6 +8,10 @@ on:
       - .github/workflows/local-runner-pilot.yml
   workflow_dispatch:
 
+concurrency:
+  group: local-runner-pilot-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
 

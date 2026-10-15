@@ -2,6 +2,7 @@
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'Common.ps1')
+. (Join-Path $PSScriptRoot 'Network.Recovery.ps1')
 . (Join-Path $PSScriptRoot 'Test.Mutex.ps1')
 foreach ($name in @('Runner.ps1', 'Update.ps1')) {
     $ast = [Management.Automation.Language.Parser]::ParseFile((Join-Path $PSScriptRoot $name), [ref]$null, [ref]$null)
@@ -20,6 +21,8 @@ function Assert-SecureRoot {}
 function Assert-InstalledHost { param($Config) }
 function Assert-RunnerProtectedPath { param($Path) [void](Assert-OwnedPath $Path) }
 function Get-OwnerToken { 'dummy' }
+function Test-RunnerSessionDemand { return $true } # Demand behavior has its own actual-session suite.
+function Write-RunnerImageProgress {} # Reach the claim mutex; preflight Stop/deadline behavior has dedicated coverage.
 function Get-RunnerImageSelection { return [pscustomobject]@{ path = 'fixture'; prepared = $false } }
 function Get-VM {}
 function Get-RunnerVmInventory { return @(Get-VM) }
@@ -55,11 +58,17 @@ function Start-Child([string] $Mode, [string] $Point = '', [string] $Source = ''
     $args = @('-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', $childPath,
         '-Scripts', $PSScriptRoot, '-Root', $script:RunnerRoot, '-Mode', $Mode, '-Point', $Point, '-Source', $Source)
     $encoded = @($args | ForEach-Object { ConvertTo-NativeArgument $_ }) -join ' '
-    Start-Process powershell.exe -ArgumentList $encoded -WindowStyle Hidden -PassThru
+    $child = Start-Process powershell.exe -ArgumentList $encoded -WindowStyle Hidden -PassThru
+    $child | Add-Member -NotePropertyName FixtureMode -NotePropertyValue $Mode
+    return $child
 }
 function Finish-Child($Child, [int] $Expected) {
     if (-not $Child.WaitForExit(15000)) { throw 'Fixture process failed to terminate.' }
-    if ($Child.ExitCode -ne $Expected) { throw "Fixture exit $($Child.ExitCode), expected $Expected." }
+    if ($Child.ExitCode -ne $Expected) {
+        $refusalPath = Join-Path $script:RunnerRoot ('refused-' + $Child.FixtureMode)
+        $detail = if (Test-Path -LiteralPath $refusalPath) { [IO.File]::ReadAllText($refusalPath) } else { 'No fixture refusal was recorded.' }
+        throw "Fixture $($Child.FixtureMode) exit $($Child.ExitCode), expected $Expected. $detail"
+    }
     $Child.Dispose()
 }
 $childPath = Join-Path $base 'child.ps1'
@@ -68,6 +77,7 @@ param($Scripts, $Root, $Mode, $Point, $Source)
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 . (Join-Path $Scripts 'Common.ps1')
+. (Join-Path $Scripts 'Network.Recovery.ps1')
 . (Join-Path $Scripts 'Test.Mutex.ps1')
 foreach ($name in @('Runner.ps1', 'Update.ps1')) {
     $ast = [Management.Automation.Language.Parser]::ParseFile((Join-Path $Scripts $name), [ref]$null, [ref]$null)
@@ -83,6 +93,8 @@ function Assert-SecureRoot {}
 function Assert-RunnerProtectedPath { param($Path) [void](Assert-OwnedPath $Path) }
 function Assert-InstalledHost { param($Config) }
 function Get-OwnerToken { 'dummy' }
+function Test-RunnerSessionDemand { return $true }
+function Write-RunnerImageProgress {} # Preserve the actual claim/publication mutex race after the read-only preflight boundary.
 function Get-RunnerImageSelection { return [pscustomobject]@{ path = 'fixture'; prepared = $false } }
 function Get-VM {}
 function Get-ScheduledTask { [pscustomobject]@{ State = 'Ready' } }

@@ -2,6 +2,7 @@
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'Common.ps1')
+. (Join-Path $PSScriptRoot 'Network.Recovery.ps1')
 . (Join-Path $PSScriptRoot 'Test.Mutex.ps1')
 $ast = [Management.Automation.Language.Parser]::ParseFile((Join-Path $PSScriptRoot 'Runner.ps1'), [ref]$null, [ref]$null)
 $definition = $ast.Find({ param($node) $node -is [Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -ceq 'Start-GuardedVm' }, $true)
@@ -30,8 +31,24 @@ function Start-VM($VM, [switch] $AsJob) {
         . (Join-Path $source 'Common.ps1')
         . (Join-Path $source 'Test.Mutex.ps1')
         $script:RunnerRoot = $root; $script:RunnerStatePath = Join-Path $root 'state.json'
+        # Nested production state reads must reacquire this same private lock.
+        $script:fixtureStateLock = $lockName
+        $script:fixtureEnter = (Get-Command Enter-RunnerLock).ScriptBlock
+        function Enter-RunnerLock([string] $Name = 'Global\ITInventoryLocalRunner-v1', [switch] $FailFast) {
+            if ($Name -cne 'Global\ITInventoryLocalRunner-v1' -and $Name -cne $script:fixtureStateLock) { throw 'Fixture child requested an unrelated mutex.' }
+            & $script:fixtureEnter $script:fixtureStateLock -FailFast:$FailFast
+        }
         function Get-RunnerVmInventory { $entry = Read-RunnerJson (Join-Path $root 'vm.json'); if ($null -ne $entry) { $entry } }
         function Get-VMHardDiskDrive($VM) { return [pscustomobject]@{ Path = Join-Path (Get-RunnerState).instancePath 'guest.vhdx' } }
+        function Get-VHD($Path) {
+            $diskPath = [IO.Path]::GetFullPath($Path)
+            $instancePath = [IO.Path]::GetDirectoryName($diskPath)
+            if ([IO.Path]::GetDirectoryName($instancePath) -ine (Join-Path $script:RunnerRoot 'instances') -or
+                [IO.Path]::GetFileName($instancePath) -cnotmatch '^ITIR-[0-9a-f]{32}$' -or
+                [IO.Path]::GetFileName($diskPath) -cne 'guest.vhdx' -or
+                -not (Test-Path -LiteralPath $diskPath -PathType Leaf)) { throw 'Disk lookup escaped the fixed fixture disks.' }
+            return [pscustomobject]@{ VhdType = 'Dynamic'; ParentPath = '' }
+        }
         function Remove-VM($VM, [switch] $Force) { if ($scenario -ceq 'cleanup-race') { Remove-Item -LiteralPath (Join-Path $root 'vm.json') } }
         # This must succeed while the supervisor waits for boot completion.
         $mutex = Enter-RunnerLock $lockName -FailFast
@@ -63,7 +80,7 @@ try {
         $instance = Join-Path (Join-Path $root 'instances') $name
         [void][IO.Directory]::CreateDirectory($instance)
         [IO.File]::WriteAllText((Join-Path $instance 'guest.vhdx'), 'owned fresh disk')
-        $state = [pscustomobject]@{ tag = $script:RunnerTag; vmName = $name; vmId = [guid]::NewGuid().ToString(); instancePath = $instance; guardianReady = $true }
+        $state = [pscustomobject]@{ tag = $script:RunnerTag; vmName = $name; vmId = [guid]::NewGuid().ToString(); instancePath = $instance; guardianReady = $true; networkRecovery = [pscustomobject]@{ phase = 'healthy'; hardDeadlineUtc = [DateTime]::UtcNow.AddMinutes(5).ToString('o'); episodeDeadlineUtc = ''; progressUtc = [DateTime]::UtcNow.ToString('o') } }
         $vm = [pscustomobject]@{ Id = $state.vmId; Name = $name; Notes = $script:RunnerTag; Path = Join-Path $instance $name
             State = 'Off'; AutomaticStartAction = 'Nothing'; AutomaticStopAction = 'TurnOff' }
         if ($scenario -ceq 'wrong-guid') { $vm.Id = [guid]::NewGuid().ToString() }
