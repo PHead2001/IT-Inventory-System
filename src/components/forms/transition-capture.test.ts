@@ -157,6 +157,87 @@ it('retains overlapping captures across teardown/remount and releases rejected/s
   release();
   expect(document.startViewTransition).toBe(native);
 });
+it('runs typed hooks before native capture and returns the exact handle without wrapping update or extending edit suspension', async () => {
+  const update = deferred(),
+    ready = deferred(),
+    finished = deferred();
+  const handle = {
+    updateCallbackDone: update.promise,
+    ready: ready.promise,
+    finished: finished.promise,
+  } as ViewTransition;
+  const events: string[] = [];
+  const options = { update: vi.fn(), types: ['route'] };
+  document.startViewTransition = vi.fn(function (this: Document, received) {
+    expect(this).toBe(document);
+    expect(received).toBe(options);
+    events.push('native');
+    return handle;
+  });
+  const listener = vi.fn();
+  const dispose = observeTransitionCapture(document, listener, {
+    beforeNative: () => {
+      events.push('before');
+      return {
+        returned: (received) => {
+          expect(received).toBe(handle);
+          events.push('returned');
+        },
+        failed: vi.fn(),
+      };
+    },
+  });
+  expect(document.startViewTransition(options)).toBe(handle);
+  expect(events).toEqual(['before', 'native', 'returned']);
+  expect(options.update).not.toHaveBeenCalled();
+  update.resolve();
+  await update.promise;
+  expect(listener).toHaveBeenLastCalledWith(false);
+  dispose();
+  ready.resolve();
+  finished.resolve();
+});
+
+it('keeps hook failures separate from native return/exception identity and retires hooks with their observer', async () => {
+  const update = deferred();
+  const nativeError = new TypeError('original native exception');
+  const handle = { updateCallbackDone: update.promise } as ViewTransition;
+  const native = vi
+    .fn()
+    .mockReturnValueOnce(handle)
+    .mockImplementationOnce(() => {
+      throw nativeError;
+    });
+  document.startViewTransition = native;
+  const reported = vi.fn();
+  vi.stubGlobal('reportError', reported);
+  const failed = vi.fn(() => {
+    throw new Error('private hook');
+  });
+  const before = vi.fn(() => ({
+    returned: () => {
+      throw new Error('private hook');
+    },
+    failed,
+  }));
+  const dispose = observeTransitionCapture(document, vi.fn(), {
+    beforeNative: before,
+  });
+  const throwing = observeTransitionCapture(document, vi.fn(), {
+    beforeNative: () => {
+      throw new Error('private hook');
+    },
+  });
+  expect(document.startViewTransition()).toBe(handle);
+  expect(() => document.startViewTransition()).toThrow(nativeError);
+  expect(failed).toHaveBeenCalledOnce();
+  expect(reported).toHaveBeenCalled();
+  dispose();
+  throwing();
+  update.resolve();
+  await update.promise;
+});
+
 it('leaves unsupported browsers and newer API wrappers alone', () => {
   document.startViewTransition =
     undefined as unknown as Document['startViewTransition'];

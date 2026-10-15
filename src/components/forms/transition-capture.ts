@@ -1,7 +1,18 @@
 type CaptureListener = (capturing: boolean) => void;
+
+/** Read-only lifecycle hooks inside the one native API observer. The update
+ * callback/options, receiver and returned native handle stay untouched. */
+export type NativeCaptureObserver = {
+  returned(transition: ViewTransition): void;
+  failed(): void;
+};
+export type NativeCaptureHooks = {
+  beforeNative(): NativeCaptureObserver | undefined;
+};
 type CaptureState = {
   listeners: Set<CaptureListener>;
   captures: Set<symbol>;
+  hooks: Set<NativeCaptureHooks>;
   original: Document['startViewTransition'];
   wrapped: Document['startViewTransition'];
 };
@@ -58,7 +69,7 @@ export function afterTransitionCapture(document: Document, effect: () => void) {
   };
 }
 function detachIfIdle(document: Document, state: CaptureState) {
-  if (state.listeners.size || state.captures.size) return;
+  if (state.listeners.size || state.captures.size || state.hooks.size) return;
   // A later observer may wrap ours. Never overwrite its ownership.
   if (document.startViewTransition === state.wrapped) {
     document.startViewTransition = state.original;
@@ -72,6 +83,7 @@ function detachIfIdle(document: Document, state: CaptureState) {
 export function observeTransitionCapture(
   document: Document,
   listener: CaptureListener,
+  hooks?: NativeCaptureHooks,
 ) {
   if (typeof document.startViewTransition !== 'function') return () => {};
   let state = documents.get(document);
@@ -79,6 +91,7 @@ export function observeTransitionCapture(
     const original = document.startViewTransition;
     const listeners = new Set<CaptureListener>();
     const captures = new Set<symbol>();
+    const nativeHooks = new Set<NativeCaptureHooks>();
     const publish = () => {
       let reported = false;
       for (const notify of listeners)
@@ -92,28 +105,53 @@ export function observeTransitionCapture(
       const capture = Symbol();
       captures.add(capture);
       publish();
+      const observers: NativeCaptureObserver[] = [];
+      for (const hooks of [...nativeHooks]) {
+        try {
+          const observer = hooks.beforeNative();
+          if (observer) observers.push(observer);
+        } catch {
+          reportSubscriberFailure(document);
+        }
+      }
       const release = () => {
         if (captures.delete(capture)) publish();
         detachIfIdle(document, state!);
       };
       try {
         const transition = original.apply(this, args);
+        for (const observer of observers) {
+          try {
+            observer.returned(transition);
+          } catch {
+            reportSubscriberFailure(document);
+          }
+        }
         void transition.updateCallbackDone.then(release, release);
         return transition;
       } catch (error) {
+        for (const observer of observers) {
+          try {
+            observer.failed();
+          } catch {
+            reportSubscriberFailure(document);
+          }
+        }
         release();
         throw error;
       }
     };
-    state = { listeners, captures, original, wrapped };
+    state = { listeners, captures, hooks: nativeHooks, original, wrapped };
     documents.set(document, state);
     document.startViewTransition = wrapped;
   }
   const owned = state;
   owned.listeners.add(listener);
+  if (hooks) owned.hooks.add(hooks);
   notifySubscriber(document, listener, owned.captures.size > 0);
   return () => {
     owned.listeners.delete(listener);
+    if (hooks) owned.hooks.delete(hooks);
     detachIfIdle(document, owned);
   };
 }

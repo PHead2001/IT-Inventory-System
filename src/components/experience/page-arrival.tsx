@@ -8,6 +8,7 @@ import {
   RoutePresentationSourceContext,
   useRoutePresentationSource,
 } from './route-presentation-source';
+import { routeContentMotion } from './route-content-motion';
 
 /** Exclude potential canvas routes before lazy chunks or observers initialize. */
 export function canvasBearingRoute(pathname: string | null | undefined) {
@@ -67,6 +68,7 @@ export function PageArrival({
     finishArrival,
     cancelIfInvalid,
     finishArrivalAfterSnapshot,
+    validNow,
   } = useRouteMotion();
   const [history, setHistory] = useState<{
     pathname: string | null;
@@ -135,8 +137,15 @@ export function PageArrival({
         onUpdate={(instance) => {
           const finish = update ? previousHandoff() : undefined;
           cancelIfInvalid();
+          const cleanup = update
+            ? routeContentMotion(instance, validNow)
+            : undefined;
           finishArrivalAfterSnapshot(instance);
-          return finish;
+          if (!cleanup && !finish) return;
+          return () => {
+            cleanup?.();
+            finish?.();
+          };
         }}
       >
         <div

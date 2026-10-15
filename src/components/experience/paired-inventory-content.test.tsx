@@ -9,6 +9,7 @@ import {
   RoutePresentationSourceContext,
 } from './route-presentation-source';
 import { createRoutePresentationLifetime } from './route-presentation-lifetime';
+vi.mock('./route-content-motion', () => ({ routeContentMotion: vi.fn() }));
 
 const state = vi.hoisted(() => ({
   boundaries: [] as ViewTransitionProps[],

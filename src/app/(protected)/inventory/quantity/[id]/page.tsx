@@ -7,6 +7,10 @@ import { RouteReady } from '@/components/experience/route-ready';
 import { routeReadyProps } from '@/components/experience/route-ready.server';
 import { PrivateDocumentTitle } from '@/components/auth/private-document-title';
 import { RecordName } from '@/components/record-name';
+import {
+  RecordDescription,
+  RecordTextDisclosure,
+} from '@/components/record-description';
 import { readQuantityPage } from './read.server';
 import { recordTitle } from '@/app/(protected)/record-title';
 export function generateMetadata() {
@@ -179,6 +183,21 @@ export default async function QuantityPage({
               )}
             </section>
           </InventoryCaptureRegion>
+          <InventoryCaptureRegion region="body">
+            <section className={panel + ' my-5'}>
+              <h2 className="font-semibold">Item details</h2>
+              <div className="mt-2">
+                <RecordDescription description={item.description} />
+              </div>
+              <div className="mt-2 text-slate-400">
+                <RecordTextDisclosure
+                  text={`Manufacturer: ${item.manufacturer || 'Not set'} · Model: ${item.model || 'Not set'}`}
+                  label="manufacturer and model"
+                  lines={1}
+                />
+              </div>
+            </section>
+          </InventoryCaptureRegion>
           {member.role === 'staff' && (
             <DetailTasks
               key={member.user_id + ':' + item.id}
@@ -212,19 +231,9 @@ export default async function QuantityPage({
                 : undefined
             }
           />
-          <InventoryCaptureGroup region="body">
+          <InventoryCaptureGroup region="record-supporting-content">
             <div className={styles.recordGrid}>
               <div className={styles.recordMain}>
-                <section className={panel + ' my-5'}>
-                  <h2 className="font-semibold">Item details</h2>
-                  <p className="mt-2 whitespace-pre-wrap break-words">
-                    {item.description || 'No description'}
-                  </p>
-                  <p className="mt-2 break-words text-sm text-slate-400">
-                    Manufacturer: {item.manufacturer || 'Not set'} · Model:{' '}
-                    {item.model || 'Not set'}
-                  </p>
-                </section>
                 <CustomMetadataList
                   definition={forms[item.categoryId]?.published_definition}
                   kind="quantity"

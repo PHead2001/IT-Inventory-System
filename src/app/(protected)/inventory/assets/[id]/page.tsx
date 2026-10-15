@@ -7,6 +7,10 @@ import { RouteReady } from '@/components/experience/route-ready';
 import { routeReadyProps } from '@/components/experience/route-ready.server';
 import { PrivateDocumentTitle } from '@/components/auth/private-document-title';
 import { RecordName } from '@/components/record-name';
+import {
+  RecordDescription,
+  RecordTextDisclosure,
+} from '@/components/record-description';
 import { readAssetPage } from './read.server';
 import { recordTitle } from '@/app/(protected)/record-title';
 export function generateMetadata() {
@@ -156,6 +160,21 @@ export default async function AssetPage({
               </dl>
             </section>
           </InventoryCaptureRegion>
+          <InventoryCaptureRegion region="body">
+            <section className={panel + ' my-5'}>
+              <h2 className="font-semibold">Asset details</h2>
+              <div className="mt-2">
+                <RecordDescription description={asset.description} />
+              </div>
+              <div className="mt-2 text-slate-400">
+                <RecordTextDisclosure
+                  text={`Manufacturer: ${asset.manufacturer || 'Not set'} · Model: ${asset.model || 'Not set'}`}
+                  label="manufacturer and model"
+                  lines={1}
+                />
+              </div>
+            </section>
+          </InventoryCaptureRegion>
           {member.role === 'staff' && (
             <DetailTasks
               key={member.user_id + ':' + asset.id}
@@ -193,29 +212,9 @@ export default async function AssetPage({
                   : undefined
             }
           />
-          <InventoryCaptureGroup region="body">
+          <InventoryCaptureGroup region="record-supporting-content">
             <div className={styles.recordGrid}>
               <div className={styles.recordMain}>
-                <section className={panel + ' my-5'}>
-                  <h2 className="font-semibold">Asset details</h2>
-                  <dl className="mt-3 space-y-2 break-words">
-                    <div>
-                      <dt className="text-sm text-slate-400">
-                        Manufacturer / model
-                      </dt>
-                      <dd>
-                        {asset.manufacturer || 'Not set'} /{' '}
-                        {asset.model || 'Not set'}
-                      </dd>
-                    </div>
-                    <div>
-                      <dt className="text-sm text-slate-400">Description</dt>
-                      <dd className="whitespace-pre-wrap">
-                        {asset.description || 'No description'}
-                      </dd>
-                    </div>
-                  </dl>
-                </section>
                 <CustomMetadataList
                   definition={forms[asset.categoryId]?.published_definition}
                   kind="asset"

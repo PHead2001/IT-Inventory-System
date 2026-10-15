@@ -3,10 +3,20 @@
 import {
   createContext,
   useContext,
+  useCallback,
+  useInsertionEffect,
+  useLayoutEffect,
+  useRef,
   type ReactElement,
   type ReactNode,
 } from 'react';
+import { Slot } from '@radix-ui/react-slot';
 import { PairedInventoryContent } from './paired-inventory-content';
+import { AuxiliaryRouteCaptureContext } from './auxiliary-route-context';
+import type { AuxiliaryParticipant } from './auxiliary-route-capture';
+import { RouteContentIdentityContext } from './route-content-identity';
+import { useRouteMotion } from './route-motion';
+import { RoutePresentationSourceContext } from './route-presentation-source';
 
 import type { InventoryCaptureRegionId } from './inventory-capture-regions';
 
@@ -17,6 +27,73 @@ export const InventoryCaptureRegionsContext = createContext<{
   conventionalPrimary: boolean;
 } | null>(null);
 
+function AuxiliaryCaptureRegion({
+  region,
+  children,
+}: {
+  region: Exclude<InventoryCaptureRegionId, 'body'>;
+  children: ReactElement;
+}) {
+  const registry = useContext(AuxiliaryRouteCaptureContext)!;
+  const capability = useContext(InventoryCaptureRegionsContext);
+  const identity = useContext(RouteContentIdentityContext);
+  const motion = useRouteMotion();
+  const source = useContext(RoutePresentationSourceContext);
+  const latest = useRef({ capability, identity, motion, source });
+  useInsertionEffect(() => {
+    latest.current = { capability, identity, motion, source };
+  });
+  const root = useRef<HTMLElement | null>(null);
+  const participant = useRef<AuxiliaryParticipant | null>(null);
+  const register = useCallback(
+    (node: HTMLElement) => {
+      const value = latest.current;
+      if (!value.identity || !value.source) return;
+      let owned = participant.current;
+      if (!owned || owned.root !== node) {
+        owned = {
+          root: node,
+          region,
+          routeKey: value.identity.rawRouteKey,
+          source: value.source,
+          current: () => {
+            const current = latest.current;
+            return (
+              current.capability?.enabled === true &&
+              (current.capability.pairedInventory ||
+                current.capability.conventionalPrimary) &&
+              current.identity?.rawRouteKey === owned!.routeKey &&
+              current.source === owned!.source &&
+              current.motion.validNow() &&
+              current.motion.captureAvailable !== false
+            );
+          },
+        };
+        participant.current = owned;
+      }
+      owned.routeKey = value.identity.rawRouteKey;
+      owned.source = value.source;
+      return registry.register(owned);
+    },
+    [registry, region],
+  );
+  const bind = useCallback(
+    (node: HTMLElement | null) => {
+      root.current = node;
+      const unregister = node ? register(node) : undefined;
+      if (!node) return;
+      return () => {
+        unregister?.();
+        if (root.current === node) root.current = null;
+      };
+    },
+    [register],
+  );
+  useLayoutEffect(() => (root.current ? register(root.current) : undefined));
+  // Existing Slot composes the authored child's ref/cleanup without a DOM host.
+  return <Slot ref={bind}>{children}</Slot>;
+}
+
 /** One conventional DOM root only. Maps and their cold slots must be siblings. */
 export function InventoryCaptureRegion({
   region,
@@ -26,7 +103,14 @@ export function InventoryCaptureRegion({
   children: ReactElement;
 }) {
   const capability = useContext(InventoryCaptureRegionsContext);
+  const auxiliary = useContext(AuxiliaryRouteCaptureContext);
   if (!capability) return children;
+  if (auxiliary && region !== 'body')
+    return (
+      <AuxiliaryCaptureRegion region={region}>
+        {children}
+      </AuxiliaryCaptureRegion>
+    );
   return (
     <PairedInventoryContent
       enabled={capability?.enabled === true}

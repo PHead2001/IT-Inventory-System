@@ -1,5 +1,6 @@
 import {
   act,
+  cleanup,
   fireEvent,
   render,
   screen,
@@ -32,6 +33,7 @@ import { PrivacyReadinessContext } from '@/components/auth/privacy-readiness';
 import {
   assignmentEpoch,
   readPrivacyRevocationRevision,
+  revokePrivatePresentation,
 } from '@/features/scan/assign-batch';
 import { RecordName } from '@/components/record-name';
 import { SettingsPanel } from '@/features/configuration/settings-panel';
@@ -49,6 +51,7 @@ import { emptyLocationBrowserState } from '@/features/room/location-browser-stat
 import { RouteReady } from './route-ready';
 import { InventoryCaptureRegion } from './inventory-capture-region';
 import { RoutePresentationLifetimeContext } from './route-presentation-source';
+import { AuxiliaryRouteCaptureContext } from './auxiliary-route-context';
 import { routeKey } from './route-key';
 import { PairedRouteLoadingContext } from './paired-route-loading';
 import { sharedTitleMotion } from './shared-title-motion';
@@ -118,6 +121,7 @@ vi.mock('@/features/configuration/actions', () => ({
 }));
 // Intent/callback lifetime only; captured geometry has its own independent suite.
 vi.mock('./shared-title-motion', () => ({ sharedTitleMotion: vi.fn() }));
+vi.mock('./route-content-motion', () => ({ routeContentMotion: vi.fn() }));
 vi.mock('@/features/labels/queue-model', () => ({
   clearLabelQueueSession: vi.fn(),
 }));
@@ -910,6 +914,107 @@ const view = (
   </PrivacyReadinessContext>
 );
 
+/** Protocol fixture only: production native timing remains a browser gate. */
+function auxiliaryNativeFixture() {
+  let ready!: () => void, finished!: () => void, update!: () => void;
+  const handle = {
+    ready: new Promise<void>((resolve) => {
+      ready = resolve;
+    }),
+    finished: new Promise<void>((resolve) => {
+      finished = resolve;
+    }),
+    updateCallbackDone: new Promise<void>((resolve) => {
+      update = resolve;
+    }),
+    skipTransition: vi.fn(),
+  } as unknown as globalThis.ViewTransition;
+  const original = vi.fn(() => handle);
+  document.startViewTransition = original;
+  vi.spyOn(HTMLElement.prototype, 'getClientRects').mockReturnValue([
+    { width: 100, height: 40 },
+  ] as unknown as DOMRectList);
+  vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue({
+    x: 0,
+    y: 10,
+    top: 10,
+    bottom: 50,
+    left: 0,
+    right: 100,
+    width: 100,
+    height: 40,
+  } as DOMRect);
+  return { handle, ready, finished, update, original };
+}
+
+it.each(['privacy', 'reduced', 'supersession'] as const)(
+  'withdraws active auxiliary claims and the exact native handle synchronously on %s',
+  async (withdrawal) => {
+    const native = auxiliaryNativeFixture();
+    history.replaceState(null, '', '/inventory');
+    const page = render(
+      view(
+        <PageArrival pathname="/inventory">
+          <RouteReady
+            actorId="staff"
+            routeKey="/inventory"
+            contentIdentity="ready-source"
+            conventionalPrimary
+            capture="regions"
+          >
+            <InventoryCaptureRegion region="header">
+              <header>
+                <RouteLink href="/history">Auxiliary history</RouteLink>
+                <RouteLink href="/labels">Auxiliary supersession</RouteLink>
+                <input
+                  aria-label="Retained auxiliary draft"
+                  defaultValue="unchanged draft"
+                />
+              </header>
+            </InventoryCaptureRegion>
+            <InventoryCaptureRegion region="body">
+              <section>Conventional body</section>
+            </InventoryCaptureRegion>
+          </RouteReady>
+        </PageArrival>,
+      ),
+    );
+    const draft = screen.getByRole('textbox', {
+      name: 'Retained auxiliary draft',
+    });
+    const header = draft.parentElement!;
+    fireEvent.click(screen.getByRole('link', { name: 'Auxiliary history' }));
+    expect(document.startViewTransition()).toBe(native.handle);
+    expect(header.style.viewTransitionName).toMatch(
+      /^route-primary-.*-header$/,
+    );
+    if (withdrawal === 'privacy') act(() => revokePrivatePresentation());
+    else if (withdrawal === 'reduced')
+      act(() => {
+        localStorage.setItem('it-inventory-reduce-motion', 'true');
+        window.dispatchEvent(
+          new StorageEvent('storage', { key: 'it-inventory-reduce-motion' }),
+        );
+      });
+    else
+      fireEvent.click(
+        screen.getByRole('link', { name: 'Auxiliary supersession' }),
+      );
+    expect(header.style.viewTransitionName).toBe('');
+    expect(native.handle.skipTransition).toHaveBeenCalled();
+    expect(
+      screen.getByRole('textbox', { name: 'Retained auxiliary draft' }),
+    ).toBe(draft);
+    expect(draft).toHaveValue('unchanged draft');
+    native.update();
+    native.ready();
+    native.finished();
+    await Promise.resolve();
+    page.unmount();
+    vi.restoreAllMocks();
+  },
+);
+
 beforeEach(() => {
   runtime.navigation = new EventTarget();
   Object.defineProperty(window, 'navigation', {
@@ -938,6 +1043,9 @@ beforeEach(() => {
   localStorage.removeItem('it-inventory-reduce-motion');
 });
 afterEach(() => {
+  // Retire the provider's single native observer before replacing the API stub.
+  // A later-wrapper ownership test deliberately forbids it overwriting stubs.
+  cleanup();
   Reflect.deleteProperty(window, 'navigation');
   vi.unstubAllGlobals();
   delete (document as Partial<Document>).startViewTransition;
@@ -3336,6 +3444,7 @@ for (const order of ['inner-first', 'outer-first'] as const) {
 it.each(['inner-first', 'outer-first'] as const)(
   'captures explicit sibling regions once across raw-query %s commits and waits for the final participant',
   async (order) => {
+    const native = auxiliaryNativeFixture();
     const sourceKey = '/inventory?q=++USB++',
       canonical = '/inventory?q=USB';
     runtime.query = 'q=++USB++';
@@ -3346,12 +3455,17 @@ it.each(['inner-first', 'outer-first'] as const)(
       React.ContextType<typeof RoutePresentationLifetimeContext>
     >;
     let motion!: ReturnType<typeof useRouteMotion>;
+    let auxiliary!: NonNullable<
+      React.ContextType<typeof AuxiliaryRouteCaptureContext>
+    >;
     function ObserveRegions() {
       const next = useRouteMotion();
+      const registry = useContext(AuxiliaryRouteCaptureContext)!;
       const lifetime = useContext(RoutePresentationLifetimeContext)!;
       useLayoutEffect(() => {
         motion = next;
         presentation = lifetime;
+        auxiliary = registry;
       });
       return null;
     }
@@ -3402,7 +3516,13 @@ it.each(['inner-first', 'outer-first'] as const)(
         </>,
       );
     const page = render(fixture());
+    const armAuxiliary = vi.spyOn(auxiliary, 'arm');
     fireEvent.click(screen.getByRole('link', { name: 'Cable row 2' }));
+    expect(armAuxiliary).toHaveBeenCalledOnce();
+    expect(armAuxiliary.mock.results[0].value).toBe(true);
+    expect(document.startViewTransition).not.toBe(native.original);
+    expect(document.startViewTransition()).toBe(native.handle);
+    expect(armAuxiliary.mock.calls[0][0].admitted()).toBe(true);
     const original = motion.intent!,
       approval = motion.titleArrival!;
     const source = runtime.boundaries.findLast(
@@ -3417,17 +3537,20 @@ it.each(['inner-first', 'outer-first'] as const)(
     }
     primaryKey = detailPath;
     page.rerender(fixture());
-    const header = runtime.boundaries.findLast(
-      (boundary) => boundary.name === original.name + '-content-header',
-    )!;
-    const task = runtime.boundaries.findLast(
-      (boundary) => boundary.name === original.name + '-content-task-launcher',
-    )!;
+    const header = screen.getByRole('heading', {
+      name: 'Cable title',
+    }).parentElement!;
+    const task = screen.getByText('Conventional task launcher');
+    const headerName = original.name + '-content-header';
+    const taskName = original.name + '-content-task-launcher';
     const title = runtime.boundaries.findLast(
       (boundary) => boundary.name === original.name,
     )!;
-    expect(header.enter).toBe('route-content');
-    expect(task.enter).toBe('route-content');
+    expect(header.style.viewTransitionName).toBe(headerName);
+    expect(task.style.viewTransitionName).toBe(taskName);
+    expect(header.style.getPropertyValue('view-transition-class')).toBe(
+      'route-content',
+    );
     expect(
       screen.getByTestId('region-map').closest('[data-test-transition-name]'),
     ).toBeNull();
@@ -3442,8 +3565,8 @@ it.each(['inner-first', 'outer-first'] as const)(
     const participants = [
       original.name,
       original.name + '-content',
-      header.name!,
-      task.name!,
+      headerName,
+      taskName,
     ];
     const finishes: (() => void)[] = [];
     const effects = participants.map((name) => ({
@@ -3457,10 +3580,12 @@ it.each(['inner-first', 'outer-first'] as const)(
     });
     try {
       await act(async () => {
-        source.onShare!({ name: original.name + '-content' });
-        title.onShare!({ name: original.name });
-        header.onEnter!({ name: header.name! }, []);
-        task.onEnter!({ name: task.name! }, []);
+        void native.handle.ready.then(() => {
+          source.onShare!({ name: original.name + '-content' });
+          title.onShare!({ name: original.name });
+        });
+        native.update();
+        native.ready();
       });
       expect(motion.arrival).toBeNull();
       expect(motion.intent).toBe(original);
@@ -3473,14 +3598,9 @@ it.each(['inner-first', 'outer-first'] as const)(
       page.rerender(fixture());
       const local = screen.getByTestId('local-region');
       expect(local.closest('[data-test-transition-name]')).toBeNull();
-      const late = runtime.boundaries.at(-1)!;
-      expect(late.name).toBeUndefined();
-      expect(late.enter).toBe('none');
-      expect(late.share).toBe('none');
-      expect(
-        late.onEnter!({ name: original.name + '-content-task-close' }, []),
-      ).toBeUndefined();
-      expect(header.onEnter!({ name: header.name! }, [])).toBeUndefined();
+      expect(local.style.viewTransitionName).toBe('');
+      expect(header.style.viewTransitionName).toBe('');
+      expect(task.style.viewTransitionName).toBe('');
       expect(handoff.mock.calls).toHaveLength(handoffsAtSeal);
       const sharedBeforeLate = vi.mocked(sharedTitleMotion).mock.calls.length;
       title.onShare!({ name: original.name });
@@ -3505,8 +3625,13 @@ it.each(['inner-first', 'outer-first'] as const)(
         ),
       ).toHaveLength(0);
     } finally {
+      native.update();
+      native.ready();
+      native.finished();
+      await Promise.resolve();
       handoff.mockRestore();
       Reflect.deleteProperty(document, 'getAnimations');
+      vi.restoreAllMocks();
     }
   },
 );
@@ -3514,6 +3639,7 @@ it.each(['inner-first', 'outer-first'] as const)(
 it.each(['history', 'location'] as const)(
   '%s source and detail regions withdraw all names at seal and late callbacks cannot affect a fresh app Back',
   async (kind) => {
+    const native = auxiliaryNativeFixture();
     const id = '00000000-0000-4000-8000-000000000001';
     const eventId = '00000000-0000-4000-8000-000000000002';
     const entity: PresentationTarget =
@@ -3627,6 +3753,7 @@ it.each(['history', 'location'] as const)(
             : 'View Shelf 1A location details',
       }),
     );
+    document.startViewTransition();
     const original = motion.intent!;
     const oldTitle = runtime.boundaries.findLast(
       (boundary) => boundary.name === original.name,
@@ -3644,10 +3771,11 @@ it.each(['history', 'location'] as const)(
     runtime.query = target.searchParams.toString();
     history.replaceState(null, '', key);
     page.rerender(fixture());
-    const header = runtime.boundaries.findLast(
-      (boundary) => boundary.name === original.name + '-content-header',
-    )!;
-    expect(header.enter).toBe('route-content');
+    const header = screen.getByRole('heading', {
+      name: 'Paired detail',
+    }).parentElement!;
+    const headerName = original.name + '-content-header';
+    expect(header.style.viewTransitionName).toBe(headerName);
     expect(
       screen
         .getByTestId('paired-source-map')
@@ -3657,24 +3785,25 @@ it.each(['history', 'location'] as const)(
     const finished = new Promise<void>((resolve) => {
       finish = resolve;
     });
-    const effects = [
-      original.name,
-      original.name + '-content',
-      header.name!,
-    ].map((name) => ({
-      effect: { pseudoElement: `::view-transition-new(${name})` },
-      finished,
-      cancel: vi.fn(),
-    }));
+    const effects = [original.name, original.name + '-content', headerName].map(
+      (name) => ({
+        effect: { pseudoElement: `::view-transition-new(${name})` },
+        finished,
+        cancel: vi.fn(),
+      }),
+    );
     Object.defineProperty(document, 'getAnimations', {
       configurable: true,
       value: () => effects,
     });
     try {
       await act(async () => {
-        oldTitle.onShare!({ name: original.name });
-        oldBody.onShare!({ name: original.name + '-content' });
-        header.onEnter!({ name: header.name! }, []);
+        void native.handle.ready.then(() => {
+          oldTitle.onShare!({ name: original.name });
+          oldBody.onShare!({ name: original.name + '-content' });
+        });
+        native.update();
+        native.ready();
       });
       expect(motion.intent).toBe(original);
       expect(motion.captureAvailable).toBe(false);
@@ -3708,6 +3837,10 @@ it.each(['history', 'location'] as const)(
         next.name,
       );
     } finally {
+      native.update();
+      native.ready();
+      native.finished();
+      await Promise.resolve();
       Reflect.deleteProperty(document, 'getAnimations');
       history.replaceState(null, '', previous);
       vi.restoreAllMocks();

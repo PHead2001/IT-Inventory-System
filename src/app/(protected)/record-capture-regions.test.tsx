@@ -1,5 +1,5 @@
 import { fireEvent, render, screen } from '@testing-library/react';
-import { beforeEach, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import type { ReactNode, ViewTransitionProps } from 'react';
 import AssetPage from './inventory/assets/[id]/page';
 import QuantityPage from './inventory/quantity/[id]/page';
@@ -10,6 +10,7 @@ const state = vi.hoisted(() => ({
   pending: true,
   site: false,
   locationPair: false,
+  description: 'A short description with all its text visible.',
 }));
 vi.mock('server-only', () => ({}));
 vi.mock('react', async (original) => ({
@@ -187,14 +188,14 @@ vi.mock('@/lib/auth/session.server', () => ({
 }));
 vi.mock('@/features/inventory/queries.server', () => ({
   getAssetDetail: async () => ({
-    asset,
+    asset: { ...asset, description: state.description },
     location: state.site ? null : location,
     site: state.site ? site : null,
     history: [],
     duplicateSerialMatches: [],
   }),
   getQuantityDetail: async () => ({
-    item,
+    item: { ...item, description: state.description },
     balances: [{ location, quantity: 2 }],
     history: [],
     stockSummary: {
@@ -242,7 +243,32 @@ beforeEach(() => {
   state.pending = true;
   state.site = false;
   state.locationPair = false;
+  state.description = 'A short description with all its text visible.';
   sessionStorage.clear();
+  vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockReturnValue(300);
+  vi.spyOn(HTMLElement.prototype, 'scrollWidth', 'get').mockReturnValue(300);
+  vi.spyOn(HTMLElement.prototype, 'scrollHeight', 'get').mockImplementation(
+    function () {
+      return this.textContent?.startsWith('Long description') ? 1920 : 24;
+    },
+  );
+  const computed = window.getComputedStyle.bind(window);
+  vi.spyOn(window, 'getComputedStyle').mockImplementation((element) => {
+    const styles = computed(element);
+    return element.tagName === 'P'
+      ? new Proxy(styles, {
+          get: (target, key) =>
+            key === 'lineHeight'
+              ? '24px'
+              : key === 'fontSize'
+                ? '16px'
+                : Reflect.get(target, key, target),
+        })
+      : styles;
+  });
+});
+afterEach(() => {
+  vi.restoreAllMocks();
 });
 function expectOutsideCapture(element: Element) {
   expect(element.closest('[data-active-capture]')).toBeNull();
@@ -261,6 +287,89 @@ async function page(kind: 'asset' | 'quantity' | 'location') {
     searchParams: Promise.resolve({}),
   });
 }
+
+it.each(['asset', 'quantity'] as const)(
+  '%s pairs the real compact details immediately after the hero, before tasks and maps',
+  async (kind) => {
+    render(await page(kind));
+    const header = document.querySelector(
+      '[data-active-capture="accepted-title-content-header"]',
+    )!;
+    const body = document.querySelector(
+      '[data-active-capture="accepted-title-content"]',
+    )!;
+    const supporting = document.querySelector(
+      '[data-active-capture="accepted-title-content-record-supporting-content"]',
+    )!;
+    const details = screen.getByRole('heading', {
+      name: kind === 'asset' ? 'Asset details' : 'Item details',
+    });
+    expect(header.nextElementSibling).toBe(body);
+    expect(body).toContainElement(details);
+    expect(body).toHaveTextContent(state.description);
+    expect(body).toHaveTextContent('Manufacturer');
+    expect(body).toHaveTextContent('Model');
+    expect(
+      screen.queryByRole('button', { name: 'Show full description' }),
+    ).toBeNull();
+    const tasks = screen.getByRole('region', { name: 'Record tasks' });
+    const preview = screen.getByRole('region', { name: 'Storage preview' });
+    expect(
+      body.compareDocumentPosition(tasks) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    expect(
+      body.compareDocumentPosition(preview) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    expect(
+      preview.compareDocumentPosition(supporting) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    expect(supporting).toContainElement(screen.getByText('Recorded metadata'));
+    expect(supporting).toContainElement(screen.getByText('Recorded files'));
+    expect(supporting).toContainElement(
+      screen.getByRole('heading', { name: 'Recent history' }),
+    );
+    expectOutsideCapture(preview);
+  },
+);
+
+it.each(['asset', 'quantity'] as const)(
+  '%s expands the complete long description in place without replacing task or map state',
+  async (kind) => {
+    state.description =
+      'Long description line.\n'.repeat(80) + 'Last recorded sentence.';
+    const view = render(await page(kind));
+    const body = document.querySelector(
+      '[data-active-capture="accepted-title-content"]',
+    )!;
+    const toggle = screen.getByRole('button', {
+      name: 'Show full description',
+    });
+    const description = document.getElementById(
+      toggle.getAttribute('aria-controls')!,
+    )!;
+    expect(description.textContent).toBe(state.description);
+    const tasks = screen.getByRole('region', { name: 'Record tasks' });
+    const preview = screen.getByRole('region', { name: 'Storage preview' });
+    fireEvent.click(toggle);
+    expect(toggle).toHaveAttribute('aria-expanded', 'true');
+    expect(description.textContent).toBe(state.description);
+    expect(body).toContainElement(description);
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Show less description' }),
+    );
+    expect(toggle).toHaveAttribute('aria-expanded', 'false');
+    expect(description.textContent).toBe(state.description);
+    state.pending = false;
+    view.rerender(await page(kind));
+    expect(screen.getByRole('region', { name: 'Record tasks' })).toBe(tasks);
+    expect(screen.getByRole('region', { name: 'Storage preview' })).toBe(
+      preview,
+    );
+    for (const canvas of screen.getAllByTestId('actual-canvas-sentinel'))
+      expectOutsideCapture(canvas);
+  },
+);
 
 it.each(['asset', 'quantity', 'location'] as const)(
   '%s keeps cold and warm preview slots outside every active capture while conventional regions participate',

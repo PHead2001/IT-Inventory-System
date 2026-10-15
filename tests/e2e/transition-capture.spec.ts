@@ -12,6 +12,7 @@ declare global {
     };
     regionHarness: {
       transition(): void;
+      release?(): void;
       proof: {
         old: NativeRegionCapture[];
         next: NativeRegionCapture[];
@@ -29,6 +30,7 @@ type NativeRegionCapture = {
   name: string;
   bounds: { x: number; y: number; width: number; height: number };
   viewport: { width: number; height: number };
+  canvasAncestors?: string[];
 };
 
 type NativeRegionCase =
@@ -38,7 +40,8 @@ type NativeRegionCase =
   | 'matching outgoing header';
 
 /** Exercise the installed production React traversal, not a ViewTransition mock.
- * The keyed ancestor has default=none like PageArrival's nested capture boundary.
+ * This negative deliberately replaces the disabled ancestor with the page.
+ * PageArrival is stable; its distinct traversal is exercised below.
  * The title is always a real visible shared pair; all content is ordinary flow. */
 async function regionHarness(kind: NativeRegionCase) {
   const below = kind === 'below viewport paired body';
@@ -172,6 +175,175 @@ for (const kind of [
       expect(header.name, diagnostic).toBe('none');
     }
   });
+}
+
+// Model the actual stable Privacy/Suspense/PageArrival boundaries separately from
+// the keyed-disabled-ancestor negative above. Only Next's page/template changes.
+type StableTopology =
+  'keyed template' | 'retained Activity' | 'delayed Suspense';
+async function stableRegionHarness(topology: StableTopology, reverse: boolean) {
+  const result = await build({
+    stdin: {
+      contents: `
+        import React, {Activity, Suspense, use, startTransition, useState, ViewTransition} from 'react';
+        import {createRoot} from 'react-dom/client';
+        import {TransitionCaptureBoundary} from './src/components/forms/transition-capture-boundary';
+        const proof = {old:[], next:[], effects:[], ready:false, finished:false, error:null};
+        let resolveGate;
+        const gate = new Promise(resolve => {resolveGate = resolve;});
+        const capture = () => Array.from(document.querySelectorAll('[data-region]')).map(element => {
+          const {x,y,width,height} = element.getBoundingClientRect();
+          const canvasAncestors = [];
+          for (const canvas of element.querySelectorAll('canvas')) {
+            for (let ancestor = canvas; ancestor; ancestor = ancestor.parentElement) {
+              const name = getComputedStyle(ancestor).viewTransitionName;
+              if (name && name !== 'none') canvasAncestors.push(name);
+            }
+          }
+          return {region:element.dataset.region, name:getComputedStyle(element).viewTransitionName,
+            bounds:{x,y,width,height}, viewport:{width:innerWidth,height:innerHeight},canvasAncestors};
+        });
+        const native = document.startViewTransition.bind(document);
+        document.startViewTransition = options => {
+          proof.old = capture();
+          const update = typeof options === 'function' ? options : options.update;
+          const wrapped = async () => {await update(); proof.next = capture();};
+          const transition = native(typeof options === 'function' ? wrapped : {...options,update:wrapped});
+          const sample = () => {
+            for (const animation of document.getAnimations()) {
+              const pseudo = animation.effect?.pseudoElement;
+              if (pseudo?.startsWith('::view-transition') && !proof.effects.includes(pseudo)) proof.effects.push(pseudo);
+            }
+            if (!proof.finished) requestAnimationFrame(sample);
+          };
+          transition.ready.then(() => {proof.ready = true; sample();}, error => {proof.error = error.name;});
+          transition.finished.then(() => {proof.finished = true;}, error => {proof.error = error.name; proof.finished = true;});
+          return transition;
+        };
+        function Page({step}) {
+          if (${topology === 'delayed Suspense'} && step === 1) use(gate);
+          const title = <ViewTransition name="stable-title" default="none" update="none" share="fixture-region">
+            <h1 data-region="title">{step ? 'Record details' : 'Inventory'}</h1>
+          </ViewTransition>;
+          const heading = <header data-region="header">{title}<p>Visible route summary</p></header>;
+          return <main>
+            {step === 1 ? <ViewTransition name="stable-header" default="none" update="none" share="fixture-region" enter="fixture-region" exit="fixture-region" onEnter={() => {}} onExit={() => {}}>
+              {heading}
+            </ViewTransition> : heading}
+            <ViewTransition name="stable-body" default="none" update="none" share="fixture-region" enter="fixture-region" exit="fixture-region">
+              <section data-region="body"><p>{step ? 'Item details: manufacturer and description' : 'Matching inventory records'}</p><button>Ordinary action</button></section>
+            </ViewTransition>
+            <div data-region="canvas-slot"><canvas aria-label="Map excluded from capture" width="200" height="60" /></div>
+          </main>;
+        }
+        function App() {
+          const [step,setStep] = useState(${reverse ? 1 : 0});
+          window.regionHarness = {proof, transition:() => startTransition(() => setStep(n => 1-n)), release:resolveGate};
+          const pages = ${topology === 'retained Activity' ? '[0,1].map(page => <Activity key={page} mode={page === step ? "visible" : "hidden"}><Page step={page}/></Activity>)' : '<Page key={step} step={step}/>'};
+          const guarded = <TransitionCaptureBoundary>{pages}</TransitionCaptureBoundary>;
+          const inner = <ViewTransition default="none" update="none">{guarded}</ViewTransition>;
+          const content = <div data-page-arrival data-route-path={step}>{inner}</div>;
+          return <div id="privacy"><Suspense fallback={<p>Loading destination</p>}>
+            <ViewTransition default="none" update="none">{content}</ViewTransition>
+          </Suspense></div>;
+        }
+        createRoot(document.getElementById('root')).render(<App/>);
+      `,
+      resolveDir: process.cwd(),
+      loader: 'tsx',
+    },
+    bundle: true,
+    write: false,
+    define: { 'process.env.NODE_ENV': '"production"' },
+    alias: {
+      react: resolve('node_modules/next/dist/compiled/react'),
+      'react-dom/client': resolve(
+        'node_modules/next/dist/compiled/react-dom/client',
+      ),
+      'react-dom': resolve('node_modules/next/dist/compiled/react-dom'),
+    },
+  });
+  return result.outputFiles[0].text;
+}
+
+for (const topology of [
+  'keyed template',
+  'retained Activity',
+  'delayed Suspense',
+] as const) {
+  for (const reverse of topology === 'delayed Suspense'
+    ? [false]
+    : [false, true]) {
+    test(`native stable PageArrival traversal: ${topology} ${reverse ? 'source-only header exits' : 'destination-only header enters'}`, async ({
+      page,
+    }, info) => {
+      await page.setViewportSize({ width: 1000, height: 700 });
+      await page.setContent(`<style>
+        html {view-transition-name:none}
+        ::view-transition-group(*) {animation-duration:200ms}
+        ::view-transition-old(*), ::view-transition-new(*) {animation-duration:200ms}
+      </style><div id="root"></div>`);
+      await page.addScriptTag({
+        content: await stableRegionHarness(topology, reverse),
+      });
+      await expect(page.getByRole('heading')).toHaveText(
+        reverse ? 'Record details' : 'Inventory',
+      );
+      if (topology === 'retained Activity') {
+        // Verify the destination really exists as a hidden retained Activity,
+        // rather than accidentally testing a fresh keyed mount again.
+        await expect(page.locator('main')).toHaveCount(2);
+      }
+      await page.evaluate(() => window.regionHarness.transition());
+      if (topology === 'delayed Suspense') {
+        await expect(page.getByRole('heading')).toHaveText('Inventory');
+        expect(
+          await page.evaluate(() => window.regionHarness.proof.ready),
+        ).toBe(false);
+        await page.evaluate(() => window.regionHarness.release!());
+      }
+      await expect(page.getByRole('heading')).toHaveText(
+        reverse ? 'Inventory' : 'Record details',
+      );
+      await page.waitForFunction(() => window.regionHarness.proof.finished);
+      const proof = await page.evaluate(() => window.regionHarness.proof);
+      await info.attach('native-stable-page-arrival', {
+        body: JSON.stringify({ topology, reverse, ...proof }, null, 2),
+        contentType: 'application/json',
+      });
+      const diagnostic = JSON.stringify({
+        ancestors,
+        topology,
+        reverse,
+        ...proof,
+      });
+      expect(proof.error, diagnostic).toBeNull();
+      expect(proof.ready, diagnostic).toBe(true);
+      for (const name of ['stable-title', 'stable-body']) {
+        expect(proof.effects, diagnostic).toContain(
+          `::view-transition-old(${name})`,
+        );
+        expect(proof.effects, diagnostic).toContain(
+          `::view-transition-new(${name})`,
+        );
+      }
+      expect(proof.effects, diagnostic).toContain(
+        `::view-transition-${reverse ? 'old' : 'new'}(stable-header)`,
+      );
+      expect(proof.effects, diagnostic).not.toContain(
+        `::view-transition-${reverse ? 'new' : 'old'}(stable-header)`,
+      );
+      for (const captures of [proof.old, proof.next]) {
+        const body = captures.find(
+          (entry) => entry.region === 'body' && entry.bounds.height > 0,
+        )!;
+        expect(body.name, diagnostic).toBe('stable-body');
+        expect(body.bounds.y, diagnostic).toBeLessThan(body.viewport.height);
+        for (const capture of captures)
+          expect(capture.canvasAncestors, diagnostic).toEqual([]);
+      }
+    });
+  }
 }
 
 // Real bundled React + native capture, independent of accounts, fixtures and DB.

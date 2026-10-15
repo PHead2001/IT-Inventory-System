@@ -6,6 +6,7 @@ import type { InventoryCaptureRegionId } from './inventory-capture-regions';
 import { RouteContentIdentityContext } from './route-content-identity';
 import { matchesTitleListRoute } from './route-motion-state';
 import { useRoutePresentationSource } from './route-presentation-source';
+import { routeContentMotion } from './route-content-motion';
 
 /** Successful conventional inventory primaries only; no readiness authority. */
 export function PairedInventoryContent({
@@ -58,7 +59,7 @@ export function PairedInventoryContent({
     : primary
       ? arrival.name + (region === 'body' ? '' : '-' + region)
       : undefined;
-  const capture = (instance: { name: string }) => {
+  const capture = (instance: { name: string }, shared = false) => {
     if (!name || instance.name !== name || !motion.current()) return;
     // Check the exact approval before giving any outgoing source a lease.
     if (matches) {
@@ -66,7 +67,18 @@ export function PairedInventoryContent({
     } else if (!motion.finishPrimaryAfterSnapshot(instance)) return;
     const finish = handoff();
     motion.cancelIfInvalid();
-    return finish;
+    const cleanup = shared
+      ? routeContentMotion(
+          instance,
+          motion.validNow,
+          matches ? motion.rejectTitleSnapshot : undefined,
+        )
+      : undefined;
+    if (!cleanup && !finish) return;
+    return () => {
+      cleanup?.();
+      finish?.();
+    };
   };
   return (
     <ViewTransition
@@ -76,9 +88,9 @@ export function PairedInventoryContent({
       share={name ? 'route-content' : 'none'}
       enter={name ? 'route-content' : 'none'}
       exit={name ? 'route-content' : 'none'}
-      onShare={capture}
-      onEnter={capture}
-      onExit={capture}
+      onShare={(instance) => capture(instance, true)}
+      onEnter={(instance) => capture(instance)}
+      onExit={(instance) => capture(instance)}
     >
       {wrap ? (
         <div className="experience-paired-inventory-content">{children}</div>

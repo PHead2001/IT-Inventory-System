@@ -2,6 +2,7 @@
 export const inventoryCaptureRegionIds = [
   'header',
   'body',
+  'record-supporting-content',
   'preview-controls',
   'preview-location',
   'preview-link',

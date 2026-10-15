@@ -143,13 +143,31 @@ inline map picker. The existing native map dialog portal and task/grid ownership
 are unchanged. The closed region inventory bounds capture names before lazy
 chunks load; DOM discovery never grants capture capability.
 
+React owns the title and body captures. Other regions register their authored DOM
+refs with one provider-owned auxiliary CSS participant controller. It observes
+before-native/returned-handle hooks inside the existing capture observer, without
+wrapping React's update callback or changing the native arguments, receiver,
+return value or exception. Naming requires the exact accepted approval, provider,
+epoch, source/destination identity, existing presentation grant, Full motion and
+explicit ready capability. The accepted source root/key and inherited presentation
+source are pinned before URL advance; destination refs use their explicit server
+capability, never an early readiness acknowledgment. Hidden, offscreen, duplicate,
+canvas-containing or externally named roots cannot participate. Incoming refs
+clear only this capture's outgoing names after the native handle has returned;
+ready seals further assignment and clears remaining live CSS names.
+
 The body keeps `${intent.name}-content`; other regions use that exact name plus
 an explicit region suffix while the matching title shares `intent.name`. Shared
 and unmatched enter/exit regions crossfade concurrently with the title in one
 native capture, including either inner-primary/outer-pathname commit order. The
 accepted pair suppresses the outer generic fade. One exact-approval completion
-receipt accepts callbacks only during React 19.3's synchronous native capture
-callback batch, then seals its participant names and waits for all their effects.
+receipt accepts actual auxiliary effects in its returned-handle ready reaction
+and React 19.3's synchronous native capture callbacks in the following reaction,
+then seals its participant names in a microtask and waits for all their effects.
+An auxiliary-only visible capture joins that same receipt even when title/body
+are offscreen. No dummy native trigger is introduced. The shared route motion
+keeps captured old-image size/position, fades it out, and fades/settles the new
+image by 8 px at its own intrinsic size; page bitmaps never morph dimensions.
 A presentation-only seal subscription withdraws title and region capture names
 immediately, even if the outer pathname already consumed the generic arrival.
 The exact intent remains only for effect completion, and native source leases
@@ -160,9 +178,11 @@ actual body region retires its unused title approval and reveals instantly.
 Ordinary unpaired routes retain their generic arrival. No readiness or request
 state is granted by presentation boundaries.
 
-Each outgoing region inherits the accepted page's existing source and acquires a
-single-use lease from its committed immutable exit descriptor. Every callback
-acquires its lease before approval retirement. The original source remains
+Each outgoing React region inherits the accepted page's existing source and
+acquires a single-use lease from its committed immutable exit descriptor. The
+auxiliary capture additionally acquires one exact pinned source exit lease before
+the native call, including when no outgoing auxiliary ref is present. Neither ref
+unmount nor ready settlement releases that native lease. The original source remains
 eligible through the final exact native `transition.finished` cleanup; privacy
 withdrawal and supersession dispose all leases immediately. Old callbacks and
 cleanups cannot borrow a renewed source or a later approval. Room and
