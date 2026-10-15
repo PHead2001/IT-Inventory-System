@@ -251,6 +251,7 @@ function BoundFilesPanel({
     });
   }, [removal]);
   const [message, setMessage] = useState('');
+  const [readError, setReadError] = useState(false);
   useEffect(() => {
     function preventFileNavigation(event: DragEvent) {
       if (event.dataTransfer?.types.includes('Files')) event.preventDefault();
@@ -298,7 +299,7 @@ function BoundFilesPanel({
           return null;
         const parsed = inventoryFileCardsSchema.safeParse(data);
         if (error || !parsed.success) {
-          setMessage('Files could not be loaded.');
+          setReadError(true);
           return null;
         }
         const envelope = parsed.data;
@@ -308,6 +309,7 @@ function BoundFilesPanel({
           ),
         );
         setCollectionRevision(envelope.revision);
+        setReadError(false);
         return envelope;
       } catch {
         if (
@@ -315,7 +317,7 @@ function BoundFilesPanel({
           isCurrent() &&
           generation === readGeneration.current
         )
-          setMessage('Files could not be loaded.');
+          setReadError(true);
         return null;
       }
     },
@@ -802,15 +804,18 @@ function BoundFilesPanel({
             ? 'JPEG, PNG or still WebP · Up to 20 MiB. Photos are normalized before display.'
             : 'JPEG, PNG, still WebP or PDF · Up to 20 MiB. Photos are normalized before display; PDFs download as attachments.'}
         </p>
-        {message && !removal && (
+        {(message || readError) && !removal && (
           <p
             role="alert"
             className="experience-feedback mt-3 break-words text-amber-100"
           >
-            {message}
+            {message && <span className="block">{message}</span>}
+            {readError && (
+              <span className="block">Files could not be loaded.</span>
+            )}
           </p>
         )}
-        <LoadingReveal busy={loading} reveal={!message}>
+        <LoadingReveal busy={loading} reveal={!message && !readError}>
           <ul className="mt-3 space-y-2">
             {cards
               .toSorted(
@@ -938,7 +943,7 @@ function BoundFilesPanel({
                 </li>
               ))}
           </ul>
-          {!busy && cards.length === 0 && !message && (
+          {!busy && cards.length === 0 && !message && !readError && (
             <p className="experience-muted mt-3 rounded-lg border border-dashed border-cyan-100/20 px-3 py-2 text-sm">
               {parentType === 'quantity'
                 ? 'No photo yet.'

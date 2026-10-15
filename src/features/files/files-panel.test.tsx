@@ -2646,45 +2646,87 @@ describe('server-seeded cards and refresh isolation', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Clear selection' }));
     await waitFor(() => expect(cardReads()).toHaveLength(1));
   });
-  it('accepts refresh after success feedback and recovers a failed read without discarding cleanup feedback', async () => {
-    mocks.fetch.mockResolvedValue({
-      ok: true,
-      json: async () => ({
-        deleted: 0,
-        failed: 0,
-        outstanding: 0,
-        blocked: 0,
-        pending: false,
-        status: 'no_work',
-      }),
-    });
+  it.each(['malformed', 'rpc', 'transport'] as const)(
+    'clears a recovered %s read failure while retaining cleanup feedback',
+    async (failure) => {
+      mocks.fetch.mockResolvedValue({
+        ok: true,
+        json: async () => ({
+          deleted: 0,
+          failed: 0,
+          outstanding: 0,
+          blocked: 0,
+          pending: false,
+          status: 'no_work',
+        }),
+      });
+      let fail = true;
+      mocks.browserRpc.mockImplementation((name: string) => {
+        if (name !== 'inventory_file_cards') return mocks.operation(name);
+        if (!fail)
+          return Promise.resolve({ data: envelope([ready]), error: null });
+        if (failure === 'transport')
+          return Promise.reject(new Error('Transport unavailable'));
+        return Promise.resolve(
+          failure === 'rpc'
+            ? { data: null, error: { message: 'Read unavailable' } }
+            : { data: { revision: '1', files: [{}] }, error: null },
+        );
+      });
+      const view = render(
+        <SeededFilesPanel {...props} initialEnvelope={envelope([])} />,
+      );
+      fireEvent.click(
+        screen.getByRole('button', { name: 'Check file cleanup' }),
+      );
+      await screen.findByText('No file cleanup is needed for this record.');
+      view.rerender(
+        <SeededFilesPanel {...props} initialEnvelope={envelope([], '13')} />,
+      );
+      await screen.findByText('Files could not be loaded.');
+      expect(
+        screen.getByText('No file cleanup is needed for this record.'),
+      ).toBeVisible();
+      fail = false;
+      view.rerender(
+        <SeededFilesPanel {...props} initialEnvelope={envelope([], '14')} />,
+      );
+      await screen.findByRole('button', { name: 'Download PDF' });
+      expect(cardReads()).toHaveLength(2);
+      expect(
+        screen.queryByText('Files could not be loaded.'),
+      ).not.toBeInTheDocument();
+      expect(
+        screen.getByText('No file cleanup is needed for this record.'),
+      ).toBeVisible();
+    },
+  );
+  it('restores the confirmed empty collection after a failed reread recovers', async () => {
     let fail = true;
     mocks.browserRpc.mockImplementation((name: string) =>
       name === 'inventory_file_cards'
         ? Promise.resolve(
             fail
-              ? { data: { revision: '1', files: [{}] }, error: null }
-              : { data: envelope([ready]), error: null },
+              ? { data: null, error: { message: 'Unavailable' } }
+              : { data: envelope([]), error: null },
           )
         : mocks.operation(name),
     );
     const view = render(
       <SeededFilesPanel {...props} initialEnvelope={envelope([])} />,
     );
-    fireEvent.click(screen.getByRole('button', { name: 'Check file cleanup' }));
-    await screen.findByText('No file cleanup is needed for this record.');
     view.rerender(
       <SeededFilesPanel {...props} initialEnvelope={envelope([], '13')} />,
     );
     await screen.findByText('Files could not be loaded.');
+    expect(screen.queryByText('No attachments yet.')).not.toBeInTheDocument();
     fail = false;
     view.rerender(
       <SeededFilesPanel {...props} initialEnvelope={envelope([], '14')} />,
     );
-    await screen.findByRole('button', { name: 'Download PDF' });
+    await screen.findByText('No attachments yet.');
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
     expect(cardReads()).toHaveLength(2);
-    // A metadata refresh preserves action/read feedback and does not reset state.
-    expect(screen.getByText('Files could not be loaded.')).toBeVisible();
   });
   it('ignores a background response that arrives after a confirmed removal', async () => {
     let finish!: (value: unknown) => void;
