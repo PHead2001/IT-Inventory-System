@@ -111,20 +111,39 @@ export async function expectRevealPosition(
     .toBeLessThan(0.001);
 }
 
-/** Capture real frames for ordering evidence without replacing elapsed time. */
-export async function spatialFrames(canvas: Locator, frames: number) {
-  return canvas.evaluate(async (element, limit) => {
-    const samples = [];
-    for (let frame = 0; frame < limit; frame++) {
-      await new Promise<void>((resolve) =>
-        requestAnimationFrame(() => resolve()),
-      );
-      samples.push({
-        phase: element.dataset.spatialPhase,
-        open: element.dataset.spatialOpenCode,
-        request: element.dataset.spatialRequest,
-      });
-    }
-    return samples;
+/** Await browser registration before advancing a paused clock through real RAFs. */
+export async function armSpatialFrames(canvas: Locator, frames: number) {
+  if (!Number.isSafeInteger(frames) || frames < 1)
+    throw new Error('Expected a positive spatial frame count');
+  const capture = await canvas.evaluateHandle((element, limit) => {
+    const samples: Array<{
+      phase: string | undefined;
+      open: string | undefined;
+      request: string | undefined;
+    }> = [];
+    let frame = 0;
+    const completed = new Promise<typeof samples>((resolve) => {
+      const sample = () => {
+        samples.push({
+          phase: element.dataset.spatialPhase,
+          open: element.dataset.spatialOpenCode,
+          request: element.dataset.spatialRequest,
+        });
+        if (samples.length === limit) resolve(samples);
+        else frame = requestAnimationFrame(sample);
+      };
+      frame = requestAnimationFrame(sample);
+    });
+    return { completed, cancel: () => cancelAnimationFrame(frame) };
   }, frames);
+  return {
+    read: () => capture.evaluate((state) => state.completed),
+    dispose: async () => {
+      try {
+        await capture.evaluate((state) => state.cancel());
+      } finally {
+        await capture.dispose();
+      }
+    },
+  };
 }

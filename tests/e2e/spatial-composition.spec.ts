@@ -30,7 +30,7 @@ import {
   expectSingleLiveRenderer,
   expectNoRendererOverlap,
   expectRevealPosition,
-  spatialFrames,
+  armSpatialFrames,
 } from './spatial-composition-observations';
 
 const room = roomSchema.parse(rawRoom);
@@ -724,13 +724,19 @@ test('W14 actual Full flight precedes reveal, newer selection retires it, and Re
     revealNode('ITC-S1A').id,
     toScenePosition(revealOffset(revealNode('ITC-S1A'))),
   );
-  const pendingFrames = spatialFrames(canvas, 3);
-  await page.clock.runFor(64);
-  expect(
-    (await pendingFrames).every(
-      (sample) => sample.phase === 'settled' && sample.open === 'ITC-S1A',
-    ),
-  ).toBe(true);
+  const pendingFrames = await armSpatialFrames(canvas, 3);
+  try {
+    await page.clock.runFor(64);
+    const samples = await pendingFrames.read();
+    expect(samples).toHaveLength(3);
+    expect(
+      samples.every(
+        (sample) => sample.phase === 'settled' && sample.open === 'ITC-S1A',
+      ),
+    ).toBe(true);
+  } finally {
+    await pendingFrames.dispose();
+  }
   await page.screenshot({
     path: testInfo.outputPath('reduced-complete-spatial-endpoint.png'),
   });
