@@ -6,9 +6,11 @@ import { Plus } from 'lucide-react';
 export function TrackingTypeChoices({
   query = '',
   onNavigate,
+  disabled = false,
 }: {
   query?: string;
   onNavigate?: (href: string) => void;
+  disabled?: boolean;
 }) {
   const id = useId();
   return (
@@ -28,6 +30,30 @@ export function TrackingTypeChoices({
       ].map((choice) => {
         const href =
           '/inventory/' + choice.kind + '/new' + (query ? '?' + query : '');
+        const content = (
+          <>
+            <strong className="block text-sm">{choice.label}</strong>
+            <span
+              id={id + '-' + choice.kind}
+              className="experience-muted mt-1 block text-sm"
+            >
+              {choice.description}
+            </span>
+          </>
+        );
+        if (disabled)
+          return (
+            <div
+              key={choice.kind}
+              role="link"
+              aria-disabled="true"
+              aria-label={choice.label}
+              aria-describedby={id + '-' + choice.kind}
+              className="min-w-0 rounded-lg border border-[color:var(--button-outline-border)] p-3 opacity-50"
+            >
+              {content}
+            </div>
+          );
         return (
           <Link
             key={choice.kind}
@@ -50,13 +76,7 @@ export function TrackingTypeChoices({
             }}
             className="min-w-0 rounded-lg border border-[color:var(--button-outline-border)] p-3 hover:bg-[var(--button-outline-hover-background)] focus-visible:outline-2 focus-visible:outline-[color:var(--control-focus-outline)]"
           >
-            <strong className="block text-sm">{choice.label}</strong>
-            <span
-              id={id + '-' + choice.kind}
-              className="experience-muted mt-1 block text-sm"
-            >
-              {choice.description}
-            </span>
+            {content}
           </Link>
         );
       })}

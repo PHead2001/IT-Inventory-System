@@ -204,6 +204,7 @@ export function CommandProvider({
     typeof createSupabaseBrowserClient
   > | null>(null);
   const authEpoch = useRef(0);
+  const cancelAuthWait = useRef<(() => void) | null>(null);
   const sessionIdentity = useRef<string | null>(actorId);
   const inFlight = useRef<AbortController | null>(null);
   const pendingDestination = useRef<{
@@ -219,6 +220,8 @@ export function CommandProvider({
   }, []);
   const cancelSessionWork = useCallback((retainArrival = false) => {
     authEpoch.current++;
+    cancelAuthWait.current?.();
+    cancelAuthWait.current = null;
     generation.current++;
     executionEpoch.current++;
     inFlight.current?.abort();
@@ -249,22 +252,41 @@ export function CommandProvider({
     [clearPrefix, cancelSessionWork],
   );
   async function verifySession() {
+    cancelAuthWait.current?.();
     const epoch = ++authEpoch.current;
     const owner = boundary.capture();
     setAuthChecked(false);
+    setError('');
     executionEpoch.current++;
     generation.current++;
     inFlight.current?.abort();
     setResult(null);
     setLoading(false);
+    let deadline: ReturnType<typeof setTimeout> | undefined;
+    let cancel!: () => void;
+    const retired = new Promise<null>((resolve) => {
+      cancel = () => {
+        clearTimeout(deadline);
+        resolve(null);
+      };
+      // Presentation verification has the same bounded lifetime as command
+      // search. A transport that ignores cancellation cannot authorize later.
+      deadline = setTimeout(cancel, 8000);
+    });
+    cancelAuthWait.current = cancel;
     try {
       const client = authClient.current;
       if (!client) throw new Error('Session unavailable');
+      const answer = await Promise.race([client.auth.getUser(), retired]);
+      if (epoch !== authEpoch.current || !owner()) return;
+      if (!answer) {
+        setError('Your session could not be checked. Try again.');
+        return;
+      }
       const {
         data: { user },
         error: authError,
-      } = await client.auth.getUser();
-      if (epoch !== authEpoch.current || !owner()) return;
+      } = answer;
       if (authError) {
         if (isSessionDenial(authError)) invalidateSession();
         else setError('Your session could not be checked. Try again.');
@@ -286,6 +308,9 @@ export function CommandProvider({
         setError('Your session could not be checked. Try again.');
         setLoading(false);
       }
+    } finally {
+      clearTimeout(deadline);
+      if (cancelAuthWait.current === cancel) cancelAuthWait.current = null;
     }
   }
   useEffect(() => {
@@ -347,6 +372,9 @@ export function CommandProvider({
   function close(restore = true) {
     const focusOwner = boundary.capture();
     const focusTarget = invoker.current;
+    authEpoch.current++;
+    cancelAuthWait.current?.();
+    cancelAuthWait.current = null;
     executionEpoch.current++;
     generation.current++;
     inFlight.current?.abort();
@@ -527,7 +555,7 @@ export function CommandProvider({
     return () => {
       document.body.style.overflow = priorOverflow;
     };
-  }, [overlay, intent]);
+  }, [overlay, intent, authChecked]);
   useEffect(() => {
     const request = ++generation.current;
     const owner = boundary.capture();
@@ -850,6 +878,27 @@ export function CommandProvider({
                 <X size={18} aria-hidden="true" />
               </Button>
             </div>
+            {overlay === 'palette' && !authChecked && !error && (
+              <p role="status">Checking your session…</p>
+            )}
+            {overlay === 'palette' && error && (
+              <div role="alert" className="experience-feedback space-y-2">
+                <p>{error}</p>
+                <Button
+                  variant="outline"
+                  onClick={() => {
+                    (intent === 'add'
+                      ? dialog.current
+                      : input.current
+                    )?.focus();
+                    void verifySession();
+                    setRetry((value) => value + 1);
+                  }}
+                >
+                  Retry search
+                </Button>
+              </div>
+            )}
             {overlay === 'help' ? (
               <>
                 <p className="experience-muted text-sm">
@@ -888,7 +937,10 @@ export function CommandProvider({
             ) : intent === 'add' ? (
               <>
                 <p>How do you track this item?</p>
-                <TrackingTypeChoices onNavigate={navigate} />
+                <TrackingTypeChoices
+                  onNavigate={navigate}
+                  disabled={!authChecked}
+                />
               </>
             ) : (
               <>
@@ -926,9 +978,6 @@ export function CommandProvider({
                     and available tasks are checked when you open the record.
                   </p>
                 )}
-                {!authChecked && !error && (
-                  <p role="status">Checking your session…</p>
-                )}
                 {query.trim().length > 0 &&
                   Array.from(query.trim()).length < 3 && (
                     <p className="experience-muted text-sm">
@@ -949,20 +998,6 @@ export function CommandProvider({
                         className="h-11 rounded bg-[var(--workspace-feedback-background)]"
                       />
                     ))}
-                  </div>
-                )}
-                {error && (
-                  <div role="alert" className="experience-feedback space-y-2">
-                    <p>{error}</p>
-                    <Button
-                      variant="outline"
-                      onClick={() => {
-                        void verifySession();
-                        setRetry((value) => value + 1);
-                      }}
-                    >
-                      Retry search
-                    </Button>
                   </div>
                 )}
                 <div
@@ -1038,13 +1073,22 @@ export function CommandProvider({
                               row.kind === 'quantity') && (
                               <span className="block text-sm">
                                 {row.context.places.length === 0
-                                  ? 'No current storage or site'
+                                  ? row.kind === 'asset' &&
+                                    row.status === 'retired'
+                                    ? 'No recorded storage or site assignment'
+                                    : 'No current storage or site'
                                   : row.context.places
                                       .map(
                                         (place) =>
                                           (place.kind === 'site'
-                                            ? 'Site: '
-                                            : 'Storage: ') +
+                                            ? row.kind === 'asset' &&
+                                              row.status === 'retired'
+                                              ? 'Last recorded site: '
+                                              : 'Site: '
+                                            : row.kind === 'asset' &&
+                                                row.status === 'retired'
+                                              ? 'Last recorded storage: '
+                                              : 'Storage: ') +
                                           (place.kind === 'location'
                                             ? (place.breadcrumb ?? place.name)
                                             : place.name) +

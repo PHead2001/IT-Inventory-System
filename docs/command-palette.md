@@ -34,6 +34,14 @@ prevents a remount from reopening a closed task. Retired or site-held assets gai
 no forced storage move. Existing authorization, versions, review and retry
 identity stay authoritative at submission.
 
+Add mode shows the session-check status and retains both tracking descriptions
+as disabled choices without navigation links until the caller is verified.
+Session verification on opening or Retry has an eight-second deadline. Transient
+failure or timeout retains the dialog, query and cursor with explicit Retry;
+retrying starts a fresh check. Late answers cannot authorize an expired check or
+overwrite a newer request/owner. Closing, revocation, unmount and settlement clear
+the owned deadline. These presentation checks do not change server authorization.
+
 Native URL consumption omits only Next's history bypass markers; its supported
 history wrapper retains router state and synchronizes useSearchParams. Application
 history state, unrelated query parameters and hashes remain. Commands and ordinary
@@ -150,7 +158,10 @@ rendered as normal text.
 
 Inventory rows add optional current context: up to three authorized named storage
 locations or sites, plus `hasMore` from a fourth-place sentinel. Location rows and displayed storage contexts add optional canonical full breadcrumbs from caller-invoker `inventory_locations`; only the deduplicated twenty results and three displayed places are enriched. Missing legacy breadcrumbs remain unknown and are omitted, never reconstructed from leaf names. Assets use their
-current storage/site fields; quantity items use positive storage and site holdings.
+current storage/site fields while active. Retired assets label preserved storage
+as Last recorded storage, matching the detail page's historical custody meaning;
+an explicit empty retired context says no recorded storage or site assignment.
+Quantity items use positive storage and site holdings.
 Enrichment follows entity deduplication and the twenty-result cap; it never
 aggregates all holdings or reads event history. An explicit empty context means
 no current storage/site; legacy absent context remains unknown and is omitted.

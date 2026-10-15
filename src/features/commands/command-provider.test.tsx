@@ -1179,3 +1179,324 @@ it.each(['sites', 'mixed'] as const)(
     expect(option).not.toHaveTextContent('Office 3');
   },
 );
+
+function pendingCaller() {
+  let resolve!: (value: unknown) => void;
+  const promise = new Promise((finish) => {
+    resolve = finish;
+  });
+  return { promise, resolve };
+}
+const verifiedCaller = { data: { user: { id: 'actor' } }, error: null };
+
+it('shows checking status and disabled Add choices until the caller is verified', async () => {
+  const caller = pendingCaller();
+  auth.getUser.mockReturnValueOnce(caller.promise);
+  render(<Workspace />);
+  fireEvent.keyDown(window, { key: 'n' });
+  await act(async () => {});
+  expect(screen.getByRole('status')).toHaveTextContent('Checking your session');
+  for (const name of ['Add quantity item', 'Add individual asset']) {
+    const choice = screen.getByRole('link', { name });
+    expect(choice).toHaveAttribute('aria-disabled', 'true');
+    expect(choice).not.toHaveAttribute('href');
+    fireEvent.click(choice);
+    fireEvent.click(choice, { ctrlKey: true });
+    fireEvent.keyDown(choice, { key: 'Enter' });
+  }
+  expect(navigation.push).not.toHaveBeenCalled();
+  expect(fetch).not.toHaveBeenCalled();
+  await act(async () => caller.resolve(verifiedCaller));
+  const quantity = screen.getByRole('link', { name: 'Add quantity item' });
+  expect(quantity).toHaveAttribute('href', '/inventory/quantity/new');
+  expect(quantity).toHaveFocus();
+  expect(screen.queryByText('Checking your session…')).toBeNull();
+});
+
+it.each(['resolved', 'thrown'] as const)(
+  'keeps Add mode and disabled choices with explicit Retry after %s Auth failure',
+  async (kind) => {
+    if (kind === 'resolved')
+      auth.getUser.mockResolvedValueOnce({
+        data: { user: null },
+        error: { status: 503 },
+      });
+    else auth.getUser.mockRejectedValueOnce(new TypeError('Offline'));
+    const retry = pendingCaller();
+    auth.getUser.mockReturnValueOnce(retry.promise);
+    render(<Workspace />);
+    fireEvent.keyDown(window, { key: 'n' });
+    await act(async () => {});
+    expect(screen.getByRole('heading', { name: 'Add item' })).toBeVisible();
+    expect(screen.getByRole('alert')).toHaveTextContent(
+      'Your session could not be checked. Try again.',
+    );
+    expect(
+      screen.getByRole('link', { name: 'Add individual asset' }),
+    ).not.toHaveAttribute('href');
+    fireEvent.click(screen.getByRole('button', { name: 'Retry search' }));
+    await act(async () => {});
+    expect(screen.getByRole('status')).toHaveTextContent(
+      'Checking your session',
+    );
+    expect(screen.queryByRole('alert')).toBeNull();
+    expect(navigation.push).not.toHaveBeenCalled();
+    await act(async () => retry.resolve(verifiedCaller));
+    const choice = screen.getByRole('link', { name: 'Add individual asset' });
+    expect(choice).toHaveAttribute('href', '/inventory/assets/new');
+    fireEvent.click(choice);
+    await act(async () => {});
+    expect(navigation.push).toHaveBeenCalledWith('/inventory/assets/new');
+  },
+);
+
+it.each(['search', 'add'] as const)(
+  'bounds a nonsettling caller check in %s mode and recovers through Retry',
+  async (mode) => {
+    auth.getUser.mockReturnValueOnce(new Promise(() => {}));
+    render(<Workspace />);
+    let search: HTMLInputElement | undefined;
+    if (mode === 'add') fireEvent.keyDown(window, { key: 'n' });
+    else {
+      search = open();
+      fireEvent.change(search, { target: { value: 'scan' } });
+      search.setSelectionRange(1, 2);
+    }
+    await act(async () => {});
+    await act(async () => vi.advanceTimersByTimeAsync(7999));
+    expect(screen.getByRole('status')).toHaveTextContent(
+      'Checking your session',
+    );
+    expect(screen.queryByRole('alert')).toBeNull();
+    expect(fetch).not.toHaveBeenCalled();
+    expect(navigation.push).not.toHaveBeenCalled();
+    await act(async () => vi.advanceTimersByTimeAsync(1));
+    expect(screen.getByRole('alert')).toHaveTextContent(
+      'Your session could not be checked. Try again.',
+    );
+    if (search) {
+      expect(search).toHaveValue('scan');
+      expect(search.selectionStart).toBe(1);
+      expect(search.selectionEnd).toBe(2);
+      expect(screen.getByRole('option', { name: /^Scan/ })).toBeDisabled();
+    } else
+      expect(
+        screen.getByRole('link', { name: 'Add quantity item' }),
+      ).not.toHaveAttribute('href');
+    fireEvent.click(screen.getByRole('button', { name: 'Retry search' }));
+    await settle();
+    expect(auth.getUser).toHaveBeenCalledTimes(2);
+    expect(screen.queryByRole('alert')).toBeNull();
+    if (search) {
+      expect(search).toHaveValue('scan');
+      expect(search.selectionStart).toBe(1);
+      expect(screen.getByRole('option', { name: /^Scan/ })).toBeEnabled();
+      expect(fetch).toHaveBeenCalledTimes(1);
+    } else
+      expect(
+        screen.getByRole('link', { name: 'Add quantity item' }),
+      ).toHaveFocus();
+  },
+);
+
+it.each(['success', 'transient', 'denial'] as const)(
+  'keeps timeout recovery closed to a late %s without requiring another request',
+  async (kind) => {
+    const first = pendingCaller();
+    auth.getUser.mockReturnValueOnce(first.promise);
+    render(<Workspace />);
+    fireEvent.keyDown(window, { key: 'n' });
+    await act(async () => vi.advanceTimersByTimeAsync(8000));
+    await act(async () =>
+      first.resolve(
+        kind === 'success'
+          ? verifiedCaller
+          : {
+              data: { user: null },
+              error: { status: kind === 'denial' ? 401 : 503 },
+            },
+      ),
+    );
+    expect(screen.getByRole('dialog')).toBeVisible();
+    expect(screen.getByRole('button', { name: 'Retry search' })).toBeVisible();
+    expect(screen.getByRole('alert')).toHaveTextContent(
+      'Your session could not be checked',
+    );
+    expect(
+      screen.getByRole('link', { name: 'Add quantity item' }),
+    ).not.toHaveAttribute('href');
+    expect(auth.getUser).toHaveBeenCalledTimes(1);
+    expect(fetch).not.toHaveBeenCalled();
+    expect(navigation.push).not.toHaveBeenCalled();
+  },
+);
+
+it('clears a completed caller deadline so it cannot expire a verified opening', async () => {
+  render(<Workspace />);
+  const search = open();
+  fireEvent.change(search, { target: { value: 'scan' } });
+  await settle();
+  await act(async () => vi.advanceTimersByTimeAsync(8000));
+  expect(screen.getByRole('dialog')).toBeVisible();
+  expect(screen.queryByRole('alert')).toBeNull();
+  expect(screen.getByRole('option', { name: /^Scan/ })).toBeEnabled();
+  expect(fetch).toHaveBeenCalledTimes(1);
+});
+
+it.each(['success', 'transient', 'denial'] as const)(
+  'ignores a timed-out caller check late %s while a newer Retry is pending',
+  async (kind) => {
+    const first = pendingCaller();
+    const retry = pendingCaller();
+    auth.getUser
+      .mockReturnValueOnce(first.promise)
+      .mockReturnValueOnce(retry.promise);
+    render(<Workspace />);
+    const search = open();
+    fireEvent.change(search, { target: { value: 'scan' } });
+    await act(async () => vi.advanceTimersByTimeAsync(8000));
+    fireEvent.click(screen.getByRole('button', { name: 'Retry search' }));
+    await act(async () => {});
+    await act(async () =>
+      first.resolve(
+        kind === 'success'
+          ? verifiedCaller
+          : {
+              data: { user: null },
+              error: { status: kind === 'denial' ? 401 : 503 },
+            },
+      ),
+    );
+    expect(screen.getByRole('status')).toHaveTextContent(
+      'Checking your session',
+    );
+    expect(screen.getByRole('option', { name: /^Scan/ })).toBeDisabled();
+    expect(fetch).not.toHaveBeenCalled();
+    expect(screen.queryByRole('alert')).toBeNull();
+    await act(async () => retry.resolve(verifiedCaller));
+    await settle();
+    expect(screen.getByRole('option', { name: /^Scan/ })).toBeEnabled();
+    expect(screen.queryByRole('alert')).toBeNull();
+    expect(fetch).toHaveBeenCalledTimes(1);
+  },
+);
+
+it.each(['close', 'unmount', 'revocation'] as const)(
+  'clears the pending caller deadline on %s and ignores late completion',
+  async (reason) => {
+    const caller = pendingCaller();
+    auth.getUser.mockReturnValueOnce(caller.promise);
+    const schedule = vi.spyOn(globalThis, 'setTimeout');
+    const clear = vi.spyOn(globalThis, 'clearTimeout');
+    const view = render(<Workspace />);
+    await act(async () => {});
+    open();
+    await act(async () => {});
+    const deadlineIndex = schedule.mock.calls.findIndex(
+      ([, delay]) => delay === 8000,
+    );
+    expect(deadlineIndex).toBeGreaterThanOrEqual(0);
+    const deadline = schedule.mock.results[deadlineIndex].value;
+    if (reason === 'unmount') view.unmount();
+    else if (reason === 'close') fireEvent.keyDown(window, { key: 'Escape' });
+    else act(() => revokePrivatePresentation());
+    await act(async () => {});
+    expect(clear).toHaveBeenCalledWith(deadline);
+    await act(async () => caller.resolve(verifiedCaller));
+    await act(async () => vi.advanceTimersByTimeAsync(8000));
+    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(fetch).not.toHaveBeenCalled();
+    expect(navigation.push).not.toHaveBeenCalled();
+  },
+);
+
+it.each(['success', 'transient', 'denial'] as const)(
+  'does not let late %s overwrite an already verified Retry result',
+  async (kind) => {
+    const first = pendingCaller();
+    auth.getUser.mockReturnValueOnce(first.promise);
+    render(<Workspace />);
+    const search = open();
+    fireEvent.change(search, { target: { value: 'scan' } });
+    search.setSelectionRange(1, 2);
+    await act(async () => vi.advanceTimersByTimeAsync(8000));
+    fireEvent.click(screen.getByRole('button', { name: 'Retry search' }));
+    await settle();
+    expect(screen.getByRole('option', { name: /^Scan/ })).toBeEnabled();
+    await act(async () =>
+      first.resolve(
+        kind === 'success'
+          ? verifiedCaller
+          : {
+              data: { user: null },
+              error: { status: kind === 'denial' ? 403 : 503 },
+            },
+      ),
+    );
+    expect(screen.getByRole('dialog')).toBeVisible();
+    expect(screen.getByRole('option', { name: /^Scan/ })).toBeEnabled();
+    expect(screen.queryByRole('alert')).toBeNull();
+    expect(search).toHaveValue('scan');
+    expect(search).toHaveFocus();
+    expect(search.selectionStart).toBe(1);
+    expect(fetch).toHaveBeenCalledTimes(1);
+  },
+);
+
+it.each(['storage', 'empty', 'legacy'] as const)(
+  'labels retired asset %s context as historical without claiming current custody',
+  async (kind) => {
+    const context =
+      kind === 'legacy'
+        ? undefined
+        : {
+            places:
+              kind === 'empty'
+                ? []
+                : [
+                    {
+                      kind: 'location',
+                      id: row.id,
+                      name: 'Drawer 1',
+                      code: 'ITC-D01',
+                      breadcrumb: 'IT Closet / Drawer 1',
+                    },
+                  ],
+            hasMore: false,
+          };
+    vi.mocked(fetch).mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          identity: { actorId: 'actor', backend: 'local-backend' },
+          result: {
+            version: 1,
+            rows: [{ ...row, status: 'retired', context }],
+            hasMore: false,
+          },
+        }),
+      ),
+    );
+    render(<Workspace />);
+    const search = open();
+    fireEvent.change(search, { target: { value: 'camera' } });
+    fireEvent.click(screen.getByRole('checkbox', { name: /Include retired/ }));
+    await settle();
+    const option = screen.getByRole('option', { name: /Camera laptop/ });
+    expect(option).toHaveTextContent('retired');
+    expect(option).not.toHaveTextContent('No current storage or site');
+    if (kind === 'storage') {
+      expect(option).toHaveTextContent(
+        'Last recorded storage: IT Closet / Drawer 1 (ITC-D01)',
+      );
+      fireEvent.click(option);
+      await act(async () => {});
+      expect(navigation.push).toHaveBeenCalledWith(
+        '/inventory/assets/' + row.id,
+      );
+    } else if (kind === 'empty')
+      expect(option).toHaveTextContent(
+        'No recorded storage or site assignment',
+      );
+    else expect(option).not.toHaveTextContent(/recorded storage/i);
+  },
+);
