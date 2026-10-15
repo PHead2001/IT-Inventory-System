@@ -31,11 +31,17 @@ import {
 
 type Capture = {
   name: string;
+  region: string;
+  bounds: { x: number; y: number; width: number; height: number };
+  viewport: { width: number; height: number; scrollY: number };
   tag: string;
   canvas: boolean;
   shell: boolean;
   primary?: boolean;
   primaryHeading?: 'Inventory' | 'Inventory history';
+};
+type RegionLayout = Pick<Capture, 'tag' | 'bounds' | 'viewport' | 'name'> & {
+  candidate: 'primary-wrapper' | 'heading' | 'section';
 };
 type ColdTitleGeometry = {
   x: number;
@@ -71,6 +77,7 @@ type Proof = {
   transitions: Array<{
     old: Capture[];
     next: Capture[];
+    layout: { old: RegionLayout[]; next: RegionLayout[] };
     ready: boolean;
     finished: boolean;
     completionMs?: number;
@@ -116,9 +123,17 @@ async function observeMotion(page: Page, unsupported = false) {
           const name = getComputedStyle(element).viewTransitionName;
           if (!name || name === 'none') return [];
           const heading = element.querySelector('h1')?.textContent?.trim();
+          const { x, y, width, height } = element.getBoundingClientRect();
           return [
             {
               name,
+              region: name.includes('-content')
+                ? name.split('-content')[1].replace(/^-/, '') || 'body'
+                : name.startsWith('inventory-title-')
+                  ? 'title'
+                  : 'other',
+              bounds: { x, y, width, height },
+              viewport: { width: innerWidth, height: innerHeight, scrollY },
               tag: element.tagName,
               canvas:
                 element.tagName === 'CANVAS' ||
@@ -136,6 +151,31 @@ async function observeMotion(page: Page, unsupported = false) {
             },
           ];
         });
+      // Include unnamed ordinary sections so a missing capture can be compared
+      // with real viewport geometry. Never read private text, form values or IDs.
+      const captureLayout = (): RegionLayout[] =>
+        Array.from(
+          document.querySelectorAll(
+            '.experience-paired-inventory-content, #main-content h1, #main-content section',
+          ),
+        )
+          .slice(0, 24)
+          .map((element) => {
+            const { x, y, width, height } = element.getBoundingClientRect();
+            return {
+              tag: element.tagName,
+              name: getComputedStyle(element).viewTransitionName,
+              candidate: element.classList.contains(
+                'experience-paired-inventory-content',
+              )
+                ? 'primary-wrapper'
+                : element.tagName === 'H1'
+                  ? 'heading'
+                  : 'section',
+              bounds: { x, y, width, height },
+              viewport: { width: innerWidth, height: innerHeight, scrollY },
+            };
+          });
       if (unsupported) {
         Object.defineProperty(document, 'startViewTransition', {
           configurable: true,
@@ -177,6 +217,7 @@ async function observeMotion(page: Page, unsupported = false) {
         const entry: Proof['transitions'][number] = {
           old: capture(),
           next: [],
+          layout: { old: captureLayout(), next: [] },
           ready: false,
           finished: false,
           effects: [],
@@ -189,6 +230,7 @@ async function observeMotion(page: Page, unsupported = false) {
         const wrapped = async () => {
           await update?.();
           entry.next = capture();
+          entry.layout.next = captureLayout();
         };
         const transition = native(
           typeof options === 'function'
@@ -454,6 +496,28 @@ async function completedTitlePair(
         nextCount: entry.next.length,
         oldTags: tags(entry.old),
         nextTags: tags(entry.next),
+        old: entry.old
+          .slice(0, 12)
+          .map(({ name, region, bounds, viewport }) => ({
+            name,
+            region,
+            bounds,
+            viewport,
+          })),
+        next: entry.next
+          .slice(0, 12)
+          .map(({ name, region, bounds, viewport }) => ({
+            name,
+            region,
+            bounds,
+            viewport,
+          })),
+        layout: entry.layout,
+        effects: entry.effects.slice(0, 24).map((effect) => ({
+          pseudo: effect.pseudo,
+          opacity: effect.opacityFrames,
+          activeDuration: effect.activeDuration,
+        })),
       })),
     });
   if (settlementError) throw new Error(diagnostic, { cause: settlementError });

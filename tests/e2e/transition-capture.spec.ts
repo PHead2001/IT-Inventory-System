@@ -10,7 +10,168 @@ declare global {
       transition(): void;
       release(): void;
     };
+    regionHarness: {
+      transition(): void;
+      proof: {
+        old: NativeRegionCapture[];
+        next: NativeRegionCapture[];
+        effects: string[];
+        ready: boolean;
+        finished: boolean;
+        error: string | null;
+      };
+    };
   }
+}
+
+type NativeRegionCapture = {
+  region: string;
+  name: string;
+  bounds: { x: number; y: number; width: number; height: number };
+  viewport: { width: number; height: number };
+};
+
+type NativeRegionCase =
+  | 'visible paired body'
+  | 'below viewport paired body'
+  | 'unmatched visible header'
+  | 'matching outgoing header';
+
+/** Exercise the installed production React traversal, not a ViewTransition mock.
+ * The keyed ancestor has default=none like PageArrival's nested capture boundary.
+ * The title is always a real visible shared pair; all content is ordinary flow. */
+async function regionHarness(kind: NativeRegionCase) {
+  const below = kind === 'below viewport paired body';
+  const header = kind.includes('header');
+  const matchingHeader = kind === 'matching outgoing header';
+  const result = await build({
+    stdin: {
+      contents: `
+        import React, {startTransition, useState, ViewTransition} from 'react';
+        import {createRoot} from 'react-dom/client';
+        const proof = {old:[], next:[], effects:[], ready:false, finished:false, error:null};
+        const capture = () => Array.from(document.querySelectorAll('[data-region]')).map(element => {
+          const {x,y,width,height} = element.getBoundingClientRect();
+          return {region:element.dataset.region, name:getComputedStyle(element).viewTransitionName,
+            bounds:{x,y,width,height}, viewport:{width:innerWidth,height:innerHeight}};
+        });
+        const native = document.startViewTransition.bind(document);
+        document.startViewTransition = options => {
+          proof.old = capture();
+          const update = typeof options === 'function' ? options : options.update;
+          const wrapped = async () => { await update(); proof.next = capture(); };
+          const transition = native(typeof options === 'function' ? wrapped : {...options,update:wrapped});
+          const sample = () => {
+            for (const animation of document.getAnimations()) {
+              const pseudo = animation.effect?.pseudoElement;
+              if (pseudo?.startsWith('::view-transition') && !proof.effects.includes(pseudo)) proof.effects.push(pseudo);
+            }
+            if (!proof.finished) requestAnimationFrame(sample);
+          };
+          transition.ready.then(() => { proof.ready = true; sample(); }, error => {proof.error = error.name;});
+          transition.finished.then(() => {proof.finished = true;}, error => {proof.error = error.name; proof.finished = true;});
+          return transition;
+        };
+        function App() {
+          const [step,setStep] = useState(0);
+          window.regionHarness = {proof, transition:() => startTransition(() => setStep(n => n+1))};
+          const title = <ViewTransition name="fixture-title" default="none" share="fixture-region">
+            <h1 data-region="title">{step ? 'Record details' : 'Inventory'}</h1>
+          </ViewTransition>;
+          const heading = <header data-region="header">{title}<p>Visible route description {step}</p></header>;
+          return <ViewTransition key={step} default="none" update="none">
+            <main>
+              {${header} && (step || ${matchingHeader}) ?
+                <ViewTransition name="fixture-header" default="none" share="fixture-region" enter="fixture-region" exit="fixture-region">{heading}</ViewTransition> : heading}
+              <ViewTransition name="fixture-body" default="none" share="fixture-region" enter="fixture-region" exit="fixture-region">
+                <section data-region="body" style={{marginTop:${below ? 1100 : 24},padding:20,background:'#eee'}}>
+                  <p>{step ? 'Current record quantity and storage location' : 'Inventory records and locations'}</p>
+                  <button>{step ? 'Move inventory' : 'Open record'}</button>
+                </section>
+              </ViewTransition>
+            </main>
+          </ViewTransition>;
+        }
+        createRoot(document.getElementById('root')).render(<App/>);
+      `,
+      resolveDir: process.cwd(),
+      loader: 'tsx',
+    },
+    bundle: true,
+    write: false,
+    define: { 'process.env.NODE_ENV': '"production"' },
+    alias: {
+      react: resolve('node_modules/next/dist/compiled/react'),
+      'react-dom/client': resolve(
+        'node_modules/next/dist/compiled/react-dom/client',
+      ),
+      'react-dom': resolve('node_modules/next/dist/compiled/react-dom'),
+    },
+  });
+  return result.outputFiles[0].text;
+}
+
+for (const kind of [
+  'visible paired body',
+  'below viewport paired body',
+  'unmatched visible header',
+  'matching outgoing header',
+] as const) {
+  test(`native region traversal: ${kind}`, async ({ page }, info) => {
+    await page.setViewportSize({ width: 1000, height: 700 });
+    await page.setContent(`<style>
+      html {view-transition-name:none}
+      ::view-transition-group(*) {animation-duration:180ms}
+      ::view-transition-old(*), ::view-transition-new(*) {animation-duration:180ms}
+    </style><div id="root"></div>`);
+    await page.addScriptTag({ content: await regionHarness(kind) });
+    await expect(page.getByRole('heading')).toHaveText('Inventory');
+    await page.evaluate(() => window.regionHarness.transition());
+    await expect(page.getByRole('heading')).toHaveText('Record details');
+    await page.waitForFunction(() => window.regionHarness.proof.finished);
+    const proof = await page.evaluate(() => window.regionHarness.proof);
+    await info.attach('native-region-traversal', {
+      body: JSON.stringify({ kind, ...proof }, null, 2),
+      contentType: 'application/json',
+    });
+    const diagnostic = JSON.stringify({ kind, ...proof });
+    expect(proof.error, diagnostic).toBeNull();
+    expect(proof.ready, diagnostic).toBe(true);
+    const hasPair = (name: string) =>
+      ['old', 'new'].every((side) =>
+        proof.effects.includes(`::view-transition-${side}(${name})`),
+      );
+    expect(hasPair('fixture-title'), diagnostic).toBe(true);
+    for (const captures of [proof.old, proof.next]) {
+      const body = captures.find((entry) => entry.region === 'body')!;
+      expect(body.bounds.height, diagnostic).toBeGreaterThan(0);
+      expect(body.bounds.y >= body.viewport.height, diagnostic).toBe(
+        kind === 'below viewport paired body',
+      );
+      expect(body.name, diagnostic).toBe(
+        kind === 'below viewport paired body' ? 'none' : 'fixture-body',
+      );
+    }
+    expect(hasPair('fixture-body'), diagnostic).toBe(
+      kind !== 'below viewport paired body',
+    );
+    expect(
+      proof.effects.some((pseudo) => pseudo.includes('(fixture-body)')),
+      diagnostic,
+    ).toBe(kind !== 'below viewport paired body');
+    expect(hasPair('fixture-header'), diagnostic).toBe(
+      kind === 'matching outgoing header',
+    );
+    if (kind === 'unmatched visible header') {
+      expect(
+        proof.effects.some((pseudo) => pseudo.includes('(fixture-header)')),
+        diagnostic,
+      ).toBe(false);
+      const header = proof.next.find((entry) => entry.region === 'header')!;
+      expect(header.bounds.y, diagnostic).toBeLessThan(header.viewport.height);
+      expect(header.name, diagnostic).toBe('none');
+    }
+  });
 }
 
 // Real bundled React + native capture, independent of accounts, fixtures and DB.
