@@ -17,6 +17,7 @@ import {
   RouteMotionProvider,
   useRouteMotion,
   useInvalidateRouteMotion,
+  useRouteMotionLogoutAttempt,
 } from './route-motion';
 import { observeRouteActionResult } from './route-action-result';
 import {
@@ -29,6 +30,8 @@ import { PageArrival } from './page-arrival';
 import RouteLink from './route-link';
 import { QueueLogoutForm } from '@/features/labels/queue-logout-form';
 import { PrivacyReadinessContext } from '@/components/auth/privacy-readiness';
+import { ProtectedPrivacyBoundary } from '@/components/auth/auth-privacy';
+import { ProtectedPrivacyContent } from '@/components/auth/privacy-content';
 import {
   assignmentEpoch,
   readPrivacyRevocationRevision,
@@ -85,22 +88,26 @@ const runtime = vi.hoisted(() => ({
   refresh: vi.fn(),
   replace: vi.fn(),
   actionPrivacy: '',
+  privacyRead: vi.fn(),
+  privacyIdentity: vi.fn(),
 }));
 vi.mock('@/lib/auth/actions', () => ({
   signOutSession: () => {
     runtime.actionPrivacy =
       document.documentElement.dataset.routeMotionPrivate ?? '';
-    runtime.logout();
-    return Promise.resolve({ ok: false, message: 'Sign-out unavailable.' });
+    return runtime.logout();
   },
 }));
 vi.mock('@/lib/auth/logout-transport', () => ({
   signOutSession: () => {
     runtime.actionPrivacy =
       document.documentElement.dataset.routeMotionPrivate ?? '';
-    runtime.logout();
-    return Promise.resolve({ ok: false, message: 'Sign-out unavailable.' });
+    return runtime.logout();
   },
+}));
+vi.mock('@/lib/auth/privacy-read-transport', () => ({
+  readLogoutPrivacyGeneration: runtime.privacyRead,
+  readProtectedPrivacyIdentity: runtime.privacyIdentity,
 }));
 vi.mock('@/features/configuration/actions', () => ({
   submitConfiguration: runtime.submitConfiguration,
@@ -904,6 +911,15 @@ beforeEach(() => {
   runtime.submitConfiguration.mockReset();
   runtime.refresh.mockReset();
   runtime.replace.mockReset();
+  runtime.logout.mockReset().mockResolvedValue({
+    ok: false,
+    message: 'Sign-out unavailable.',
+  });
+  runtime.privacyRead.mockReset().mockResolvedValue({ status: 'absent' });
+  runtime.privacyIdentity.mockReset().mockResolvedValue({
+    status: 'match',
+    generation: { status: 'absent' },
+  });
   vi.stubGlobal('CSS', { supports: () => true });
   vi.stubGlobal('matchMedia', () => ({
     matches: false,
@@ -2628,6 +2644,7 @@ it.each([null, { user: { id: 'other-account' } }])(
 
 it('a guarded real server-action form keeps intent, while permitted intercepted submission cancels before dispatch', async () => {
   const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false);
+  const skipTransition = vi.fn();
   const observedSubmits: boolean[] = [];
   const observe = (event: Event) =>
     observedSubmits.push(event.defaultPrevented);
@@ -2642,10 +2659,17 @@ it('a guarded real server-action form keeps intent, while permitted intercepted 
       ),
     );
     fireEvent.click(screen.getByRole('link', { name: 'Cable row 2' }));
+    Object.defineProperty(document, 'activeViewTransition', {
+      configurable: true,
+      value: { skipTransition },
+    });
     const form = screen
       .getByRole('button', { name: 'Sign out' })
       .closest('form')!;
+    const beforeDenied = readPrivacyRevocationRevision();
     fireEvent.submit(form);
+    expect(readPrivacyRevocationRevision()).toBe(beforeDenied);
+    expect(skipTransition).not.toHaveBeenCalled();
     expect(document.documentElement.dataset.routeMotionPrivate).toBe('true');
     expect(runtime.logout).not.toHaveBeenCalled();
     expect(screen.getByRole('link', { name: 'Cable row 2' })).toHaveAttribute(
@@ -2654,6 +2678,7 @@ it('a guarded real server-action form keeps intent, while permitted intercepted 
     confirm.mockReturnValue(true);
     fireEvent.submit(form);
     expect(document.documentElement.dataset.routeMotionPrivate).toBe('false');
+    expect(skipTransition).toHaveBeenCalled();
     await waitFor(() => expect(runtime.logout).toHaveBeenCalledOnce());
     expect(runtime.actionPrivacy).toBe('false');
     // Both events are prevented: the first by our guard, the second by React.
@@ -2663,9 +2688,193 @@ it('a guarded real server-action form keeps intent, while permitted intercepted 
     ).not.toHaveAttribute('data-test-transition-name');
   } finally {
     confirm.mockRestore();
+    Reflect.deleteProperty(document, 'activeViewTransition');
     document.removeEventListener('submit', observe);
   }
 });
+it.each(['failure', 'timeout'] as const)(
+  'a logout %s needs a fresh coordinator grant before ordinary Locations navigation recovers',
+  async (outcome) => {
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
+    let finishLogout!: (value: { ok: false; message: string }) => void;
+    runtime.logout.mockReturnValueOnce(
+      new Promise((resolve) => {
+        finishLogout = resolve;
+      }),
+    );
+    let privacy!: React.ContextType<typeof PrivacyReadinessContext>;
+    let motion!: ReturnType<typeof useRouteMotion>;
+    function Observe() {
+      const currentPrivacy = useContext(PrivacyReadinessContext);
+      const currentMotion = useRouteMotion();
+      useLayoutEffect(() => {
+        privacy = currentPrivacy;
+        motion = currentMotion;
+      });
+      return <Probe />;
+    }
+    render(
+      <ProtectedPrivacyBoundary
+        binding={{
+          actorId: 'staff',
+          backend: 'local',
+          role: 'staff',
+          canManageConfiguration: false,
+        }}
+      >
+        <RouteMotionProvider actorId="staff">
+          <Observe />
+          <ProtectedPrivacyContent>
+            <QueueLogoutForm />
+            <RouteLink href="/locations">Locations</RouteLink>
+          </ProtectedPrivacyContent>
+        </RouteMotionProvider>
+      </ProtectedPrivacyBoundary>,
+    );
+    await waitFor(() => expect(screen.getByText('enabled')).toBeVisible());
+    runtime.privacyIdentity.mockClear();
+    fireEvent.submit(
+      screen.getByRole('button', { name: 'Sign out' }).closest('form')!,
+    );
+    await waitFor(() => expect(runtime.logout).toHaveBeenCalledOnce());
+    await waitFor(() => expect(runtime.privacyIdentity).toHaveBeenCalled());
+    await waitFor(() => expect(privacy.ready).toBe(true));
+    // Even a genuine check completed during the attempt cannot release its lease.
+    expect(privacy.verifiedEpoch).toBe(assignmentEpoch());
+    expect(screen.getByText('instant')).toBeVisible();
+    expect(document.documentElement.dataset.routeMotionPrivate).toBe('false');
+
+    let finishIdentity!: (value: unknown) => void;
+    runtime.privacyIdentity.mockReturnValueOnce(
+      new Promise((resolve) => {
+        finishIdentity = resolve;
+      }),
+    );
+    const priorChecks = runtime.privacyIdentity.mock.calls.length;
+    await act(async () =>
+      finishLogout({
+        ok: false,
+        message:
+          outcome === 'timeout'
+            ? 'Sign-out could not be confirmed.'
+            : 'Sign-out unavailable.',
+      }),
+    );
+    await waitFor(() =>
+      expect(runtime.privacyIdentity.mock.calls.length).toBeGreaterThan(
+        priorChecks,
+      ),
+    );
+    expect(privacy.ready).toBe(false);
+    expect(screen.getByText('instant')).toBeVisible();
+    await act(async () =>
+      finishIdentity(
+        outcome === 'timeout'
+          ? { status: 'unavailable' }
+          : { status: 'match', generation: { status: 'absent' } },
+      ),
+    );
+    if (outcome === 'timeout') {
+      expect(screen.getByText('instant')).toBeVisible();
+      expect(document.documentElement.dataset.routeMotionPrivate).toBe('false');
+      expect(motion.arrival).toBeNull();
+    } else {
+      await waitFor(() => expect(screen.getByText('enabled')).toBeVisible());
+      fireEvent.click(screen.getByRole('link', { name: 'Locations' }));
+      expect(motion.arrival?.destinationKey).toBe('/locations');
+    }
+    vi.restoreAllMocks();
+  },
+);
+
+it.each(['confirmed', 'auth revocation'] as const)(
+  'permanently closes a pending logout on late %s even after the form unmounts',
+  async (outcome) => {
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
+    let finish!: (value: {
+      ok: boolean;
+      message?: string;
+      logoutGeneration?: string;
+    }) => void;
+    runtime.logout.mockReturnValueOnce(
+      new Promise((resolve) => {
+        finish = resolve;
+      }),
+    );
+    const fixture = (show: boolean) =>
+      view(
+        <>
+          {show && <QueueLogoutForm />}
+          <List />
+        </>,
+      );
+    const page = render(fixture(true));
+    fireEvent.submit(
+      screen.getByRole('button', { name: 'Sign out' }).closest('form')!,
+    );
+    await waitFor(() => expect(runtime.logout).toHaveBeenCalledOnce());
+    page.rerender(fixture(false));
+    if (outcome === 'auth revocation')
+      act(() => runtime.callbacks.at(-1)!('SIGNED_OUT', null));
+    await act(async () =>
+      finish(
+        outcome === 'confirmed'
+          ? {
+              ok: true,
+              logoutGeneration: '00000000-0000-4000-8000-000000000001',
+            }
+          : { ok: false, message: 'Unavailable' },
+      ),
+    );
+    page.rerender(fixture(false));
+    expect(screen.getByText('instant')).toBeVisible();
+    expect(document.documentElement.dataset.routeMotionPrivate).toBe('false');
+    fireEvent.click(screen.getByRole('link', { name: 'Cable row 2' }));
+    expect(
+      screen.getByRole('link', { name: 'Cable row 2' }),
+    ).not.toHaveAttribute('data-test-transition-name');
+    vi.restoreAllMocks();
+  },
+);
+
+it('only the exact current logout lease may settle or close its provider', () => {
+  const begins: Array<ReturnType<typeof useRouteMotionLogoutAttempt>> = [];
+  function Capture() {
+    const begin = useRouteMotionLogoutAttempt();
+    useLayoutEffect(() => {
+      begins.push(begin);
+    });
+    return null;
+  }
+  const fixture = (actor = 'staff') => view(<Capture />, actor);
+  const page = render(fixture());
+  let old!: (confirmed: boolean) => void;
+  let current!: (confirmed: boolean) => void;
+  act(() => {
+    old = begins.at(-1)!();
+  });
+  act(() => {
+    current = begins.at(-1)!();
+  });
+  const revision = readPrivacyRevocationRevision();
+  act(() => old(true));
+  expect(readPrivacyRevocationRevision()).toBe(revision);
+  page.rerender(fixture());
+  expect(screen.getByText('instant')).toBeVisible();
+  act(() => current(false));
+  page.rerender(fixture());
+  expect(screen.getByText('enabled')).toBeVisible();
+  let retired!: (confirmed: boolean) => void;
+  act(() => {
+    retired = begins.at(-1)!();
+  });
+  page.rerender(fixture('replacement-actor'));
+  const replacementRevision = readPrivacyRevocationRevision();
+  act(() => retired(true));
+  expect(readPrivacyRevocationRevision()).toBe(replacementRevision);
+  expect(screen.getByText('enabled')).toBeVisible();
+});
+
 it('same-actor refresh preserves intent while unmounted callbacks cannot suppress a new account', () => {
   const { rerender } = render(view(<List />));
   const oldCallback = runtime.callbacks.at(-1)!;

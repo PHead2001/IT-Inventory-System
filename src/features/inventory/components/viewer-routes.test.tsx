@@ -8,11 +8,15 @@ import SiteOpeningPage from '@/app/(protected)/sites/[code]/open/[kind]/page';
 vi.mock('server-only', () => ({}));
 const fixture = vi.hoisted(() => ({
   role: 'viewer',
-  fileCards: vi.fn(async (name: string) => {
-    if (name !== 'inventory_file_cards')
-      throw new Error('Unexpected RPC: ' + name);
-    return { data: { revision: '1', files: [] }, error: null };
-  }),
+  fileCards: vi.fn(
+    async (
+      name: string,
+    ): Promise<{ data: unknown; error: unknown; status?: number }> => {
+      if (name !== 'inventory_file_cards')
+        throw new Error('Unexpected RPC: ' + name);
+      return { data: { revision: '1', files: [] }, error: null };
+    },
+  ),
   forms: vi.fn(async (ids: string[]) => {
     void ids;
     return {};
@@ -61,11 +65,14 @@ vi.mock('@/features/files/files-panel', () => ({
   FilesPanel: ({
     parentType,
     staff,
+    initialState,
   }: {
+    initialState: { status: string };
     parentType: 'quantity' | 'asset';
     staff: boolean;
   }) => (
     <section
+      data-file-status={initialState.status}
       aria-label={
         parentType === 'quantity' ? 'Quantity photo' : 'Asset attachments'
       }
@@ -115,7 +122,10 @@ vi.mock('../actions', () => ({
   submitInventory: vi.fn(),
   findDuplicateSerials: vi.fn(),
 }));
-vi.mock('next/navigation', () => ({
+vi.mock('next/navigation', async () => ({
+  unstable_rethrow: (
+    await vi.importActual<typeof import('next/navigation')>('next/navigation')
+  ).unstable_rethrow,
   useRouter: () => ({ refresh: vi.fn(), push: vi.fn() }),
   notFound: () => {
     throw new Error('not found');
@@ -226,3 +236,55 @@ it('lazy mounts metadata edit through the task launcher', async () => {
     screen.getByRole('form', { name: 'Edit asset metadata' }),
   ).toBeVisible();
 });
+
+it.each(['asset', 'quantity'] as const)(
+  'keeps authorized %s core detail usable when optional file metadata is unavailable',
+  async (kind) => {
+    const Page = kind === 'asset' ? AssetPage : QuantityPage;
+    for (const failure of ['rpc', 'malformed', 'transport']) {
+      if (failure === 'transport')
+        fixture.fileCards.mockRejectedValueOnce(
+          new TypeError('Network unavailable'),
+        );
+      else
+        fixture.fileCards.mockResolvedValueOnce(
+          failure === 'rpc'
+            ? {
+                data: null,
+                error: { message: 'Provider unavailable' },
+                status: 503,
+              }
+            : { data: { revision: '1', files: [{}] }, error: null },
+        );
+      const view = render(
+        await Page({ params: Promise.resolve({ id: 'item' }) }),
+      );
+      expect(screen.getByRole('heading', { name: 'Cable' })).toBeVisible();
+      expect(
+        screen.getByRole('region', {
+          name: kind === 'quantity' ? 'Quantity photo' : 'Asset attachments',
+        }),
+      ).toHaveAttribute('data-file-status', 'unavailable');
+      expect(
+        screen.getByRole('link', {
+          name:
+            kind === 'quantity'
+              ? 'View all item history'
+              : 'View all asset history',
+        }),
+      ).toBeVisible();
+      view.unmount();
+    }
+  },
+);
+it.each(['asset', 'quantity'] as const)(
+  'does not turn a definite %s file-read authorization denial into a usable detail response',
+  async (kind) => {
+    const error = { code: 'P1001', message: 'Membership revoked' };
+    fixture.fileCards.mockResolvedValueOnce({ data: null, error });
+    const Page = kind === 'asset' ? AssetPage : QuantityPage;
+    await expect(
+      Page({ params: Promise.resolve({ id: 'item' }) }),
+    ).rejects.toBe(error);
+  },
+);

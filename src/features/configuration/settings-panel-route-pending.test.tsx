@@ -118,10 +118,7 @@ it('keeps committed category feedback alongside a genuine pending refresh and re
   expect(committed).toHaveAttribute('role', 'status');
   // The former unscoped browser lookup cannot select this committed receipt.
   expect(() => screen.getByRole('status')).toThrow(/multiple elements/i);
-  expect(screen.getByText('Opening requested content…')).toHaveAttribute(
-    'role',
-    'status',
-  );
+  expect(screen.getByText('Working…')).toHaveAttribute('role', 'status');
   expect(screen.getAllByRole('status')).toHaveLength(2);
   expect(screen.getByText('Original category list')).toBeVisible();
   expect(runtime.refresh).toHaveBeenCalledOnce();

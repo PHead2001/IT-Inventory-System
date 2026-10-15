@@ -375,3 +375,59 @@ occurred. W08 and D303.2 remain open for source repairs, fresh exact-candidate
 gates and repeated hosted proof. Earlier green CI/review does not certify
 these visual failures or later working-tree repairs; all 76 acceptance rows
 and integrated-staging/hardware prerequisites remain required.
+
+## PR54 hosted repair checkpoint at 59b334ff
+
+On 2026-10-15, the read-only replay verified READY preview
+`dpl_6S7VQAMTUpJwMji4UtMq2iDu2RXq` at
+`https://it-inventory-system-8rnj0m9w3-phead2002.vercel.app`, exact
+`59b334ff53192953aa678a890dacc13ab1119683`, target null. Fresh provider
+lineage, served public configuration and authenticated cookie project names
+matched isolated PR54 backend `bexvgduzosektmnvzmyv`. Successor
+`977e5874f472c3b61a932a1351382db6ca421fb0` differs only in
+`viewer-routes.test.tsx` and `stock-display.test.tsx`; runtime source is
+unchanged. Its preview `dpl_F5928XoMfFiRZC1ifPF4GqfkmPqn` was separately
+provider-verified READY, but this browser evidence remains labelled 59b334ff.
+
+Sixteen functional cases passed: keyboard row/detail/app Back, initial file
+envelope, cold JavaScript admission and real logout/ordinary recovery, each at
+1280 × 900 and 390 × 900 in Full and Reduced. Full title/body effects genuinely
+overlapped; active outgoing snapshot bounds stayed within 1 px with scale 1.
+Reduced had zero native stages. Initial empty-file content arrived ready without
+the generic three rows; file-region/control geometry stayed within 1 px over
+33–40 frames, with region height 546.53125 px and zero measured post-admission
+non-recent-input CLS. Cold admitted title geometry was stable within 1 px over
+35 frames with zero post-admission non-recent-input CLS. Full logout samples
+withdrew private names and native effects before native finish; protected reads,
+actual form login, intended record return and ordinary recovery passed. These
+checks do not certify populated/max-file geometry, all W08 inline surfaces,
+failed-to-successful file refresh, assistive-technology output or physical devices.
+
+Actual recordings confirm the old-body viewport-alignment repair, but D303.2
+visual acceptance remains blocked by an incoming-image stretch at handoff.
+Phone forward frame 32 shows hero bottom about 419 px and Tasks top about
+443 px; frame 33 settles to 360.140625 px and 380.140625 px. A bounded read-only
+diagnostic found the incoming image held at 350 × 7320.66 px while live body
+height was already 6440.671875 px throughout 14 active and four post-finish
+samples. Live scroll, title, hero, badge, stats, Tasks and Item details bounds
+stayed constant. The approximately 1.1366 height ratio corroborates snapshot
+sizing/fill distortion rather than live DOM reflow at teardown; native intrinsic
+bitmap dimensions were not directly measured. No blanket no-end-snap,
+no-clipping or duplicate-title acceptance is claimed. One desktop Full empty-file
+screenshot also captures the disabled Upload and review background before its
+text is painted; the other three show the label. That visual caveat remains
+undiagnosed and prevents a blanket inline reveal claim.
+
+Retained proof is `.local-tools/pr54-hosted-59b334ff/closeout-report.md`, with
+`matrix-index.json`, actual WebM/PNG chronology and
+`diagnostic-live-hero-final-handoff-390-full-1792101126795/handoff-landmarks.json`.
+The original detector failure is retained separately: it misread post-finish
+pseudo defaults with no active native effects; the corrected detector requires
+genuine active named body effects and finite dimensions. Every owned case
+restored Full, signed out and closed its browser/context; minimum sampled free
+RAM was 9.80 GiB. Newly created preview access was revoked and its ignored file
+removed. Final read-only fixture state remained archived, version 20, zero stock
+and 20 events. No inventory, original audit fixture, production or staging writes
+occurred. All 76 acceptance rows and their existing dispositions remain;
+exact-final-candidate gates, unresolved visual repair and integrated-staging
+prerequisites are not promoted by this checkpoint.

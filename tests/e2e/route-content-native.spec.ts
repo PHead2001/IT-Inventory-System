@@ -25,6 +25,7 @@ declare global {
       proof: NativeProof;
       begin(value: FixturePage | null, freeze?: boolean): void;
       frame(time: number): void;
+      mutateTrailing(height: number): void;
       release(): void;
       policy(mode: 'full' | 'reduced', privateReady: boolean): void;
       cssPolicy(mode: 'full' | 'reduced', privateReady: boolean): void;
@@ -55,7 +56,11 @@ const fixtures = {
 // It does not wrap startViewTransition or impersonate an application navigation.
 // Pixel checkpoints pause only this fictional fixture's real snapshot effects;
 // they prove compositing geometry, not normal-speed application performance.
-async function fixtureScript(initial: FixturePage | null, baseline = false) {
+async function fixtureScript(
+  initial: FixturePage | null,
+  baseline = false,
+  forcedIncoming = false,
+) {
   const result = await build({
     stdin: {
       contents: `
@@ -93,6 +98,14 @@ async function fixtureScript(initial: FixturePage | null, baseline = false) {
             } else {
               cleanup = routeContentMotion(instance, valid, () => state.proof.errors.push('Body fallback'));
               if (cleanup) cleanups.push(cleanup);
+              if (${forcedIncoming}) {
+                // Negative control recreates the prior incoming size override.
+                // Opacity/translation and the corrected group/old path stay real.
+                const captured = getComputedStyle(document.documentElement, '::view-transition-group('+instance.name+')');
+                const box = {width:captured.width, height:captured.height};
+                const forced = document.documentElement.animate([box,box], {duration:200,fill:'both',pseudoElement:'::view-transition-new('+instance.name+')'});
+                cleanups.push(()=>forced.cancel());
+              }
             }
             observe('share-body');
             return cleanup;
@@ -105,12 +118,16 @@ async function fixtureScript(initial: FixturePage | null, baseline = false) {
           const ys = value.y < 0 ? [110,420,790] : [220,420,870];
           const landmark = value.old ? '#ff0000' : '#0000ff';
           const xs = value.old ? [24,value.width-50] : [90,value.width-110];
+          const heroHeight = Math.max(1000, ...ys.map(y=>y-value.y+24));
           return <ViewTransition default="none" name="geometry-body" share={enabled?'route-content':'none'} enter={enabled?'route-content':'none'} exit={enabled?'route-content':'none'} onShare={body} onEnter={()=>observe('enter-body')} onExit={()=>observe('exit-body')}>
-            <article data-body={value.id} style={{position:'absolute',left:value.x,top:value.y,width:value.width,height:value.height,margin:0}}>
+            <article data-body={value.id} style={{position:'absolute',left:value.x,top:value.y,width:value.width,height:'auto',margin:0}}>
+              <div data-hero style={{height:heroHeight}}>
               {xs.flatMap((x,xi)=>ys.map((y,yi)=><i key={xi+'-'+yi} data-landmark style={{position:'absolute',left:x,top:y-value.y,width:32,height:24,background:landmark}}/>))}
               <ViewTransition default="none" name="geometry-title" share={enabled?'record-title':'none'} onShare={title}>
                 <h1 style={{position:'absolute',left:220,top:300-value.y,width:value.old?180:260,height:value.old?32:48,margin:0,fontSize:16,color:'#00ff00',background:'#00ff00'}}>Fictional title</h1>
               </ViewTransition>
+              </div>
+              <div data-trailing style={{height:value.height-heroHeight}} />
             </article>
           </ViewTransition>;
         }
@@ -118,6 +135,11 @@ async function fixtureScript(initial: FixturePage | null, baseline = false) {
           const [value,setValue] = useState(${JSON.stringify(initial)});
           const [,rerender] = useState(0);
           state.begin = (next,hold=true) => {freeze=hold;current=true;state.proof=fresh();cleanups=[];startTransition(()=>setValue(next));};
+          state.mutateTrailing = height => {
+            const body = document.querySelector('[data-body]');
+            const hero = body.querySelector('[data-hero]');
+            body.querySelector('[data-trailing]').style.height = (height-Number.parseFloat(hero.style.height))+'px';
+          };
           state.frame = time => {for(const animation of owned){animation.pause();animation.currentTime=time;}};
           state.release = () => {for(const animation of owned)animation.play();};
           state.policy = (next,admitted) => {mode=next;privateReady=admitted;document.documentElement.dataset.motion=next;document.documentElement.dataset.routeMotionPrivate=String(admitted);flushSync(()=>rerender(n=>n+1));};
@@ -150,6 +172,7 @@ async function mount(
   page: Page,
   initial: FixturePage | null,
   baseline = false,
+  forcedIncoming = false,
 ) {
   const css = await readFile(resolve('src/app/globals.css'), 'utf8');
   const start = css.indexOf('@keyframes route-content-in');
@@ -164,13 +187,15 @@ async function mount(
   await page.setViewportSize({ width: 1280, height: 900 });
   await page.emulateMedia({ reducedMotion: 'no-preference' });
   await page.setContent(
-    `<style>:root{--motion-route:${token('--motion-route')};--ease-workspace:${token('--ease-workspace')}}html,body{margin:0;background:#000;overflow:hidden} ${css.slice(start, end)}</style><div id="root"></div>`,
+    `<style>:root{--motion-route:${token('--motion-route')};--ease-workspace:${token('--ease-workspace')}}html,body{margin:0;background:#000;overflow:hidden} ${css.slice(start, end)} ${forcedIncoming ? '::view-transition-new(.route-content){object-fit:fill;}' : ''}</style><div id="root"></div>`,
   );
   await page.locator('html').evaluate((element) => {
     element.dataset.motion = 'full';
     element.dataset.routeMotionPrivate = 'true';
   });
-  await page.addScriptTag({ content: await fixtureScript(initial, baseline) });
+  await page.addScriptTag({
+    content: await fixtureScript(initial, baseline, forcedIncoming),
+  });
   await page.waitForFunction(() => Boolean(window.routeGeometry?.begin));
   if (initial)
     await expect(page.locator('[data-body]')).toHaveAttribute(
@@ -255,6 +280,8 @@ async function frame(
           width: style.width,
           height: style.height,
           transform: style.transform,
+          objectFit: style.objectFit,
+          objectPosition: style.objectPosition,
         };
       }),
   );
@@ -315,6 +342,10 @@ for (const direction of ['forward', 'back'] as const) {
     )!;
     expect(incoming.frames[0].transform).toBe('translateY(8px)');
     expect(incoming.frames.at(-1)!.transform).toBe('translateY(0px)');
+    for (const keyframe of incoming.frames) {
+      expect(keyframe).not.toHaveProperty('width');
+      expect(keyframe).not.toHaveProperty('height');
+    }
     for (const animation of body) {
       expect(animation.duration).toBe(200);
       expect(animation.frames[0].width).toBe(animation.frames.at(-1)!.width);
@@ -409,6 +440,131 @@ for (const direction of ['forward', 'back'] as const) {
       body: JSON.stringify(proof),
       contentType: 'application/json',
     });
+  });
+}
+
+// Mutate only trailing flow content after native capture. The hero, shared title
+// and colored landmarks retain their live document geometry throughout.
+for (const direction of ['forward', 'back'] as const) {
+  for (const change of ['shrink', 'grow'] as const) {
+    test(`native incoming keeps hero pixels natural when trailing content ${change}s after ${direction} capture`, async ({
+      page,
+    }, testInfo) => {
+      const { old } = fixtures[direction];
+      const next = {
+        ...fixtures[direction].next,
+        height: direction === 'forward' ? 7320 : 2400,
+      };
+      const height = next.height + (change === 'shrink' ? -880 : 880);
+      await mount(page, old);
+      await begin(page, next);
+      const before = await page.locator('[data-hero]').boundingBox();
+      await page.evaluate(
+        (height) => window.routeGeometry.mutateTrailing(height),
+        height,
+      );
+      expect(await page.locator('[data-hero]').boundingBox()).toEqual(before);
+      expect((await page.locator('[data-body]').boundingBox())!.height).toBe(
+        height,
+      );
+      for (const time of [60, 130, 199]) {
+        const { png, styles } = await frame(
+          page,
+          testInfo,
+          `${direction}-${change}-${time}ms`,
+          time,
+        );
+        const group = styles.find(
+          (style) => style.pseudo === '::view-transition-group(geometry-body)',
+        )!;
+        const incoming = styles.find(
+          (style) => style.pseudo === '::view-transition-new(geometry-body)',
+        )!;
+        const outgoing = styles.find(
+          (style) => style.pseudo === '::view-transition-old(geometry-body)',
+        )!;
+        expect(Number.parseFloat(group.height)).toBe(next.height);
+        expect(Number.parseFloat(incoming.height)).toBe(height);
+        expect(Number.parseFloat(incoming.width)).toBe(next.width);
+        expect(incoming.objectFit).toBe('none');
+        expect(incoming.objectPosition).toBe('0px 0px');
+        expect(Number.parseFloat(outgoing.height)).toBe(old.height);
+        expect(Number.parseFloat(outgoing.width)).toBe(old.width);
+        const matrix = incoming.transform
+          .slice(incoming.transform.indexOf('(') + 1, -1)
+          .split(',')
+          .map(Number);
+        expect(matrix.slice(0, 4)).toEqual([1, 0, 0, 1]);
+        for (const x of [next.x + 90, next.x + next.width - 110]) {
+          for (const y of [110, 420, 790]) {
+            expect(
+              pixels(
+                png,
+                { x, y: y + matrix[5], width: 32, height: 24 },
+                'blue',
+              ),
+              `Natural ${direction}/${change} hero landmark ${x},${y} at ${time}ms`,
+            ).toBeGreaterThan(700);
+          }
+        }
+      }
+      await page.evaluate(() => window.routeGeometry.release());
+      await page.waitForFunction(
+        () => window.routeGeometry.proof.finished,
+        undefined,
+        { polling: 10 },
+      );
+      const live = PNG.sync.read(
+        await page.screenshot({ animations: 'allow' }),
+      );
+      expect(
+        pixels(live, { x: next.x + 90, y: 790, width: 32, height: 24 }, 'blue'),
+      ).toBe(768);
+    });
+  }
+}
+for (const change of ['shrink', 'grow'] as const) {
+  test(`forced incoming sizing negative control distorts fixed hero pixels after trailing content ${change}s`, async ({
+    page,
+  }, testInfo) => {
+    const old = fixtures.forward.old;
+    const next = { ...fixtures.forward.next, height: 7320 };
+    const height = next.height + (change === 'shrink' ? -880 : 880);
+    await mount(page, old, false, true);
+    await begin(page, next);
+    await page.evaluate(
+      (height) => window.routeGeometry.mutateTrailing(height),
+      height,
+    );
+    const { png, styles } = await frame(
+      page,
+      testInfo,
+      `forced-incoming-${change}`,
+      130,
+    );
+    const incoming = styles.find(
+      (style) => style.pseudo === '::view-transition-new(geometry-body)',
+    )!;
+    expect(Number.parseFloat(incoming.height)).toBe(next.height);
+    expect(incoming.objectFit).toBe('fill');
+    const matrix = incoming.transform
+      .slice(incoming.transform.indexOf('(') + 1, -1)
+      .split(',')
+      .map(Number);
+    expect(
+      pixels(
+        png,
+        { x: next.x + 90, y: 790 + matrix[5], width: 32, height: 24 },
+        'blue',
+      ),
+      'The old forced height must fail the natural fixed-hero landmark requirement',
+    ).toBeLessThan(100);
+    await page.evaluate(() => window.routeGeometry.release());
+    await page.waitForFunction(
+      () => window.routeGeometry.proof.finished,
+      undefined,
+      { polling: 10 },
+    );
   });
 }
 

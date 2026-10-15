@@ -229,7 +229,7 @@ export default async function AssetPage({
               aria-label="Record attachments"
             >
               <FilesPanel
-                initialEnvelope={initialFiles}
+                initialState={initialFiles}
                 actorId={member.user_id}
                 parentType="asset"
                 parentId={asset.id}

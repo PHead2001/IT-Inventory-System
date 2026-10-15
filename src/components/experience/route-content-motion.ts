@@ -23,8 +23,8 @@ function translation(value: unknown) {
   return { x: matrix.e, y: matrix.f };
 }
 
-/** Preserve each body bitmap's own captured box. Unlike the shared title, bodies
- * never scale or morph between potentially very different page dimensions.
+/** Preserve the outgoing bitmap's captured box and the incoming image's natural
+ * size. Unlike the shared title, bodies never scale or morph between pages.
  * All replacements are registered synchronously, before completion collectors.
  */
 export function routeContentMotion(
@@ -118,10 +118,12 @@ export function routeContentMotion(
       { ...previous, opacity: 1 },
       { ...previous, opacity: 0 },
     ]);
-    const incoming = { width: `${width}px`, height: `${height}px` };
+    // The incoming replaced image follows its live intrinsic size. Its captured
+    // group can outlive trailing content changes; forcing that earlier box onto
+    // this image stretches the entire page until the snapshot is released.
     animate(newImage, [
-      { ...incoming, transform: 'translateY(8px)', opacity: 0 },
-      { ...incoming, transform: 'translateY(0px)', opacity: 1 },
+      { transform: 'translateY(8px)', opacity: 0 },
+      { transform: 'translateY(0px)', opacity: 1 },
     ]);
     return () => replacements.forEach((animation) => animation.cancel());
   } catch {

@@ -13,9 +13,10 @@ it.each(['asset', 'quantity'] as const)(
   async (kind) => {
     const result = { revision: '17', files: [] };
     mocks.rpc.mockResolvedValue({ data: result, error: null });
-    await expect(getInventoryFileCards(kind, 'parent')).resolves.toEqual(
-      result,
-    );
+    await expect(getInventoryFileCards(kind, 'parent')).resolves.toEqual({
+      status: 'ready',
+      envelope: result,
+    });
     expect(mocks.member).toHaveBeenCalledOnce();
     expect(mocks.rpc).toHaveBeenCalledWith('inventory_file_cards', {
       p_parent_type: kind,
@@ -37,21 +38,23 @@ it.each([
   { revision: '1', files: [{ id: 'incomplete' }] },
   { revision: '1', files: [], path: 'private/path' },
 ])(
-  'rejects malformed or private metadata instead of inventing an empty collection: %j',
+  'marks malformed or private metadata unavailable without inventing an empty collection: %j',
   async (data) => {
     mocks.rpc.mockResolvedValue({ data, error: null });
-    await expect(getInventoryFileCards('asset', 'parent')).rejects.toThrow();
+    await expect(getInventoryFileCards('asset', 'parent')).resolves.toEqual({
+      status: 'unavailable',
+    });
     expect(inventoryFileCardsSchema.safeParse(data).success).toBe(false);
   },
 );
-it('propagates RPC failure rather than returning a successful empty collection', async () => {
+it('isolates RPC failure without returning a successful empty collection', async () => {
   mocks.rpc.mockResolvedValue({
     data: { revision: '1', files: [] },
     error: { message: 'denied' },
   });
-  await expect(getInventoryFileCards('asset', 'parent')).rejects.toThrow(
-    'could not be loaded',
-  );
+  await expect(getInventoryFileCards('asset', 'parent')).resolves.toEqual({
+    status: 'unavailable',
+  });
 });
 
 it('validates every complete ready and own-pending card without allowing private card fields', async () => {
@@ -83,9 +86,10 @@ it('validates every complete ready and own-pending card without allowing private
     ],
   };
   mocks.rpc.mockResolvedValue({ data: result, error: null });
-  await expect(getInventoryFileCards('asset', 'parent')).resolves.toEqual(
-    result,
-  );
+  await expect(getInventoryFileCards('asset', 'parent')).resolves.toEqual({
+    status: 'ready',
+    envelope: result,
+  });
   for (const key of Object.keys(card)) {
     const incomplete: Record<string, unknown> = { ...card };
     delete incomplete[key];
@@ -100,4 +104,48 @@ it('validates every complete ready and own-pending card without allowing private
       files: [{ ...card, source_path: 'private/source' }],
     }).success,
   ).toBe(false);
+});
+
+it.each([
+  { status: 401 },
+  { status: 403 },
+  { code: 'P1001' },
+  { code: '42501' },
+  { code: 'PGRST301' },
+  { name: 'AuthSessionMissingError' },
+  { code: 'invalid_jwt' },
+])('propagates definite file RPC authorization denial %j', async (error) => {
+  mocks.rpc.mockResolvedValueOnce({ data: null, error });
+  await expect(getInventoryFileCards('asset', 'parent')).rejects.toEqual(error);
+  mocks.rpc.mockRejectedValueOnce(error);
+  await expect(getInventoryFileCards('quantity', 'parent')).rejects.toEqual(
+    error,
+  );
+});
+it.each([401, 403])(
+  'retains RPC HTTP status %s when the error body lacks a denial code',
+  async (status) => {
+    const error = { message: 'Access denied' };
+    mocks.rpc.mockResolvedValue({ data: null, error, status });
+    await expect(getInventoryFileCards('asset', 'parent')).rejects.toBe(error);
+  },
+);
+it.each([
+  new TypeError('Network unavailable'),
+  { status: 503 },
+  { status: 429 },
+])('isolates a transport/provider exception %j', async (error) => {
+  mocks.rpc.mockRejectedValue(error);
+  await expect(getInventoryFileCards('quantity', 'parent')).resolves.toEqual({
+    status: 'unavailable',
+  });
+});
+it('does not mask Next redirect control flow from a read adapter', async () => {
+  const error = Object.assign(new Error('Next redirect'), {
+    digest: 'NEXT_REDIRECT;replace;/login;307;',
+  });
+  mocks.rpc.mockRejectedValue(error);
+  await expect(getInventoryFileCards('asset', 'parent')).rejects.toBe(error);
+  mocks.rpc.mockResolvedValue({ data: null, error });
+  await expect(getInventoryFileCards('quantity', 'parent')).rejects.toBe(error);
 });

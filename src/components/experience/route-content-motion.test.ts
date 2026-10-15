@@ -136,14 +136,10 @@ it('preserves the old scrolled bitmap at y=-602 while the new body begins at y=-
   ]);
   expect(animate.mock.calls[2][0]).toEqual([
     {
-      width: '1180px',
-      height: '7622px',
       transform: 'translateY(8px)',
       opacity: 0,
     },
     {
-      width: '1180px',
-      height: '7622px',
       transform: 'translateY(0px)',
       opacity: 1,
     },
@@ -185,14 +181,25 @@ it('preserves the Back bitmap at y=151 when the restored destination begins at y
 });
 
 it.each(['200ms', '.2s', '2e-1s'])(
-  'uses %s timing while every image/group retains constant dimensions with no scaling',
+  'uses %s timing while the group/old box stay fixed and incoming sizing stays natural',
   (token) => {
     duration = token;
     routeContentMotion({ name }, () => true);
     for (const [keyframes, options] of animate.mock.calls) {
       expect(options).toMatchObject({ duration: 200, fill: 'both', delay: 0 });
-      expect(keyframes[0].width).toBe(keyframes[1].width);
-      expect(keyframes[0].height).toBe(keyframes[1].height);
+      if (options.pseudoElement === newImage) {
+        for (const frame of keyframes) {
+          expect(Object.keys(frame).toSorted()).toEqual([
+            'opacity',
+            'transform',
+          ]);
+          expect(frame).not.toHaveProperty('width');
+          expect(frame).not.toHaveProperty('height');
+        }
+      } else {
+        expect(keyframes[0].width).toBe(keyframes[1].width);
+        expect(keyframes[0].height).toBe(keyframes[1].height);
+      }
       expect(
         keyframes.every(
           (frame: Keyframe) => !String(frame.transform).includes('scale'),
@@ -311,11 +318,21 @@ it('retains native capture geometry without clipping translated old bitmaps or p
   expect(groupRule).toMatch(/overflow:\s*visible\s*;/);
   expect(pairRule).toMatch(/overflow:\s*visible\s*;/);
   for (const image of ['old', 'new']) {
-    const imageRule = css.match(
-      new RegExp(
-        `::view-transition-${image}\\(\\.route-content\\)\\s*\\{([^}]+)\\}`,
+    const imageRule = [
+      ...css.matchAll(
+        new RegExp(
+          `::view-transition-${image}\\(\\.route-content\\)\\s*\\{([^}]+)\\}`,
+          'g',
+        ),
       ),
-    )?.[1];
+    ].at(-1)?.[1];
     expect(imageRule).toMatch(/animation-play-state:\s*running\s*;/);
+    if (image === 'new') {
+      expect(imageRule).toMatch(/width:\s*auto\s*;/);
+      expect(imageRule).toMatch(/height:\s*auto\s*;/);
+      expect(imageRule).toMatch(/object-fit:\s*none\s*;/);
+      expect(imageRule).toMatch(/object-position:\s*0 0\s*;/);
+      expect(imageRule).toMatch(/overflow:\s*visible\s*;/);
+    }
   }
 });

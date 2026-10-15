@@ -10,6 +10,10 @@ import {
 import { clearLabelQueueSession } from './queue-model';
 import { assignmentEpoch } from '@/features/scan/assign-batch';
 const routing = vi.hoisted(() => ({ replace: vi.fn(), refresh: vi.fn() }));
+const motion = vi.hoisted(() => ({ begin: vi.fn(), settle: vi.fn() }));
+vi.mock('@/components/experience/route-motion', () => ({
+  useRouteMotionLogoutAttempt: () => motion.begin,
+}));
 vi.mock('next/navigation', () => ({
   useSearchParams: () => new URLSearchParams(),
   usePathname: () => '/test',
@@ -46,6 +50,8 @@ const snapshot = {
   receipt: { key: 'original command', id: id(4) },
 };
 beforeEach(() => {
+  motion.begin.mockReset().mockReturnValue(motion.settle);
+  motion.settle.mockReset();
   clearAllDesignerRecovery();
   vi.mocked(clearLabelQueueSession).mockClear();
   vi.mocked(clearLabelQueueSession).mockReturnValue(true);
@@ -73,6 +79,7 @@ it('cancels signout without removing unknown recovery or label session data', ()
   expect(readDesignerRecovery(id(1), id(2)).item).toEqual(snapshot);
   expect(clearLabelQueueSession).not.toHaveBeenCalled();
   expect(signOutSession).not.toHaveBeenCalled();
+  expect(motion.begin).not.toHaveBeenCalled();
 });
 it('allows explicit confirmed signout and removes even non-durable original recovery', async () => {
   vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
@@ -89,6 +96,28 @@ it('allows explicit confirmed signout and removes even non-durable original reco
     expect(readDesignerRecovery(id(1), id(2)).item).toBeNull(),
   );
   await waitFor(() => expect(clearLabelQueueSession).toHaveBeenCalledTimes(2));
+});
+it('keeps one attempt through repeated submit and settles confirmed logout after local unmount', async () => {
+  let finish!: (result: { ok: true; logoutGeneration: string }) => void;
+  vi.mocked(signOutSession).mockReturnValueOnce(
+    new Promise((resolve) => {
+      finish = resolve;
+    }),
+  );
+  const page = render(<QueueLogoutForm />);
+  const form = screen
+    .getByRole('button', { name: 'Sign out' })
+    .closest('form')!;
+  fireEvent.submit(form);
+  await waitFor(() => expect(signOutSession).toHaveBeenCalledOnce());
+  expect(motion.begin).toHaveBeenCalledOnce();
+  expect(screen.getByRole('button', { name: 'Signing out…' })).toBeDisabled();
+  expect(fireEvent.submit(form)).toBe(false);
+  expect(motion.begin).toHaveBeenCalledOnce();
+  page.unmount();
+  finish({ ok: true, logoutGeneration: id(1) });
+  await waitFor(() => expect(motion.settle).toHaveBeenCalledWith(true));
+  expect(motion.settle).toHaveBeenCalledOnce();
 });
 it('signs out without confirmation for a definitely unsaved draft and clears it after success', async () => {
   writeDesignerRecovery({ ...snapshot, uncertainSave: false });
@@ -157,6 +186,7 @@ it.each(['server', 'transport'])(
       screen.getByRole('button', { name: 'Sign out' }).closest('form')!,
     );
     await screen.findByRole('alert');
+    expect(motion.settle).toHaveBeenCalledWith(false);
     expect(readDesignerRecovery(id(1), id(2)).item).toEqual(snapshot);
     expect(sessionStorage.getItem('inventory-assign-batch-v1:old')).toBe(
       'settled checklist and PRIVATE ticket',

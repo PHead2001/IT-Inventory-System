@@ -121,25 +121,45 @@ it('renders one authoritative asset timeline without duplicating custody or merg
 vi.mock('server-only', () => ({}));
 
 vi.mock('@/features/files/cards.server', () => ({
-  getInventoryFileCards: vi.fn(async () => ({ revision: '17', files: [] })),
+  getInventoryFileCards: vi.fn(async () => ({
+    status: 'ready',
+    envelope: { revision: '17', files: [] },
+  })),
 }));
 
-it('passes authorized server file metadata into the first detail render and propagates file read failure', async () => {
+it('passes typed server file state while keeping core detail usable on unavailability and propagating authorization failure', async () => {
   const { getInventoryFileCards } =
     await import('@/features/files/cards.server');
   const { FilesPanel } = await import('@/features/files/files-panel');
   const Page = AssetPage;
   const parentId = 'asset';
-  render(await Page({ params: Promise.resolve({ id: parentId }) }));
+  const view = render(
+    await Page({ params: Promise.resolve({ id: parentId }) }),
+  );
   expect(getInventoryFileCards).toHaveBeenCalledWith('asset', parentId);
   expect(FilesPanel).toHaveBeenCalledWith(
-    expect.objectContaining({ initialEnvelope: { revision: '17', files: [] } }),
+    expect.objectContaining({
+      initialState: {
+        status: 'ready',
+        envelope: { revision: '17', files: [] },
+      },
+    }),
+    undefined,
+  );
+  view.unmount();
+  vi.mocked(getInventoryFileCards).mockResolvedValueOnce({
+    status: 'unavailable',
+  });
+  render(await Page({ params: Promise.resolve({ id: parentId }) }));
+  expect(screen.getByRole('heading', { name: 'Switch' })).toBeVisible();
+  expect(FilesPanel).toHaveBeenLastCalledWith(
+    expect.objectContaining({ initialState: { status: 'unavailable' } }),
     undefined,
   );
   vi.mocked(getInventoryFileCards).mockRejectedValueOnce(
-    new Error('Files unavailable'),
+    new Error('Membership denied'),
   );
   await expect(
     Page({ params: Promise.resolve({ id: parentId }) }),
-  ).rejects.toThrow('Files unavailable');
+  ).rejects.toThrow('Membership denied');
 });

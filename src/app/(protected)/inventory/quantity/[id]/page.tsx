@@ -270,7 +270,7 @@ export default async function QuantityPage({
               aria-label="Record attachments"
             >
               <FilesPanel
-                initialEnvelope={initialFiles}
+                initialState={initialFiles}
                 actorId={member.user_id}
                 parentType="quantity"
                 parentId={item.id}

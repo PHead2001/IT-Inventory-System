@@ -37,13 +37,13 @@ import { HistoryList } from '@/features/inventory/components/read-ui';
 // server-fixture adapter. The production panel receives it as an RSC prop and
 // never performs this initial read in the browser.
 function FilesPanel(
-  props: Omit<ComponentProps<typeof SeededFilesPanel>, 'initialEnvelope'>,
+  props: Omit<ComponentProps<typeof SeededFilesPanel>, 'initialState'>,
 ) {
   const identity = `${process.env.NEXT_PUBLIC_SUPABASE_URL}:${props.actorId}:${props.parentType}:${props.parentId}:${props.staff}`;
   return <ServerCardsFixture key={identity} {...props} />;
 }
 function ServerCardsFixture(
-  props: Omit<ComponentProps<typeof SeededFilesPanel>, 'initialEnvelope'>,
+  props: Omit<ComponentProps<typeof SeededFilesPanel>, 'initialState'>,
 ) {
   const [seed, setSeed] = useState<InventoryFileCards | null>(null);
   const [failed, setFailed] = useState(false);
@@ -63,8 +63,16 @@ function ServerCardsFixture(
       cancelled = true;
     };
   }, [props.parentType, props.parentId]);
-  if (failed) return <p role="alert">Files could not be loaded.</p>;
-  return seed ? <SeededFilesPanel {...props} initialEnvelope={seed} /> : null;
+  if (failed)
+    return (
+      <SeededFilesPanel {...props} initialState={{ status: 'unavailable' }} />
+    );
+  return seed ? (
+    <SeededFilesPanel
+      {...props}
+      initialState={{ status: 'ready', envelope: seed }}
+    />
+  ) : null;
 }
 
 it('uses one local browse/drop path, revokes image previews, and never embeds or publishes a selected PDF', async () => {
@@ -2521,7 +2529,7 @@ describe('server-seeded cards and refresh isolation', () => {
         <SeededFilesPanel
           {...props}
           parentType={parentType}
-          initialEnvelope={envelope(files)}
+          initialState={{ status: 'ready', envelope: envelope(files) }}
         />,
       );
       const panel = screen.getByRole('region', { name: 'Inventory files' });
@@ -2551,10 +2559,10 @@ describe('server-seeded cards and refresh isolation', () => {
     render(
       <SeededFilesPanel
         {...props}
-        initialEnvelope={envelope(
-          [ready, { ...pending, id: 'own-pending' }],
-          '37',
-        )}
+        initialState={{
+          status: 'ready',
+          envelope: envelope([ready, { ...pending, id: 'own-pending' }], '37'),
+        }}
       />,
     );
     expect(screen.getByText('Uploaded · review required')).toBeVisible();
@@ -2577,10 +2585,16 @@ describe('server-seeded cards and refresh isolation', () => {
         : mocks.operation(name),
     );
     const view = render(
-      <SeededFilesPanel {...props} initialEnvelope={envelope([pending])} />,
+      <SeededFilesPanel
+        {...props}
+        initialState={{ status: 'ready', envelope: envelope([pending]) }}
+      />,
     );
     view.rerender(
-      <SeededFilesPanel {...props} initialEnvelope={envelope([], '1')} />,
+      <SeededFilesPanel
+        {...props}
+        initialState={{ status: 'ready', envelope: envelope([], '1') }}
+      />,
     );
     expect(screen.getByText('Uploaded · review required')).toBeVisible();
     expect(screen.queryByText('No attachments yet.')).not.toBeInTheDocument();
@@ -2603,13 +2617,22 @@ describe('server-seeded cards and refresh isolation', () => {
         : mocks.operation(name),
     );
     const view = render(
-      <SeededFilesPanel {...props} initialEnvelope={envelope([pending])} />,
+      <SeededFilesPanel
+        {...props}
+        initialState={{ status: 'ready', envelope: envelope([pending]) }}
+      />,
     );
     view.rerender(
-      <SeededFilesPanel {...props} initialEnvelope={envelope([], '2')} />,
+      <SeededFilesPanel
+        {...props}
+        initialState={{ status: 'ready', envelope: envelope([], '2') }}
+      />,
     );
     view.rerender(
-      <SeededFilesPanel {...props} initialEnvelope={envelope([], '3')} />,
+      <SeededFilesPanel
+        {...props}
+        initialState={{ status: 'ready', envelope: envelope([], '3') }}
+      />,
     );
     await act(async () =>
       finishes[1]({
@@ -2620,7 +2643,10 @@ describe('server-seeded cards and refresh isolation', () => {
     await act(async () => finishes[0]({ data: envelope([]), error: null }));
     expect(screen.getByText('Awaiting publication')).toBeVisible();
     view.rerender(
-      <SeededFilesPanel {...props} initialEnvelope={envelope([], '4')} />,
+      <SeededFilesPanel
+        {...props}
+        initialState={{ status: 'ready', envelope: envelope([], '4') }}
+      />,
     );
     await act(async () =>
       finishes[2]({ data: { revision: '99', files: [{}] }, error: null }),
@@ -2630,14 +2656,22 @@ describe('server-seeded cards and refresh isolation', () => {
   });
   it('defers refresh during selected upload intent and rereads after the selection is cleared', async () => {
     const seed = envelope([]);
-    const view = render(<SeededFilesPanel {...props} initialEnvelope={seed} />);
+    const view = render(
+      <SeededFilesPanel
+        {...props}
+        initialState={{ status: 'ready', envelope: seed }}
+      />,
+    );
     fireEvent.change(screen.getByLabelText('Add photo or PDF'), {
       target: {
         files: [new File(['pdf'], 'choice.pdf', { type: 'application/pdf' })],
       },
     });
     view.rerender(
-      <SeededFilesPanel {...props} initialEnvelope={envelope([ready])} />,
+      <SeededFilesPanel
+        {...props}
+        initialState={{ status: 'ready', envelope: envelope([ready]) }}
+      />,
     );
     expect(cardReads()).toHaveLength(0);
     expect(
@@ -2674,14 +2708,20 @@ describe('server-seeded cards and refresh isolation', () => {
         );
       });
       const view = render(
-        <SeededFilesPanel {...props} initialEnvelope={envelope([])} />,
+        <SeededFilesPanel
+          {...props}
+          initialState={{ status: 'ready', envelope: envelope([]) }}
+        />,
       );
       fireEvent.click(
         screen.getByRole('button', { name: 'Check file cleanup' }),
       );
       await screen.findByText('No file cleanup is needed for this record.');
       view.rerender(
-        <SeededFilesPanel {...props} initialEnvelope={envelope([], '13')} />,
+        <SeededFilesPanel
+          {...props}
+          initialState={{ status: 'ready', envelope: envelope([], '13') }}
+        />,
       );
       await screen.findByText('Files could not be loaded.');
       expect(
@@ -2689,7 +2729,10 @@ describe('server-seeded cards and refresh isolation', () => {
       ).toBeVisible();
       fail = false;
       view.rerender(
-        <SeededFilesPanel {...props} initialEnvelope={envelope([], '14')} />,
+        <SeededFilesPanel
+          {...props}
+          initialState={{ status: 'ready', envelope: envelope([], '14') }}
+        />,
       );
       await screen.findByRole('button', { name: 'Download PDF' });
       expect(cardReads()).toHaveLength(2);
@@ -2713,20 +2756,242 @@ describe('server-seeded cards and refresh isolation', () => {
         : mocks.operation(name),
     );
     const view = render(
-      <SeededFilesPanel {...props} initialEnvelope={envelope([])} />,
+      <SeededFilesPanel
+        {...props}
+        initialState={{ status: 'ready', envelope: envelope([]) }}
+      />,
     );
     view.rerender(
-      <SeededFilesPanel {...props} initialEnvelope={envelope([], '13')} />,
+      <SeededFilesPanel
+        {...props}
+        initialState={{ status: 'ready', envelope: envelope([], '13') }}
+      />,
     );
     await screen.findByText('Files could not be loaded.');
     expect(screen.queryByText('No attachments yet.')).not.toBeInTheDocument();
     fail = false;
     view.rerender(
-      <SeededFilesPanel {...props} initialEnvelope={envelope([], '14')} />,
+      <SeededFilesPanel
+        {...props}
+        initialState={{ status: 'ready', envelope: envelope([], '14') }}
+      />,
     );
     await screen.findByText('No attachments yet.');
     expect(screen.queryByRole('alert')).not.toBeInTheDocument();
     expect(cardReads()).toHaveLength(2);
+  });
+
+  it.each(['asset', 'quantity'] as const)(
+    'keeps unavailable %s files explicit and gates revision-dependent actions until Retry obtains real cards',
+    async (parentType) => {
+      const photo = {
+        ...ready,
+        type: parentType === 'quantity' ? 'image/png' : ready.type,
+      };
+      mocks.browserRpc.mockImplementation((name: string) => {
+        if (name === 'inventory_file_cards')
+          return Promise.resolve({
+            data: envelope([photo], '73'),
+            error: null,
+          });
+        if (name === 'inventory_file_remove')
+          return Promise.resolve({
+            data: null,
+            error: { message: 'Unknown removal outcome' },
+          });
+        if (name === 'inventory_file_read')
+          return Promise.resolve({
+            data: null,
+            error: { message: 'No thumbnail' },
+          });
+        return mocks.operation(name);
+      });
+      render(
+        <SeededFilesPanel
+          {...props}
+          parentType={parentType}
+          initialState={{ status: 'unavailable' }}
+        />,
+      );
+      const input = screen.getByLabelText(
+        parentType === 'quantity'
+          ? 'Add recognition photo'
+          : 'Add photo or PDF',
+      );
+      expect(screen.getByText('Files could not be loaded.')).toBeVisible();
+      expect(
+        screen.queryByText(/No photo yet\.|No attachments yet\./),
+      ).not.toBeInTheDocument();
+      expect(input).toBeDisabled();
+      expect(
+        screen.getByRole('button', { name: 'Browse files' }),
+      ).toBeDisabled();
+      expect(
+        screen.getByRole('button', { name: 'Upload and review' }),
+      ).toBeDisabled();
+      expect(cardReads()).toHaveLength(0);
+      const drop = screen.getByRole('group', {
+        name: 'Choose an inventory file',
+      });
+      fireEvent.drop(drop, {
+        dataTransfer: {
+          files: [new File(['image'], 'ignored.png', { type: 'image/png' })],
+        },
+      });
+      expect(
+        screen.queryByRole('button', { name: 'Clear selection' }),
+      ).not.toBeInTheDocument();
+      fireEvent.click(screen.getByRole('button', { name: 'Retry files' }));
+      await screen.findByText('Ready');
+      expect(
+        screen.queryByText('Files could not be loaded.'),
+      ).not.toBeInTheDocument();
+      expect(input).toBeEnabled();
+      expect(cardReads()).toHaveLength(1);
+      fireEvent.click(screen.getByRole('button', { name: 'Remove' }));
+      fireEvent.click(screen.getByRole('button', { name: 'Remove file' }));
+      await screen.findByRole('button', { name: 'Retry removal' });
+      expect(mocks.browserRpc).toHaveBeenCalledWith(
+        'inventory_file_remove',
+        expect.objectContaining({ p_expected_revision: '73' }),
+      );
+    },
+  );
+  it.each(['asset', 'quantity'] as const)(
+    'uses explicit Retry to establish a real empty %s collection for a viewer',
+    async (parentType) => {
+      mocks.browserRpc.mockImplementation((name: string) =>
+        name === 'inventory_file_cards'
+          ? Promise.resolve({ data: envelope([], '29'), error: null })
+          : mocks.operation(name),
+      );
+      render(
+        <SeededFilesPanel
+          {...props}
+          parentType={parentType}
+          staff={false}
+          initialState={{ status: 'unavailable' }}
+        />,
+      );
+      expect(
+        screen.queryByText(/No photo yet\.|No attachments yet\./),
+      ).not.toBeInTheDocument();
+      expect(
+        screen.queryByRole('button', { name: 'Browse files' }),
+      ).not.toBeInTheDocument();
+      fireEvent.click(screen.getByRole('button', { name: 'Retry files' }));
+      await screen.findByText(
+        parentType === 'quantity' ? 'No photo yet.' : 'No attachments yet.',
+      );
+      expect(
+        screen.queryByRole('button', { name: 'Retry files' }),
+      ).not.toBeInTheDocument();
+      expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    },
+  );
+  it.each(['rpc', 'malformed', 'transport'] as const)(
+    'keeps an unavailable collection unknown after a %s retry failure, then recovers explicitly',
+    async (failure) => {
+      let failed = true;
+      mocks.browserRpc.mockImplementation((name: string) => {
+        if (name !== 'inventory_file_cards') return mocks.operation(name);
+        if (!failed)
+          return Promise.resolve({ data: envelope([], '41'), error: null });
+        if (failure === 'transport')
+          return Promise.reject(new Error('Network unavailable'));
+        return Promise.resolve(
+          failure === 'rpc'
+            ? { data: null, error: { message: 'Provider unavailable' } }
+            : { data: { revision: '1', files: [{}] }, error: null },
+        );
+      });
+      render(
+        <SeededFilesPanel
+          {...props}
+          initialState={{ status: 'unavailable' }}
+        />,
+      );
+      fireEvent.click(screen.getByRole('button', { name: 'Retry files' }));
+      await waitFor(() =>
+        expect(
+          screen.getByRole('button', { name: 'Retry files' }),
+        ).toBeEnabled(),
+      );
+      expect(screen.getByText('Files could not be loaded.')).toBeVisible();
+      expect(
+        screen.getByRole('button', { name: 'Browse files' }),
+      ).toBeDisabled();
+      expect(screen.queryByText('No attachments yet.')).not.toBeInTheDocument();
+      failed = false;
+      fireEvent.click(screen.getByRole('button', { name: 'Retry files' }));
+      await screen.findByText('No attachments yet.');
+      expect(
+        screen.getByRole('button', { name: 'Browse files' }),
+      ).toBeEnabled();
+    },
+  );
+  it('clears only the initial read error after explicit Retry and preserves independent cleanup feedback', async () => {
+    mocks.fetch.mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        deleted: 0,
+        failed: 0,
+        outstanding: 0,
+        blocked: 0,
+        pending: false,
+        status: 'no_work',
+      }),
+    });
+    mocks.browserRpc.mockImplementation((name: string) =>
+      name === 'inventory_file_cards'
+        ? Promise.resolve({ data: envelope([], '64'), error: null })
+        : mocks.operation(name),
+    );
+    render(
+      <SeededFilesPanel {...props} initialState={{ status: 'unavailable' }} />,
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Check file cleanup' }));
+    await screen.findByText('No file cleanup is needed for this record.');
+    expect(screen.getByText('Files could not be loaded.')).toBeVisible();
+    fireEvent.click(screen.getByRole('button', { name: 'Retry files' }));
+    await waitFor(() =>
+      expect(
+        screen.queryByText('Files could not be loaded.'),
+      ).not.toBeInTheDocument(),
+    );
+    expect(
+      screen.getByText('No file cleanup is needed for this record.'),
+    ).toBeVisible();
+    expect(screen.getByRole('button', { name: 'Browse files' })).toBeEnabled();
+  });
+  it('ignores a successful delayed initial Retry when its actor binding was replaced', async () => {
+    let finish!: (value: unknown) => void;
+    mocks.browserRpc.mockImplementation((name: string) =>
+      name === 'inventory_file_cards'
+        ? new Promise((resolve) => {
+            finish = resolve;
+          })
+        : mocks.operation(name),
+    );
+    const view = render(
+      <SeededFilesPanel {...props} initialState={{ status: 'unavailable' }} />,
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Retry files' }));
+    view.rerender(
+      <SeededFilesPanel
+        {...props}
+        actorId="replacement-actor"
+        initialState={{ status: 'unavailable' }}
+      />,
+    );
+    await act(async () =>
+      finish({ data: envelope([ready], '44'), error: null }),
+    );
+    expect(screen.getByText('Files could not be loaded.')).toBeVisible();
+    expect(
+      screen.queryByRole('button', { name: 'Download PDF' }),
+    ).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Browse files' })).toBeDisabled();
   });
   it('ignores a background response that arrives after a confirmed removal', async () => {
     let finish!: (value: unknown) => void;
@@ -2744,10 +3009,16 @@ describe('server-seeded cards and refresh isolation', () => {
       return mocks.operation(name);
     });
     const view = render(
-      <SeededFilesPanel {...props} initialEnvelope={envelope([ready])} />,
+      <SeededFilesPanel
+        {...props}
+        initialState={{ status: 'ready', envelope: envelope([ready]) }}
+      />,
     );
     view.rerender(
-      <SeededFilesPanel {...props} initialEnvelope={envelope([ready], '13')} />,
+      <SeededFilesPanel
+        {...props}
+        initialState={{ status: 'ready', envelope: envelope([ready], '13') }}
+      />,
     );
     fireEvent.click(screen.getByRole('button', { name: 'Remove' }));
     fireEvent.click(screen.getByRole('button', { name: 'Remove file' }));
@@ -2765,7 +3036,10 @@ describe('server-seeded cards and refresh isolation', () => {
         : { data: { rows: [], has_more: false }, error: null },
     );
     const view = render(
-      <SeededFilesPanel {...props} initialEnvelope={envelope([ready])} />,
+      <SeededFilesPanel
+        {...props}
+        initialState={{ status: 'ready', envelope: envelope([ready]) }}
+      />,
     );
     fireEvent.click(screen.getByRole('button', { name: 'Remove' }));
     fireEvent.click(screen.getByRole('button', { name: 'Remove file' }));
@@ -2774,7 +3048,10 @@ describe('server-seeded cards and refresh isolation', () => {
       ([name]) => name === 'inventory_file_remove',
     )![1];
     view.rerender(
-      <SeededFilesPanel {...props} initialEnvelope={envelope([], '99')} />,
+      <SeededFilesPanel
+        {...props}
+        initialState={{ status: 'ready', envelope: envelope([], '99') }}
+      />,
     );
     expect(cardReads()).toHaveLength(0);
     fireEvent.click(screen.getByRole('button', { name: 'Retry removal' }));

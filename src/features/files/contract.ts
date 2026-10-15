@@ -64,3 +64,6 @@ export const inventoryFileCardsSchema = z.strictObject({
 });
 export type InventoryFileCard = z.infer<typeof inventoryFileCardSchema>;
 export type InventoryFileCards = z.infer<typeof inventoryFileCardsSchema>;
+
+export type InventoryFileCardsState =
+  { status: 'ready'; envelope: InventoryFileCards } | { status: 'unavailable' };

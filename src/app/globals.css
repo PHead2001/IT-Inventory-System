@@ -1317,6 +1317,11 @@ html[data-motion='full'] .experience-auth-panel {
 ::view-transition-new(.route-content) {
   animation: route-content-in var(--motion-route) var(--ease-workspace) both;
   animation-play-state: running;
+  width: auto;
+  height: auto;
+  object-fit: none;
+  object-position: 0 0;
+  overflow: visible;
 }
 ::view-transition-group(.record-title),
 ::view-transition-old(.record-title),
