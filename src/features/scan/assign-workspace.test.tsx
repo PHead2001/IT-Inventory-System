@@ -2665,6 +2665,7 @@ it('removes outside Cancel release listeners on unmount while restoration is pen
     expect(
       screen.getByRole('form', { name: 'Inspect equipment' }),
     ).toHaveAttribute('aria-busy', 'true');
+    expect(readBatch(scope).raw).toBe(before);
     expect(
       screen.getByRole('button', { name: 'Cancel inspection' }),
     ).toHaveFocus();
@@ -2684,6 +2685,9 @@ it('removes outside Cancel release listeners on unmount while restoration is pen
       screen.getByRole('heading', { name: 'Freshly inspected adapters' }),
     ).toBeInTheDocument();
     expect(review).toHaveFocus();
+    expect(
+      screen.getByRole('button', { name: 'Confirm assign' }),
+    ).toBeEnabled();
     expect(mocks.submit).not.toHaveBeenCalled();
   } finally {
     add.mockRestore();

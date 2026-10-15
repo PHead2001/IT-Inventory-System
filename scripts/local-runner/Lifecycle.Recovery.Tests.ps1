@@ -11,10 +11,21 @@ $base = Join-Path ([IO.Path]::GetTempPath()) ('ITIR-lifecycle-tests-' + [guid]::
 [void][IO.Directory]::CreateDirectory($base)
 $script:lockPrefix = 'Local\ITIR-lifecycle-' + [guid]::NewGuid().ToString('N')
 $script:realEnter = (Get-Command Enter-RunnerLock).ScriptBlock
+$script:realExit = (Get-Command Exit-RunnerLock).ScriptBlock
 $script:locks = [Collections.Generic.List[string]]::new()
+$script:heldLocks = [Collections.Generic.List[string]]::new()
 function Enter-RunnerLock([string] $Name = 'Global\ITInventoryLocalRunner-v1', [switch] $FailFast) {
+    if ($Name -cne 'Global\ITInventoryLocalRunner-v1' -and $script:heldLocks.Contains('Global\ITInventoryLocalRunner-v1')) { throw 'Fixture observed outer lock acquired while state lock held.' }
+    if ($Name -ceq 'Global\ITInventoryLocalRunner-Control-v1' -and $script:heldLocks.Count -gt 0) { throw 'Fixture observed control lock acquired inside another lock.' }
+    $mutex = & $script:realEnter ($script:lockPrefix + '-' + $Name.Replace('\', '-')) -FailFast:$FailFast
     $script:locks.Add($Name)
-    return & $script:realEnter ($script:lockPrefix + '-' + $Name.Replace('\', '-')) -FailFast:$FailFast
+    $script:heldLocks.Add($Name)
+    return $mutex
+}
+function Exit-RunnerLock($Mutex) {
+    & $script:realExit $Mutex
+    if ($script:heldLocks.Count -eq 0) { throw 'Fixture lock release had no acquisition.' }
+    $script:heldLocks.RemoveAt($script:heldLocks.Count - 1)
 }
 function Assert-Administrator {}
 function Write-Host {}
@@ -45,6 +56,7 @@ function New-Fixture([string] $Name) {
     $script:RunnerStatePath = Join-Path $script:RunnerRoot 'state.json'
     $script:taskRunning = $false; $script:vmPresent = $false; $script:rejectAcl = ''; $script:fault = ''
     $script:locks.Clear()
+    if ($script:heldLocks.Count -ne 0) { throw 'Previous lifecycle operation leaked a lock.' }
     Write-RunnerJson $script:RunnerConfigPath ([ordered]@{
         schema = 1; tag = $script:RunnerTag; repo = 'example/fixture'; maxMinutes = 120; activation = 'pilot'; label = 'it-inventory-ephemeral'
         pilotExpectedSha = ('a' * 40); pilotWorkflowPath = '.github/workflows/local-runner-pilot.yml'; pilotLabel = ('it-inventory-pilot-' + ('a' * 40))
@@ -54,6 +66,15 @@ function New-Fixture([string] $Name) {
     Write-RunnerJson (Join-Path $script:RunnerRoot 'last-error.json') ([ordered]@{ stage = 'network-isolation'; code = 'STAGE_FAILED' })
 }
 try {
+    # State readers now reenter the same native mutex. Preserve lock hierarchy:
+    # control/supervisor must never be acquired while that state mutex is held.
+    $stateLock = Enter-RunnerLock
+    try {
+        $nestedStateLock = Enter-RunnerLock
+        Exit-RunnerLock $nestedStateLock
+        Assert-Rejected { Enter-RunnerLock 'Global\ITInventoryLocalRunner-Control-v1' } 'control inside state lock'
+        Assert-Rejected { Enter-RunnerLock 'Global\ITInventoryLocalRunner-Supervisor-v1' } 'supervisor inside state lock'
+    } finally { Exit-RunnerLock $stateLock }
     $retryPoints = @('retry-pending', 'retry-archive', 'retry-disabled', 'retry-remove-pilot-attempt.json', 'retry-remove-pilot-result.json', 'retry-target', 'retry-before-complete', 'retry-complete')
     foreach ($point in $retryPoints) {
         New-Fixture $point
@@ -140,7 +161,13 @@ try {
             throw "Update $point failed to restore exact old config and coherent bundle."
         }
         Assert-UpdatePreservedHashes $preserved
-        if ($script:locks[0] -cne 'Global\ITInventoryLocalRunner-Control-v1' -or $script:locks[1] -cne 'Global\ITInventoryLocalRunner-v1' -or $script:locks[2] -cne 'Global\ITInventoryLocalRunner-Supervisor-v1' -or $script:locks[3] -cne 'Global\ITInventoryLocalRunner-v1') { throw 'Update lock order changed.' }
+        $expectedPrefix = @('Global\ITInventoryLocalRunner-Control-v1',
+            'Global\ITInventoryLocalRunner-v1', 'Global\ITInventoryLocalRunner-v1', 'Global\ITInventoryLocalRunner-v1',
+            'Global\ITInventoryLocalRunner-Supervisor-v1', 'Global\ITInventoryLocalRunner-v1', 'Global\ITInventoryLocalRunner-v1')
+        if ($script:locks.Count -lt $expectedPrefix.Count) { throw 'Update lock order incomplete.' }
+        for ($index = 0; $index -lt $expectedPrefix.Count; $index++) {
+            if ($script:locks[$index] -cne $expectedPrefix[$index]) { throw 'Update lock order changed.' }
+        }
     }
     foreach ($changed in @('source', 'missing-dependency', 'acl', 'config', 'receipt', 'running-task', 'vm', 'state', 'staged-source')) {
         New-Fixture ('update-invalid-' + $changed)

@@ -10,8 +10,23 @@ $script:RunnerRoot = $base
 $script:RunnerStatePath = Join-Path $base 'state.json'
 $script:probeFails = $false
 $script:probeResult = $null
+# Reconciliation now precedes capacity admission. Keep its state lock inside
+# this offline fixture, never the installed runner's protected Global mutex.
+$script:stateLocked = $false
+$script:fixtureStateDepth = 0
+function Enter-RunnerLock { $script:fixtureStateDepth++; $script:stateLocked = $true; return 'fixture' }
+function Exit-RunnerLock {
+    if ($script:fixtureStateDepth -le 0) { throw 'Unbalanced fixture state release.' }
+    $script:fixtureStateDepth--; $script:stateLocked = $script:fixtureStateDepth -gt 0
+}
+$fixtureOuter = Enter-RunnerLock; $fixtureInner = Enter-RunnerLock
+Exit-RunnerLock $fixtureInner
+if (-not $script:stateLocked) { throw 'Nested state release exposed memory IO.' }
+Exit-RunnerLock $fixtureOuter
+if ($script:stateLocked -or $script:fixtureStateDepth -ne 0) { throw 'State fixture did not balance.' }
 function Get-CimInstance {
     param($ClassName, $OperationTimeoutSec, $ErrorAction)
+    if ($script:stateLocked) { throw 'Memory inspection held the reconciliation state mutex.' }
     if ($ClassName -cne 'Win32_OperatingSystem' -or $ErrorAction -cne 'Stop' -or $OperationTimeoutSec -ne 10) { throw 'Wrong memory probe.' }
     if ($script:probeFails) { throw 'SENTINEL_PRIVATE_DETAIL' }
     return $script:probeResult
@@ -60,7 +75,7 @@ try {
     function Write-EventLog {}
     function Start-Sleep {
         param($Seconds)
-        if ($Seconds -ne 30) { throw 'Capacity refusal did not use bounded loop.' }
+        if ($Seconds -ne 1) { throw 'Capacity refusal did not use stop-aware bounded loop.' }
         $script:sleeps++
         [IO.File]::WriteAllText((Join-Path $script:RunnerRoot 'stop.requested'), 'stop')
     }
@@ -90,16 +105,16 @@ try {
     function Get-QueuedRunnerJob { return $null }
     function Start-Sleep {
         param($Seconds)
-        if ($Seconds -ne 30) { throw 'Capacity retry changed its bounded interval.' }
+        if ($Seconds -ne 1) { throw 'Capacity retry changed its stop-aware bounded interval.' }
         $script:sleeps++
-        if ($script:recoverCapacity -and $script:sleeps -eq 1) {
-            $script:probeResult.FreePhysicalMemory = [uint64](10GB / 1KB)
+        if ($script:recoverCapacity -and $script:sleeps -le 30) {
+            if ($script:sleeps -eq 30) { $script:probeResult.FreePhysicalMemory = [uint64](10GB / 1KB) }
         } else { [IO.File]::WriteAllText((Join-Path $base 'stop.requested'), 'stop') }
     }
     foreach ($case in @(
         @{ free = (10GB / 1KB); recover = $false; sleeps = 1 },
         @{ free = (10GB / 1KB + 1); recover = $false; sleeps = 1 },
-        @{ free = (9GB / 1KB); recover = $true; sleeps = 2 }
+        @{ free = (9GB / 1KB); recover = $true; sleeps = 31 }
     )) {
         $script:probeResult = [pscustomobject]@{ FreePhysicalMemory = [uint64]$case.free; TotalVisibleMemorySize = [uint64](32GB / 1KB) }
         $script:recoverCapacity = $case.recover
@@ -126,6 +141,7 @@ try {
     # boot stage immediately before that call, rather than retaining isolation.
     $session = $ast.Find({ param($node) $node -is [Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq 'Invoke-RunnerSession' }, $false)
     if ($session.Extent.Text -notmatch "RunnerOperationStage = 'vm-boot'\s+Start-GuardedVm") { throw 'Guarded boot lacks its own failure stage.' }
+if ($script:fixtureStateDepth -ne 0 -or $script:stateLocked) { throw 'Fixture leaked state recursion.' }
     Write-Host 'Memory admission regressions passed: boundaries, invalid/failed inspection, no pilot/session allocation, bounded waits and boot stage.'
 } finally {
     if ([IO.Path]::GetDirectoryName($base).TrimEnd('\') -cne ([IO.Path]::GetTempPath()).TrimEnd('\') -or [IO.Path]::GetFileName($base) -notmatch '^ITIR-memory-[0-9a-f]{32}$') { throw 'Unexpected memory fixture cleanup path.' }
