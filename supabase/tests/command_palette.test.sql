@@ -48,9 +48,10 @@ insert into public.locations(code,name,parent_id,kind,can_hold_inventory)
  select 'PAL-BULK-LOC-'||n,'Calibration location filler '||n,(select id from public.locations where code='ITC'),'container',true from generate_series(1,6000) n;
 insert into public.quantity_items(id,name,category_id) values
  ('a3010000-0000-4000-8000-000000009999','PaletteCalibration instrument',(select id from public.categories where code='OTHER'));
--- Exact irrelevant kinds fill an ordinary page before a fuzzy equipment match.
+-- Exact site matches fill an ordinary page before a fuzzy equipment match.
+-- Location matches also crowd search while keeping active sibling names distinct.
 insert into public.locations(code,name,parent_id,kind,can_hold_inventory)
- select 'PAL-PURPOSE-LOC-'||n,'PurposeCrowd',(select id from public.locations where code='ITC'),'container',true from generate_series(1,25) n;
+ select 'PAL-PURPOSE-LOC-'||n,'PurposeCrowd '||n,(select id from public.locations where code='ITC'),'container',true from generate_series(1,25) n;
 insert into public.sites(code,name)
  select 'PAL-PURPOSE-SITE-'||n,'PurposeCrowd' from generate_series(1,25) n;
 insert into public.sites(code,name)
@@ -127,6 +128,8 @@ select is(jsonb_array_length(public.command_palette_search_v1('PaletteTies')->'r
 select is(public.command_palette_search_v1('PaletteTies')->>'hasMore','true','21st unique entity sets cap guidance');
 select is(public.command_palette_search_v1('PaletteTies')->'rows'->0->>'id','a3010000-0000-4000-8000-000000000100','ties use deterministic entity identity');
 select is(public.command_palette_search_v1('PaletteTies'),public.command_palette_search_v1('PaletteTies'),'repeat rank stable');
+select is(jsonb_array_length(public.command_palette_search_v1('PurposeCrowd')->'rows'),20,'unique sibling fixtures still fill the ordinary purpose search cap');
+select is(public.command_palette_search_v1('PurposeCrowd')->>'hasMore','true','ordinary purpose search retains more irrelevant matches beyond the cap');
 select ok(not exists(select 1 from jsonb_array_elements(public.command_palette_search_v1('PurposeCrowd')->'rows') r where r->>'kind'='asset'),'ordinary cap is full of higher-ranked locations/sites');
 select is(public.command_palette_search_v1('PurposeCrowd','active','move')->'rows'->0->>'id','a3010000-0000-4000-8000-000000008001','move purpose selects eligible kinds before per-field/global caps');
 select is(public.command_palette_search_v1('PurposeCrowd','active','move')->>'hasMore','false','irrelevant location/site matches do not set move hasMore');
