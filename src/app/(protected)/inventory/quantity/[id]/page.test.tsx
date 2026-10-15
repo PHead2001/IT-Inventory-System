@@ -53,7 +53,9 @@ vi.mock('@/features/inventory/components/detail-tasks', () => ({
 vi.mock('@/features/metadata/custom-metadata-list', () => ({
   CustomMetadataList: () => null,
 }));
-vi.mock('@/features/files/files-panel', () => ({ FilesPanel: () => null }));
+vi.mock('@/features/files/files-panel', () => ({
+  FilesPanel: vi.fn(() => null),
+}));
 vi.mock('next/navigation', () => ({ notFound: vi.fn() }));
 
 it('keeps a quantity correction distinct from custody movement in the record history', async () => {
@@ -78,3 +80,27 @@ it('keeps a quantity correction distinct from custody movement in the record his
   expect(history).not.toHaveTextContent('5 units');
 });
 vi.mock('server-only', () => ({}));
+
+vi.mock('@/features/files/cards.server', () => ({
+  getInventoryFileCards: vi.fn(async () => ({ revision: '17', files: [] })),
+}));
+
+it('passes authorized server file metadata into the first detail render and propagates file read failure', async () => {
+  const { getInventoryFileCards } =
+    await import('@/features/files/cards.server');
+  const { FilesPanel } = await import('@/features/files/files-panel');
+  const Page = QuantityPage;
+  const parentId = 'quantity';
+  render(await Page({ params: Promise.resolve({ id: parentId }) }));
+  expect(getInventoryFileCards).toHaveBeenCalledWith('quantity', parentId);
+  expect(FilesPanel).toHaveBeenCalledWith(
+    expect.objectContaining({ initialEnvelope: { revision: '17', files: [] } }),
+    undefined,
+  );
+  vi.mocked(getInventoryFileCards).mockRejectedValueOnce(
+    new Error('Files unavailable'),
+  );
+  await expect(
+    Page({ params: Promise.resolve({ id: parentId }) }),
+  ).rejects.toThrow('Files unavailable');
+});

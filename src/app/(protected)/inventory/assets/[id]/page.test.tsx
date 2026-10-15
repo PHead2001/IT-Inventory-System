@@ -82,7 +82,9 @@ vi.mock('@/features/inventory/components/detail-tasks', () => ({
 vi.mock('@/features/metadata/custom-metadata-list', () => ({
   CustomMetadataList: () => null,
 }));
-vi.mock('@/features/files/files-panel', () => ({ FilesPanel: () => null }));
+vi.mock('@/features/files/files-panel', () => ({
+  FilesPanel: vi.fn(() => null),
+}));
 
 it('renders one authoritative asset timeline without duplicating custody or merging separate events', async () => {
   render(await AssetPage({ params: Promise.resolve({ id: 'asset' }) }));
@@ -117,3 +119,27 @@ it('renders one authoritative asset timeline without duplicating custody or merg
   ).toBeVisible();
 });
 vi.mock('server-only', () => ({}));
+
+vi.mock('@/features/files/cards.server', () => ({
+  getInventoryFileCards: vi.fn(async () => ({ revision: '17', files: [] })),
+}));
+
+it('passes authorized server file metadata into the first detail render and propagates file read failure', async () => {
+  const { getInventoryFileCards } =
+    await import('@/features/files/cards.server');
+  const { FilesPanel } = await import('@/features/files/files-panel');
+  const Page = AssetPage;
+  const parentId = 'asset';
+  render(await Page({ params: Promise.resolve({ id: parentId }) }));
+  expect(getInventoryFileCards).toHaveBeenCalledWith('asset', parentId);
+  expect(FilesPanel).toHaveBeenCalledWith(
+    expect.objectContaining({ initialEnvelope: { revision: '17', files: [] } }),
+    undefined,
+  );
+  vi.mocked(getInventoryFileCards).mockRejectedValueOnce(
+    new Error('Files unavailable'),
+  );
+  await expect(
+    Page({ params: Promise.resolve({ id: parentId }) }),
+  ).rejects.toThrow('Files unavailable');
+});

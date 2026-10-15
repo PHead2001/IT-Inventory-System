@@ -8,7 +8,8 @@ import {
 } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import userEvent from '@testing-library/user-event';
-import { readFileSync } from 'node:fs';
+import { useEffect, useState, type ComponentProps } from 'react';
+import type { InventoryFileCards } from './contract';
 
 const mocks = vi.hoisted(() => ({
   operation: vi.fn(),
@@ -27,136 +28,44 @@ vi.mock('@/lib/supabase/browser', () => ({
   }),
 }));
 
-import { FilesPanel } from './files-panel';
+import { FilesPanel as SeededFilesPanel } from './files-panel';
 import { OperationalTimeProvider } from '@/components/operational-time';
 import * as operationalTime from '@/lib/operational-time';
 import { HistoryList } from '@/features/inventory/components/read-ui';
 
-it('marks only the file surface busy during the deferred initial read and reveals actual files', async () => {
-  let finish!: (value: unknown) => void;
-  mocks.browserRpc.mockImplementation((name: string) =>
-    name === 'inventory_file_cards'
-      ? new Promise((resolve) => {
-          finish = resolve;
-        })
-      : mocks.operation(name),
-  );
-  render(
-    <FilesPanel
-      parentType="asset"
-      parentId="00000000-0000-4000-8000-000000000001"
-      active
-      staff
-      actorId="staff"
-    />,
-  );
-  const panel = screen.getByRole('region', { name: 'Inventory files' });
-  expect(panel).toHaveAttribute('aria-busy', 'true');
-  expect(
-    panel.querySelector('[data-loading-shape="files"]'),
-  ).toBeInTheDocument();
-  const announcement = screen.getByText('Loading files…');
-  expect(announcement).toHaveClass('sr-only');
-  expect(announcement.closest('[aria-busy="true"]')).toBeNull();
-  await act(async () =>
-    finish({ data: { revision: '1', files: [pending] }, error: null }),
-  );
-  await within(panel).findByText('Uploaded · review required');
-  expect(panel).toHaveAttribute('aria-busy', 'false');
-  expect(screen.queryByText('Loading files…')).not.toBeInTheDocument();
-  expect(
-    panel.querySelector('[data-loading-shape="files"]'),
-  ).not.toBeInTheDocument();
-});
-
-it.each(['quantity', 'asset'] as const)(
-  'reveals a deferred empty %s collection immediately inside the animated host',
-  async (parentType) => {
-    let finish!: (value: unknown) => void;
-    mocks.browserRpc.mockImplementation((name: string) =>
-      name === 'inventory_file_cards'
-        ? new Promise((resolve) => {
-            finish = resolve;
-          })
-        : mocks.operation(name),
-    );
-    const originalAnimate = HTMLElement.prototype.animate;
-    const originalMedia = window.matchMedia;
-    const originalMotion = document.documentElement.dataset.motion;
-    const originalRootStyle = document.documentElement.getAttribute('style');
-    const hosts: HTMLElement[] = [];
-    const cancel = vi.fn();
-    const animate = vi.fn(function (this: HTMLElement) {
-      hosts.push(this);
-      return { cancel };
-    });
-    HTMLElement.prototype.animate =
-      animate as unknown as typeof originalAnimate;
-    window.matchMedia = vi.fn(() => ({
-      matches: false,
-      addEventListener: vi.fn(),
-      removeEventListener: vi.fn(),
-    })) as unknown as typeof originalMedia;
-    document.documentElement.dataset.motion = 'full';
-    try {
-      // jsdom does not load the app stylesheet. Supply its actual shared motion
-      // tokens so the real reveal admission follows the production contract.
-      const globals = readFileSync('src/app/globals.css', 'utf8');
-      for (const [, token, value] of globals.matchAll(
-        /(--(?:motion-feedback|ease-workspace)):\s*([^;]+);/g,
-      ))
-        document.documentElement.style.setProperty(token, value);
-      render(
-        <FilesPanel
-          parentType={parentType}
-          parentId="00000000-0000-4000-8000-000000000001"
-          active
-          staff
-          actorId="staff"
-        />,
-      );
-      const empty =
-        parentType === 'quantity' ? 'No photo yet.' : 'No attachments yet.';
-      expect(screen.queryByText(empty)).not.toBeInTheDocument();
-      expect(animate).not.toHaveBeenCalled();
-      const fileInput = screen.getByLabelText(
-        parentType === 'quantity'
-          ? 'Add recognition photo'
-          : 'Add photo or PDF',
-      );
-      await act(async () =>
-        finish({ data: { revision: '1', files: [] }, error: null }),
-      );
-      const message = screen.getByText(empty);
-      expect(message).toBeVisible();
-      expect(animate).toHaveBeenCalledOnce();
-      expect(animate).toHaveBeenCalledWith(
-        [{ opacity: 0.65 }, { opacity: 1 }],
-        { duration: 130, easing: 'cubic-bezier(0.2, 0.8, 0.2, 1)' },
-      );
-      expect(hosts[0]).toContainElement(message);
-      expect(hosts[0]).toHaveAttribute('aria-busy', 'false');
-      expect(fileInput).toBeEnabled();
-      expect(
-        screen.getByLabelText(
-          parentType === 'quantity'
-            ? 'Add recognition photo'
-            : 'Add photo or PDF',
-        ),
-      ).toBe(fileInput);
-      expect(screen.queryByText('Loading files…')).not.toBeInTheDocument();
-    } finally {
-      HTMLElement.prototype.animate = originalAnimate;
-      window.matchMedia = originalMedia;
-      if (originalMotion === undefined)
-        delete document.documentElement.dataset.motion;
-      else document.documentElement.dataset.motion = originalMotion;
-      if (originalRootStyle === null)
-        document.documentElement.removeAttribute('style');
-      else document.documentElement.setAttribute('style', originalRootStyle);
-    }
-  },
-);
+// Existing mutation scenarios obtain their starting metadata through this
+// server-fixture adapter. The production panel receives it as an RSC prop and
+// never performs this initial read in the browser.
+function FilesPanel(
+  props: Omit<ComponentProps<typeof SeededFilesPanel>, 'initialEnvelope'>,
+) {
+  const identity = `${process.env.NEXT_PUBLIC_SUPABASE_URL}:${props.actorId}:${props.parentType}:${props.parentId}:${props.staff}`;
+  return <ServerCardsFixture key={identity} {...props} />;
+}
+function ServerCardsFixture(
+  props: Omit<ComponentProps<typeof SeededFilesPanel>, 'initialEnvelope'>,
+) {
+  const [seed, setSeed] = useState<InventoryFileCards | null>(null);
+  const [failed, setFailed] = useState(false);
+  useEffect(() => {
+    let cancelled = false;
+    void mocks
+      .operation('inventory_file_cards', {
+        p_parent_type: props.parentType,
+        p_parent_id: props.parentId,
+      })
+      .then(({ data, error }: { data: InventoryFileCards; error: unknown }) => {
+        if (cancelled) return;
+        if (error) setFailed(true);
+        else setSeed(data);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [props.parentType, props.parentId]);
+  if (failed) return <p role="alert">Files could not be loaded.</p>;
+  return seed ? <SeededFilesPanel {...props} initialEnvelope={seed} /> : null;
+}
 
 it('uses one local browse/drop path, revokes image previews, and never embeds or publishes a selected PDF', async () => {
   const create = vi
@@ -285,7 +194,7 @@ const pending = {
   type: 'image/png',
   bytes: 20,
   purpose: 'asset_photo',
-  state: 'uploaded',
+  state: 'uploaded' as const,
   created_at: '2026-09-25T00:00:00Z',
   version: '1',
   replaces_file_id: null,
@@ -428,6 +337,9 @@ it('labels the actual file upload/activity instants in the one shared display zo
       </OperationalTimeProvider>,
     );
     await screen.findByText('Original: damaged.png');
+    await waitFor(() =>
+      expect(container.querySelectorAll('time')).toHaveLength(3),
+    );
     const times = container.querySelectorAll('time');
     expect(times).toHaveLength(3);
     for (const time of times) {
@@ -755,7 +667,7 @@ describe('fresh native picker intent', () => {
 });
 
 describe('terminal file cancellation cleanup', () => {
-  it('describes only supported photo formats for quantity records', () => {
+  it('describes only supported photo formats for quantity records', async () => {
     render(
       <FilesPanel
         actorId="actor-a"
@@ -765,7 +677,9 @@ describe('terminal file cancellation cleanup', () => {
         staff
       />,
     );
-    const files = screen.getByRole('region', { name: 'Inventory files' });
+    const files = await screen.findByRole('region', {
+      name: 'Inventory files',
+    });
     expect(files).toHaveTextContent('JPEG, PNG or still WebP');
     expect(files).not.toHaveTextContent('PDF');
     expect(screen.getByLabelText('Add recognition photo')).toHaveAttribute(
@@ -2559,4 +2473,279 @@ describe('named file removal confirmation', () => {
       vi.unstubAllEnvs();
     },
   );
+});
+
+describe('server-seeded cards and refresh isolation', () => {
+  const props = {
+    actorId: 'actor-a',
+    parentType: 'asset' as const,
+    parentId: id,
+    active: true,
+    staff: true,
+  };
+  const ready = {
+    ...pending,
+    state: 'ready' as const,
+    type: 'application/pdf',
+    ready_at: pending.created_at,
+  };
+  const envelope = (files: InventoryFileCards['files'], revision = '12') => ({
+    revision,
+    files,
+  });
+  const cardReads = () =>
+    mocks.browserRpc.mock.calls.filter(
+      ([name]) => name === 'inventory_file_cards',
+    );
+  it.each([
+    ['quantity', 0],
+    ['quantity', 1],
+    ['asset', 0],
+    ['asset', 1],
+    ['asset', 20],
+  ] as const)(
+    'renders actual %s cards (%s ready) synchronously without an initial browser cards request',
+    async (parentType, count) => {
+      mocks.operation.mockImplementation(async (name: string) =>
+        name === 'inventory_file_history'
+          ? { data: { rows: [], has_more: false }, error: null }
+          : { data: null, error: { message: 'Thumbnail unavailable' } },
+      );
+      const files = Array.from({ length: count }, (_, n) => ({
+        ...ready,
+        id: `ready-${n}`,
+        name: `Ready file ${n}`,
+        type: parentType === 'quantity' ? 'image/png' : ready.type,
+      }));
+      const { container } = render(
+        <SeededFilesPanel
+          {...props}
+          parentType={parentType}
+          initialEnvelope={envelope(files)}
+        />,
+      );
+      const panel = screen.getByRole('region', { name: 'Inventory files' });
+      expect(panel).toHaveAttribute('aria-busy', 'false');
+      expect(
+        container.querySelector('[data-loading-shape="files"]'),
+      ).toBeNull();
+      if (!count)
+        expect(
+          screen.getByText(
+            parentType === 'quantity' ? 'No photo yet.' : 'No attachments yet.',
+          ),
+        ).toBeVisible();
+      else expect(screen.getAllByRole('listitem')).toHaveLength(count);
+      await act(async () => {});
+      expect(cardReads()).toHaveLength(0);
+    },
+  );
+  it('renders own pending files at the supplied revision and uses that revision for removal', async () => {
+    mocks.operation.mockImplementation(async (name: string) => {
+      if (name === 'inventory_file_history')
+        return { data: { rows: [], has_more: false }, error: null };
+      if (name === 'inventory_file_remove')
+        return { data: null, error: { message: 'unknown' } };
+      throw new Error(name);
+    });
+    render(
+      <SeededFilesPanel
+        {...props}
+        initialEnvelope={envelope(
+          [ready, { ...pending, id: 'own-pending' }],
+          '37',
+        )}
+      />,
+    );
+    expect(screen.getByText('Uploaded · review required')).toBeVisible();
+    fireEvent.click(screen.getByRole('button', { name: 'Remove' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Remove file' }));
+    await screen.findByRole('button', { name: 'Retry removal' });
+    expect(mocks.browserRpc).toHaveBeenCalledWith(
+      'inventory_file_remove',
+      expect.objectContaining({ p_expected_revision: '37' }),
+    );
+    expect(cardReads()).toHaveLength(0);
+  });
+  it('treats refreshed props only as a reread signal and keeps cards while reading; equal revision can advance pending state', async () => {
+    let finish!: (value: unknown) => void;
+    mocks.browserRpc.mockImplementation((name: string) =>
+      name === 'inventory_file_cards'
+        ? new Promise((resolve) => {
+            finish = resolve;
+          })
+        : mocks.operation(name),
+    );
+    const view = render(
+      <SeededFilesPanel {...props} initialEnvelope={envelope([pending])} />,
+    );
+    view.rerender(
+      <SeededFilesPanel {...props} initialEnvelope={envelope([], '1')} />,
+    );
+    expect(screen.getByText('Uploaded · review required')).toBeVisible();
+    expect(screen.queryByText('No attachments yet.')).not.toBeInTheDocument();
+    await act(async () =>
+      finish({
+        data: envelope([{ ...pending, state: 'validated', version: '4' }]),
+        error: null,
+      }),
+    );
+    expect(screen.getByText('Awaiting publication')).toBeVisible();
+    expect(cardReads()).toHaveLength(1);
+  });
+  it('ignores a superseded delayed read and malformed refresh responses without erasing known cards', async () => {
+    const finishes: ((value: unknown) => void)[] = [];
+    mocks.browserRpc.mockImplementation((name: string) =>
+      name === 'inventory_file_cards'
+        ? new Promise((resolve) => {
+            finishes.push(resolve);
+          })
+        : mocks.operation(name),
+    );
+    const view = render(
+      <SeededFilesPanel {...props} initialEnvelope={envelope([pending])} />,
+    );
+    view.rerender(
+      <SeededFilesPanel {...props} initialEnvelope={envelope([], '2')} />,
+    );
+    view.rerender(
+      <SeededFilesPanel {...props} initialEnvelope={envelope([], '3')} />,
+    );
+    await act(async () =>
+      finishes[1]({
+        data: envelope([{ ...pending, state: 'validated' }]),
+        error: null,
+      }),
+    );
+    await act(async () => finishes[0]({ data: envelope([]), error: null }));
+    expect(screen.getByText('Awaiting publication')).toBeVisible();
+    view.rerender(
+      <SeededFilesPanel {...props} initialEnvelope={envelope([], '4')} />,
+    );
+    await act(async () =>
+      finishes[2]({ data: { revision: '99', files: [{}] }, error: null }),
+    );
+    expect(screen.getByText('Files could not be loaded.')).toBeVisible();
+    expect(screen.getByText('Awaiting publication')).toBeVisible();
+  });
+  it('defers refresh during selected upload intent and rereads after the selection is cleared', async () => {
+    const seed = envelope([]);
+    const view = render(<SeededFilesPanel {...props} initialEnvelope={seed} />);
+    fireEvent.change(screen.getByLabelText('Add photo or PDF'), {
+      target: {
+        files: [new File(['pdf'], 'choice.pdf', { type: 'application/pdf' })],
+      },
+    });
+    view.rerender(
+      <SeededFilesPanel {...props} initialEnvelope={envelope([ready])} />,
+    );
+    expect(cardReads()).toHaveLength(0);
+    expect(
+      screen.getByRole('button', { name: 'Clear selection' }),
+    ).toBeVisible();
+    fireEvent.click(screen.getByRole('button', { name: 'Clear selection' }));
+    await waitFor(() => expect(cardReads()).toHaveLength(1));
+  });
+  it('accepts refresh after success feedback and recovers a failed read without discarding cleanup feedback', async () => {
+    mocks.fetch.mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        deleted: 0,
+        failed: 0,
+        outstanding: 0,
+        blocked: 0,
+        pending: false,
+        status: 'no_work',
+      }),
+    });
+    let fail = true;
+    mocks.browserRpc.mockImplementation((name: string) =>
+      name === 'inventory_file_cards'
+        ? Promise.resolve(
+            fail
+              ? { data: { revision: '1', files: [{}] }, error: null }
+              : { data: envelope([ready]), error: null },
+          )
+        : mocks.operation(name),
+    );
+    const view = render(
+      <SeededFilesPanel {...props} initialEnvelope={envelope([])} />,
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Check file cleanup' }));
+    await screen.findByText('No file cleanup is needed for this record.');
+    view.rerender(
+      <SeededFilesPanel {...props} initialEnvelope={envelope([], '13')} />,
+    );
+    await screen.findByText('Files could not be loaded.');
+    fail = false;
+    view.rerender(
+      <SeededFilesPanel {...props} initialEnvelope={envelope([], '14')} />,
+    );
+    await screen.findByRole('button', { name: 'Download PDF' });
+    expect(cardReads()).toHaveLength(2);
+    // A metadata refresh preserves action/read feedback and does not reset state.
+    expect(screen.getByText('Files could not be loaded.')).toBeVisible();
+  });
+  it('ignores a background response that arrives after a confirmed removal', async () => {
+    let finish!: (value: unknown) => void;
+    let reads = 0;
+    mocks.browserRpc.mockImplementation((name: string) => {
+      if (name === 'inventory_file_cards') {
+        if (++reads === 1)
+          return new Promise((resolve) => {
+            finish = resolve;
+          });
+        return Promise.resolve({ data: envelope([], '13'), error: null });
+      }
+      if (name === 'inventory_file_remove')
+        return Promise.resolve({ data: {}, error: null });
+      return mocks.operation(name);
+    });
+    const view = render(
+      <SeededFilesPanel {...props} initialEnvelope={envelope([ready])} />,
+    );
+    view.rerender(
+      <SeededFilesPanel {...props} initialEnvelope={envelope([ready], '13')} />,
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Remove' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Remove file' }));
+    await screen.findByText(/File removed\./);
+    await act(async () => finish({ data: envelope([ready]), error: null }));
+    expect(
+      screen.queryByRole('button', { name: 'Download PDF' }),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByText(ready.name)).not.toBeInTheDocument();
+  });
+  it('preserves an unknown removal request and its retry identity across refreshed props', async () => {
+    mocks.operation.mockImplementation(async (name: string) =>
+      name === 'inventory_file_remove'
+        ? { data: null, error: { message: 'unknown' } }
+        : { data: { rows: [], has_more: false }, error: null },
+    );
+    const view = render(
+      <SeededFilesPanel {...props} initialEnvelope={envelope([ready])} />,
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Remove' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Remove file' }));
+    await screen.findByRole('button', { name: 'Retry removal' });
+    const original = mocks.browserRpc.mock.calls.find(
+      ([name]) => name === 'inventory_file_remove',
+    )![1];
+    view.rerender(
+      <SeededFilesPanel {...props} initialEnvelope={envelope([], '99')} />,
+    );
+    expect(cardReads()).toHaveLength(0);
+    fireEvent.click(screen.getByRole('button', { name: 'Retry removal' }));
+    await waitFor(() =>
+      expect(
+        mocks.browserRpc.mock.calls.filter(
+          ([name]) => name === 'inventory_file_remove',
+        ),
+      ).toHaveLength(2),
+    );
+    expect(mocks.browserRpc).toHaveBeenLastCalledWith(
+      'inventory_file_remove',
+      original,
+    );
+  });
 });

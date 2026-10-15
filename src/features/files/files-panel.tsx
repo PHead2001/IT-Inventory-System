@@ -3,31 +3,21 @@ import { afterTransitionCapture } from '@/components/forms/transition-capture';
 import {
   LoadingAnnouncement,
   LoadingReveal,
-  LoadingSkeleton,
 } from '@/components/ui/loading-skeleton';
 import { OperationalTimestamp } from '@/components/operational-time';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { createSupabaseBrowserClient } from '@/lib/supabase/browser';
 import { formatFileSize } from '@/lib/file-size';
-import { cleanupResultSchema, type CleanupResult } from './contract';
+import {
+  cleanupResultSchema,
+  inventoryFileCardsSchema,
+  type CleanupResult,
+  type InventoryFileCard as Card,
+  type InventoryFileCards as CardsEnvelope,
+} from './contract';
 import { validateSelectedFile } from './selection';
 
 const bucket = 'inventory-files';
-type Card = {
-  id: string;
-  name: string;
-  filename: string;
-  uploader: string;
-  ready_at: string | null;
-  type: string;
-  bytes: number | null;
-  purpose: string;
-  state: string;
-  created_at: string;
-  version: string;
-  replaces_file_id: string | null;
-  reviewed_replaced_file_version: string | null;
-};
 type FileHistory = {
   id: string;
   action: string;
@@ -39,7 +29,6 @@ type FileHistory = {
   file_bytes: number;
   collection_revision: string;
 };
-type CardsEnvelope = { revision: string; files: Card[] };
 function fileState(state: string) {
   switch (state) {
     case 'ready':
@@ -146,6 +135,7 @@ export function FilesPanel({
   staff,
   actorId,
   parentName = 'this inventory record',
+  initialEnvelope,
 }: {
   parentType: 'asset' | 'quantity';
   parentId: string;
@@ -153,6 +143,7 @@ export function FilesPanel({
   staff: boolean;
   actorId: string;
   parentName?: string;
+  initialEnvelope: CardsEnvelope;
 }) {
   return (
     <BoundFilesPanel
@@ -162,6 +153,7 @@ export function FilesPanel({
       active={active}
       staff={staff}
       parentName={parentName}
+      initialEnvelope={initialEnvelope}
     />
   );
 }
@@ -172,16 +164,20 @@ function BoundFilesPanel({
   active,
   staff,
   parentName,
+  initialEnvelope,
 }: {
   parentType: 'asset' | 'quantity';
   parentId: string;
   active: boolean;
   staff: boolean;
   parentName: string;
+  initialEnvelope: CardsEnvelope;
 }) {
   const [client] = useState(createSupabaseBrowserClient);
-  const [cards, setCards] = useState<Card[]>([]);
-  const [collectionRevision, setCollectionRevision] = useState('1');
+  const [cards, setCards] = useState<Card[]>(() => initialEnvelope.files);
+  const [collectionRevision, setCollectionRevision] = useState(
+    initialEnvelope.revision,
+  );
   const [history, setHistory] = useState<FileHistory[]>([]);
   const [historyPage, setHistoryPage] = useState(1);
   const [historyMore, setHistoryMore] = useState(false);
@@ -266,7 +262,7 @@ function BoundFilesPanel({
       document.removeEventListener('drop', preventFileNavigation);
     };
   }, []);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(false);
   const [historyError, setHistoryError] = useState(false);
   const [cleanupPending, setCleanupPending] = useState(false);
   const [preview, setPreview] = useState<{
@@ -277,33 +273,52 @@ function BoundFilesPanel({
   const [rpc] = useState(() => client.rpc.bind(client) as unknown as Rpc);
   const mounted = useRef(true);
   const invalidatedFiles = useRef(new Set<string>());
+  const readGeneration = useRef(0);
   useEffect(() => {
     mounted.current = true;
     return () => {
       mounted.current = false;
     };
   }, []);
-  const load = useCallback(async (): Promise<CardsEnvelope | null> => {
-    const { data, error } = await rpc('inventory_file_cards', {
-      p_parent_type: parentType,
-      p_parent_id: parentId,
-    });
-    if (!mounted.current) return null;
-    if (error) {
-      setMessage('Files could not be loaded.');
-      return null;
-    }
-    const envelope = data as CardsEnvelope;
-    setCards(
-      Array.isArray(envelope?.files)
-        ? envelope.files.filter(
+  const load = useCallback(
+    async (isCurrent = () => true): Promise<CardsEnvelope | null> => {
+      const generation = ++readGeneration.current;
+      try {
+        const { data, error } = await rpc('inventory_file_cards', {
+          p_parent_type: parentType,
+          p_parent_id: parentId,
+        });
+        if (
+          !mounted.current ||
+          !isCurrent() ||
+          generation !== readGeneration.current
+        )
+          return null;
+        const parsed = inventoryFileCardsSchema.safeParse(data);
+        if (error || !parsed.success) {
+          setMessage('Files could not be loaded.');
+          return null;
+        }
+        const envelope = parsed.data;
+        setCards(
+          envelope.files.filter(
             (card) => !invalidatedFiles.current.has(card.id),
-          )
-        : [],
-    );
-    setCollectionRevision(envelope?.revision ?? '1');
-    return envelope;
-  }, [rpc, parentType, parentId]);
+          ),
+        );
+        setCollectionRevision(envelope.revision);
+        return envelope;
+      } catch {
+        if (
+          mounted.current &&
+          isCurrent() &&
+          generation === readGeneration.current
+        )
+          setMessage('Files could not be loaded.');
+        return null;
+      }
+    },
+    [rpc, parentType, parentId],
+  );
   async function cleanupTerminalFiles() {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 15000);
@@ -326,25 +341,32 @@ function BoundFilesPanel({
       clearTimeout(timeout);
     }
   }
+  const seenEnvelope = useRef(initialEnvelope);
+  const refreshPending = useRef(false);
   useEffect(() => {
-    let cancelled = false;
-    void rpc('inventory_file_cards', {
-      p_parent_type: parentType,
-      p_parent_id: parentId,
-    }).then(({ data, error }) => {
-      if (cancelled) return;
-      setLoading(false);
-      if (error) setMessage('Files could not be loaded.');
-      else {
-        const envelope = data as CardsEnvelope;
-        setCards(Array.isArray(envelope?.files) ? envelope.files : []);
-        setCollectionRevision(envelope?.revision ?? '1');
-      }
+    if (seenEnvelope.current !== initialEnvelope) {
+      seenEnvelope.current = initialEnvelope;
+      refreshPending.current = true;
+    }
+    // RSC refresh props are an invalidation signal, never an ordered snapshot:
+    // pending file versions can change without advancing collection revision.
+    // Keep local intents and ambiguous removal outcomes intact until settled.
+    // Feedback and cleanup retries survive rereads; they are not refresh locks.
+    if (!refreshPending.current || busy || removal || file || replace) return;
+    refreshPending.current = false;
+    setLoading(true);
+    let current = true;
+    let completed = false;
+    void load(() => current).finally(() => {
+      completed = true;
+      if (mounted.current && current) setLoading(false);
     });
     return () => {
-      cancelled = true;
+      current = false;
+      setLoading(false);
+      if (!completed) refreshPending.current = true;
     };
-  }, [rpc, parentType, parentId]);
+  }, [initialEnvelope, busy, removal, file, replace, load]);
   useEffect(() => {
     let cancelled = false;
     void rpc('inventory_file_history', {
@@ -786,14 +808,6 @@ function BoundFilesPanel({
             {message}
           </p>
         )}
-        {loading && (
-          <LoadingSkeleton
-            shape="files"
-            label="Loading files…"
-            announce={false}
-            className="mt-3"
-          />
-        )}
         <LoadingReveal busy={loading} reveal={!message}>
           <ul className="mt-3 space-y-2">
             {cards
@@ -922,7 +936,7 @@ function BoundFilesPanel({
                 </li>
               ))}
           </ul>
-          {!loading && !busy && cards.length === 0 && !message && (
+          {!busy && cards.length === 0 && !message && (
             <p className="experience-muted mt-3 rounded-lg border border-dashed border-cyan-100/20 px-3 py-2 text-sm">
               {parentType === 'quantity'
                 ? 'No photo yet.'
