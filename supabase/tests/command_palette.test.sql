@@ -37,15 +37,25 @@ insert into public.sites(id,code,name,active) values
 insert into public.quantity_items(id,name,category_id)
  select ('a3010000-0000-4000-8000-'||lpad(n::text,12,'0'))::uuid,'PaletteTies',
  (select id from public.categories where code='OTHER') from generate_series(100,135) n;
+-- Retain 6,000 common Calibration/PAL-BULK matches per table for adversarial
+-- equal-distance ranking/cap coverage. A selective token in 30 rows per field
+-- (more than the 21-candidate sentinel) supplies the distinct KNN plan workload.
 insert into public.quantity_items(name,item_code,category_id)
- select 'Calibration fixture filler '||n,'PAL-BULK-ITEM-'||n,(select id from public.categories where code='OTHER') from generate_series(1,6000) n;
+ select 'Calibration '||case when n<=30 then 'Spectrometer ' else '' end||'fixture filler '||n,
+ 'PAL-BULK-'||case when n<=30 then 'RIVET-' else '' end||'ITEM-'||n,
+ (select id from public.categories where code='OTHER') from generate_series(1,6000) n;
 insert into public.serialized_assets(name,asset_tag,serial_number,category_id,location_id)
- select 'Calibration asset filler '||n,'PAL-BULK-ASSET-'||n,'PAL-BULK-SERIAL-'||n,
+ select 'Calibration '||case when n<=30 then 'Spectrometer ' else '' end||'asset filler '||n,
+ 'PAL-BULK-'||case when n<=30 then 'RIVET-' else '' end||'ASSET-'||n,
+ 'PAL-BULK-'||case when n<=30 then 'RIVET-' else '' end||'SERIAL-'||n,
  (select id from public.categories where code='OTHER'),(select id from public.locations where code='ITC-D01') from generate_series(1,6000) n;
 insert into public.sites(code,name)
- select 'PAL-BULK-SITE-'||n,'Calibration site filler '||n from generate_series(1,6000) n;
+ select 'PAL-BULK-'||case when n<=30 then 'RIVET-' else '' end||'SITE-'||n,
+ 'Calibration '||case when n<=30 then 'Spectrometer ' else '' end||'site filler '||n from generate_series(1,6000) n;
 insert into public.locations(code,name,parent_id,kind,can_hold_inventory)
- select 'PAL-BULK-LOC-'||n,'Calibration location filler '||n,(select id from public.locations where code='ITC'),'container',true from generate_series(1,6000) n;
+ select 'PAL-BULK-'||case when n<=30 then 'RIVET-' else '' end||'LOC-'||n,
+ 'Calibration '||case when n<=30 then 'Spectrometer ' else '' end||'location filler '||n,
+ (select id from public.locations where code='ITC'),'container',true from generate_series(1,6000) n;
 insert into public.quantity_items(id,name,category_id) values
  ('a3010000-0000-4000-8000-000000009999','PaletteCalibration instrument',(select id from public.categories where code='OTHER'));
 -- Exact site matches fill an ordinary page before a fuzzy equipment match.
@@ -55,10 +65,10 @@ insert into public.locations(code,name,parent_id,kind,can_hold_inventory)
 insert into public.sites(code,name)
  select 'PAL-PURPOSE-SITE-'||n,'PurposeCrowd' from generate_series(1,25) n;
 insert into public.sites(code,name)
- select 'PAL-PRINT-SITE-'||n,'PrintCrowd' from generate_series(1,25) n;
+ select 'PAL-PRINT-SITE-'||n,'QuasarHatch' from generate_series(1,25) n;
 insert into public.serialized_assets(id,name,asset_tag,category_id,location_id) values
  ('a3010000-0000-4000-8000-000000008001','PurposeCrowd equipment','PAL-PURPOSE-ASSET',(select id from public.categories where code='OTHER'),(select id from public.locations where code='ITC-D01')),
- ('a3010000-0000-4000-8000-000000008002','PrintCrowd equipment','PAL-PRINT-ASSET',(select id from public.categories where code='OTHER'),(select id from public.locations where code='ITC-D01'));
+ ('a3010000-0000-4000-8000-000000008002','QuasarHatch equipment','PAL-PRINT-ASSET',(select id from public.categories where code='OTHER'),(select id from public.locations where code='ITC-D01'));
 insert into public.quantity_items(id,name,item_code,category_id) values
  ('a3010000-0000-4000-8000-000000000013','Palette many places','PAL-MANY',(select id from public.categories where code='OTHER'));
 insert into public.stock_balances(item_id,location_id,quantity)
@@ -100,7 +110,10 @@ select is(public.command_palette_search_v1(chr(160)||'Z9'||chr(65279))->'rows'->
 select is(public.command_palette_search_v1('PAL-ZERO')->'rows'->0->'context','{"places":[],"hasMore":false}'::jsonb,'zero stock explicitly has no current context');
 select is(public.command_palette_search_v1('PAL-ONE')->'rows'->0->'context'->'places'->0->>'code','ITC-D01','asset context uses current physical storage');
 select is(public.command_palette_search_v1('PAL-SITE-ASSET')->'rows'->0->'context'->'places'->0->>'kind','site','site-held asset uses current custody');
-select is(jsonb_array_length(public.command_palette_search_v1('PAL-MULTI')->'rows'),1,'mixed storage/site holdings still produce one quantity entity');
+-- Longer identifier queries also return legitimate fuzzy neighbors. Count the
+-- owned entity rather than assuming exact matches suppress those neighbors.
+select is((select count(*) from jsonb_array_elements(public.command_palette_search_v1('PAL-MULTI')->'rows') r
+ where r->>'kind'='quantity' and r->>'id'='a3010000-0000-4000-8000-000000000011'),1::bigint,'mixed storage/site holdings still produce one quantity entity');
 select is(jsonb_array_length(public.command_palette_search_v1('PAL-MULTI')->'rows'->0->'context'->'places'),3,'mixed quantity context contains bounded storage and site places');
 select is(public.command_palette_search_v1('PAL-MULTI')->'rows'->0->'context'->>'hasMore','false','three authorized places have no fourth sentinel');
 select is(jsonb_array_length(public.command_palette_search_v1('PAL-MANY')->'rows'->0->'context'->'places'),3,'more than three places are clipped before response aggregation');
@@ -114,8 +127,14 @@ select throws_ok($$select public.command_palette_search_v1(repeat('a',201))$$,'P
 select throws_ok($$select public.command_palette_search_v1('x'||chr(9))$$,'P1012','invalid_palette_query','controls rejected before trimming');
 select is(jsonb_array_length(public.command_palette_search_v1('PA')->'rows'),0,'short nonexact query returns no fuzzy names');
 select is(public.command_palette_search_v1('pal-zero')->'rows'->0->>'id','a3010000-0000-4000-8000-000000000010','zero-stock definition included');
-select is(jsonb_array_length(public.command_palette_search_v1('PAL-MULTI')->'rows'),1,'holdings do not duplicate quantity definition');
-select is(jsonb_array_length(public.command_palette_search_v1('PAL-DUPLICATE')->'rows'),2,'duplicate serials remain separate named assets');
+select is((select count(*) from jsonb_array_elements(public.command_palette_search_v1('PAL-MULTI')->'rows') r),
+ (select count(distinct (r->>'kind',r->>'id')) from jsonb_array_elements(public.command_palette_search_v1('PAL-MULTI')->'rows') r),'holdings and fuzzy field matches do not duplicate any entity');
+select results_eq($$select r->>'id' from jsonb_array_elements(public.command_palette_search_v1('PAL-DUPLICATE')->'rows') r
+ where r->>'kind'='asset' and r->>'serialNumber'='PAL-DUPLICATE' order by r->>'id'$$,
+ $$values ('a3010000-0000-4000-8000-000000000020'::text),('a3010000-0000-4000-8000-000000000021'::text)$$,'duplicate serials remain separate named assets alongside fuzzy neighbors');
+select ok(extensions.word_similarity('pal-multi','pal-bulk-item-1')>0.35,'shared identifier prefix is a legitimate fuzzy neighbor');
+select ok(exists(select 1 from jsonb_array_elements(public.command_palette_search_v1('PAL-MULTI')->'rows') r
+ where r->>'id'<>'a3010000-0000-4000-8000-000000000011'),'an exact identifier match retains eligible fuzzy neighbors');
 select is(public.command_palette_search_v1('PAL-EMPTY')->'rows'->0->>'kind','site','empty site included');
 select is(public.command_palette_search_v1('ITC-D01')->'rows'->0->>'kind','location','empty/aggregate-independent logical location included');
 select is(public.command_palette_search_v1('PAL-RETIRED','all')->'rows'->0->>'status','retired','historical scope marks retired assets');
@@ -128,13 +147,28 @@ select is(jsonb_array_length(public.command_palette_search_v1('PaletteTies')->'r
 select is(public.command_palette_search_v1('PaletteTies')->>'hasMore','true','21st unique entity sets cap guidance');
 select is(public.command_palette_search_v1('PaletteTies')->'rows'->0->>'id','a3010000-0000-4000-8000-000000000100','ties use deterministic entity identity');
 select is(public.command_palette_search_v1('PaletteTies'),public.command_palette_search_v1('PaletteTies'),'repeat rank stable');
+-- Common terms still exercise all 6,000 equal-distance rows in each field.
+-- The separate selective plan probe must not erase this ranking workload.
+create temporary table palette_common_results as
+ select query,public.command_palette_search_v1(query) answer
+ from (values ('calibration'),('pal-bulk')) terms(query);
+select is(jsonb_array_length(answer->'rows'),20,'6,000-row common term keeps the entity cap: '||query) from palette_common_results;
+select is(answer->>'hasMore','true','6,000-row common term retains overflow guidance: '||query) from palette_common_results;
+select results_eq($$select r->>'id' from palette_common_results p cross join lateral jsonb_array_elements(p.answer->'rows') with ordinality result(r,position)
+ where p.query='calibration' order by position$$,
+ $$select id::text from public.serialized_assets where name like 'Calibration %' order by id limit 20$$,'common name ties keep the first twenty entity identities');
+select results_eq($$select r->>'id' from palette_common_results p cross join lateral jsonb_array_elements(p.answer->'rows') with ordinality result(r,position)
+ where p.query='pal-bulk' order by position$$,
+ $$select id::text from public.serialized_assets where asset_tag like 'PAL-BULK-%' order by id limit 20$$,'common identifier ties keep the first twenty deduplicated entity identities');
 select is(jsonb_array_length(public.command_palette_search_v1('PurposeCrowd')->'rows'),20,'unique sibling fixtures still fill the ordinary purpose search cap');
 select is(public.command_palette_search_v1('PurposeCrowd')->>'hasMore','true','ordinary purpose search retains more irrelevant matches beyond the cap');
 select ok(not exists(select 1 from jsonb_array_elements(public.command_palette_search_v1('PurposeCrowd')->'rows') r where r->>'kind'='asset'),'ordinary cap is full of higher-ranked locations/sites');
 select is(public.command_palette_search_v1('PurposeCrowd','active','move')->'rows'->0->>'id','a3010000-0000-4000-8000-000000008001','move purpose selects eligible kinds before per-field/global caps');
 select is(public.command_palette_search_v1('PurposeCrowd','active','move')->>'hasMore','false','irrelevant location/site matches do not set move hasMore');
-select is(public.command_palette_search_v1('PrintCrowd','active','print')->'rows'->0->>'id','a3010000-0000-4000-8000-000000008002','print purpose excludes sites before ranking/caps');
-select is(public.command_palette_search_v1('PrintCrowd','active','print')->>'hasMore','false','excluded site matches do not set print hasMore');
+select ok(extensions.word_similarity('quasarhatch','PurposeCrowd 1')<0.35,'print crowd fixture does not also match eligible purpose-crowd locations');
+select is(public.command_palette_search_v1('QuasarHatch')->>'hasMore','true','ordinary search retains the excluded-site crowd beyond the cap');
+select is(public.command_palette_search_v1('QuasarHatch','active','print')->'rows'->0->>'id','a3010000-0000-4000-8000-000000008002','print purpose excludes sites before ranking/caps');
+select is(public.command_palette_search_v1('QuasarHatch','active','print')->>'hasMore','false','excluded site matches do not set print hasMore');
 select is(public.command_palette_search_v1('PaletteTies','active','move')->>'hasMore','true','move cap counts its own 21st eligible entity');
 select is(public.command_palette_search_v1('PaletteTies','active','print')->>'hasMore','true','print cap counts its own 21st eligible entity');
 select ok(not exists(select 1 from jsonb_array_elements(public.command_palette_search_v1('PAL-RETIRED','all','move')->'rows') r where r->>'status'<>'active'),'historical scope never advertises historical movement');
@@ -152,17 +186,23 @@ declare plan jsonb; table_name text; eligibility text; query text;
 begin
  table_name:=case p_kind when 'asset' then 'serialized_assets' when 'quantity' then 'quantity_items' when 'location' then 'locations' when 'site' then 'sites' end;
  eligibility:=case p_kind when 'asset' then 'r.status=''active''' when 'quantity' then 'not r.archived' else 'r.active' end;
- query:=case when p_field='name' then 'calibration' else 'pal-bulk' end;
+ query:=case when p_field='name' then 'spectrometer' else 'rivet' end;
  execute format('explain (analyze,buffers,format json) select r.id from public.%I r where %s and public.command_palette_normalize(r.%I) operator(extensions.%%>) %L order by public.command_palette_normalize(r.%I) operator(extensions.<->>) %L,r.id limit 21',table_name,eligibility,p_field,query,p_field,query) into plan;
  return plan;
 end $$;
 select set_config('request.jwt.claims','{"sub":"a3010000-0000-4000-8000-000000000001","role":"authenticated"}',true);
 set local pg_trgm.word_similarity_threshold='0.35';
 set local role authenticated;
-select ok(jsonb_path_exists(pg_temp.palette_plan(kind,field),
- '$[0].Plan.** ? (@."Index Name" == $index && exists(@."Order By"))',
- jsonb_build_object('index','command_palette_'||kind||'_'||field||'_gist')),
- 'real authenticated large-fixture KNN plan uses '||kind||' '||field)
+create temporary table palette_plans as
+ select kind,field,pg_temp.palette_plan(kind,field) plan,
+ 'command_palette_'||kind||'_'||field||'_gist' index_name
  from (values ('asset','name'),('asset','asset_tag'),('asset','serial_number'),('quantity','name'),('quantity','item_code'),('location','name'),('location','code'),('site','name'),('site','code')) fields(kind,field);
+select ok(jsonb_path_exists(plan,
+ '$[0].Plan.** ? (@."Index Name" == $index && exists(@."Order By"))',
+ jsonb_build_object('index',index_name)),
+ 'real authenticated large-fixture KNN plan uses '||kind||' '||field)
+ from palette_plans;
+select diag(kind||' '||field||' failed KNN plan: '||jsonb_pretty(plan)) from palette_plans
+ where not jsonb_path_exists(plan,'$[0].Plan.** ? (@."Index Name" == $index && exists(@."Order By"))',jsonb_build_object('index',index_name));
 select * from finish();
 rollback;

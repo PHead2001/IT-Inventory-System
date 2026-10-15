@@ -328,6 +328,35 @@ hosted staff/viewer desktop/phone Full/Reduced verification and AT acceptance
 remain pending. Prior accepted-SHA evidence and all 76 requirements remain intact;
 this checkpoint promotes no acceptance row.
 
+## PR57 command-search database-test repair checkpoint, 2026-10-15
+
+Candidate `723078c9cd30d7aec5922423cff84446b3059131` reached the database
+gate in [CI run 38800262714](https://github.com/PHead2001/IT-Inventory-System/actions/runs/38800262714)
+after all 4,379 application tests passed. Reset and migrations passed, but
+`command_palette.test.sql` failed 11 of its 89 assertions. This is failed
+database evidence, not candidate certification.
+
+The local test repair counts owned entities and distinct `(kind,id)` pairs
+without excluding legitimate fuzzy neighbors, retains the two named assets
+sharing a serial, and isolates the 25-site print crowd from other eligible
+fuzzy location matches. The fixture preserves 6,000 common matches per table
+and adds common-query cap, overflow and deterministic-identity assertions.
+Thirty selective-token matches per field supply a separate natural-planner
+workload; all nine authenticated GiST/KNN assertions remain, with actual failed
+plans included in diagnostics. No search RPC, index, RLS policy or migration
+changes are included in this repair.
+
+Independent source review accepted the revised test design. A focused batch
+passed 88 application tests with one worker and a 512 MiB heap; generated
+identifier grammar, length and uniqueness checks and diff whitespace checks
+passed. These checks do not execute PostgreSQL or establish the KNN diagnosis.
+The local Docker daemon was unavailable during the read-only prerequisite
+check; no stack was started or reset and no browser was run. Clean pgTAP,
+actual authenticated plans, Data API timeout and generated-type checks remain
+pending, together with complete final-SHA CI, fresh remote Codex review and
+the existing hosted/AT acceptance requirements. All 76 matrix rows and their
+acceptance dispositions remain unchanged.
+
 ## Earlier PR55 integration context
 
 Earlier readiness was withdrawn after the P2 findings on `a750648766b6b732180778a95e8dba71d7faec22`; its passing CI did not certify the later explicit-serial and advisory-color repairs. The serial/tag implementation retained integration with main `b074ff458e5eff0f0253636d87c0bfaed1f5afdd`, structured scan names/context, metadata no-op/concurrency and task/privacy guards. Its caller-scoped single-snapshot serial read has a twenty-first overflow sentinel; the existing duplicate-warning RPC remains unchanged. The final acceptance checkpoint below supersedes those earlier pending gates.
