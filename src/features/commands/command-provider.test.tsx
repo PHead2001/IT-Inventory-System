@@ -172,7 +172,7 @@ async function settle() {
 }
 function open() {
   fireEvent.click(screen.getByRole('button', { name: 'Search and commands' }));
-  return screen.getByRole('combobox');
+  return screen.getByRole<HTMLInputElement>('combobox');
 }
 it('distinguishes identical location and holding names by canonical breadcrumbs and omits unknown legacy paths', async () => {
   const locations = ['West', 'East'].map((parent, index) => ({
