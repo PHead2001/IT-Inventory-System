@@ -41,12 +41,23 @@ failure or timeout retains the dialog, query and cursor with explicit Retry;
 retrying starts a fresh check. Late answers cannot authorize an expired check or
 overwrite a newer request/owner. Closing, revocation, unmount and settlement clear
 the owned deadline. These presentation checks do not change server authorization.
+The shared retry control says Try again in both Search and Add. Browser search
+also has an eight-second deadline from dispatch through response-body reading;
+expiry aborts and retires that request, stops pending feedback and retains the
+query/cursor for retry. Ignored aborts and late responses cannot replace newer
+results. Query changes, closing, revocation and unmount clear the owned deadline.
+Current 401/403 responses withdraw the palette as soon as headers arrive, before
+body reading; a stalled or malformed denial body cannot become a retryable error.
+Responses from retired requests cannot revoke a newer verified owner.
 
 Native URL consumption omits only Next's history bypass markers; its supported
 history wrapper retains router state and synchronizes useSearchParams. Application
 history state, unrelated query parameters and hashes remain. Commands and ordinary
 links share the canonical leave guards in metadata forms/designers and custody
 management; declined leaves and recovery/pending/uncertain decisions remain there.
+After a declined leave the palette closes and returns focus to its invoker unless
+an existing guard dialog owns focus. Move mode searches active equipment only and
+omits the historical-scope control; ordinary search and Print retain that control.
 Add mode focuses a connected tracking choice, including transitions from an open
 palette. Arrow selection scrolls only the result viewport, immediately in either
 motion mode, and wraps without scrolling the page.

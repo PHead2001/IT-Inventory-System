@@ -405,7 +405,7 @@ export function CommandProvider({
     );
     if (!owner() || session !== executionEpoch.current) return;
     if (!allowed) {
-      close(false);
+      close();
       return;
     }
     const ticket = boundary.issue(href);
@@ -455,6 +455,7 @@ export function CommandProvider({
     generation.current++;
     setOverlay('palette');
     setIntent(command.target.task === 'print' ? 'label' : command.target.task);
+    if (command.target.task === 'move') setScope('active');
     setActive(0);
     setQuery('');
     setResult(null);
@@ -562,6 +563,8 @@ export function CommandProvider({
     const controller = new AbortController();
     inFlight.current = controller;
     let timer: ReturnType<typeof setTimeout> | undefined;
+    let deadline: ReturnType<typeof setTimeout> | undefined;
+    let retireWait: (() => void) | undefined;
     queueMicrotask(() => {
       if (controller.signal.aborted || !owner()) return;
       setResult(null);
@@ -590,16 +593,62 @@ export function CommandProvider({
       }
       setLoading(true);
       timer = setTimeout(async () => {
-        try {
-          const response = await fetch('/api/commands/search', {
-            method: 'POST',
-            credentials: 'same-origin',
-            cache: 'no-store',
-            signal: controller.signal,
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(parsed.data),
+        if (
+          controller.signal.aborted ||
+          request !== generation.current ||
+          !owner()
+        )
+          return;
+        const retired = new Promise<null>((resolve) => {
+          retireWait = () => {
+            clearTimeout(deadline);
+            resolve(null);
+          };
+          controller.signal.addEventListener('abort', retireWait, {
+            once: true,
           });
-          const body: unknown = await response.json();
+          deadline = setTimeout(() => {
+            if (
+              request === generation.current &&
+              !controller.signal.aborted &&
+              owner()
+            ) {
+              setError('Search could not be loaded. Try again.');
+              setLoading(false);
+            }
+            controller.abort();
+          }, 8000);
+        });
+        try {
+          const answer = await Promise.race([
+            (async () => {
+              const response = await fetch('/api/commands/search', {
+                method: 'POST',
+                credentials: 'same-origin',
+                cache: 'no-store',
+                signal: controller.signal,
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(parsed.data),
+              });
+              if (
+                controller.signal.aborted ||
+                request !== generation.current ||
+                !owner()
+              )
+                return null;
+              // A current credential/membership denial is authoritative from
+              // its status; body decoding must not delay or downgrade it.
+              if (response.status === 401 || response.status === 403) {
+                invalidateSession();
+                return null;
+              }
+              const body: unknown = await response.json();
+              return { response, body };
+            })(),
+            retired,
+          ]);
+          if (!answer) return;
+          const { response, body } = answer;
           if (
             request !== generation.current ||
             controller.signal.aborted ||
@@ -607,10 +656,6 @@ export function CommandProvider({
           )
             return;
           if (!response.ok) {
-            if (response.status === 401 || response.status === 403) {
-              invalidateSession();
-              return;
-            }
             const message =
               typeof body === 'object' &&
               body &&
@@ -651,6 +696,9 @@ export function CommandProvider({
           )
             setError('Search could not be loaded. Try again.');
         } finally {
+          clearTimeout(deadline);
+          if (retireWait)
+            controller.signal.removeEventListener('abort', retireWait);
           if (
             request === generation.current &&
             !controller.signal.aborted &&
@@ -663,6 +711,7 @@ export function CommandProvider({
     return () => {
       clearTimeout(timer);
       controller.abort();
+      clearTimeout(deadline);
     };
   }, [
     query,
@@ -895,7 +944,7 @@ export function CommandProvider({
                     setRetry((value) => value + 1);
                   }}
                 >
-                  Retry search
+                  Try again
                 </Button>
               </div>
             )}
@@ -962,16 +1011,21 @@ export function CommandProvider({
                   autoComplete="off"
                   placeholder="Name, tag, serial, or code"
                 />
-                <label className="flex min-h-11 items-center gap-3 text-sm">
-                  <input
-                    type="checkbox"
-                    checked={scope === 'all'}
-                    onChange={(event) =>
-                      editSearch(query, event.target.checked ? 'all' : 'active')
-                    }
-                  />
-                  Include retired, archived, and inactive records
-                </label>
+                {intent !== 'move' && (
+                  <label className="flex min-h-11 items-center gap-3 text-sm">
+                    <input
+                      type="checkbox"
+                      checked={scope === 'all'}
+                      onChange={(event) =>
+                        editSearch(
+                          query,
+                          event.target.checked ? 'all' : 'active',
+                        )
+                      }
+                    />
+                    Include retired, archived, and inactive records
+                  </label>
+                )}
                 {intent === 'move' && (
                   <p className="experience-muted text-sm">
                     Move searches active equipment only. Its current location
