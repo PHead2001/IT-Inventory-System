@@ -204,5 +204,124 @@ select ok(jsonb_path_exists(plan,
  from palette_plans;
 select diag(kind||' '||field||' failed KNN plan: '||jsonb_pretty(plan)) from palette_plans
  where not jsonb_path_exists(plan,'$[0].Plan.** ? (@."Index Name" == $index && exists(@."Order By"))',jsonb_build_object('index',index_name));
+
+-- Diagnostic only: do not replace the production function or its assertions
+-- above before the candidate has real authenticated/default-planner evidence.
+-- Reuse the same transaction, JWT, RLS, analyzed 6,000-row fixtures and indexes.
+-- The only extra fixture supplies the missing inactive-location sibling.
+reset role;
+insert into public.locations(id,code,name,parent_id,kind,can_hold_inventory,active) values
+ ('a3010000-0000-4000-8000-000000009998','PAL-KNN-INACTIVE','Palette KNN inactive',
+ (select id from public.locations where code='ITC'),'container',true,false);
+analyze public.locations;
+create function pg_temp.palette_probe_sql(p_kind text,p_field text,p_query text,p_scope text,p_purpose text,p_proposed boolean)
+returns text language plpgsql security invoker as $$
+declare table_name text; eligibility text; term text; distance text; needle text;
+begin
+ table_name:=case p_kind when 'asset' then 'serialized_assets' when 'quantity' then 'quantity_items' when 'location' then 'locations' when 'site' then 'sites' end;
+ needle:=public.command_palette_normalize(p_query);
+ eligibility:=case p_kind
+  when 'asset' then format('(%L<>''move'' or r.status=''active'') and (%L=''all'' or r.status=''active'')',p_purpose,p_scope)
+  when 'quantity' then format('(%L<>''move'' or not r.archived) and (%L=''all'' or not r.archived)',p_purpose,p_scope)
+  when 'location' then format('%L in (''all'',''print'') and (%L=''all'' or r.active)',p_purpose,p_scope)
+  when 'site' then format('%L=''all'' and (%L=''all'' or r.active)',p_purpose,p_scope) end;
+ term:=format('public.command_palette_normalize(r.%I)',p_field);
+ distance:=format('%s operator(extensions.<->>) %L',term,needle);
+ if not p_proposed then
+  return format('select r.id,%s distance from public.%I r where %s and char_length(%L)>=3 and %s operator(extensions.%%>) %L order by %s,r.id limit 21',distance,table_name,eligibility,needle,term,needle,distance);
+ end if;
+ -- Distance-only WITH TIES must retain the complete boundary tie before the
+ -- outer UUID sort. Putting UUID in this inner order would defeat GiST KNN;
+ -- plain LIMIT could discard the true first UUIDs among 6,000 distance ties.
+ return format('select nearest.id,nearest.distance from (select r.id,%s term,%s distance from public.%I r where %s and char_length(%L)>=3 order by %s fetch first 21 rows with ties) nearest where nearest.term operator(extensions.%%>) %L order by nearest.distance,nearest.id limit 21',term,distance,table_name,eligibility,needle,distance,needle);
+end $$;
+create function pg_temp.palette_probe_ids(p_sql text) returns jsonb language plpgsql security invoker as $$
+declare ids jsonb;
+begin
+ execute format('select coalesce(jsonb_agg(id order by distance,id),''[]''::jsonb) from (%s) candidates',p_sql) into ids;
+ return ids;
+end $$;
+create function pg_temp.palette_probe_plan(p_sql text) returns jsonb language plpgsql security invoker as $$
+declare plan jsonb;
+begin
+ execute 'explain (analyze,buffers,format json) '||p_sql into plan;
+ return plan;
+end $$;
+create function pg_temp.palette_plan_summary(p_plan jsonb) returns jsonb language sql security invoker as $$
+ with recursive nodes(node) as (
+  select p_plan->0->'Plan'
+  union all
+  select child from nodes cross join lateral jsonb_array_elements(coalesce(node->'Plans','[]'::jsonb)) child
+ )
+ select jsonb_build_object('executionMs',p_plan->0->'Execution Time','nodes',jsonb_agg(
+  jsonb_strip_nulls(jsonb_build_object('type',node->'Node Type','index',node->'Index Name',
+   'order',node->'Order By','rows',node->'Actual Rows','removed',node->'Rows Removed by Filter',
+   'loops',node->'Actual Loops','sharedHit',node->'Shared Hit Blocks','sharedRead',node->'Shared Read Blocks'))))
+ from nodes
+$$;
+set local role authenticated;
+select ok(current_user='authenticated' and auth.uid()='a3010000-0000-4000-8000-000000000001'::uuid
+ and current_setting('row_security')='on' and current_setting('enable_seqscan')='on',
+ 'candidate diagnostic retains authenticated JWT, RLS and enabled sequential scans');
+select diag('KNN environment: '||jsonb_build_object('server',current_setting('server_version'),
+ 'pg_trgm',(select extversion from pg_extension where extname='pg_trgm'),
+ 'extensionSchema',(select n.nspname from pg_extension e join pg_namespace n on n.oid=e.extnamespace where e.extname='pg_trgm'),
+ 'threshold',current_setting('pg_trgm.word_similarity_threshold'),
+ 'enable_seqscan',current_setting('enable_seqscan'),'enable_indexscan',current_setting('enable_indexscan'),
+ 'enable_bitmapscan',current_setting('enable_bitmapscan'),'random_page_cost',current_setting('random_page_cost'))::text);
+select ok(count(*)=2 and bool_and(not p.proleakproof),'word threshold and distance operators retain their actual nonleakproof catalog flags')
+ from pg_operator o join pg_namespace n on n.oid=o.oprnamespace join pg_proc p on p.oid=o.oprcode
+ where n.nspname='extensions' and o.oprname in ('%>','<->>') and o.oprleft='text'::regtype and o.oprright='text'::regtype;
+select diag('KNN catalog: '||jsonb_build_object('index',p.index_name,'definition',pg_get_indexdef(i.oid),
+ 'rls',t.relrowsecurity,'forceRls',t.relforcerowsecurity)::text)
+ from palette_plans p join pg_class i on i.relname=p.index_name join pg_index ix on ix.indexrelid=i.oid join pg_class t on t.oid=ix.indrelid;
+
+create temporary table palette_probe_fields as
+ select p.kind,p.field,p.index_name,
+  case when field='name' then 'spectrometer' else 'rivet' end selective,
+  case when field='name' then 'calibration' else 'pal-bulk' end common,
+  case when field='name' then case kind when 'asset' then 'Palette retired' when 'quantity' then 'Palette archived' when 'location' then 'Palette KNN inactive' else 'Palette inactive site' end
+   else case kind when 'asset' then case field when 'asset_tag' then 'PAL-RETIRED' else 'PAL-OLD' end when 'quantity' then 'PAL-ARCHIVED' when 'location' then 'PAL-KNN-INACTIVE' else 'PAL-INACTIVE' end end lifecycle,
+  case kind when 'asset' then 'a3010000-0000-4000-8000-000000000022' when 'quantity' then 'a3010000-0000-4000-8000-000000000012' when 'location' then 'a3010000-0000-4000-8000-000000009998' else 'a3010000-0000-4000-8000-000000000031' end lifecycle_id
+ from palette_plans p;
+create temporary table palette_probe_cases as
+ select f.*,s.scenario,s.scope,s.purpose,
+  case s.scenario when 'common' then common when 'unicode' then chr(160)||selective||chr(65279)
+   when 'absent' then 'qzxjkvbqzxjkvb' when 'lifecycle-active' then lifecycle when 'lifecycle-all' then lifecycle
+   when 'lifecycle-move' then lifecycle when 'lifecycle-print' then lifecycle else selective end query
+ from palette_probe_fields f cross join (values
+  ('selective','active','all'),('common','active','all'),('unicode','active','all'),('absent','active','all'),
+  ('lifecycle-active','active','all'),('lifecycle-all','all','all'),('lifecycle-move','all','move'),('lifecycle-print','all','print'),
+  ('purpose-move','active','move'),('purpose-print','active','print')) s(scenario,scope,purpose);
+create temporary table palette_probe_results as
+ select c.*,
+  pg_temp.palette_probe_ids(pg_temp.palette_probe_sql(kind,field,query,scope,purpose,false)) original,
+  pg_temp.palette_probe_ids(pg_temp.palette_probe_sql(kind,field,query,scope,purpose,true)) proposed
+ from palette_probe_cases c;
+select is(proposed,original,'candidate ordered IDs equal original: '||kind||' '||field||' '||scenario)
+ from palette_probe_results order by kind,field,scenario;
+select is(jsonb_array_length(proposed),21,'candidate retains all 21 available sentinels: '||kind||' '||field||' '||scenario)
+ from palette_probe_results where scenario in ('selective','common') order by kind,field,scenario;
+select ok(proposed ? lifecycle_id,'candidate all scope retains known lifecycle row: '||kind||' '||field)
+ from palette_probe_results where scenario='lifecycle-all' order by kind,field;
+select ok(not (proposed ? lifecycle_id),'candidate excludes known lifecycle row before limit: '||kind||' '||field||' '||scenario)
+ from palette_probe_results where scenario in ('lifecycle-active','lifecycle-move') order by kind,field,scenario;
+select is(proposed,'[]'::jsonb,'candidate excludes ineligible kind before limit: '||kind||' '||field||' '||scenario)
+ from palette_probe_results where (scenario='purpose-move' and kind in ('location','site')) or (scenario='purpose-print' and kind='site') order by kind,field,scenario;
+
+create temporary table palette_proposed_plans as
+ select f.kind,f.field,f.index_name,
+  pg_temp.palette_probe_plan(pg_temp.palette_probe_sql(kind,field,selective,'active','all',false)) original_plan,
+  pg_temp.palette_probe_plan(pg_temp.palette_probe_sql(kind,field,selective,'active','all',true)) plan
+ from palette_probe_fields f;
+select ok(jsonb_path_exists(plan,'$[0].Plan.** ? (@."Index Name" == $index && exists(@."Order By"))',jsonb_build_object('index',index_name)),
+ 'candidate authenticated default-planner KNN uses '||kind||' '||field) from palette_proposed_plans order by kind,field;
+select diag('KNN comparison: '||p.kind||' '||p.field||' '||jsonb_build_object(
+ 'original',pg_temp.palette_plan_summary(p.original_plan),'proposed',pg_temp.palette_plan_summary(p.plan))::text)
+ from palette_proposed_plans p order by p.kind,p.field;
+-- Full plans are emitted only for failed candidate index assertions. ID
+-- comparisons above are bounded to 21; never dump the 6,000-row tie population.
+select diag('candidate failed KNN plan: '||kind||' '||field||' '||jsonb_pretty(plan)) from palette_proposed_plans
+ where not jsonb_path_exists(plan,'$[0].Plan.** ? (@."Index Name" == $index && exists(@."Order By"))',jsonb_build_object('index',index_name));
 select * from finish();
 rollback;
