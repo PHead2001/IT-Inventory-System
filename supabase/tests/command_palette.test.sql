@@ -179,15 +179,27 @@ select throws_ok($$select public.command_palette_search_v1('Palette')$$,'P1001',
 select set_config('request.jwt.claims','{"sub":"a3010000-0000-4000-8000-000000000004","role":"authenticated"}',true);
 select throws_ok($$select public.command_palette_search_v1('Palette')$$,'P1001','forbidden','Auth account without membership denied before data');
 reset role;
--- Plan evidence helper runs the same expression, eligibility and distance
--- orientation as the field stream, with caller RLS active at execution.
+-- Explain the actual deployed fuzzy arm, including its full row projection.
+-- A narrow ID-only probe can change planner width/cost and is not authoritative.
+-- Substitute only the fixed active/all/long-query arguments; caller RLS remains.
 create function pg_temp.palette_plan(p_kind text,p_field text) returns jsonb language plpgsql security invoker as $$
-declare plan jsonb; table_name text; eligibility text; query text;
+declare plan jsonb; table_name text; needle text; body text; candidates text; statement text; matches bigint;
 begin
  table_name:=case p_kind when 'asset' then 'serialized_assets' when 'quantity' then 'quantity_items' when 'location' then 'locations' when 'site' then 'sites' end;
- eligibility:=case p_kind when 'asset' then 'r.status=''active''' when 'quantity' then 'not r.archived' else 'r.active' end;
- query:=case when p_field='name' then 'spectrometer' else 'rivet' end;
- execute format('explain (analyze,buffers,format json) select r.id from public.%I r where %s and public.command_palette_normalize(r.%I) operator(extensions.%%>) %L order by public.command_palette_normalize(r.%I) operator(extensions.<->>) %L,r.id limit 21',table_name,eligibility,p_field,query,p_field,query) into plan;
+ needle:=case when p_field='name' then 'spectrometer' else 'rivet' end;
+ select replace(prosrc,chr(13)||chr(10),chr(10)) into body from pg_catalog.pg_proc where oid='public.command_palette_search_v1(text,text,text)'::regprocedure;
+ candidates:=split_part(split_part(body,' with candidates as ('||chr(10),2),chr(10)||' ), best as (',1);
+ select count(*),min(btrim(arm)) into matches,statement
+ from regexp_split_to_table(candidates,chr(10)||' union all'||chr(10)) arm
+ where strpos(arm,'distance,false exact')>0
+ and strpos(arm,'  from public.'||table_name||' r where ')>0
+ and strpos(arm,'order by public.command_palette_normalize(r.'||p_field||') operator(extensions.<->>) needle fetch first 21 rows with ties')>0;
+ if matches<>1 or left(statement,1)<>'(' or right(statement,1)<>')' then
+  raise exception 'Expected exactly one deployed fuzzy arm for % %',p_kind,p_field;
+ end if;
+ statement:=substring(statement from 2 for char_length(statement)-2);
+ statement:=replace(replace(replace(statement,'p_purpose',quote_literal('all')),'p_scope',quote_literal('active')),'needle',quote_literal(needle));
+ execute 'explain (analyze,buffers,format json) '||statement into plan;
  return plan;
 end $$;
 select set_config('request.jwt.claims','{"sub":"a3010000-0000-4000-8000-000000000001","role":"authenticated"}',true);
@@ -197,6 +209,8 @@ create temporary table palette_plans as
  select kind,field,pg_temp.palette_plan(kind,field) plan,
  'command_palette_'||kind||'_'||field||'_gist' index_name
  from (values ('asset','name'),('asset','asset_tag'),('asset','serial_number'),('quantity','name'),('quantity','item_code'),('location','name'),('location','code'),('site','name'),('site','code')) fields(kind,field);
+select is((select count(*) from palette_plans where jsonb_typeof(plan)='array' and jsonb_array_length(plan)=1),9::bigint,
+ 'all nine deployed fuzzy-arm plans are present and nonempty');
 select ok(jsonb_path_exists(plan,
  '$[0].Plan.** ? (@."Index Name" == $index && exists(@."Order By"))',
  jsonb_build_object('index',index_name)),
@@ -205,8 +219,9 @@ select ok(jsonb_path_exists(plan,
 select diag(kind||' '||field||' failed KNN plan: '||jsonb_pretty(plan)) from palette_plans
  where not jsonb_path_exists(plan,'$[0].Plan.** ? (@."Index Name" == $index && exists(@."Order By"))',jsonb_build_object('index',index_name));
 
--- Diagnostic only: do not replace the production function or its assertions
--- above before the candidate has real authenticated/default-planner evidence.
+-- Keep the pre-repair field stream as an independent result-equivalence
+-- reference after the forward migration. The production plan assertions above
+-- now use the repaired distance-only WITH TIES shape proved by the diagnostic.
 -- Reuse the same transaction, JWT, RLS, analyzed 6,000-row fixtures and indexes.
 -- The only extra fixture supplies the missing inactive-location sibling.
 reset role;

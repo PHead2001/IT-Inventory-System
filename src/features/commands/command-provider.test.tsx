@@ -369,9 +369,7 @@ it.each(['storage', 'site', 'mixed', 'empty', 'legacy'] as const)(
         kind === 'site' ? 'Site: Office' : 'Storage: Drawer 1',
       );
       if (kind === 'mixed')
-        expect(option).toHaveTextContent(
-          'Site: Office (OFFICE); More locations',
-        );
+        expect(option).toHaveTextContent('Site: Office (OFFICE); More places');
     }
   },
 );
@@ -380,6 +378,7 @@ it('focuses connected Add choices both from N and an existing palette and contai
   const launcher = screen.getByRole('button', { name: 'Search and commands' });
   launcher.focus();
   fireEvent.keyDown(window, { key: 'n' });
+  await act(async () => {});
   expect(screen.getByRole('link', { name: 'Add quantity item' })).toHaveFocus();
   const last = screen.getByRole('link', { name: 'Add individual asset' });
   last.focus();
@@ -389,6 +388,7 @@ it('focuses connected Add choices both from N and an existing palette and contai
   await act(async () => {});
   expect(launcher).toHaveFocus();
   open();
+  await act(async () => {});
   fireEvent.click(screen.getByRole('option', { name: /^Add item/ }));
   expect(screen.getByRole('link', { name: 'Add quantity item' })).toHaveFocus();
   fireEvent.keyDown(window, { key: 'Escape' });
@@ -416,6 +416,7 @@ it.each([null, { user: { id: 'other' } }])(
     let signal: AbortSignal | null = null;
     render(<Workspace />);
     const search = open();
+    await act(async () => {});
     fireEvent.change(search, { target: { value: 'camera' } });
     await settle();
     expect(screen.getByText('Camera laptop')).toBeVisible();
@@ -455,7 +456,10 @@ it('uses the actual site recovery guard for palette, shortcut, and Add-choice na
   fireEvent.change(screen.getByLabelText('Name'), {
     target: { value: 'Retain site draft' },
   });
+  // The form publishes its recovery URL before palette verification captures it.
+  await act(async () => {});
   open();
+  await act(async () => {});
   fireEvent.click(screen.getByRole('option', { name: /^Scan/ }));
   expect(navigation.push).not.toHaveBeenCalled();
   await act(async () => {});
@@ -467,6 +471,7 @@ it('uses the actual site recovery guard for palette, shortcut, and Add-choice na
   await act(async () => {});
   expect(navigation.push).not.toHaveBeenCalled();
   fireEvent.keyDown(window, { key: 'n' });
+  await act(async () => {});
   fireEvent.click(screen.getByRole('link', { name: 'Add individual asset' }));
   await act(async () => {});
   expect(navigation.push).not.toHaveBeenCalled();
@@ -479,6 +484,7 @@ it('honors a declined shared leave decision without pushing or retaining the pal
   try {
     render(<Workspace />);
     open();
+    await act(async () => {});
     fireEvent.click(screen.getByRole('option', { name: /^Scan/ }));
     await act(async () => {});
     expect(navigation.push).not.toHaveBeenCalled();
@@ -508,6 +514,7 @@ it('scrolls only the results viewport when arrows wrap/select an offscreen optio
   );
   render(<Workspace />);
   const search = open();
+  await act(async () => {});
   fireEvent.change(search, { target: { value: 'viewport' } });
   await settle();
   const list = screen.getByRole('listbox');
@@ -534,6 +541,7 @@ it('owns one accessible modal, inerts background, traps Tab, and restores Escape
   const launcher = screen.getByRole('button', { name: 'Search and commands' });
   launcher.focus();
   open();
+  await act(async () => {});
   expect(screen.getByRole('dialog')).toHaveAttribute('aria-modal', 'true');
   expect(screen.getByRole('combobox')).toHaveFocus();
   expect(launcher.closest('[inert]')).not.toBeNull();
@@ -636,9 +644,11 @@ it('staff N opens the existing tracking choice; viewer N has no task or effect',
   const view = render(<Workspace staff={false} />);
   fireEvent.keyDown(window, { key: 'n' });
   await act(async () => {});
+  await act(async () => {});
   expect(screen.queryByRole('dialog')).toBeNull();
   view.rerender(<Workspace />);
   fireEvent.keyDown(window, { key: 'n' });
+  await act(async () => {});
   fireEvent.click(screen.getByRole('link', { name: 'Add individual asset' }));
   await act(async () => {});
   expect(navigation.push).toHaveBeenCalledWith('/inventory/assets/new');
@@ -652,6 +662,7 @@ it('debounces, aborts a superseded query, rejects stale replies, and cancels on 
   });
   render(<Workspace />);
   const search = open();
+  await act(async () => {});
   fireEvent.change(search, { target: { value: 'first' } });
   await settle();
   expect(fetch).toHaveBeenCalledTimes(1);
@@ -679,6 +690,7 @@ it('dismisses actor-mismatched results and requires a fresh explicit opening', a
     .mockResolvedValueOnce(response('Fresh actor'));
   render(<Workspace />);
   const search = open();
+  await act(async () => {});
   fireEvent.change(search, { target: { value: 'camera' } });
   await settle();
   expect(screen.queryByRole('dialog')).toBeNull();
@@ -708,6 +720,7 @@ it.each(['Move asset or stock', 'Print label'])(
     );
     render(<Workspace />);
     const search = open();
+    await act(async () => {});
     const taskIndex = screen
       .getAllByRole('option')
       .findIndex((option) => option.textContent?.startsWith(task));
@@ -739,6 +752,7 @@ it.each(['Move asset or stock', 'Print label'])(
 it('includes historical scope explicitly, navigates results by keyboard, and opens move/label intents', async () => {
   render(<Workspace />);
   const search = open();
+  await act(async () => {});
   fireEvent.change(search, { target: { value: 'camera' } });
   await settle();
   expect(JSON.parse(String(vi.mocked(fetch).mock.calls[0][1]!.body))).toEqual({
@@ -757,6 +771,7 @@ it('includes historical scope explicitly, navigates results by keyboard, and ope
     '/inventory/assets/' + row.id,
   );
   open();
+  await act(async () => {});
   fireEvent.click(screen.getByRole('option', { name: /Move asset or stock/ }));
   fireEvent.change(screen.getByRole('combobox'), {
     target: { value: 'camera' },
@@ -768,6 +783,7 @@ it('includes historical scope explicitly, navigates results by keyboard, and ope
     '/inventory/assets/' + row.id + '?task=asset_move',
   );
   open();
+  await act(async () => {});
   fireEvent.click(screen.getByRole('option', { name: /^Print label/ }));
   fireEvent.change(screen.getByRole('combobox'), {
     target: { value: 'camera' },
@@ -820,6 +836,7 @@ it('dismisses search during ordinary recheck and never lets getUser alone author
   const draft = screen.getByLabelText('Retained draft');
   fireEvent.change(draft, { target: { value: 'Untouched' } });
   open();
+  await act(async () => {});
   await settle();
   view.rerender(<Workspace fresh={false} />);
   expect(screen.queryByRole('dialog')).toBeNull();
@@ -831,12 +848,14 @@ it('dismisses search during ordinary recheck and never lets getUser alone author
   expect(draft).toHaveValue('Untouched');
   view.rerender(<Workspace />);
   open();
+  await act(async () => {});
   await settle();
   expect(screen.getByRole('combobox')).toHaveValue('');
 });
 it('rechecks the captured lifetime after a guard synchronously revokes privacy', async () => {
   render(<Workspace />);
   open();
+  await act(async () => {});
   const remove = registerNavigationGuard(() => {
     revokePrivatePresentation();
     return true;
@@ -855,6 +874,7 @@ it('rechecks the captured lifetime after a guard synchronously revokes privacy',
 it('reconciles an accepted command arrival only after its same-binding fresh grant and real primary return', async () => {
   const view = render(<Workspace />);
   open();
+  await act(async () => {});
   fireEvent.click(screen.getByRole('option', { name: /^Scan/ }));
   await act(async () => {});
   expect(navigation.push).toHaveBeenCalledWith('/scan');
@@ -872,6 +892,7 @@ it('leaves a declined guard dialog in charge of focus without creating route pro
   const launcher = screen.getByRole('button', { name: 'Search and commands' });
   launcher.focus();
   open();
+  await act(async () => {});
   const external = document.createElement('div');
   external.setAttribute('role', 'alertdialog');
   const stay = document.createElement('button');
@@ -959,6 +980,7 @@ it('a real palette Move command reopens a consumed same-record task while the se
   fireEvent.click(screen.getByRole('button', { name: 'Close task' }));
   expect(screen.queryByLabelText('Move destination')).toBeNull();
   open();
+  await act(async () => {});
   fireEvent.click(screen.getByRole('option', { name: /Move asset or stock/ }));
   fireEvent.change(screen.getByRole('combobox'), {
     target: { value: 'camera' },
@@ -978,3 +1000,182 @@ it('a real palette Move command reopens a consumed same-record task while the se
   await act(async () => {});
   expect(navigation.push).toHaveBeenCalledTimes(1);
 });
+
+it.each([
+  { name: 'AuthRetryableFetchError', status: 503 },
+  { status: 503 },
+  { status: 429 },
+  { message: 'Unclassified provider failure' },
+])(
+  'retains the palette and explicit retry after resolved transient Auth failure %j',
+  async (error) => {
+    auth.getUser.mockResolvedValueOnce({ data: { user: null }, error });
+    render(<Workspace />);
+    const search = open();
+    fireEvent.change(search, { target: { value: 'scan' } });
+    search.setSelectionRange(1, 2);
+    await settle();
+    expect(screen.getByRole('dialog')).toBeVisible();
+    expect(
+      screen.getByText('Your session could not be checked. Try again.'),
+    ).toBeVisible();
+    expect(search).toHaveValue('scan');
+    expect(search.selectionStart).toBe(1);
+    // An unavailable check must not advance the remembered actor identity.
+    act(() => auth.listener!('TOKEN_REFRESHED', { user: { id: 'actor' } }));
+    expect(screen.getByRole('dialog')).toBeVisible();
+    const command = screen.getByRole('option', { name: /^Scan/ });
+    expect(command).toBeDisabled();
+    fireEvent.click(command);
+    fireEvent.keyDown(search, { key: 'Enter' });
+    expect(fetch).not.toHaveBeenCalled();
+    expect(navigation.push).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: 'Retry search' }));
+    await settle();
+    expect(auth.getUser).toHaveBeenCalledTimes(2);
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(search).toHaveValue('scan');
+    expect(screen.getByRole('option', { name: /^Scan/ })).toBeEnabled();
+    fireEvent.click(screen.getByRole('option', { name: /Camera laptop/ }));
+    await act(async () => {});
+    expect(navigation.push).toHaveBeenCalledWith('/inventory/assets/' + row.id);
+  },
+);
+it('retains Retry after thrown transport failure and waits for a later verified caller', async () => {
+  auth.getUser.mockRejectedValueOnce(new TypeError('Network unavailable'));
+  render(<Workspace />);
+  const search = open();
+  fireEvent.change(search, { target: { value: 'camera' } });
+  await settle();
+  expect(screen.getByRole('button', { name: 'Retry search' })).toBeVisible();
+  expect(fetch).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole('button', { name: 'Retry search' }));
+  await settle();
+  expect(screen.getByText('Camera laptop')).toBeVisible();
+});
+it.each([
+  { data: { user: { id: 'actor' } }, error: { status: 401 } },
+  { data: { user: { id: 'actor' } }, error: { status: 403 } },
+  { data: { user: null }, error: { name: 'AuthSessionMissingError' } },
+  { data: { user: { id: 'actor' } }, error: { code: 'PGRST301' } },
+  { data: { user: null }, error: null },
+  { data: { user: { id: 'different-actor' } }, error: null },
+])(
+  'withdraws the palette for definite Auth denial or missing/mismatched user %j',
+  async (result) => {
+    auth.getUser.mockResolvedValueOnce(result);
+    render(<Workspace />);
+    fireEvent.change(open(), { target: { value: 'camera' } });
+    await settle();
+    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(fetch).not.toHaveBeenCalled();
+    expect(navigation.push).not.toHaveBeenCalled();
+  },
+);
+it('withdraws on a thrown definite Auth denial', async () => {
+  auth.getUser.mockRejectedValueOnce({ status: 403 });
+  render(<Workspace />);
+  open();
+  await settle();
+  expect(screen.queryByRole('dialog')).toBeNull();
+  expect(fetch).not.toHaveBeenCalled();
+});
+it.each(['success', 'transient'] as const)(
+  'ignores late %s verification after the authenticated actor changes',
+  async (kind) => {
+    let finish!: (value: unknown) => void;
+    auth.getUser.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finish = resolve;
+        }),
+    );
+    render(<Workspace />);
+    fireEvent.change(open(), { target: { value: 'camera' } });
+    act(() => auth.listener!('SIGNED_IN', { user: { id: 'different-actor' } }));
+    await act(async () =>
+      finish(
+        kind === 'success'
+          ? { data: { user: { id: 'actor' } }, error: null }
+          : { data: { user: null }, error: { status: 503 } },
+      ),
+    );
+    await settle();
+    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Retry search' })).toBeNull();
+    expect(fetch).not.toHaveBeenCalled();
+    expect(navigation.push).not.toHaveBeenCalled();
+  },
+);
+it('retires a queued navigation and old results before a transient retry check', async () => {
+  render(<Workspace />);
+  const search = open();
+  fireEvent.change(search, { target: { value: 'camera' } });
+  await settle();
+  expect(screen.getByText('Camera laptop')).toBeVisible();
+  // A failed subsequent query leaves retry available alongside static commands.
+  vi.mocked(fetch).mockResolvedValueOnce(
+    new Response(JSON.stringify({ error: 'Search unavailable' }), {
+      status: 503,
+    }),
+  );
+  fireEvent.change(search, { target: { value: 'scan' } });
+  await settle();
+  // navigate awaits the synchronous shared leave decision. Rechecking in this
+  // same turn must retire its queued continuation before it can push.
+  fireEvent.click(screen.getByRole('option', { name: /^Scan/ }));
+  auth.getUser.mockResolvedValueOnce({
+    data: { user: null },
+    error: { status: 503 },
+  });
+  fireEvent.click(screen.getByRole('button', { name: 'Retry search' }));
+  await settle();
+  expect(screen.getByRole('option', { name: /^Scan/ })).toBeDisabled();
+  expect(screen.queryByRole('option', { name: /Camera laptop/ })).toBeNull();
+  fireEvent.keyDown(search, { key: 'Enter' });
+  expect(navigation.push).not.toHaveBeenCalled();
+  expect(screen.getByRole('dialog')).toBeVisible();
+  expect(fetch).toHaveBeenCalledTimes(2);
+});
+it.each(['sites', 'mixed'] as const)(
+  'uses truthful overflow copy for four %s holdings and preserves each visible kind',
+  async (kind) => {
+    const holdings = Array.from({ length: 4 }, (_, index) => ({
+      kind: kind === 'mixed' && index === 0 ? 'location' : 'site',
+      id: row.id.slice(0, -1) + (index + 1),
+      name: index === 0 && kind === 'mixed' ? 'Drawer' : 'Office ' + index,
+      code: 'PLACE-' + index,
+    }));
+    vi.mocked(fetch).mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          identity: { actorId: 'actor', backend: 'local-backend' },
+          result: {
+            version: 1,
+            rows: [
+              {
+                ...row,
+                kind: 'quantity',
+                context: { places: holdings.slice(0, 3), hasMore: true },
+              },
+            ],
+            hasMore: false,
+          },
+        }),
+      ),
+    );
+    render(<Workspace />);
+    fireEvent.change(open(), { target: { value: 'camera' } });
+    await settle();
+    const option = screen.getByRole('option', { name: /Camera laptop/ });
+    expect(option).toHaveTextContent('More places');
+    expect(option).not.toHaveTextContent('More locations');
+    expect(option).toHaveTextContent('Site: Office 1 (PLACE-1)');
+    expect(option).toHaveTextContent(
+      kind === 'mixed'
+        ? 'Storage: Drawer (PLACE-0)'
+        : 'Site: Office 0 (PLACE-0)',
+    );
+    expect(option).not.toHaveTextContent('Office 3');
+  },
+);

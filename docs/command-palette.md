@@ -133,6 +133,15 @@ entities return with hasMore based on the 21st unique entity. Base records inclu
 zero-stock definitions and empty locations/sites; holdings never duplicate rows.
 Duplicate serials remain legal and return separate named assets.
 
+The forward RLS/KNN repair keeps eligibility inside each fuzzy stream, orders by
+word distance alone and fetches the first 21 rows with ties. The outer query
+applies the unchanged nonleakproof `%>` threshold, orders by distance/UUID and
+limits to 21. This lets GiST supply nearest-neighbor ordering under caller RLS
+without making the threshold leakproof. Keeping every boundary tie before the
+UUID sort preserves deterministic results; a common equal-distance term can
+still visit thousands of rows. No constant-work or universal latency claim is
+implied by the 21-candidate output cap.
+
 Version-one rows expose kind, id, name, code, assetTag, serialNumber, status and
 matchedField. Database JSON is capped at 64 KiB; the endpoint validates its schema
 and 20-row cap. Response text limits count Unicode codepoints, matching PostgreSQL
@@ -202,6 +211,20 @@ empty entities, duplicate serials, multiple holdings, typo matching, ties/caps,
 purpose filtering and authenticated large-fixture index plans. Verify every field's
 actual KNN plan and the real Data API timeout behavior; a SQL timeout declaration
 or mocked endpoint test alone does not establish either contract.
+
+At diagnostic commit `856f828b74c38c433cecbf8d2c90931e432acf4a`,
+[CI run 38807984527](https://github.com/PHead2001/IT-Inventory-System/actions/runs/38807984527)
+proved all nine proposed GiST plans and 90 original/proposed ordered-ID
+comparisons under PostgreSQL 17.6/pg_trgm 1.6, authenticated RLS, threshold 0.35
+and the default planner. All 152 added diagnostic assertions passed; seven
+original production-plan assertions still failed. Those diagnostics justified
+`20261015212553_command_palette_rls_knn.sql`; the migrated RPC's full behavior,
+clean database gate and type check still require a subsequent exact-SHA run.
+The authoritative post-migration probes extract each full fuzzy arm from the
+deployed function, including its payload columns, so planner row-width costs
+are retained. Each statement is explained separately; this is not a capture
+of the RPC's nested execution plan. Existing RPC assertions remain the behavior
+gate alongside the independent field-stream equivalence comparisons.
 
 Browser acceptance must cover staff/viewer, desktop/phone, Full/Reduced motion,
 ordinary buttons/keyboard, help/preferences, repeated same-record Move under the

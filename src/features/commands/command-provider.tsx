@@ -67,6 +67,21 @@ type CommandContextValue = {
   open: (type: 'palette' | 'help', invoker: HTMLElement | null) => void;
 };
 const CommandContext = createContext<CommandContextValue | null>(null);
+// Match command search's definite credential/membership denials. Provider or
+// transport failures do not establish that the caller's session changed.
+function isSessionDenial(error: unknown) {
+  const details = error && typeof error === 'object' ? error : {};
+  const status = 'status' in details ? details.status : undefined;
+  const code = 'code' in details ? details.code : undefined;
+  return (
+    status === 401 ||
+    status === 403 ||
+    ['PGRST301', 'PGRST302', 'PGRST303', '42501', 'P1001'].includes(
+      String(code),
+    ) ||
+    ('name' in details && details.name === 'AuthSessionMissingError')
+  );
+}
 const focusable =
   'button:not([disabled]), input:not([disabled]), a[href], select:not([disabled]), [tabindex="0"]';
 export function ShortcutBadge({ href }: { href: string }) {
@@ -237,6 +252,11 @@ export function CommandProvider({
     const epoch = ++authEpoch.current;
     const owner = boundary.capture();
     setAuthChecked(false);
+    executionEpoch.current++;
+    generation.current++;
+    inFlight.current?.abort();
+    setResult(null);
+    setLoading(false);
     try {
       const client = authClient.current;
       if (!client) throw new Error('Session unavailable');
@@ -245,15 +265,24 @@ export function CommandProvider({
         error: authError,
       } = await client.auth.getUser();
       if (epoch !== authEpoch.current || !owner()) return;
-      if (authError || user?.id !== actorId) {
+      if (authError) {
+        if (isSessionDenial(authError)) invalidateSession();
+        else setError('Your session could not be checked. Try again.');
+        return;
+      }
+      if (user?.id !== actorId) {
         invalidateSession();
         return;
       }
       sessionIdentity.current = user.id;
       setAuthChecked(true);
       setError('');
-    } catch {
+    } catch (error) {
       if (epoch === authEpoch.current && owner()) {
+        if (isSessionDenial(error)) {
+          invalidateSession();
+          return;
+        }
         setError('Your session could not be checked. Try again.');
         setLoading(false);
       }
@@ -332,6 +361,7 @@ export function CommandProvider({
       );
   }
   async function navigate(href: string, search = false) {
+    if (overlay === 'palette' && !authChecked) return;
     if (
       !boundary.authorized() ||
       !freshPresentationGrant(latestPrivacy.current)
@@ -377,6 +407,7 @@ export function CommandProvider({
       pendingDestination.current = null;
   }
   function execute(command: Command) {
+    if (overlay === 'palette' && !authChecked) return;
     if (
       !boundary.authorized() ||
       !freshPresentationGrant(latestPrivacy.current)
@@ -629,10 +660,12 @@ export function CommandProvider({
     const href = entityDestination(row, intent === 'add' ? 'open' : intent);
     if (href) navigate(href);
   };
-  const actions = [
-    ...staticCommands.map((command) => () => execute(command)),
-    ...rows.map((row) => () => selectRow(row)),
-  ];
+  const actions = authChecked
+    ? [
+        ...staticCommands.map((command) => () => execute(command)),
+        ...rows.map((row) => () => selectRow(row)),
+      ]
+    : [];
   useEffect(() => {
     const container = listbox.current;
     const option = container?.querySelector<HTMLElement>(
@@ -948,6 +981,7 @@ export function CommandProvider({
                       aria-selected={index === active}
                       onFocus={() => setActive(index)}
                       type="button"
+                      disabled={!authChecked}
                       onClick={() => execute(entry)}
                       className={
                         'flex min-h-11 w-full items-center gap-3 rounded p-3 text-left ' +
@@ -980,6 +1014,7 @@ export function CommandProvider({
                         onFocus={() => setActive(index)}
                         key={row.kind + ':' + row.id}
                         type="button"
+                        disabled={!authChecked}
                         onClick={() => selectRow(row)}
                         className={
                           'flex min-h-11 w-full items-start gap-3 rounded p-3 text-left ' +
@@ -1018,7 +1053,7 @@ export function CommandProvider({
                                           ')',
                                       )
                                       .join('; ')}
-                                {row.context.hasMore && '; More locations'}
+                                {row.context.hasMore && '; More places'}
                               </span>
                             )}
                           <span className="experience-code block break-words text-sm">
