@@ -303,6 +303,31 @@ W11 stays open beyond the palette entry surface. Database/real Data API/index
 proof, final build/E2E, exact-commit remote review/CI, hosted and AT acceptance
 remain required; no production or hosted database work was performed.
 
+## PR57 A301/W20 iteration checkpoint, 2026-10-15
+
+Candidate `52603401c3c45b46fb7cc710269ed7a6db43214a` retains fixture
+uniqueness repair `80b88a8a`: command-search locations have distinct sibling
+names, while the ordinary-purpose search assertions still require 20 rows,
+`hasMore` and the intended eligible-kind ranking. These pgTAP assertions have
+not run on that candidate: [CI run 38770842629](https://github.com/PHead2001/IT-Inventory-System/actions/runs/38770842629)
+failed in the application unit gate (4,376 passed, one failed), so database and
+browser jobs were skipped.
+
+The exact metadata leave-dialog failure was reproduced locally. The follow-up guard repair installs the navigation guard before committed task-state publication
+and exposes persistence failure to admission before synchronous CAS-rebase
+uncertainty publication. Deterministic regressions fail before their respective
+fixes and preserve the original submitted request without discard. The final
+working-tree batch passes 139 focused tests; five independent repetitions of all
+four race cases, scoped zero-warning lint, formatting and whitespace checks pass.
+Independent Astra review of the expanded fix reports no blocking findings. This
+is local iteration evidence, not final exact-SHA certification.
+
+A301/W20 retain their acceptance-pending dispositions. Clean candidate pgTAP,
+Data API/index/deadline proof, complete exact-SHA CI and fresh remote Codex review,
+hosted staff/viewer desktop/phone Full/Reduced verification and AT acceptance
+remain pending. Prior accepted-SHA evidence and all 76 requirements remain intact;
+this checkpoint promotes no acceptance row.
+
 ## Earlier PR55 integration context
 
 Earlier readiness was withdrawn after the P2 findings on `a750648766b6b732180778a95e8dba71d7faec22`; its passing CI did not certify the later explicit-serial and advisory-color repairs. The serial/tag implementation retained integration with main `b074ff458e5eff0f0253636d87c0bfaed1f5afdd`, structured scan names/context, metadata no-op/concurrency and task/privacy guards. Its caller-scoped single-snapshot serial read has a twenty-first overflow sentinel; the existing duplicate-warning RPC remains unchanged. The final acceptance checkpoint below supersedes those earlier pending gates.

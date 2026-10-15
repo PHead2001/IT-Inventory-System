@@ -4781,6 +4781,81 @@ describe('existing edit recovery and review', () => {
     expect(submitInventory).not.toHaveBeenCalled();
     storage.mockRestore();
   });
+  it.each(['acknowledgement', 'rebase'] as const)(
+    'guards command navigation when an unretained %s publishes uncertainty',
+    async (failure) => {
+      const original = Storage.prototype.setItem;
+      const storage = vi
+        .spyOn(Storage.prototype, 'setItem')
+        .mockImplementation(function (this: Storage, key, raw) {
+          const envelope = JSON.parse(raw);
+          if (
+            failure === 'acknowledgement'
+              ? envelope.status === 'saved'
+              : envelope.status === 'editing' && envelope.sequence > 0
+          )
+            throw new DOMException('quota');
+          original.call(this, key, raw);
+        });
+      const admission = vi.fn();
+      const report = (state: { uncertain: boolean }) => {
+        // Task owners observe commits in a layout effect, before passive effects.
+        if (state.uncertain) admission(requestAppNavigation('/scan', null));
+      };
+      vi.mocked(submitInventory).mockResolvedValue({
+        ok: true,
+        entityId: item.id,
+        version: '1',
+        changed: false,
+      });
+      if (failure === 'rebase') {
+        vi.mocked(submitInventory).mockResolvedValue({
+          ok: false,
+          kind: 'domain',
+          code: 'stale_version',
+          message: 'Stale',
+        });
+        vi.mocked(refreshMetadataRecord).mockResolvedValue({
+          ok: true,
+          record: { ...item, version: 2, manufacturer: 'Latest maker' },
+          form: form(),
+          draftForm: form(),
+        });
+      }
+      try {
+        render(
+          <TaskStateContext.Provider value={report}>
+            <MetadataForm {...props} forms={{ [categoryId]: form() }} />
+          </TaskStateContext.Provider>,
+        );
+        fireEvent.change(screen.getByLabelText('Name'), {
+          target: { value: 'Possibly saved' },
+        });
+        fireEvent.click(screen.getByRole('button', { name: 'Review details' }));
+        fireEvent.click(screen.getByRole('button', { name: 'Confirm save' }));
+        await waitFor(() => expect(admission).toHaveBeenCalled());
+        expect(
+          admission.mock.calls.every(([allowed]) => allowed === false),
+        ).toBe(true);
+        expect(
+          screen.getByRole('dialog', { name: 'Leave this edit?' }),
+        ).toHaveTextContent('retry the same save');
+        expect(
+          screen.queryByRole('button', { name: 'Discard changes' }),
+        ).toBeNull();
+        expect(
+          JSON.parse(sessionStorage.getItem(sessionStorage.key(0)!)!).status,
+        ).toBe('submitted');
+        expect(push).not.toHaveBeenCalled();
+        expect(submitInventory).toHaveBeenCalledOnce();
+        expect(
+          JSON.parse(sessionStorage.getItem(sessionStorage.key(0)!)!).command,
+        ).toEqual(vi.mocked(submitInventory).mock.calls[0][0]);
+      } finally {
+        storage.mockRestore();
+      }
+    },
+  );
   it.each([true, false])(
     'does not discard an acknowledged exact command when its terminal receipt cannot be stored (changed=%s)',
     async (changed) => {

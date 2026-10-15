@@ -349,13 +349,20 @@ export function MetadataForm({
   const editRecovery = useRef<EditEnvelope | null>(null);
   const editDurable = useRef(false);
   const editSession = useRef<EditSession | null>(null);
+  const editWriteFailed = useRef(false);
   const storeEdit = (
     next: EditEnvelope,
     previous: EditEnvelope | null,
     resolvedRequest?: string,
-  ) =>
-    !!editSession.current &&
-    writeEdit(next, previous, resolvedRequest, editSession.current);
+  ) => {
+    const stored =
+      !!editSession.current &&
+      writeEdit(next, previous, resolvedRequest, editSession.current);
+    // A failed CAS/rebase write can publish task uncertainty synchronously,
+    // before recoveryError commits. Admission must already know storage failed.
+    editWriteFailed.current = !stored;
+    return stored;
+  };
   const editPrevious = useRef<EditEnvelope | null>(null);
   const editHydrated = useRef(false);
   const [editReady, setEditReady] = useState(!editRecoveryEnabled);
@@ -1514,13 +1521,6 @@ export function MetadataForm({
           : '/inventory',
       )
     : `/inventory/${kind === 'asset' ? 'assets' : 'quantity'}/${baseline?.id}`;
-  const reportTask = useReportTaskState({
-    dirty: dirty && !state?.ok && !actorStale,
-    pending: pending && !state?.ok,
-    uncertain,
-    completed: state?.ok === true,
-    completedVersion: state?.ok ? state.version : undefined,
-  });
   const [navigationTarget, setNavigationTarget] = useState<string | null>(null);
   const navigationAnchor = useRef<HTMLElement | null>(null);
   const discardedEdit = useRef<{
@@ -1703,7 +1703,9 @@ export function MetadataForm({
     if (discardOpen)
       return afterTransitionCapture(document, () => keepRef.current?.focus());
   }, [discardOpen]);
-  useEffect(() => {
+  // Install the current leave decision in the same commit as retry controls,
+  // before task owners observe that committed state or navigation can begin.
+  useLayoutEffect(() => {
     if (
       preview ||
       terminalDraft ||
@@ -1727,7 +1729,11 @@ export function MetadataForm({
     };
     window.addEventListener('beforeunload', warn);
     const removeGuard = registerNavigationGuard(({ url: target, invoker }) => {
-      if (hasDurableTerminal() || !editRecoveryEnabled || !recoveryError)
+      if (
+        hasDurableTerminal() ||
+        !editRecoveryEnabled ||
+        (!recoveryError && !editWriteFailed.current)
+      )
         return true;
       if (
         target.origin !== window.location.origin ||
@@ -1756,6 +1762,13 @@ export function MetadataForm({
     editRecoveryEnabled,
     recoveryError,
   ]);
+  const reportTask = useReportTaskState({
+    dirty: dirty && !state?.ok && !actorStale,
+    pending: pending && !state?.ok,
+    uncertain,
+    completed: state?.ok === true,
+    completedVersion: state?.ok ? state.version : undefined,
+  });
   const keepEditing = () => {
     setDiscardOpen(false);
     setNavigationTarget(null);
