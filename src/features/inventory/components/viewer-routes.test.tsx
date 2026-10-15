@@ -8,6 +8,11 @@ import SiteOpeningPage from '@/app/(protected)/sites/[code]/open/[kind]/page';
 vi.mock('server-only', () => ({}));
 const fixture = vi.hoisted(() => ({
   role: 'viewer',
+  fileCards: vi.fn(async (name: string) => {
+    if (name !== 'inventory_file_cards')
+      throw new Error('Unexpected RPC: ' + name);
+    return { data: { revision: '1', files: [] }, error: null };
+  }),
   forms: vi.fn(async (ids: string[]) => {
     void ids;
     return {};
@@ -33,7 +38,10 @@ const fixture = vi.hoisted(() => ({
   },
 }));
 vi.mock('@/lib/auth/session.server', () => ({
-  requireMember: async () => ({ member: { role: fixture.role } }),
+  requireMember: async () => ({
+    member: { user_id: fixture.role, role: fixture.role },
+    supabase: { rpc: fixture.fileCards },
+  }),
 }));
 vi.mock('@/features/metadata/queries.server', () => ({
   getPublishedForms: fixture.forms,
@@ -116,6 +124,7 @@ vi.mock('next/navigation', () => ({
 beforeEach(() => {
   fixture.role = 'viewer';
   fixture.forms.mockClear();
+  fixture.fileCards.mockClear();
 });
 it.each(['quantity', 'asset'] as const)(
   '%s detail restores only a safe internal result scope',
@@ -148,6 +157,10 @@ it.each(['quantity', 'asset'] as const)(
   async (kind) => {
     const Page = kind === 'quantity' ? QuantityPage : AssetPage;
     render(await Page({ params: Promise.resolve({ id: 'item' }) }));
+    expect(fixture.fileCards).toHaveBeenCalledWith('inventory_file_cards', {
+      p_parent_type: kind,
+      p_parent_id: 'item',
+    });
     expect(screen.getByRole('heading', { name: 'Cable' })).toBeVisible();
     if (kind === 'quantity') {
       expect(
