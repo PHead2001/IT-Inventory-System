@@ -108,6 +108,7 @@ vi.mock('@/features/configuration/actions', () => ({
 }));
 // Intent/callback lifetime only; captured geometry has its own independent suite.
 vi.mock('./shared-title-motion', () => ({ sharedTitleMotion: vi.fn() }));
+vi.mock('./route-content-motion', () => ({ routeContentMotion: vi.fn() }));
 vi.mock('@/features/labels/queue-model', () => ({
   clearLabelQueueSession: vi.fn(),
 }));

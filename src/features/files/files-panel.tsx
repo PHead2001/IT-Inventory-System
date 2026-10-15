@@ -281,7 +281,9 @@ function BoundFilesPanel({
     };
   }, []);
   const load = useCallback(
-    async (isCurrent = () => true): Promise<CardsEnvelope | null> => {
+    async (
+      isCurrent: () => boolean = () => true,
+    ): Promise<CardsEnvelope | null> => {
       const generation = ++readGeneration.current;
       try {
         const { data, error } = await rpc('inventory_file_cards', {

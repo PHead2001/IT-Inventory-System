@@ -1295,13 +1295,28 @@ html[data-motion='full'] .experience-auth-panel {
   }
 }
 ::view-transition-group(.route-content) {
-  animation: none;
+  /* Preserve the browser's old capture until paired onShare/onUpdate reads it.
+     Single-sided arrivals/exits retain their ordinary running image fades. */
+  animation-duration: var(--motion-route);
+  animation-timing-function: var(--ease-workspace);
+  animation-play-state: paused;
+  overflow: visible;
+}
+::view-transition-image-pair(.route-content) {
+  overflow: visible;
+}
+::view-transition-old(.route-content),
+::view-transition-new(.route-content) {
+  animation-play-state: running;
+  object-fit: fill;
 }
 ::view-transition-old(.route-content) {
   animation: route-content-out var(--motion-route) var(--ease-workspace) both;
+  animation-play-state: running;
 }
 ::view-transition-new(.route-content) {
   animation: route-content-in var(--motion-route) var(--ease-workspace) both;
+  animation-play-state: running;
 }
 ::view-transition-group(.record-title),
 ::view-transition-old(.record-title),
