@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 import ts from 'typescript';
-import { expect, it } from 'vitest';
+import { expect, it, vi } from 'vitest';
 
 // Exercise the actual browser-serialized observer closures without importing a
 // Playwright spec or launching a browser. Keep DOM timing types authoritative.
@@ -25,9 +25,14 @@ function declaration(path: string, name: string) {
 }
 const source = [
   declaration('tests/e2e/native-ready.ts', 'NativeReadyEvidence'),
-  'declare const entry: { old: { name: string }[]; next: { name: string }[] };',
+  'declare const entry: { old: { name: string }[]; next: { name: string }[]; ready: boolean; finished: boolean; firstSkip?: NativeReadyEvidence["firstSkip"]; lastFrame?: NativeReadyEvidence };',
+  'declare let notified: boolean;',
+  'declare function sendReady(evidence: NativeReadyEvidence): void;',
   'const ' + declaration('tests/e2e/route-motion.spec.ts', 'liveEffects') + ';',
   'const ' + declaration('tests/e2e/route-motion.spec.ts', 'running') + ';',
+  'const ' +
+    declaration('tests/e2e/route-motion.spec.ts', 'notifyTerminal') +
+    ';',
 ].join('\n');
 
 it('the serialized observer satisfies strict evidence types using the installed DOM library', () => {
@@ -89,3 +94,51 @@ it.each([undefined, null, 0, 0.5])(
     expect(result.active).toBe(progress !== undefined && progress !== null);
   },
 );
+
+it('the actual observer reports terminal completion once when no running owned frame exists', () => {
+  const notify = vi.fn();
+  const js = ts.transpileModule(source, {
+    compilerOptions: { target: ts.ScriptTarget.ES2022 },
+  }).outputText;
+  const terminal = new Function(
+    'document',
+    'entry',
+    'sendReady',
+    'let notified = false;\n' +
+      js +
+      '\nnotifyTerminal("finished-before-running"); notifyTerminal("ready-rejected");',
+  );
+  terminal(
+    { getAnimations: () => [] },
+    { old: [], next: [], ready: true, finished: true },
+    notify,
+  );
+  expect(notify).toHaveBeenCalledOnce();
+  expect(notify.mock.calls[0][0]).toMatchObject({
+    terminal: 'finished-before-running',
+    finished: true,
+    effects: [],
+  });
+});
+
+it('cancellation caller diagnostics retain static script positions and exclude route/query values', () => {
+  const js = ts.transpileModule(
+    'const ' +
+      declaration('tests/e2e/route-motion.spec.ts', 'cancellationCaller') +
+      ';',
+    {
+      compilerOptions: { target: ts.ScriptTarget.ES2022 },
+    },
+  ).outputText;
+  const caller = new Function('Error', js + '\nreturn cancellationCaller();');
+  const result = caller(
+    class {
+      stack =
+        'Error\n at skipTransition (https://example.test/_next/static/abc.js:1:2)\n at cancel (https://example.test/_next/static/xyz.js:12:34)\n at route (https://example.test/private/record?access=credential:3:4)';
+    },
+  );
+  expect(result).toEqual(['cancel@xyz.js:12:34', 'route']);
+  expect(JSON.stringify(result)).not.toMatch(
+    /private|record|access|credential|https/,
+  );
+});

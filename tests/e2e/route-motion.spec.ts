@@ -79,6 +79,8 @@ type Proof = {
     notifiedAt?: number;
     finishedAt?: number;
     lastFrame?: NativeReadyEvidence;
+    firstSkip?: NativeReadyEvidence['firstSkip'];
+    geometry: NonNullable<NativeReadyEvidence['firstSkip']>['geometry'];
     effects: RouteEffectTiming[];
     timingErrors: string[];
     timingComplete: boolean;
@@ -88,6 +90,7 @@ type Proof = {
     whileActive: boolean;
     at: number;
     effects: NativeReadyEvidence['effects'];
+    firstSkip?: NativeReadyEvidence['firstSkip'];
   }>;
   replacements: Array<{
     pseudo: string;
@@ -121,6 +124,7 @@ test.afterEach(async ({ page }, info) => {
           readyAt: entry.readyAt,
           notifiedAt: entry.notifiedAt,
           finishedAt: entry.finishedAt,
+          firstSkip: entry.firstSkip,
           lastFrame: entry.lastFrame && {
             ...entry.lastFrame,
             effects: entry.lastFrame.effects.slice(0, 6),
@@ -237,6 +241,7 @@ async function observeMotion(page: Page, unsupported = false) {
           effects: [],
           timingErrors: [],
           timingComplete: false,
+          geometry: [],
         };
         proof.transitions.push(entry);
         const update =
@@ -297,12 +302,36 @@ async function observeMotion(page: Page, unsupported = false) {
               effect.currentTime < effect.endTime,
           );
         const skip = transition.skipTransition.bind(transition);
+        const cancellationCaller = () =>
+          (new Error().stack ?? '')
+            .split('\n')
+            .slice(2, 8)
+            .map((line) => {
+              // Keep only static script basename/position and identifier labels.
+              // Never retain stack URLs, route paths, query strings or messages.
+              const location = /(?:^|\/)([A-Za-z0-9_.-]+\.js):(\d+):(\d+)/.exec(
+                line,
+              );
+              const fn =
+                /^\s*at ([A-Za-z_$][\w.$]{0,63})(?:\s|\()/.exec(line)?.[1] ??
+                'anonymous';
+              return location
+                ? `${fn}@${location[1].slice(-100)}:${location[2]}:${location[3]}`
+                : fn;
+            });
         transition.skipTransition = () => {
           const effects = liveEffects();
+          entry.firstSkip ??= {
+            at: performance.now(),
+            reason: 'skip-transition',
+            caller: cancellationCaller(),
+            geometry: entry.geometry.slice(0, 3),
+          };
           proof.snapshotSkips.push({
             at: performance.now(),
             effects,
             whileActive: entry.ready && !entry.finished && running(effects),
+            firstSkip: entry.firstSkip,
           });
           return skip();
         };
@@ -393,18 +422,35 @@ async function observeMotion(page: Page, unsupported = false) {
             entry.notifiedAt = evidence.at;
             // Qualify the owned real animation in this browser frame. Passing
             // evidence avoids a second Node-to-browser validation round trip.
-            void (
-              window as Window & {
-                routeMotionReady?: (
-                  evidence: NativeReadyEvidence,
-                ) => Promise<void>;
-              }
-            ).routeMotionReady?.(evidence);
+            sendReady(evidence);
           }
           if (!entry.finished) requestAnimationFrame(frame);
         };
         let notified = false;
         let readyAt: number | undefined;
+        const sendReady = (evidence: NativeReadyEvidence) => {
+          void (
+            window as Window & {
+              routeMotionReady?: (
+                evidence: NativeReadyEvidence,
+              ) => Promise<void>;
+            }
+          ).routeMotionReady?.(evidence);
+        };
+        const notifyTerminal = (reason: NativeReadyEvidence['terminal']) => {
+          if (notified) return;
+          notified = true;
+          const evidence: NativeReadyEvidence = {
+            at: performance.now(),
+            ready: entry.ready,
+            finished: entry.finished,
+            effects: liveEffects(),
+            terminal: reason,
+            firstSkip: entry.firstSkip,
+          };
+          entry.lastFrame = evidence;
+          sendReady(evidence);
+        };
         void transition.ready.then(
           () => {
             readyAt = performance.now();
@@ -415,12 +461,13 @@ async function observeMotion(page: Page, unsupported = false) {
             // the next frame and continuously through native completion.
             requestAnimationFrame(frame);
           },
-          () => {},
+          () => notifyTerminal('ready-rejected'),
         );
         void transition.finished.then(
           async () => {
             entry.finished = true;
             entry.finishedAt = performance.now();
+            notifyTerminal('finished-before-running');
             if (readyAt !== undefined)
               entry.completionMs = entry.finishedAt - readyAt;
             sample();
@@ -430,6 +477,7 @@ async function observeMotion(page: Page, unsupported = false) {
           () => {
             entry.finished = true;
             entry.finishRejected = true;
+            notifyTerminal('finished-rejected');
             entry.timingComplete = true;
           },
         );
@@ -438,6 +486,33 @@ async function observeMotion(page: Page, unsupported = false) {
       const cancel = Animation.prototype.cancel;
       Animation.prototype.cancel = function () {
         const pseudo = (this.effect as KeyframeEffect | null)?.pseudoElement;
+        if (pseudo?.startsWith('::view-transition-group(')) {
+          const entry = proof.transitions.findLast((entry) => !entry.finished);
+          if (
+            entry &&
+            entry.geometry.length < 3 &&
+            !entry.geometry.some((g) => g.pseudo === pseudo)
+          ) {
+            const first = (this.effect as KeyframeEffect)
+              .getKeyframes()
+              .find(
+                (frame) => frame.offset === 0 || frame.computedOffset === 0,
+              );
+            const transform = first?.transform;
+            entry.geometry.push({
+              pseudo,
+              width: first?.width !== undefined,
+              height: first?.height !== undefined,
+              transform:
+                transform === undefined
+                  ? 'missing'
+                  : transform === 'none' ||
+                      transform === 'matrix(1, 0, 0, 1, 0, 0)'
+                    ? 'identity'
+                    : 'other',
+            });
+          }
+        }
         if (pseudo?.startsWith('::view-transition'))
           proof.cancellations.push({
             pseudo,

@@ -4,6 +4,18 @@ export type NativeReadyEvidence = {
   at: number;
   ready: boolean;
   finished: boolean;
+  terminal?: 'finished-before-running' | 'ready-rejected' | 'finished-rejected';
+  firstSkip?: {
+    at: number;
+    reason: 'skip-transition';
+    caller: string[];
+    geometry: Array<{
+      pseudo: string;
+      width: boolean;
+      height: boolean;
+      transform: 'missing' | 'identity' | 'other';
+    }>;
+  };
   effects: Array<{
     pseudo: string;
     playState: AnimationPlayState;
@@ -68,6 +80,13 @@ export async function armNativeReady(
     current.cancel = reject;
     current.run = async (evidence) => {
       try {
+        if (evidence.terminal)
+          throw new Error(
+            'Native snapshot ' +
+              evidence.terminal +
+              ': ' +
+              JSON.stringify(evidence),
+          );
         validate(evidence);
         await run();
         resolve();

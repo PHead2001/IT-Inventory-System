@@ -1,5 +1,5 @@
 import { expect, it, vi } from 'vitest';
-import { armNativeReady } from '../e2e/native-ready';
+import { armNativeReady, type NativeReadyEvidence } from '../e2e/native-ready';
 
 const evidence = { at: 500, ready: true, finished: false, effects: [] };
 function fixture() {
@@ -20,7 +20,7 @@ function fixture() {
   return {
     page: page as never,
     expose: page.exposeBinding,
-    ready: () => ready!({}, evidence),
+    ready: (proof: NativeReadyEvidence = evidence) => ready!({}, proof),
     close: () => close!(),
   };
 }
@@ -38,6 +38,26 @@ it('rearms the same page twice with one binding and a fresh validation for each 
   expect(f.expose).toHaveBeenCalledTimes(1);
   expect(validate).toHaveBeenCalledTimes(2);
   expect(run).toHaveBeenCalledTimes(2);
+});
+
+it('terminal completion before an owned running frame rejects promptly without releasing the held operation', async () => {
+  const f = fixture(),
+    validate = vi.fn(),
+    release = vi.fn(async () => {});
+  const { completed } = await armNativeReady(f.page, validate, release);
+  const rejected = expect(completed).rejects.toThrow('finished-before-running');
+  await f.ready({
+    ...evidence,
+    finished: true,
+    terminal: 'finished-before-running',
+  });
+  await rejected;
+  expect(validate).not.toHaveBeenCalled();
+  expect(release).not.toHaveBeenCalled();
+  const next = await armNativeReady(f.page, validate, release);
+  await f.ready();
+  await next.completed;
+  expect(release).toHaveBeenCalledOnce();
 });
 
 it('rejects an overlapping arm without losing the original ready barrier', async () => {

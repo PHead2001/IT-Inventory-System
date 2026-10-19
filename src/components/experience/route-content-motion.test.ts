@@ -128,10 +128,11 @@ afterEach(() => {
   Reflect.deleteProperty(document, 'timeline');
 });
 
-it('starts every body replacement on one sampled document clock despite independently assigned animation starts', () => {
+it('starts every body replacement on one sampled document clock despite independently assigned animation starts', async () => {
   clock = 723.25;
   routeContentMotion({ name }, () => true);
   expect(animate).toHaveBeenCalledTimes(3);
+  await Promise.resolve();
   expect(clockReads).toBe(1);
   expect(replacements.map((effect) => effect.startTime)).toEqual([
     723.25, 723.25, 723.25,
@@ -140,10 +141,11 @@ it('starts every body replacement on one sampled document clock despite independ
 
 it.each([null, undefined, NaN, Infinity, { value: 500 }])(
   'retires all replacements if the document clock is unavailable or invalid: %s',
-  (value) => {
+  async (value) => {
     clock = value;
     const unsupported = vi.fn();
     routeContentMotion({ name }, () => true, unsupported);
+    await Promise.resolve();
     expect(animate).toHaveBeenCalledTimes(3);
     replacements.forEach(({ cancel }) => expect(cancel).toHaveBeenCalledOnce());
     expect(unsupported).toHaveBeenCalledOnce();
@@ -283,6 +285,35 @@ it('falls back if privacy or Reduced motion invalidates authority during geometr
   expect(skip).toHaveBeenCalledOnce();
 });
 
+it('accepts React-normalized unchanged dimensions and omitted identity transform without mistaking destination translation for the old transform', async () => {
+  // React's ready processing removes equal dimensions and transform:none before
+  // invoking onUpdate; these absent properties are a supported captured shape.
+  frames = [
+    { offset: 0, computedOffset: 0 },
+    { offset: 1, computedOffset: 1 },
+  ];
+  const unsupported = vi.fn();
+  routeContentMotion({ name }, () => true, unsupported);
+  await Promise.resolve();
+  expect(unsupported).not.toHaveBeenCalled();
+  expect(skip).not.toHaveBeenCalled();
+  expect(animate).toHaveBeenCalledTimes(3);
+  expect(animate.mock.calls[1][0]).toEqual([
+    {
+      width: '1180px',
+      height: '7622px',
+      transform: 'translate(-40px, 77px)',
+      opacity: 1,
+    },
+    {
+      width: '1180px',
+      height: '7622px',
+      transform: 'translate(-40px, 77px)',
+      opacity: 0,
+    },
+  ]);
+});
+
 it.each([
   [
     'missing old dimensions',
@@ -348,7 +379,7 @@ it('cancels partially created effects if pseudo-element animation is unsupported
   expect(skip).toHaveBeenCalledOnce();
 });
 
-it('cancels the full replacement set if assigning the shared clock is unsupported', () => {
+it('cancels the full replacement set if assigning the shared clock is unsupported', async () => {
   animate.mockImplementationOnce(() => {
     const replacement = {
       cancel: vi.fn(),
@@ -363,6 +394,7 @@ it('cancels the full replacement set if assigning the shared clock is unsupporte
     return replacement;
   });
   routeContentMotion({ name }, () => true);
+  await Promise.resolve();
   expect(animate).toHaveBeenCalledTimes(3);
   replacements.forEach(({ cancel }) => expect(cancel).toHaveBeenCalledOnce());
   expect(skip).toHaveBeenCalledOnce();
