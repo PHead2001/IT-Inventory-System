@@ -42,13 +42,21 @@ function Assert-RunnerRecoveryDiagnostic($Diagnostic) {
         refusal = @('', 'stale-observation', 'dispatch-deadline', 'provider-uncertain', 'operation-uncertain', 'stop', 'owner-dead', 'identity-changed', 'hard-deadline', 'outage-deadline', 'guardian-progress-expired', 'clock-regressed', 'vm-state-uncertain', 'connectivity-state-uncertain', 'watchdog-expired', 'other')
     }
     $numbers = @('generation', 'episodeAgeMs', 'episodeRemainingMs', 'operationAgeMs', 'observationUnavailableCount', 'fingerprintChangeCount', 'staleAdmissionCount', 'applyCount', 'observationElapsedMs', 'preflightElapsedMs', 'applyElapsedMs')
+    # Prior protected cleanup journals remain readable. New projections add only
+    # these fixed optional diagnostics; unknown fields remain invalid.
+    if ($Diagnostic -is [pscustomobject]) {
+        if ($Diagnostic.PSObject.Properties.Name -contains 'admissionOperation') { $enums.admissionOperation = @('', 'connect', 'resume', 'other') }
+        foreach ($name in @('observationAgeMs', 'quarantineElapsedMs', 'connectElapsedMs', 'resumeElapsedMs')) {
+            if ($Diagnostic.PSObject.Properties.Name -contains $name) { $numbers += $name }
+        }
+    }
     if ($Diagnostic -isnot [pscustomobject] -or (@($Diagnostic.PSObject.Properties.Name | Sort-Object) -join ',') -cne (@(@($enums.Keys) + $numbers | Sort-Object) -join ',')) { throw 'Invalid recovery diagnostic fields.' }
     foreach ($name in $enums.Keys) {
         if ($Diagnostic.$name -isnot [string] -or $Diagnostic.$name -cnotin $enums[$name]) { throw 'Invalid recovery diagnostic enum.' }
     }
     foreach ($name in $numbers) {
         $max = if ($name -ceq 'generation') { 2147483647 } elseif ($name -clike '*Count') { 1000000 } else { 86400000 }
-        [void](Get-RunnerRecoveryDiagnosticNumber $Diagnostic.$name $max -Signed:($name -ceq 'episodeRemainingMs'))
+        [void](Get-RunnerRecoveryDiagnosticNumber $Diagnostic.$name $max -Signed:($name -cin @('episodeRemainingMs', 'observationAgeMs')))
     }
 }
 
@@ -60,6 +68,7 @@ function New-RunnerRecoveryDiagnostic($Recovery, [DateTime] $NowUtc) {
         episodeAgeMs = 0; episodeRemainingMs = 0; operationAgeMs = 0
         observationUnavailableCount = 0; fingerprintChangeCount = 0; staleAdmissionCount = 0; applyCount = 0
         observationElapsedMs = 0; preflightElapsedMs = 0; applyElapsedMs = 0
+        admissionOperation = ''; observationAgeMs = 0; quarantineElapsedMs = 0; connectElapsedMs = 0; resumeElapsedMs = 0
     }
     if ($Recovery.PSObject.Properties.Name -contains 'operation') { $value.operation = if ($Recovery.operation -cin @('', 'quarantine', 'apply', 'connect', 'resume', 'probe')) { $Recovery.operation } else { 'other' } }
     if ($Recovery.PSObject.Properties.Name -contains 'diagnostics') {
@@ -67,6 +76,10 @@ function New-RunnerRecoveryDiagnostic($Recovery, [DateTime] $NowUtc) {
         foreach ($name in @('observationUnavailableCount', 'fingerprintChangeCount', 'staleAdmissionCount', 'applyCount', 'observationElapsedMs', 'preflightElapsedMs', 'applyElapsedMs')) {
             $value[$name] = Get-RunnerRecoveryDiagnosticNumber $d.$name $(if ($name -clike '*Count') { 1000000 } else { 86400000 })
         }
+        foreach ($name in @('observationAgeMs', 'quarantineElapsedMs', 'connectElapsedMs', 'resumeElapsedMs')) {
+            if ($d.PSObject.Properties.Name -contains $name) { $value[$name] = Get-RunnerRecoveryDiagnosticNumber $d.$name 86400000 -Signed:($name -ceq 'observationAgeMs') }
+        }
+        if ($d.PSObject.Properties.Name -contains 'admissionOperation') { $value.admissionOperation = if ($d.admissionOperation -cin @('', 'connect', 'resume')) { $d.admissionOperation } else { 'other' } }
         $value.trigger = if ($d.trigger -cin @('', 'observation-unavailable', 'fingerprint-change', 'connectivity-lost')) { $d.trigger } else { 'other' }
         $value.lastTransition = if ($d.lastTransition -cin $phases) { $d.lastTransition } else { 'other' }
         $refusals = @('', 'stale-observation', 'dispatch-deadline', 'provider-uncertain', 'operation-uncertain', 'stop', 'owner-dead', 'identity-changed', 'hard-deadline', 'outage-deadline', 'guardian-progress-expired', 'clock-regressed', 'vm-state-uncertain', 'connectivity-state-uncertain', 'watchdog-expired')
