@@ -184,6 +184,19 @@ through Next/browser history and the ordinary authorization/privacy gates. Nativ
 traversal cancels a departing animation or paired wait and tracks real destination
 readiness; it never arms a shared title or a precommit privacy animation ticket.
 
+Inventory **Back to results** also repairs an anchor that Next consumed while a
+loading fallback had no result row. This application-Link owner is independent of
+motion: it retains only the accepted source's record/holding identity and exact
+result scope/anchor in the current provider. A real matching Back gesture can
+replay the ordinary anchor scroll once, instantly, only after fresh actor/privacy
+admission and the canonical visible primary reveal the unique same occurrence.
+Changed, missing or ambiguous rows never select a guessed substitute. New
+navigation, user scroll/pointer/keyboard intervention, access withdrawal and
+provider/actor/generation retirement cancel a pending replay. No history or
+browser storage is written. Existing non-motion focus behavior is preserved;
+the application return repair never moves focus. Native Back/Forward continues
+to use its separate instant coordinator below.
+
 Privacy checks can temporarily collapse the destination document and clamp the
 browser's restored scroll to zero. A provider-local scroll coordinator retains at
 most 50 finite, nonnegative offset checkpoints, bound to the browser history entry

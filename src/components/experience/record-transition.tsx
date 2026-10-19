@@ -70,13 +70,19 @@ export function InventoryRecordLink({
     finishTitleAfterSnapshot,
     current,
     rejectTitleSnapshot,
+    registerReturnSource,
   } = useRouteMotion();
+  const source = useRef<HTMLAnchorElement>(null);
   const contentIdentity = useContext(RouteContentIdentityContext);
   const target =
     returnTo && pairable
       ? titleTarget(record, returnTo, holding, contentIdentity?.rawRouteKey)
       : null;
   const targetListKey = target ? listRouteKey(target.listHref) : null;
+  useLayoutEffect(() => {
+    if (target && source.current)
+      return registerReturnSource(target, source.current);
+  });
   const matches =
     intent &&
     target &&
@@ -102,6 +108,7 @@ export function InventoryRecordLink({
       }}
     >
       <Link
+        ref={source}
         href={href}
         className={className}
         onNavigate={() => {
