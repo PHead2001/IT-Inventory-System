@@ -1,7 +1,12 @@
 import { expect, it, vi } from 'vitest';
 import { armNativeReady, type NativeReadyEvidence } from '../e2e/native-ready';
 
-const evidence = { at: 500, ready: true, finished: false, effects: [] };
+const evidence: NativeReadyEvidence = {
+  at: 500,
+  ready: true,
+  finished: false,
+  effects: [],
+};
 function fixture() {
   let ready:
     ((_source: unknown, proof: typeof evidence) => Promise<void>) | undefined;

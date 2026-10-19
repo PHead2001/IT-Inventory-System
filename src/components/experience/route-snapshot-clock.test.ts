@@ -6,7 +6,7 @@ type Effect = {
   startTime: number | null;
   playState: string;
   effect: { pseudoElement: string; getKeyframes: () => Keyframe[] };
-  cancel: ReturnType<typeof vi.fn>;
+  cancel: ReturnType<typeof vi.fn<() => void>>;
 };
 const title = 'inventory-title-clock';
 const body = 'inventory-body-clock';
