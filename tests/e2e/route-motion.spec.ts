@@ -386,6 +386,33 @@ async function resetProof(page: Page) {
   });
 }
 
+/** Assert the ordinary hash destination, including viewport-edge clamping.
+ * This observes the result and never supplies a scroll/focus repair itself. */
+async function expectResultAnchor(page: Page, anchor: string) {
+  const row = page.locator(`[id="${anchor}"]`);
+  await expect(row).toBeVisible();
+  await expect
+    .poll(() =>
+      row.evaluate((element) => {
+        const root = document.scrollingElement ?? document.documentElement;
+        const margin =
+          Number.parseFloat(getComputedStyle(element).scrollMarginTop) || 0;
+        const padding =
+          Number.parseFloat(
+            getComputedStyle(document.documentElement).scrollPaddingTop,
+          ) || 0;
+        const absoluteTop =
+          element.getBoundingClientRect().top + window.scrollY;
+        const expected = Math.min(
+          Math.max(0, absoluteTop - margin - padding),
+          Math.max(0, root.scrollHeight - innerHeight),
+        );
+        return Math.abs(window.scrollY - expected) <= 1;
+      }),
+    )
+    .toBe(true);
+}
+
 /** Cancel any real partial prefetch attempted by the production router. The
  * old link policy exercised Next's canceled/fulfilled-null prefetch path here;
  * the mitigation must prevent those requests rather than patching that cache. */
@@ -1587,6 +1614,7 @@ for (const width of [1280, 390]) {
     );
     await expect(page.locator('#inventory-row-2')).toBeVisible();
     const appBackAfterNativeForward = await completedTitlePair(page);
+    await expectResultAnchor(page, 'inventory-row-2');
     expect(appBackAfterNativeForward.replacements).toHaveLength(1);
     prefetch.assertNone();
     await resetProof(page);
@@ -1606,6 +1634,7 @@ for (const width of [1280, 390]) {
     await expect(page.locator('#inventory-row-2')).toBeVisible();
     await completedTitlePair(page);
     const back = await proof(page);
+    await expectResultAnchor(page, 'inventory-row-2');
     expect(back.replacements).toHaveLength(1);
     const pair = back.transitions.find((entry) =>
       entry.old.some(
@@ -1955,6 +1984,7 @@ for (const mode of ['system-reduced', 'local-reduced'] as const) {
         await expect(back).toBeFocused();
         await page.keyboard.press('Enter');
         await results(anchoredScope);
+        await expectResultAnchor(page, 'inventory-row-2');
         // The installed Next scroll handler leaves focus untouched. Its
         // departing Back link is removed, so normal focus falls to the body;
         // the restored result remains focusable without a presentation trap.

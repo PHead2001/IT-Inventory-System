@@ -35,6 +35,7 @@ import { createRoutePendingOwners } from './route-pending-owners';
 import { createRouteReadiness } from './route-readiness';
 import { createNativeScrollRestoration } from './native-scroll-restoration';
 import { createRouteCommandState } from './route-command-state';
+import { createApplicationReturn } from './application-return';
 import {
   RouteReadyContext,
   RouteNavigationIdentityContext,
@@ -66,6 +67,7 @@ const RouteMotionContext = createContext<{
   pending: ReturnType<typeof createRoutePendingState>;
   readiness: ReturnType<typeof createRouteReadiness>;
   loading: ReturnType<typeof createPairedRouteLoading>;
+  applicationReturn: ReturnType<typeof createApplicationReturn>;
   lifecycleRef: { current: boolean };
   providerToken: symbol;
   commands: ReturnType<typeof createRouteCommandState>;
@@ -196,6 +198,9 @@ export function RouteMotionProvider({
   const [nativeScroll] = useState(() =>
     createNativeScrollRestoration(readiness),
   );
+  const [applicationReturn] = useState(() =>
+    createApplicationReturn(readiness),
+  );
   const [presentation] = useState(createRoutePresentationLifetime);
   const [owners] = useState(createRoutePendingOwners);
   const [navigationObservers] = useState(
@@ -211,7 +216,8 @@ export function RouteMotionProvider({
   const liveRouteKey = useRef(committedRouteKey);
   useLayoutEffect(() => {
     liveRouteKey.current = committedRouteKey;
-  }, [committedRouteKey]);
+    applicationReturn.routeChanged(committedRouteKey);
+  }, [committedRouteKey, applicationReturn]);
   const mountedOwners = useSyncExternalStore(
     owners.subscribe,
     owners.snapshot,
@@ -240,8 +246,13 @@ export function RouteMotionProvider({
         )
           return;
         const epoch = pending.snapshot().epoch;
+        const closeMotion = state.beginNavigation(href, epoch);
+        const closeReturn = applicationReturn.beginNavigation(href, epoch);
         return {
-          close: state.beginNavigation(href, epoch),
+          close: () => {
+            closeMotion();
+            closeReturn();
+          },
           current: () =>
             lifecycleRef.current &&
             currentRouteProvider === providerToken &&
@@ -256,6 +267,7 @@ export function RouteMotionProvider({
         )
           return;
         commands.navigation(commandDestination(href));
+        applicationReturn.acceptNavigation(href, pending.snapshot().epoch);
         navigationObservers.forEach((observer) => {
           try {
             observer(href);
@@ -343,6 +355,7 @@ export function RouteMotionProvider({
           return;
         commands.retire();
         presentation.invalidate();
+        applicationReturn.invalidate();
         latestPrivacy.current.navigation?.retire(providerToken);
         // Generic route failure retires presentation, not verified actor eligibility.
         // An already-invalid access scope is never re-enabled here.
@@ -366,6 +379,7 @@ export function RouteMotionProvider({
       liveRouteKey,
       commands,
       navigationObservers,
+      applicationReturn,
     ],
   );
   const pendingSnapshot = useSyncExternalStore(
@@ -390,7 +404,7 @@ export function RouteMotionProvider({
   useInsertionEffect(() => {
     lifecycleRef.current = true;
     currentRouteProvider = providerToken;
-    nativeScroll.bindAuthority(() => {
+    const readAuthority = () => {
       const value = latestPrivacy.current;
       if (
         !lifecycleRef.current ||
@@ -409,7 +423,9 @@ export function RouteMotionProvider({
         ]),
         ready: freshPresentationGrant(value),
       };
-    });
+    };
+    nativeScroll.bindAuthority(readAuthority);
+    applicationReturn.bindAuthority(readAuthority);
     const unbindNavigation =
       latestPrivacy.current.navigation?.bind(providerToken);
     const suspendPresentation = () => {
@@ -417,6 +433,7 @@ export function RouteMotionProvider({
         return;
       commands.retire();
       nativeScroll.invalidate();
+      applicationReturn.invalidate();
       document.documentElement.dataset.routeMotionPrivate = 'false';
       suspended.current = true;
       acceptedGrant.current = null;
@@ -441,6 +458,7 @@ export function RouteMotionProvider({
           return;
         commands.retire();
         nativeScroll.invalidate();
+        applicationReturn.invalidate();
         document.documentElement.dataset.routeMotionPrivate = 'false';
         suspended.current = true;
         acceptedGrant.current = null;
@@ -484,6 +502,7 @@ export function RouteMotionProvider({
       lifecycleRef.current = false;
       navigationObservers.clear();
       nativeScroll.dispose();
+      applicationReturn.dispose();
       latestPrivacy.current.navigation?.retire(providerToken);
       presentation.invalidate();
       if (ownsDocument) {
@@ -510,6 +529,7 @@ export function RouteMotionProvider({
     presentation,
     nativeScroll,
     commands,
+    applicationReturn,
     navigationObservers,
   ]);
   useLayoutEffect(() => {
@@ -554,6 +574,7 @@ export function RouteMotionProvider({
     // Temporary same-authority rechecks freeze checkpoints independently of
     // presentation visibility. Only a fresh grant and real primary can restore.
     nativeScroll.reconcile();
+    applicationReturn.reconcile();
   }, [
     privacy,
     privacyRevision,
@@ -567,11 +588,16 @@ export function RouteMotionProvider({
     nativeScroll,
     commands,
     mountedActor,
+    applicationReturn,
   ]);
   useEffect(() => {
     nativeScroll.attach();
     return nativeScroll.detach;
   }, [nativeScroll]);
+  useEffect(() => {
+    applicationReturn.attach();
+    return applicationReturn.detach;
+  }, [applicationReturn]);
   useEffect(() => {
     let observing = true;
     let navigation: Navigation | undefined;
@@ -636,6 +662,7 @@ export function RouteMotionProvider({
         return;
       commands.retire();
       nativeScroll.invalidate();
+      applicationReturn.invalidate();
       document.documentElement.dataset.routeMotionPrivate = 'false';
       suspended.current = true;
       acceptedGrant.current = null;
@@ -676,6 +703,7 @@ export function RouteMotionProvider({
       state.finish();
       cancelRouteSnapshots();
       readiness.history();
+      applicationReturn.cancel();
       nativeScroll.reconcile();
     };
     window.addEventListener('popstate', pop, true);
@@ -695,6 +723,7 @@ export function RouteMotionProvider({
     presentation,
     commands,
     nativeScroll,
+    applicationReturn,
   ]);
   useEffect(() => {
     // Next may redirect through its own router, without an accepted Link event.
@@ -732,6 +761,7 @@ export function RouteMotionProvider({
         pending,
         readiness,
         loading,
+        applicationReturn,
         lifecycleRef,
         providerToken,
         commands,
@@ -740,6 +770,7 @@ export function RouteMotionProvider({
         withdrawGrant: () => {
           commands.retire();
           nativeScroll.invalidate();
+          applicationReturn.invalidate();
           latestPrivacy.current.navigation?.retire(providerToken);
           document.documentElement.dataset.routeMotionPrivate = 'false';
           suspended.current = true;
@@ -760,6 +791,7 @@ export function RouteMotionProvider({
             logoutAttempt.current = null;
             if (confirmed) {
               nativeScroll.invalidate();
+              applicationReturn.invalidate();
               latestPrivacy.current.navigation?.retire(providerToken);
               suspended.current = true;
               acceptedGrant.current = null;
@@ -948,15 +980,25 @@ export function useRouteMotion() {
     retireTitle: () => {
       if (current()) state?.stageNavigation(null);
     },
+    registerReturnSource: (
+      target: Parameters<NonNullable<typeof state>['arm']>[0],
+      element: HTMLElement,
+    ) => context?.applicationReturn.registerSource(target, element),
     arm: (target: Parameters<NonNullable<typeof state>['arm']>[0]) => {
-      if (current()) state?.stageNavigation(enabled ? target : null);
+      if (current()) {
+        context?.applicationReturn.stageForward(target);
+        state?.stageNavigation(enabled ? target : null);
+      }
     },
     armBack: (
       record: Parameters<NonNullable<typeof state>['backTarget']>[0],
       href: string,
     ) => {
       const target = state?.backTarget(record, href);
-      if (current()) state?.stageNavigation(enabled && target ? target : null);
+      if (current()) {
+        context?.applicationReturn.stageBack(record, href);
+        state?.stageNavigation(enabled && target ? target : null);
+      }
     },
     cancelIfInvalid: () => {
       if (!current()) return;
