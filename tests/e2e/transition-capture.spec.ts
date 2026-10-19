@@ -312,7 +312,6 @@ for (const topology of [
         contentType: 'application/json',
       });
       const diagnostic = JSON.stringify({
-        ancestors,
         topology,
         reverse,
         ...proof,

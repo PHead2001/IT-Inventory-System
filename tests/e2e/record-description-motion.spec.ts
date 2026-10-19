@@ -115,6 +115,8 @@ for (const direction of ['expand', 'collapse'] as const) {
     const result = await page
       .getByRole('button', { name: 'Show full description' })
       .evaluate(async (button, direction) => {
+        if (!(button instanceof HTMLButtonElement))
+          throw new Error('Description control must be a native button.');
         const paragraph = document.getElementById(
           button.getAttribute('aria-controls')!,
         )!;

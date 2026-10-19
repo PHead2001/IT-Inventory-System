@@ -26,8 +26,8 @@ let sourceRoot: HTMLElement;
 let current: boolean;
 let admitted: boolean;
 let controller: ReturnType<typeof createAuxiliaryRouteCapture>;
-let participate: ReturnType<typeof vi.fn>;
-let nativeCall: ReturnType<typeof vi.fn>;
+let participate: ReturnType<typeof vi.fn<(name: string) => boolean>>;
+let nativeCall: ReturnType<typeof vi.fn<Document['startViewTransition']>>;
 let effects: Array<{
   effect: { pseudoElement: string };
   finished: Promise<void>;

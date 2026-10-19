@@ -48,13 +48,14 @@ function AuxiliaryCaptureRegion({
   const register = useCallback(
     (node: HTMLElement) => {
       const value = latest.current;
-      if (!value.identity || !value.source) return;
+      const routeKey = value.identity?.rawRouteKey;
+      if (!routeKey || !value.source) return;
       let owned = participant.current;
       if (!owned || owned.root !== node) {
         owned = {
           root: node,
           region,
-          routeKey: value.identity.rawRouteKey,
+          routeKey,
           source: value.source,
           current: () => {
             const current = latest.current;
@@ -71,7 +72,7 @@ function AuxiliaryCaptureRegion({
         };
         participant.current = owned;
       }
-      owned.routeKey = value.identity.rawRouteKey;
+      owned.routeKey = routeKey;
       owned.source = value.source;
       return registry.register(owned);
     },

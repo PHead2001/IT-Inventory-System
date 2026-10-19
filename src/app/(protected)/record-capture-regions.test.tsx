@@ -254,7 +254,7 @@ beforeEach(() => {
   vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockReturnValue(300);
   vi.spyOn(HTMLElement.prototype, 'scrollWidth', 'get').mockReturnValue(300);
   vi.spyOn(HTMLElement.prototype, 'scrollHeight', 'get').mockImplementation(
-    function () {
+    function (this: HTMLElement) {
       return this.textContent?.startsWith('Long description') ? 1920 : 24;
     },
   );
