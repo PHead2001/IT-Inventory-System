@@ -8,6 +8,20 @@ select ok((select reloptions @> array['security_invoker=true'] from pg_class whe
 select ok(not has_function_privilege(role_name,'public.command_palette_search_v1(text,text,text)','EXECUTE'),role_name||' cannot search')
  from (values ('anon'),('service_role')) roles(role_name);
 select ok(has_function_privilege('authenticated','public.command_palette_search_v1(text,text,text)','EXECUTE'),'caller role can reach membership guard');
+select ok(has_function_privilege(role_name,'public.command_palette_normalize(text)','EXECUTE'),role_name||' can normalize text for authorized expression-index maintenance')
+ from (values ('authenticated'),('service_role')) roles(role_name);
+select ok(not has_function_privilege('anon','public.command_palette_normalize(text)','EXECUTE'),'anonymous cannot invoke the normalization helper');
+select ok(not exists(
+ select 1 from pg_proc p cross join lateral aclexplode(coalesce(p.proacl,acldefault('f',p.proowner))) privilege
+ where p.oid=signature::regprocedure and privilege.grantee=0 and privilege.privilege_type='EXECUTE'
+),'PUBLIC has no EXECUTE grant on '||signature)
+ from (values ('public.command_palette_normalize(text)'),('public.command_palette_search_v1(text,text,text)')) functions(signature);
+select ok((select not prosecdef and provolatile='i' and proparallel='s' and proconfig @> array['search_path=""'] from pg_proc
+ where oid='public.command_palette_normalize(text)'::regprocedure),'normalizer retains immutable parallel-safe invoker execution with empty search path');
+set local role service_role;
+select is(public.command_palette_normalize(chr(160)||'PaLeTtE'||chr(65279)),'palette','service role can execute pure Unicode normalization required by indexed writes');
+select throws_ok($$select public.command_palette_search_v1('Palette')$$,'42501','permission denied for function command_palette_search_v1','helper grant does not authorize service-role palette search');
+reset role;
 select ok((select not prosecdef and proconfig @> array['search_path=""','statement_timeout=5s','pg_trgm.word_similarity_threshold=0.35'] from pg_proc
  where oid='public.command_palette_search_v1(text,text,text)'::regprocedure),'invoker, empty search path and timeout declaration');
 
@@ -182,11 +196,11 @@ reset role;
 -- Explain the actual deployed fuzzy arm, including its full row projection.
 -- A narrow ID-only probe can change planner width/cost and is not authoritative.
 -- Substitute only the fixed active/all/long-query arguments; caller RLS remains.
-create function pg_temp.palette_plan(p_kind text,p_field text) returns jsonb language plpgsql security invoker as $$
-declare plan jsonb; table_name text; needle text; body text; candidates text; statement text; matches bigint;
+create function pg_temp.palette_deployed_sql(p_kind text,p_field text,p_query text,p_scope text default 'active',p_purpose text default 'all',p_inner boolean default false)
+returns text language plpgsql security invoker as $$
+declare table_name text; body text; candidates text; statement text; matches bigint; threshold text; ordering text;
 begin
  table_name:=case p_kind when 'asset' then 'serialized_assets' when 'quantity' then 'quantity_items' when 'location' then 'locations' when 'site' then 'sites' end;
- needle:=case when p_field='name' then 'spectrometer' else 'rivet' end;
  select replace(prosrc,chr(13)||chr(10),chr(10)) into body from pg_catalog.pg_proc where oid='public.command_palette_search_v1(text,text,text)'::regprocedure;
  candidates:=split_part(split_part(body,' with candidates as ('||chr(10),2),chr(10)||' ), best as (',1);
  select count(*),min(btrim(arm)) into matches,statement
@@ -198,8 +212,22 @@ begin
   raise exception 'Expected exactly one deployed fuzzy arm for % %',p_kind,p_field;
  end if;
  statement:=substring(statement from 2 for char_length(statement)-2);
- statement:=replace(replace(replace(statement,'p_purpose',quote_literal('all')),'p_scope',quote_literal('active')),'needle',quote_literal(needle));
- execute 'explain (analyze,buffers,format json) '||statement into plan;
+ threshold:='  and public.command_palette_normalize(r.'||p_field||') operator(extensions.%>) needle';
+ ordering:='  order by public.command_palette_normalize(r.'||p_field||') operator(extensions.<->>) needle fetch first 21 rows with ties';
+ if strpos(statement,threshold||chr(10)||ordering)=0 or strpos(statement,') r where r.term')>0 then
+  raise exception 'Threshold must precede the deployed WITH TIES boundary for % %',p_kind,p_field;
+ end if;
+ if p_inner then
+  statement:=split_part(split_part(statement,chr(10)||' from ('||chr(10),2),chr(10)||' ) r',1);
+  if statement='' or strpos(statement,ordering)=0 then raise exception 'Missing deployed inner arm'; end if;
+ end if;
+ return replace(replace(replace(statement,'p_purpose',quote_literal(p_purpose)),'p_scope',quote_literal(p_scope)),'needle',quote_literal(public.command_palette_normalize(p_query)));
+end $$;
+create function pg_temp.palette_plan(p_kind text,p_field text) returns jsonb language plpgsql security invoker as $$
+declare plan jsonb;
+begin
+ execute 'explain (analyze,buffers,format json) '||pg_temp.palette_deployed_sql(p_kind,p_field,
+  case when p_field='name' then 'spectrometer' else 'rivet' end) into plan;
  return plan;
 end $$;
 select set_config('request.jwt.claims','{"sub":"a3010000-0000-4000-8000-000000000001","role":"authenticated"}',true);
@@ -221,14 +249,39 @@ select diag(kind||' '||field||' failed KNN plan: '||jsonb_pretty(plan)) from pal
 
 -- Keep the pre-repair field stream as an independent result-equivalence
 -- reference after the forward migration. The production plan assertions above
--- now use the repaired distance-only WITH TIES shape proved by the diagnostic.
+-- use the deployed threshold-before-WITH-TIES shape; do not derive the reference
+-- from the new function body or move its independent threshold/UUID ordering.
 -- Reuse the same transaction, JWT, RLS, analyzed 6,000-row fixtures and indexes.
--- The only extra fixture supplies the missing inactive-location sibling.
+-- Additional owned fixtures cover the inactive-location sibling and sparse
+-- qualifying populations without changing the original 6,000-row tie fixture.
 reset role;
 insert into public.locations(id,code,name,parent_id,kind,can_hold_inventory,active) values
  ('a3010000-0000-4000-8000-000000009998','PAL-KNN-INACTIVE','Palette KNN inactive',
  (select id from public.locations where code='ITC'),'container',true,false);
+-- Each field has 1/20/21 matches for independent tokens, against the existing
+-- 6,000 unrelated rows. Zero matches uses a fourth absent token. Keep code/tag
+-- uniqueness and legal duplicate serials; all fixtures roll back with this test.
+insert into public.quantity_items(name,item_code,category_id)
+ select token||' '||n,token||'-'||n,(select id from public.categories where code='OTHER')
+ from (values ('zygophoton',1),('quavernix',20),('xeldruvak',21)) sparse(token,matches)
+ cross join lateral generate_series(1,matches) n;
+insert into public.serialized_assets(name,asset_tag,serial_number,category_id,location_id)
+ select token||' '||n,token||'-'||n,token||'-'||n,
+ (select id from public.categories where code='OTHER'),(select id from public.locations where code='ITC-D01')
+ from (values ('zygophoton',1),('quavernix',20),('xeldruvak',21)) sparse(token,matches)
+ cross join lateral generate_series(1,matches) n;
+insert into public.locations(name,code,parent_id,kind,can_hold_inventory)
+ select token||' '||n,upper(token)||'-'||n,(select id from public.locations where code='ITC'),'container',true
+ from (values ('zygophoton',1),('quavernix',20),('xeldruvak',21)) sparse(token,matches)
+ cross join lateral generate_series(1,matches) n;
+insert into public.sites(name,code)
+ select token||' '||n,upper(token)||'-'||n
+ from (values ('zygophoton',1),('quavernix',20),('xeldruvak',21)) sparse(token,matches)
+ cross join lateral generate_series(1,matches) n;
+analyze public.serialized_assets;
+analyze public.quantity_items;
 analyze public.locations;
+analyze public.sites;
 create function pg_temp.palette_probe_sql(p_kind text,p_field text,p_query text,p_scope text,p_purpose text,p_proposed boolean)
 returns text language plpgsql security invoker as $$
 declare table_name text; eligibility text; term text; distance text; needle text;
@@ -248,7 +301,7 @@ begin
  -- Distance-only WITH TIES must retain the complete boundary tie before the
  -- outer UUID sort. Putting UUID in this inner order would defeat GiST KNN;
  -- plain LIMIT could discard the true first UUIDs among 6,000 distance ties.
- return format('select nearest.id,nearest.distance from (select r.id,%s term,%s distance from public.%I r where %s and char_length(%L)>=3 order by %s fetch first 21 rows with ties) nearest where nearest.term operator(extensions.%%>) %L order by nearest.distance,nearest.id limit 21',term,distance,table_name,eligibility,needle,distance,needle);
+ return format('select nearest.id,nearest.distance from (select r.id,%s term,%s distance from public.%I r where %s and char_length(%L)>=3 and %s operator(extensions.%%>) %L order by %s fetch first 21 rows with ties) nearest order by nearest.distance,nearest.id limit 21',term,distance,table_name,eligibility,needle,term,needle,distance);
 end $$;
 create function pg_temp.palette_probe_ids(p_sql text) returns jsonb language plpgsql security invoker as $$
 declare ids jsonb;
@@ -274,6 +327,12 @@ create function pg_temp.palette_plan_summary(p_plan jsonb) returns jsonb languag
    'loops',node->'Actual Loops','sharedHit',node->'Shared Hit Blocks','sharedRead',node->'Shared Read Blocks'))))
  from nodes
 $$;
+create function pg_temp.palette_inner_result(p_sql text,p_query text) returns jsonb language plpgsql security invoker as $$
+declare answer jsonb;
+begin
+ execute format('select jsonb_build_object(''rows'',count(*),''rejected'',count(*) filter (where not coalesce(candidate.term operator(extensions.%%>) %L,false))) from (%s) candidate',public.command_palette_normalize(p_query),p_sql) into answer;
+ return answer;
+end $$;
 set local role authenticated;
 select ok(current_user='authenticated' and auth.uid()='a3010000-0000-4000-8000-000000000001'::uuid
  and current_setting('row_security')='on' and current_setting('enable_seqscan')='on',
@@ -299,6 +358,37 @@ create temporary table palette_probe_fields as
    else case kind when 'asset' then case field when 'asset_tag' then 'PAL-RETIRED' else 'PAL-OLD' end when 'quantity' then 'PAL-ARCHIVED' when 'location' then 'PAL-KNN-INACTIVE' else 'PAL-INACTIVE' end end lifecycle,
   case kind when 'asset' then 'a3010000-0000-4000-8000-000000000022' when 'quantity' then 'a3010000-0000-4000-8000-000000000012' when 'location' then 'a3010000-0000-4000-8000-000000009998' else 'a3010000-0000-4000-8000-000000000031' end lifecycle_id
  from palette_plans p;
+-- Exercise the actual deployed full projection and inner boundary, not the
+-- synthesized diagnostic candidate. Under sparse/absent search, rejected rows
+-- at distance 1 must never inflate WITH TIES output. A scan may still inspect
+-- them under nonleakproof caller RLS; record that cost rather than hiding it.
+create temporary table palette_sparse_results as
+ select f.kind,f.field,s.query,s.expected,
+  pg_temp.palette_probe_ids(pg_temp.palette_deployed_sql(f.kind,f.field,s.query)) actual,
+  pg_temp.palette_probe_ids(pg_temp.palette_probe_sql(f.kind,f.field,s.query,'active','all',false)) reference,
+  pg_temp.palette_inner_result(pg_temp.palette_deployed_sql(f.kind,f.field,s.query,'active','all',true),s.query) inner_result,
+  pg_temp.palette_probe_plan(pg_temp.palette_deployed_sql(f.kind,f.field,s.query,'active','all',true)) inner_plan
+ from palette_probe_fields f cross join (values
+  ('qzxjkvbqzxjkvb',0),('zygophoton',1),('quavernix',20),('xeldruvak',21)) s(query,expected);
+select is((select count(*) from palette_sparse_results),36::bigint,'all nine deployed arms include all four absent/sparse cases');
+select is(actual,reference,'deployed sparse ordered IDs equal independent reference: '||kind||' '||field||' '||expected)
+ from palette_sparse_results order by kind,field,expected;
+select is(jsonb_array_length(actual),expected,'deployed arm retains exact sparse candidate count: '||kind||' '||field||' '||expected)
+ from palette_sparse_results order by kind,field,expected;
+select is((inner_result->>'rows')::integer,expected,'deployed WITH TIES emits qualifying rows only: '||kind||' '||field||' '||expected)
+ from palette_sparse_results order by kind,field,expected;
+select is((inner_result->>'rejected')::integer,0,'no rejected row enters WITH TIES output: '||kind||' '||field||' '||expected)
+ from palette_sparse_results order by kind,field,expected;
+select is((inner_plan->0->'Plan'->>'Actual Rows')::integer,expected,'actual boundary plan retains exact sparse cardinality: '||kind||' '||field||' '||expected)
+ from palette_sparse_results order by kind,field,expected;
+select diag('deployed sparse boundary: '||kind||' '||field||' '||expected||' '||
+ pg_temp.palette_plan_summary(inner_plan)::text) from palette_sparse_results order by kind,field,expected;
+select is(jsonb_array_length(public.command_palette_search_v1(query)->'rows'),least(expected*4,20),
+ 'full RPC preserves unique-entity cap for sparse query: '||expected)
+ from (values ('qzxjkvbqzxjkvb',0),('zygophoton',1),('quavernix',20),('xeldruvak',21)) s(query,expected);
+select is(public.command_palette_search_v1(query)->>'hasMore',(expected*4>20)::text,
+ 'full RPC preserves overflow sentinel for sparse query: '||expected)
+ from (values ('qzxjkvbqzxjkvb',0),('zygophoton',1),('quavernix',20),('xeldruvak',21)) s(query,expected);
 create temporary table palette_probe_cases as
  select f.*,s.scenario,s.scope,s.purpose,
   case s.scenario when 'common' then common when 'unicode' then chr(160)||selective||chr(65279)

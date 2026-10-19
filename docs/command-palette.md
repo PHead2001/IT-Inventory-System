@@ -125,6 +125,17 @@ qualified objects and an empty search path. It checks active membership before
 data and preserves RLS. Only authenticated receives EXECUTE; PUBLIC, anon and
 service_role do not. Ordinary inventory search is unchanged.
 
+The pure immutable `command_palette_normalize(text)` helper separately grants
+EXECUTE to authenticated and service_role so existing authorized writes can
+maintain its expression indexes. It reads no records and remains SECURITY
+INVOKER with an empty search path; PUBLIC and anon have no EXECUTE grant.
+This helper grant does not grant palette RPC access or change table privileges.
+The SQL gate checks these ACLs and service-role normalization/search denial.
+The existing `tests/integration/custody.ts` direct service-role transaction inserts
+a location (both indexed name/code) and updates its indexed name, reads it back
+and rolls back. That retained integration is the actual indexed-write regression
+for the helper grant; execution on the repaired candidate remains required.
+
 The closed purpose selector is all (default), move, or print. It filters every
 field stream before nearest-neighbor limits, deduplication, global ranking and
 the 20-entity cap. Move searches active assets/quantity definitions even under
@@ -152,14 +163,26 @@ entities return with hasMore based on the 21st unique entity. Base records inclu
 zero-stock definitions and empty locations/sites; holdings never duplicate rows.
 Duplicate serials remain legal and return separate named assets.
 
-The forward RLS/KNN repair keeps eligibility inside each fuzzy stream, orders by
-word distance alone and fetches the first 21 rows with ties. The outer query
-applies the unchanged nonleakproof `%>` threshold, orders by distance/UUID and
-limits to 21. This lets GiST supply nearest-neighbor ordering under caller RLS
-without making the threshold leakproof. Keeping every boundary tie before the
+The forward threshold repair keeps eligibility and the unchanged nonleakproof
+`%>` threshold inside each fuzzy stream before ordering by word distance alone
+and fetching the first 21 rows with ties. The outer query orders qualifying rows
+by distance/UUID and limits to 21. Rejected distance-1 rows cannot inflate the
+boundary output for absent or sparse searches. Under caller RLS the threshold
+may remain a filter, so this change does not establish bounded scanning or a
+particular index plan. Keeping every qualifying boundary tie before the
 UUID sort preserves deterministic results; a common equal-distance term can
 still visit thousands of rows. No constant-work or universal latency claim is
 implied by the 21-candidate output cap.
+
+The transactional SQL gate extracts all nine deployed full-projection arms and
+their inner boundaries. Against 6,000 unrelated rows per table, absent and
+1/20/21-match cases require exact qualifying boundary counts and no rejected
+output, compare ordered IDs with the independent pre-repair reference, and emit
+buffer, rows-removed and execution-time summaries. The existing 6,000 qualifying
+ties, authenticated default-planner KNN assertions, nonleakproof catalog checks
+and PostgREST five-second deadline gate remain required. These new cases are
+authored regression coverage; final-candidate database execution and performance
+acceptance remain pending until those gates run.
 
 Version-one rows expose kind, id, name, code, assetTag, serialNumber, status and
 matchedField. Database JSON is capped at 64 KiB; the endpoint validates its schema
