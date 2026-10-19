@@ -521,7 +521,7 @@ it.each(['denial', 'logout', 'auth'] as const)(
   },
 );
 
-it('declining the real unknown-outcome logout guard preserves presentation; approved exit invalidates before action dispatch', async () => {
+it('declining logout preserves presentation; an approved attempt suspends before dispatch and failed transport requires a fresh grant', async () => {
   await admitted();
   const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false);
   const form = screen
@@ -530,15 +530,34 @@ it('declining the real unknown-outcome logout guard preserves presentation; appr
   fireEvent.submit(form);
   expect(runtime.signOut).not.toHaveBeenCalled();
   expect(controls.motion.enabled).toBe(true);
-  runtime.signOut.mockImplementation(async () => {
+  const transport = deferred<{ ok: false; message: string }>();
+  runtime.signOut.mockImplementation(() => {
     expect(document.documentElement.dataset.routeMotionPrivate).toBe('false');
     expect(controls.scope.state.snapshot().pending).toBe(false);
-    return { ok: false, message: 'Sign-out unavailable.' };
+    return transport.promise;
   });
   confirm.mockReturnValue(true);
   fireEvent.submit(form);
   await waitFor(() => expect(runtime.signOut).toHaveBeenCalledOnce());
   expect(controls.motion.enabled).toBe(false);
+  const verification = deferred<LogoutPrivacyGeneration>();
+  runtime.read.mockReturnValue(verification.promise);
+  const priorReads = runtime.read.mock.calls.length;
+  await act(async () => {
+    transport.resolve({ ok: false, message: 'Sign-out unavailable.' });
+    await transport.promise;
+  });
+  await waitFor(() =>
+    expect(runtime.read.mock.calls.length).toBeGreaterThan(priorReads),
+  );
+  expect(controls.motion.enabled).toBe(false);
+  expect(document.documentElement.dataset.routeMotionPrivate).toBe('false');
+  await act(async () => {
+    verification.resolve({ status: 'absent' });
+    await verification.promise;
+  });
+  await waitFor(() => expect(controls.motion.enabled).toBe(true));
+  expect(document.documentElement.dataset.routeMotionPrivate).toBe('true');
 });
 
 // The injected stale context here targets the insertion-order race independently
