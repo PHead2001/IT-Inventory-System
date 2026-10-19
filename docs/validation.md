@@ -128,16 +128,33 @@ supersession, native history/terminal/unmount retirement, authoritative primary
 focus and the explicit consumed-task handoff. Focus/readiness observers must not
 settle another owner's pending work. The additive database search requires the
 full canonical database gate, including pgTAP authorization/lifecycle/ranking
-fixtures, actual authenticated GiST/KNN plans and canonical type regeneration.
+fixtures and canonical type regeneration. Under the default planner and caller
+RLS, all nine exact deployed full-projection fuzzy arms cover selective, absent,
+sparse 1/20/21-result and common 6,000-row workloads. Each of these 54 cases must
+finish in <=500 ms, use <=16,384 root shared hit+read buffers, avoid temporary
+spill, emit at most 21 IDs and preserve the independent reference's distance/UUID
+order. A PL/pgSQL portal observer records actual emitted order without sorting;
+a deliberately reversed-order regression guards that observer. Separate
+index-eligibility plans change only the inner FETCH FIRST 21 ROWS WITH TIES count
+to 1 and require the expected GiST index with Order By for all nine fields. These
+eligibility probes do not establish deployed-query performance. Six whole
+RPC workloads must finish in <5 seconds. Compact diagnostics retain plan costs,
+estimates, actuals, buffers, field/relation statistics and planner settings;
+planner flags, cost constants and operator leakproof flags remain unchanged.
+These assertions define the required oracle; integrating them is not runtime
+proof. Certification requires their execution through the canonical database
+gate on the exact candidate revision.
 The local palette integration gate also starts fresh PostgreSQL connections as
 the nonsuperuser authenticated role. It reproduces the unregistered trigram
 parameter failure, executes the actual breadcrumb migration prefix and function
 header in a temporary schema with rollback, and checks threshold restoration.
 A separate fresh caller proves nonmember denial and authorized search before
 the extension library has been loaded in that backend.
-Real Data API deadline/error proof and desktop/390px Full/Reduced staff/viewer
-browser/preview checks remain separate acceptance requirements; a declared SQL
-timeout or component mock is not that proof. See
+The mandatory real Data API deadline integration must witness database
+cancellation code 57014 before the client deadline and forced lock release.
+Desktop/390px Full/Reduced staff/viewer browser/preview checks remain separate
+acceptance requirements; a declared SQL timeout or component mock is not deadline
+proof. See
 [Search and commands](command-palette.md).
 
 Checkpoint scope/accessibility regression coverage includes normalized location status/export links, caller-scoped record identity and unavailable history recovery, page-local versus full-row counts, empty inventory/destination states, page recovery, monitoring coverage, intact location codes and hidden/unmodeled/failed map guidance. Focused Vitest tests prove these contracts and stale-response handling; `scope-accessibility.spec.ts` exercises ordinary controls, real authorized reads and downloaded CSV across page boundaries. Required-input and category-focus interaction coverage lives in `scope-accessibility-forms.spec.ts`. Mocked reads are not integrated runtime or complete assistive-technology proof; use the existing disposable-local and isolated-preview gates for final acceptance.

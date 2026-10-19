@@ -40,10 +40,13 @@ function sameBinding(a: TaskSource, b: TaskSource) {
 
 /** Consumption-only receipt. A raw URL or registration can never mint one. */
 export function createNativeTaskHandoff() {
+  // A busy accepted primary remembers its binding only. It grants no task
+  // capability until that same clean source is observed idle and fresh.
+  let candidate: TaskSource | null = null;
   let receipt: TaskSource | null = null;
   let retired = false;
   const retire = () => {
-    if (receipt) retired = true;
+    if (candidate) retired = true;
   };
   const current = (source: TaskSource) => {
     if (!receipt || retired) return false;
@@ -74,20 +77,32 @@ export function createNativeTaskHandoff() {
       // Only a new accepted exact server/navigation binding can replace a
       // retired receipt. Reverification or a cached render cannot revive it.
       const url = new URL(source.cleanKey, location.origin);
+      const eligible =
+        acceptedPrimary &&
+        source.fresh &&
+        source.visible &&
+        source.committedKey === source.cleanKey &&
+        !url.searchParams.has('task') &&
+        validReturn(url);
+      if (!candidate || !sameBinding(candidate, source)) {
+        retire();
+        if (!eligible) return;
+        candidate = { ...source };
+        receipt = null;
+        retired = false;
+      } else if (retired) return;
       if (
-        !acceptedPrimary ||
         !source.fresh ||
-        !source.idle ||
         !source.visible ||
-        source.committedKey !== source.cleanKey ||
-        url.searchParams.has('task') ||
-        !validReturn(url)
+        source.securityRevision !== candidate.securityRevision ||
+        source.pendingEpoch !== candidate.pendingEpoch ||
+        source.cleanKey !== candidate.cleanKey ||
+        source.committedKey !== candidate.cleanKey
       ) {
         retire();
         return;
       }
-      receipt = { ...source };
-      retired = false;
+      if (eligible && source.idle) receipt = { ...source };
     },
     consume(
       source: TaskSource,
@@ -95,6 +110,10 @@ export function createNativeTaskHandoff() {
       task: string,
       apply: (href: string) => void,
     ) {
+      if (!receipt) {
+        retire();
+        return null;
+      }
       if (!current(source) || !receipt) return null;
       const url = new URL(location.href);
       const kind = /^\/inventory\/(assets|quantity)\/[^/]+$/.exec(

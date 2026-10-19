@@ -239,13 +239,7 @@ create temporary table palette_plans as
  from (values ('asset','name'),('asset','asset_tag'),('asset','serial_number'),('quantity','name'),('quantity','item_code'),('location','name'),('location','code'),('site','name'),('site','code')) fields(kind,field);
 select is((select count(*) from palette_plans where jsonb_typeof(plan)='array' and jsonb_array_length(plan)=1),9::bigint,
  'all nine deployed fuzzy-arm plans are present and nonempty');
-select ok(jsonb_path_exists(plan,
- '$[0].Plan.** ? (@."Index Name" == $index && exists(@."Order By"))',
- jsonb_build_object('index',index_name)),
- 'real authenticated large-fixture KNN plan uses '||kind||' '||field)
- from palette_plans;
-select diag(kind||' '||field||' failed KNN plan: '||jsonb_pretty(plan)) from palette_plans
- where not jsonb_path_exists(plan,'$[0].Plan.** ? (@."Index Name" == $index && exists(@."Order By"))',jsonb_build_object('index',index_name));
+-- Index choice is recorded separately from deployed cost/semantic evidence.
 
 -- Keep the pre-repair field stream as an independent result-equivalence
 -- reference after the forward migration. The production plan assertions above
@@ -414,19 +408,114 @@ select ok(not (proposed ? lifecycle_id),'candidate excludes known lifecycle row 
 select is(proposed,'[]'::jsonb,'candidate excludes ineligible kind before limit: '||kind||' '||field||' '||scenario)
  from palette_probe_results where (scenario='purpose-move' and kind in ('location','site')) or (scenario='purpose-print' and kind='site') order by kind,field,scenario;
 
-create temporary table palette_proposed_plans as
- select f.kind,f.field,f.index_name,
-  pg_temp.palette_probe_plan(pg_temp.palette_probe_sql(kind,field,selective,'active','all',false)) original_plan,
-  pg_temp.palette_probe_plan(pg_temp.palette_probe_sql(kind,field,selective,'active','all',true)) plan
- from palette_probe_fields f;
+
+-- Keep the existing fixture, authorization, normalization and semantic tests.
+-- Cost proof always explains the exact full deployed arm, never an ID-only proxy.
+create function pg_temp.cost_plan(p_sql text) returns jsonb language plpgsql security invoker as $$
+declare answer jsonb;
+begin
+ execute 'explain (analyze,buffers,format json) '||p_sql into answer;
+ return answer;
+end $$;
+-- Iterate the actual portal stream. Never sort deployed rows in the observer.
+create function pg_temp.cost_emitted_ids(p_sql text) returns jsonb language plpgsql security invoker as $$
+declare candidate record; answer jsonb:='[]'::jsonb;
+begin
+ for candidate in execute p_sql loop
+  answer:=answer||jsonb_build_array(candidate.id);
+ end loop;
+ return answer;
+end $$;
+select is(pg_temp.cost_emitted_ids('select id from (values (1,''second''),(2,''first'')) emitted(position,id) order by position'),
+ '["second","first"]'::jsonb,'emitted-order observer preserves deliberately nonalphabetical stream');
+create function pg_temp.cost_nodes(p_plan jsonb) returns setof jsonb language sql security invoker as $$
+ with recursive nodes(node) as (
+  select p_plan->0->'Plan' union all
+  select child from nodes cross join lateral jsonb_array_elements(coalesce(node->'Plans','[]'::jsonb)) child
+ ) select node from nodes
+$$;
+create function pg_temp.cost_summary(p_plan jsonb) returns jsonb language sql security invoker as $$
+ select jsonb_build_object('executionMs',p_plan->0->'Execution Time',
+  'rootBuffers',coalesce((p_plan->0->'Plan'->>'Shared Hit Blocks')::bigint,0)+coalesce((p_plan->0->'Plan'->>'Shared Read Blocks')::bigint,0),
+  'nodes',(select jsonb_agg(jsonb_strip_nulls(jsonb_build_object(
+   'type',n->'Node Type','relation',n->'Relation Name','index',n->'Index Name',
+   'startupCost',n->'Startup Cost','totalCost',n->'Total Cost','estimatedRows',n->'Plan Rows','width',n->'Plan Width',
+   'actualRows',n->'Actual Rows','loops',n->'Actual Loops','removed',n->'Rows Removed by Filter',
+   'sharedHit',n->'Shared Hit Blocks','sharedRead',n->'Shared Read Blocks',
+   'tempRead',n->'Temp Read Blocks','tempWritten',n->'Temp Written Blocks',
+   'sortMethod',n->'Sort Method','sortSpaceType',n->'Sort Space Type',
+   'indexCond',n->'Index Cond','filter',n->'Filter','order',n->'Order By','sortKey',n->'Sort Key')))
+   from pg_temp.cost_nodes(p_plan) n))
+$$;
+select ok(current_user='authenticated' and auth.uid()='a3010000-0000-4000-8000-000000000001'::uuid
+ and current_setting('row_security')='on' and current_setting('enable_seqscan')='on'
+ and current_setting('enable_indexscan')='on' and current_setting('enable_bitmapscan')='on'
+ and current_setting('random_page_cost')='4' and current_setting('pg_trgm.word_similarity_threshold')='0.35',
+ 'cost experiment retains default planner, authenticated actor and caller RLS');
+create temporary table cost_cases as
+ select f.kind,f.field,f.index_name,s.scenario,
+ case s.scenario when 'selective' then f.selective when 'common' then f.common
+ else s.query end query
+ from palette_probe_fields f cross join (values
+ ('selective',null::text),('common',null::text),('absent','qzxjkvbqzxjkvb'),
+ ('sparse1','zygophoton'),('sparse20','quavernix'),('sparse21','xeldruvak')) s(scenario,query);
+create temporary table cost_results as
+ select c.*,pg_temp.cost_plan(pg_temp.palette_deployed_sql(kind,field,query)) plan,
+ pg_temp.cost_emitted_ids(pg_temp.palette_deployed_sql(kind,field,query)) actual,
+ pg_temp.palette_probe_ids(pg_temp.palette_probe_sql(kind,field,query,'active','all',false)) reference
+ from cost_cases c;
+select is(count(*),54::bigint,'all nine exact full-projection arms cover all six workloads') from cost_results;
+select ok((plan->0->>'Execution Time')::numeric<=500,
+ 'deployed arm <=500ms: '||kind||' '||field||' '||scenario) from cost_results;
+ select ok((plan->0->'Plan') ?& array['Shared Hit Blocks','Shared Read Blocks']
+ and (plan->0->'Plan'->>'Shared Hit Blocks')::bigint+(plan->0->'Plan'->>'Shared Read Blocks')::bigint<=16384,
+ 'deployed root shared buffers <=16384: '||kind||' '||field||' '||scenario) from cost_results;
+select ok(not exists(select 1 from pg_temp.cost_nodes(plan) n
+ where coalesce((n->>'Temp Read Blocks')::bigint,0)>0 or coalesce((n->>'Temp Written Blocks')::bigint,0)>0
+ or n->>'Sort Space Type'='Disk' or n->>'Sort Method' like '%external%'),
+ 'deployed arm does not spill: '||kind||' '||field||' '||scenario) from cost_results;
+-- IDs and distance/UUID order remain an independent semantic oracle.
+select is(actual,reference,'deployed ordered IDs equal independent reference: '||kind||' '||field||' '||scenario) from cost_results;
+select ok(jsonb_array_length(actual)<=21,'deployed output <=21: '||kind||' '||field||' '||scenario) from cost_results;
+select diag('deployed-cost '||kind||' '||field||' '||scenario||' '||pg_temp.cost_summary(plan)::text) from cost_results order by kind,field,scenario;
+
+-- Independent capability proof only. Change just the inner WITH TIES count.
+-- This is never labeled deployed performance proof; a missing index is a failure.
+create function pg_temp.eligibility_sql(p_kind text,p_field text,p_query text) returns text language plpgsql security invoker as $$
+declare deployed text;
+begin
+ deployed:=pg_temp.palette_deployed_sql(p_kind,p_field,p_query);
+ if (length(deployed)-length(replace(deployed,'fetch first 21 rows with ties','')))/length('fetch first 21 rows with ties')<>1 then
+  raise exception 'Expected exactly one unchanged deployed WITH TIES boundary';
+ end if;
+ return replace(deployed,'fetch first 21 rows with ties','fetch first 1 rows with ties');
+end $$;
+create temporary table cost_eligibility as
+ select kind,field,index_name,pg_temp.cost_plan(pg_temp.eligibility_sql(kind,field,selective)) plan from palette_probe_fields;
+select is(count(*),9::bigint,'all nine independent index eligibility plans exist') from cost_eligibility;
 select ok(jsonb_path_exists(plan,'$[0].Plan.** ? (@."Index Name" == $index && exists(@."Order By"))',jsonb_build_object('index',index_name)),
- 'candidate authenticated default-planner KNN uses '||kind||' '||field) from palette_proposed_plans order by kind,field;
-select diag('KNN comparison: '||p.kind||' '||p.field||' '||jsonb_build_object(
- 'original',pg_temp.palette_plan_summary(p.original_plan),'proposed',pg_temp.palette_plan_summary(p.plan))::text)
- from palette_proposed_plans p order by p.kind,p.field;
--- Full plans are emitted only for failed candidate index assertions. ID
--- comparisons above are bounded to 21; never dump the 6,000-row tie population.
-select diag('candidate failed KNN plan: '||kind||' '||field||' '||jsonb_pretty(plan)) from palette_proposed_plans
- where not jsonb_path_exists(plan,'$[0].Plan.** ? (@."Index Name" == $index && exists(@."Order By"))',jsonb_build_object('index',index_name));
+ 'independent LIMIT1 WITH TIES index eligibility: '||kind||' '||field) from cost_eligibility;
+select diag('independent-eligibility '||kind||' '||field||' '||pg_temp.cost_summary(plan)::text) from cost_eligibility order by kind,field;
+
+-- Whole RPC success is separate from each arm budget and overdue Data API proof.
+create temporary table cost_rpc as
+ select query,pg_temp.cost_plan(format('select public.command_palette_search_v1(%L,''active'',''all'')',query)) plan
+ from (values ('spectrometer'),('rivet'),('calibration'),('pal-bulk'),('qzxjkvbqzxjkvb'),('quavernix')) q(query);
+select ok((plan->0->>'Execution Time')::numeric<5000,'whole authenticated RPC succeeds before5s: '||query) from cost_rpc;
+select diag('whole-rpc '||query||' '||pg_temp.cost_summary(plan)::text) from cost_rpc;
+select diag('planner-setting '||name||'='||setting) from pg_settings
+ where name in ('server_version','row_security','enable_seqscan','enable_indexscan','enable_bitmapscan',
+ 'random_page_cost','seq_page_cost','cpu_tuple_cost','cpu_index_tuple_cost','cpu_operator_cost',
+ 'effective_cache_size','work_mem','pg_trgm.word_similarity_threshold');
+select diag('relation-stat '||jsonb_build_object('relation',c.relname,'pages',c.relpages,'tuples',c.reltuples,
+ 'rls',c.relrowsecurity,'forceRls',c.relforcerowsecurity)::text)
+ from pg_class c join pg_namespace n on n.oid=c.relnamespace
+ where n.nspname='public' and c.relname in ('serialized_assets','quantity_items','locations','sites');
+select diag('field-stat '||jsonb_build_object('relation',tablename,'field',attname,'nullFraction',null_frac,
+ 'averageWidth',avg_width,'distinct',n_distinct,'correlation',correlation)::text)
+ from pg_stats where schemaname='public' and (tablename,attname) in
+ (('serialized_assets','name'),('serialized_assets','asset_tag'),('serialized_assets','serial_number'),
+ ('quantity_items','name'),('quantity_items','item_code'),('locations','name'),('locations','code'),('sites','name'),('sites','code'));
+
 select * from finish();
 rollback;

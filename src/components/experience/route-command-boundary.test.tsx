@@ -1,10 +1,14 @@
 import { TaskWorkspace } from '@/features/inventory/components/task-workspace';
-import { act, cleanup, render, screen } from '@testing-library/react';
+import { act, cleanup, render, screen, waitFor } from '@testing-library/react';
 import {
   Activity,
   useContext,
   useLayoutEffect,
   useSyncExternalStore,
+  useState,
+  useEffect,
+  useMemo,
+  Fragment,
 } from 'react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import {
@@ -12,11 +16,16 @@ import {
   useRouteCommandBoundary,
   type RouteCommandTicket,
 } from './route-motion';
-import { RoutePendingContext, useRouteRouter } from './route-pending';
+import {
+  RoutePendingContext,
+  useRouteRouter,
+  useReportRoutePending,
+} from './route-pending';
 import {
   RouteReady,
   useConsumeRouteTask,
   RouteReadyContext,
+  RouteNavigationIdentityContext,
 } from './route-ready';
 import { PrivacyReadinessContext } from '@/components/auth/privacy-readiness';
 import {
@@ -636,6 +645,33 @@ it('does not rearm from an unrelated accepted navigation followed by a matching 
   );
 });
 
+function StableNavigation({ children }: { children: React.ReactNode }) {
+  const current = useContext(RouteNavigationIdentityContext)!;
+  const { state, committedRouteKey } = current;
+  const stable = useMemo(
+    () => ({ state, committedRouteKey }),
+    [state, committedRouteKey],
+  );
+  return (
+    <RouteNavigationIdentityContext value={stable}>
+      {children}
+    </RouteNavigationIdentityContext>
+  );
+}
+function AsyncRoutePendingOwner({ work }: { work: Promise<void> }) {
+  const [pending, setPending] = useState(true);
+  useReportRoutePending(pending);
+  useEffect(() => {
+    let live = true;
+    void work.then(() => {
+      if (live) setPending(false);
+    });
+    return () => {
+      live = false;
+    };
+  }, [work]);
+  return null;
+}
 function NativeTaskPrimary({
   kind,
   hidden = false,
@@ -644,6 +680,9 @@ function NativeTaskPrimary({
   content = 'native-record',
   workspace = false,
   mode = 'visible',
+  primaryReady = true,
+  primaryKey = 'primary',
+  work,
 }: {
   kind: 'asset' | 'quantity';
   hidden?: boolean;
@@ -652,7 +691,11 @@ function NativeTaskPrimary({
   content?: string;
   workspace?: boolean;
   mode?: 'visible' | 'hidden';
+  primaryReady?: boolean;
+  primaryKey?: string;
+  work?: Promise<void>;
 }) {
+  const NavigationBoundary = work ? StableNavigation : Fragment;
   const path =
     '/inventory/' + (kind === 'asset' ? 'assets' : 'quantity') + '/record';
   return (
@@ -667,38 +710,43 @@ function NativeTaskPrimary({
     >
       <RouteMotionProvider actorId="actor">
         <Probe backend="backend" />
-        <Activity mode={mode}>
-          <div hidden={hidden}>
-            <RouteReady
-              actorId="actor"
-              routeKey={anchor ?? path}
-              contentIdentity={content}
-            >
-              <main>
-                <ConsumptionProbe />
-                <h1>Native task source</h1>
-                {workspace && (
-                  <TaskWorkspace
-                    choices={[
-                      {
-                        id: kind + '_move',
-                        label: kind === 'asset' ? 'Move asset' : 'Move stock',
-                      },
-                    ]}
-                    context="Owned test record"
-                    recordIdentity={kind + ':record'}
-                    taskIntent={
-                      new URLSearchParams(runtime.query).get('task') ??
-                      undefined
-                    }
-                  >
-                    {() => <p>Unsaved Move task</p>}
-                  </TaskWorkspace>
-                )}
-              </main>
-            </RouteReady>
-          </div>
-        </Activity>
+        {work && <AsyncRoutePendingOwner work={work} />}
+        <NavigationBoundary>
+          <Activity mode={mode}>
+            <div hidden={hidden}>
+              <RouteReady
+                actorId="actor"
+                routeKey={anchor ?? path}
+                contentIdentity={content}
+                ready={primaryReady}
+                key={primaryKey}
+              >
+                <main>
+                  <ConsumptionProbe />
+                  <h1>Native task source</h1>
+                  {workspace && (
+                    <TaskWorkspace
+                      choices={[
+                        {
+                          id: kind + '_move',
+                          label: kind === 'asset' ? 'Move asset' : 'Move stock',
+                        },
+                      ]}
+                      context="Owned test record"
+                      recordIdentity={kind + ':record'}
+                      taskIntent={
+                        new URLSearchParams(runtime.query).get('task') ??
+                        undefined
+                      }
+                    >
+                      {() => <p>Unsaved Move task</p>}
+                    </TaskWorkspace>
+                  )}
+                </main>
+              </RouteReady>
+            </div>
+          </Activity>
+        </NavigationBoundary>
       </RouteMotionProvider>
     </PrivacyReadinessContext>
   );
@@ -868,5 +916,289 @@ it.each(['asset', 'quantity'] as const)(
     await act(async () => {});
     expect(screen.queryByText('Unsaved Move task')).toBeNull();
     view.unmount();
+  },
+);
+
+it.each(['asset', 'quantity'] as const)(
+  'admits native %s task after asynchronous pending settlement without rerendering the accepted primary',
+  async (kind) => {
+    const path =
+      '/inventory/' + (kind === 'asset' ? 'assets' : 'quantity') + '/record';
+    runtime.pathname = path;
+    runtime.query = '';
+    history.replaceState({}, '', path);
+    let release!: () => void;
+    const work = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const view = render(
+      <NativeTaskPrimary kind={kind} workspace primaryReady={false} />,
+    );
+    await act(async () => {});
+    view.rerender(
+      <NativeTaskPrimary
+        kind={kind}
+        work={work}
+        workspace
+        primaryReady={false}
+      />,
+    );
+    await waitFor(() => expect(scope.state.snapshot().pending).toBe(true));
+    accept(path);
+    view.rerender(<NativeTaskPrimary kind={kind} work={work} workspace />);
+    expect(primary()?.routeKey).toBe(path);
+    expect(scope.state.snapshot().pending).toBe(true);
+    const heldConsume = consume;
+    await act(async () => {
+      release();
+      await work;
+    });
+    expect(scope.state.snapshot().pending).toBe(false);
+    expect(consume).toBe(heldConsume);
+    runtime.query = 'returnTo=%2Finventory&task=' + kind + '_move';
+    history.replaceState(
+      { user: 'retained' },
+      '',
+      path + '?' + runtime.query + '#tasks',
+    );
+    view.rerender(<NativeTaskPrimary kind={kind} work={work} workspace />);
+    await act(async () => {});
+    expect(
+      screen.getByRole('heading', {
+        name: kind === 'asset' ? 'Move asset' : 'Move stock',
+      }),
+    ).toHaveFocus();
+    expect(location.search).toBe('?returnTo=%2Finventory');
+    expect(location.hash).toBe('#tasks');
+    expect(history.state).toEqual({ user: 'retained' });
+  },
+);
+
+async function acceptedBusyNativePrimary() {
+  const path = '/inventory/assets/record';
+  runtime.pathname = path;
+  runtime.query = '';
+  history.replaceState({}, '', path);
+  let release!: () => void;
+  const work = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const view = render(
+    <NativeTaskPrimary kind="asset" workspace primaryReady={false} />,
+  );
+  await act(async () => {});
+  view.rerender(
+    <NativeTaskPrimary
+      kind="asset"
+      work={work}
+      workspace
+      primaryReady={false}
+    />,
+  );
+  await waitFor(() => expect(scope.state.snapshot().pending).toBe(true));
+  accept(path);
+  view.rerender(<NativeTaskPrimary kind="asset" work={work} workspace />);
+  expect(primary()?.routeKey).toBe(path);
+  return { path, view, work, release };
+}
+it.each([
+  'cancel',
+  'hidden',
+  'stale',
+  'security',
+  'semantic',
+  'task-before-idle',
+  'new-busy',
+] as const)(
+  'deferred accepted candidate cannot issue after %s during the complete busy lifetime',
+  async (reason) => {
+    const { path, view, work, release } = await acceptedBusyNativePrimary();
+    if (reason === 'cancel') act(() => scope.state.cancel(false));
+    if (reason === 'hidden') {
+      view.rerender(
+        <NativeTaskPrimary kind="asset" work={work} workspace hidden />,
+      );
+      view.rerender(<NativeTaskPrimary kind="asset" work={work} workspace />);
+    }
+    if (reason === 'stale') {
+      view.rerender(
+        <NativeTaskPrimary kind="asset" work={work} workspace fresh={false} />,
+      );
+      view.rerender(<NativeTaskPrimary kind="asset" work={work} workspace />);
+    }
+    if (reason === 'security') {
+      act(() => revokePrivatePresentation());
+      view.rerender(<NativeTaskPrimary kind="asset" work={work} workspace />);
+    }
+    if (reason === 'semantic' || reason === 'task-before-idle') {
+      runtime.query =
+        reason === 'semantic' ? 'unknown=changed' : 'task=asset_move';
+      history.replaceState({}, '', path + '?' + runtime.query);
+      view.rerender(<NativeTaskPrimary kind="asset" work={work} workspace />);
+      await act(async () => {});
+      runtime.query = '';
+      history.replaceState({}, '', path);
+      view.rerender(<NativeTaskPrimary kind="asset" work={work} workspace />);
+    }
+    if (reason === 'new-busy') {
+      let finish!: () => void;
+      act(() => {
+        finish = scope.state.register();
+      });
+      act(() => finish());
+    }
+    await act(async () => {
+      release();
+      await work;
+    });
+    expect(scope.state.snapshot().pending).toBe(false);
+    runtime.query = 'task=asset_move';
+    history.replaceState({}, '', path + '?' + runtime.query);
+    view.rerender(<NativeTaskPrimary kind="asset" work={work} workspace />);
+    await act(async () => {});
+    expect(screen.queryByText('Unsaved Move task')).toBeNull();
+    expect(location.search).toBe('?task=asset_move');
+  },
+);
+it.each(['hidden', 'semantic', 'cancel', 'new-busy'] as const)(
+  'queued idle observation cannot acquire a receipt after synchronous %s withdrawal',
+  async (reason) => {
+    const { path, view, work, release } = await acceptedBusyNativePrimary();
+    const element = document.querySelector<HTMLElement>('[data-route-ready]')!;
+    let once = true,
+      finish: (() => void) | undefined;
+    const stop = scope.state.subscribe(() => {
+      if (scope.state.snapshot().pending || !once) return;
+      once = false;
+      if (reason === 'hidden') element.hidden = true;
+      if (reason === 'semantic')
+        history.replaceState({}, '', path + '?unknown=changed');
+      if (reason === 'cancel') scope.state.cancel(false);
+      if (reason === 'new-busy') finish = scope.state.register();
+    });
+    await act(async () => {
+      release();
+      await work;
+    });
+    stop();
+    if (finish) act(finish);
+    element.hidden = false;
+    runtime.query = '';
+    history.replaceState({}, '', path);
+    view.rerender(<NativeTaskPrimary kind="asset" work={work} workspace />);
+    runtime.query = 'task=asset_move';
+    history.replaceState({}, '', path + '?' + runtime.query);
+    view.rerender(<NativeTaskPrimary kind="asset" work={work} workspace />);
+    await act(async () => {});
+    expect(screen.queryByText('Unsaved Move task')).toBeNull();
+    expect(location.search).toBe('?task=asset_move');
+  },
+);
+it.each(['early-traverse', 'popstate', 'remounted-history'] as const)(
+  'history origin %s never issues a native source, while a subsequent accepted application navigation does',
+  async (reason) => {
+    const originalNavigation = Object.getOwnPropertyDescriptor(
+      window,
+      'navigation',
+    );
+    const navigation = new EventTarget();
+    Object.defineProperty(window, 'navigation', {
+      configurable: true,
+      value: navigation,
+    });
+    try {
+      const { path, view, work, release } = await acceptedBusyNativePrimary();
+      if (reason === 'popstate')
+        act(() => window.dispatchEvent(new PopStateEvent('popstate')));
+      else {
+        const event = new Event('navigate');
+        Object.defineProperties(event, {
+          navigationType: { value: 'traverse' },
+          destination: { value: { url: location.origin + path } },
+        });
+        act(() => navigation.dispatchEvent(event));
+      }
+      if (reason === 'remounted-history')
+        view.rerender(
+          <NativeTaskPrimary
+            kind="asset"
+            work={work}
+            workspace
+            primaryKey="fresh-history-root"
+            content="fresh-history-root"
+          />,
+        );
+      await act(async () => {
+        release();
+        await work;
+      });
+      runtime.query = 'task=asset_move';
+      history.replaceState({}, '', path + '?' + runtime.query);
+      view.rerender(
+        <NativeTaskPrimary
+          kind="asset"
+          work={work}
+          workspace
+          primaryKey={
+            reason === 'remounted-history' ? 'fresh-history-root' : 'primary'
+          }
+          content={
+            reason === 'remounted-history'
+              ? 'fresh-history-root'
+              : 'native-record'
+          }
+        />,
+      );
+      await act(async () => {});
+      expect(screen.queryByText('Unsaved Move task')).toBeNull();
+      // No native exception is needed for an ordinary newly accepted exact task URL.
+      accept(path + '?task=asset_move');
+      view.rerender(
+        <NativeTaskPrimary
+          kind="asset"
+          work={work}
+          workspace
+          anchor={path + '?task=asset_move'}
+        />,
+      );
+      await act(async () => {});
+      expect(screen.getByRole('heading', { name: 'Move asset' })).toHaveFocus();
+      runtime.query = '';
+      view.rerender(
+        <NativeTaskPrimary
+          kind="asset"
+          work={work}
+          workspace
+          anchor={path + '?task=asset_move'}
+        />,
+      );
+      await act(async () => {});
+      await act(async () =>
+        screen.getByRole('button', { name: 'Close task' }).click(),
+      );
+      runtime.query = 'task=asset_move&returnTo=%2Finventory';
+      history.replaceState(
+        { user: 'retained' },
+        '',
+        path + '?' + runtime.query + '#tasks',
+      );
+      view.rerender(
+        <NativeTaskPrimary
+          kind="asset"
+          work={work}
+          workspace
+          anchor={path + '?task=asset_move'}
+        />,
+      );
+      await act(async () => {});
+      expect(screen.getByRole('heading', { name: 'Move asset' })).toHaveFocus();
+      expect(location.search).toBe('?returnTo=%2Finventory');
+      expect(location.hash).toBe('#tasks');
+      expect(history.state).toEqual({ user: 'retained' });
+    } finally {
+      if (originalNavigation)
+        Object.defineProperty(window, 'navigation', originalNavigation);
+      else Reflect.deleteProperty(window, 'navigation');
+    }
   },
 );

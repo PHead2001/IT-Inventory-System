@@ -215,3 +215,95 @@ it('refuses empty task values and unsupported record routes', () => {
     expect(apply).not.toHaveBeenCalled();
   }
 });
+
+it('a fresh exact accepted busy primary is only a candidate until its unchanged binding becomes idle', () => {
+  history.replaceState({}, '', path);
+  const handoff = createNativeTaskHandoff();
+  const busy = source({ idle: false });
+  handoff.observe(busy, true);
+  handoff.observe({ ...busy, idle: true }, true);
+  task();
+  expect(
+    handoff.consume(
+      source({ ...busy, idle: true, committedKey: key() }),
+      path,
+      'asset_move',
+      replaceAppHistoryUrl,
+    ),
+  ).not.toBeNull();
+});
+it.each([
+  'retire',
+  'security',
+  'epoch',
+  'hidden',
+  'stale',
+  'semantic',
+  'return-path',
+  'task-before-idle',
+  'unaccepted-binding',
+] as const)(
+  'does not revive deferred busy candidate after %s even if the current source later becomes fresh and idle',
+  (reason) => {
+    history.replaceState({}, '', path);
+    const handoff = createNativeTaskHandoff();
+    const busy = source({ idle: false });
+    handoff.observe(busy, true);
+    const changes: Record<string, Partial<TaskSource>> = {
+      security: { securityRevision: 'reverified' },
+      epoch: { pendingEpoch: 2 },
+      hidden: { visible: false },
+      stale: { fresh: false },
+      semantic: { committedKey: path + '?unknown=changed' },
+      'return-path': {
+        cleanKey: path + '?returnTo=%2Finventory',
+        committedKey: path + '?returnTo=%2Finventory',
+      },
+      'task-before-idle': { committedKey: path + '?task=asset_move' },
+      'unaccepted-binding': { navigationIdentity: 2 },
+    };
+    if (reason === 'retire') handoff.retire();
+    else
+      handoff.observe(
+        { ...busy, ...changes[reason] },
+        reason !== 'unaccepted-binding',
+      );
+    handoff.observe({ ...busy, idle: true }, true);
+    task();
+    expect(
+      handoff.consume(
+        source({ ...busy, idle: true, committedKey: key() }),
+        path,
+        'asset_move',
+        replaceAppHistoryUrl,
+      ),
+    ).toBeNull();
+    // Only an explicitly new accepted navigation binding can replace the tombstone.
+    history.replaceState({}, '', path);
+    const next = { ...busy, idle: true, navigationIdentity: 3 };
+    handoff.observe(next, true);
+    task();
+    expect(
+      handoff.consume(
+        source({ ...next, committedKey: key() }),
+        path,
+        'asset_move',
+        replaceAppHistoryUrl,
+      ),
+    ).not.toBeNull();
+  },
+);
+it('initial unverified renders cannot create or poison a candidate before the first fresh accepted primary', () => {
+  history.replaceState({}, '', path);
+  const handoff = createNativeTaskHandoff();
+  handoff.observe(
+    source({ fresh: false, securityRevision: 'bootstrap' }),
+    false,
+  );
+  handoff.retire();
+  handoff.observe(source(), true);
+  task();
+  expect(
+    handoff.consume(source(), path, 'asset_move', replaceAppHistoryUrl),
+  ).not.toBeNull();
+});

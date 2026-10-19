@@ -3,6 +3,7 @@ export function createRouteCommandState() {
   let serial = 0;
   let generation = 0;
   let navigationIdentity = 0;
+  let navigationOrigin: 'initial' | 'application' | 'history' = 'initial';
   let navigationDestination: string | null = null;
   const listeners = new Set<() => void>();
   let unpublished = false;
@@ -13,6 +14,7 @@ export function createRouteCommandState() {
   return {
     snapshot: () => ({ serial, generation }),
     navigationIdentity: () => navigationIdentity,
+    navigationOrigin: () => navigationOrigin,
     navigationDestination: () => navigationDestination,
     subscribe(listener: () => void) {
       listeners.add(listener);
@@ -21,6 +23,7 @@ export function createRouteCommandState() {
       };
     },
     navigation(destination: string | null) {
+      navigationOrigin = 'application';
       serial++;
       navigationIdentity++;
       navigationDestination = destination;
@@ -35,6 +38,7 @@ export function createRouteCommandState() {
       if (unpublished) notify();
     },
     history(destination: string | null) {
+      navigationOrigin = 'history';
       navigationIdentity++;
       generation++;
       navigationDestination = destination;

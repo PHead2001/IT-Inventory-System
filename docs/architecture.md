@@ -40,6 +40,14 @@ security withdrawal retire the receipt; cached rendering or reverification alone
 cannot revive it. Normal accepted navigation and task eligibility/draft guards
 remain authoritative.
 
+An exact fresh visible primary that is still busy records only a nonauthorizing
+candidate. A genuine same-epoch pending-to-idle notification queues a read-only
+observation of that unchanged source; it neither registers a primary nor finishes
+another owner's work. Retirement before issuance tombstones the candidate too.
+Navigation origin travels atomically with its existing identity, so history
+traversal cannot issue a native source even before `popstate` or after a cached
+root remount. A new accepted application navigation can establish fresh authority.
+
 When a refreshed record withdraws the selected task, the workspace retains its
 mounted draft but hides and disables fresh input/submission. Close or switch
 still requires explicit draft discard. Reintroducing a launcher does not silently

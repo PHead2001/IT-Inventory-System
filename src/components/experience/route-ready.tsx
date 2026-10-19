@@ -102,7 +102,6 @@ export function RouteReady({
     const privacy = authority.current;
     const snapshot = pending.state.snapshot();
     const currentNavigation = navigation.state.navigationIdentity();
-    const destination = navigation.state.navigationDestination();
     return {
       root: root.current,
       actorId,
@@ -124,10 +123,7 @@ export function RouteReady({
       idle:
         !snapshot.pending &&
         pending.state.current(snapshot.epoch) &&
-        readiness?.nativeTaskIdle() === true &&
-        (destination === null ||
-          destination === navigation.committedRouteKey ||
-          consumed?.navigationIdentity === currentNavigation),
+        readiness?.nativeTaskIdle() === true,
       visible:
         ready &&
         root.current.isConnected &&
@@ -142,10 +138,15 @@ export function RouteReady({
   const observeTaskSource = useEffectEvent(() => {
     const source = taskSource();
     const primary = readiness?.currentPrimary();
+    const destination = navigation?.state.navigationDestination();
     if (source)
       nativeTask.observe(
         source,
-        primary?.root === source.root &&
+        navigation?.state.navigationOrigin() !== 'history' &&
+          (destination === null ||
+            destination === source.committedKey ||
+            consumed?.navigationIdentity === source.navigationIdentity) &&
+          primary?.root === source.root &&
           primary.actorId === actorId &&
           primary.contentIdentity === contentIdentity &&
           primary.routeKey === source.cleanKey &&
@@ -154,16 +155,64 @@ export function RouteReady({
       );
     else nativeTask.retire();
   });
-  useEffect(() => {
-    const retire = () => nativeTask.retire();
-    let epoch = pending?.state.snapshot().epoch;
-    const stopPending = pending?.state.subscribe(() => {
+  const observeSettledTaskSource = useEffectEvent((current: () => boolean) => {
+    const expected = taskSource();
+    const href = location.href;
+    if (
+      !expected?.fresh ||
+      !expected.visible ||
+      new URL(href).searchParams.has('task')
+    )
+      return;
+    // Store listeners can synchronously commit/withdraw a primary. Observe only
+    // after that notification finishes, without acknowledging or settling it.
+    queueMicrotask(() => {
+      if (!current()) return;
+      const source = taskSource();
       if (
-        pending.state.snapshot().pending ||
-        pending.state.snapshot().epoch !== epoch
+        !source ||
+        source.root !== expected.root ||
+        source.actorId !== expected.actorId ||
+        source.contentIdentity !== expected.contentIdentity ||
+        source.serverAnchor !== expected.serverAnchor ||
+        source.navigationIdentity !== expected.navigationIdentity ||
+        source.securityRevision !== expected.securityRevision ||
+        source.pendingEpoch !== expected.pendingEpoch
       )
-        retire();
-      epoch = pending.state.snapshot().epoch;
+        return;
+      const before = new URL(href);
+      const now = new URL(location.href);
+      if (
+        keyOf(before.pathname, before.searchParams) !==
+        keyOf(now.pathname, now.searchParams)
+      ) {
+        nativeTask.retire();
+        return;
+      }
+      observeTaskSource();
+    });
+  });
+  useEffect(() => {
+    let live = true;
+    let observation = 0;
+    const retire = () => nativeTask.retire();
+    let previous = pending?.state.snapshot();
+    const stopPending = pending?.state.subscribe(() => {
+      const next = pending.state.snapshot();
+      const token = ++observation;
+      const settled =
+        previous?.pending && !next.pending && previous.epoch === next.epoch;
+      if (next.pending || next.epoch !== previous?.epoch) retire();
+      previous = next;
+      if (settled)
+        observeSettledTaskSource(
+          () =>
+            live &&
+            observation === token &&
+            pending.state.current(next.epoch) &&
+            pending.state.snapshot().epoch === next.epoch &&
+            !pending.state.snapshot().pending,
+        );
     });
     let identity = navigation?.state.navigationIdentity();
     const stopNavigation = navigation?.state.subscribe(() => {
@@ -176,6 +225,7 @@ export function RouteReady({
     const stopAssignment = subscribeAssignmentInvalidation(retire);
     window.addEventListener('popstate', retire);
     return () => {
+      live = false;
       retire();
       stopPending?.();
       stopNavigation?.();

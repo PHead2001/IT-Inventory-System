@@ -179,10 +179,20 @@ their inner boundaries. Against 6,000 unrelated rows per table, absent and
 1/20/21-match cases require exact qualifying boundary counts and no rejected
 output, compare ordered IDs with the independent pre-repair reference, and emit
 buffer, rows-removed and execution-time summaries. The existing 6,000 qualifying
-ties, authenticated default-planner KNN assertions, nonleakproof catalog checks
-and PostgREST five-second deadline gate remain required. These new cases are
-authored regression coverage; final-candidate database execution and performance
-acceptance remain pending until those gates run.
+ties and nonleakproof catalog checks remain required. The deployed cost oracle
+covers all nine exact full-projection arms across selective, absent, sparse
+1/20/21-result and common 6,000-row workloads under authenticated caller RLS and
+the default planner. Each of the 54 cases requires <=500 ms execution, <=16,384
+root shared hit+read buffers, no temporary spill and at most 21 emitted IDs in
+the independent reference's distance/UUID order. A PL/pgSQL portal loop observes
+actual order without sorting; a deliberately reversed-order regression guards
+the observer. Separate eligibility probes change only the inner FETCH FIRST 21
+ROWS WITH TIES count to 1 and require each expected GiST index with Order By.
+Eligibility does not establish deployed-query performance. Six whole RPC cases
+must finish in <5 seconds, and the real Data API deadline gate remains mandatory.
+These are authored regression requirements; final-candidate database execution
+and performance acceptance remain pending until those gates run. See
+[validation](validation.md) for the canonical gate and diagnostic requirements.
 
 Version-one rows expose kind, id, name, code, assetTag, serialNumber, status and
 matchedField. Database JSON is capped at 64 KiB; the endpoint validates its schema
@@ -200,7 +210,8 @@ Enrichment follows entity deduplication and the twenty-result cap; it never
 aggregates all holdings or reads event history. An explicit empty context means
 no current storage/site; legacy absent context remains unknown and is omitted.
 The forward normalization/context migration must deploy before context is accepted;
-database execution, generated types and authenticated KNN checks remain required.
+database execution, generated types, the deployed cost/semantic oracle, separate
+index eligibility and real Data API deadline proof remain required.
 
 The private no-store POST endpoint caps streamed bodies at 4 KiB, requires
 same-origin requests, rechecks Auth/membership with the caller SDK, propagates
@@ -227,8 +238,10 @@ database gate. It signs in an owned viewer, verifies normal RPC access, holds an
 independent local table lock and observes the actual authenticated Data API request
 waiting. It requires database `57014`/statement-timeout failure around five seconds,
 before either client cancellation or forced lock release, and cleans up its lock
-and actor. It refuses nonloopback endpoints. This authored proof has not yet run.
-The nine authenticated large-fixture KNN plans remain in `command_palette.test.sql`.
+and actor. It refuses nonloopback endpoints. Final-candidate execution remains
+required.
+The deployed cost/semantic cases and separate nine-field index-eligibility plans
+remain in `command_palette.test.sql`.
 A hosted timeout run requires independent approval of its exclusive window,
 verified isolated PR backend and caller/SQL access; this local gate does not
 authorize a hosted lock or establish hosted timeout acceptance.
@@ -253,11 +266,16 @@ zero-warning lint and formatting checks; follow docs/validation.md for full gate
 Schema changes require the complete local database gate and canonical db:types
 regeneration/check. The pgTAP suite covers grants, membership/RLS, input, lifecycle,
 empty entities, duplicate serials, multiple holdings, typo matching, ties/caps,
-purpose filtering and authenticated large-fixture index plans. Verify every field's
-actual KNN plan and the real Data API timeout behavior; a SQL timeout declaration
-or mocked endpoint test alone does not establish either contract.
+purpose filtering, deployed full-projection cost/semantic cases and separate
+authenticated index-eligibility plans. All fixed per-arm budgets, emitted-order
+comparisons, eligibility and whole-RPC checks must pass alongside the real Data
+API timeout behavior. A SQL timeout declaration or mocked endpoint test alone
+does not establish those contracts. Planner flags, cost constants and operator
+leakproof flags remain unchanged; a failed budget or eligibility check remains
+an unresolved criterion.
 
-At diagnostic commit `856f828b74c38c433cecbf8d2c90931e432acf4a`,
+For historical context, diagnostic commit
+`856f828b74c38c433cecbf8d2c90931e432acf4a` is dated 2026-10-15.
 [CI run 38807984527](https://github.com/PHead2001/IT-Inventory-System/actions/runs/38807984527)
 proved all nine proposed GiST plans and 90 original/proposed ordered-ID
 comparisons under PostgreSQL 17.6/pg_trgm 1.6, authenticated RLS, threshold 0.35
@@ -290,5 +308,6 @@ document-admission/feedback repair; cached-primary followup checks are recorded
 separately in the review evidence. The unshipped additive migration was recreated with the pinned CLI as
 20261012102652_command_palette_search.sql, following existing forward-history
 prefix rules; deployed migrations were not renumbered. Database application,
-type regeneration, actual KNN/Data API deadline proof, browser/preview checks,
+type regeneration, deployed cost/semantic and separate index-eligibility checks,
+real Data API deadline proof, browser/preview checks,
 independent boundary review and exact-commit full gates remain pending.
