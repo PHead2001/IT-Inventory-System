@@ -845,7 +845,6 @@ it.each(['asset', 'quantity'] as const)(
       expect(
         screen.getByRole('heading', {
           name: kind === 'asset' ? 'Move asset' : 'Move stock',
-          exact: true,
         }),
       ).toHaveFocus();
       expect(location.search).toBe('?returnTo=%2Finventory');
@@ -855,7 +854,7 @@ it.each(['asset', 'quantity'] as const)(
       view.rerender(<NativeTaskPrimary kind={kind} workspace />);
       await act(async () => {});
       await act(async () =>
-        screen.getByRole('button', { name: 'Close task', exact: true }).click(),
+        screen.getByRole('button', { name: 'Close task' }).click(),
       );
     }
     view.unmount();
