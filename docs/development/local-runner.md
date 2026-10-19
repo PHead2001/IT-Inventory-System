@@ -409,6 +409,12 @@ unstable providers can therefore still exhaust the original recovery budget.
 The bounded failure projection adds the last admission operation and actual age
 of the retained capture, plus maximum quarantine/connect/resume attempt durations.
 A negative capture age records a future-clock refusal; it is not a fresh lease.
+Successful connect/resume and quarantine attempts persist their completed
+diagnostics under the existing state mutex before returning success. The next
+guardian tick therefore reads the same admission operation, observation age and
+attempt duration from serialized state. This adds no provider read or mutation,
+generation advance, authority change or deadline extension. Offline regressions
+round-trip the state through JSON and check the following tick.
 Existing observation/preflight/apply diagnostics retain their meanings. Older
 protected diagnostic records remain readable; unknown fields and invalid numbers
 remain rejected. These source changes and offline regressions do not establish a

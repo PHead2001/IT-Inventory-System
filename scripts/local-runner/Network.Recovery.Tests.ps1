@@ -27,8 +27,8 @@ function New-Capture([string] $Ip = '192.168.4.12', [string] $Route = '192.168.4
 }
 function Get-NetIPAddress { $script:readIndex++; if ($script:fail -ceq 'slow-network') { $script:clock = $script:clock.AddSeconds(3) }; return $script:captures[[Math]::Min($script:readIndex, $script:captures.Count - 1)].addresses }
 function Get-NetRoute { return $script:captures[[Math]::Min($script:readIndex, $script:captures.Count - 1)].routes }
-function Get-RunnerState { return $script:state }
-function Write-RunnerJson($Path, $Value) { $script:state = $Value }
+function Get-RunnerState { if ($script:serializeState) { return ($script:serializedState | ConvertFrom-Json) }; return $script:state }
+function Write-RunnerJson($Path, $Value) { if ($script:serializeState) { if (-not $script:locked) { throw 'Serialized fixture write escaped state lock.' }; $script:serializedState = $Value | ConvertTo-Json -Depth 30 -Compress; $script:stateWrites++ }; $script:state = $Value }
 function Assert-RunnerProtectedPath($Path) { [void](Assert-OwnedPath $Path) } # TEMP fixture; no installed ACL claim.
 # Windows state mutex recursion must retain locked=true until the outer release.
 $script:fixtureStateDepth = 0
@@ -46,6 +46,7 @@ function Test-RunnerProcessIdentity { return $script:alive }
 function Get-RunnerRecoveryNow { return $script:clock }
 function Get-VM {
     $script:vmQueries++
+    if ($script:fail -ceq 'timing-success') { $script:clock = $script:clock.AddMilliseconds(100) }
     if ($script:fail -ceq 'timing-stages') {
         # Tick preflight, effect preflight, then final adapter readback. These
         # deliberately differ from the ACL installation's per-rule duration.
@@ -125,6 +126,7 @@ function Get-RunnerNetworkObservation {
 }
 function New-Fixture {
     if ($script:fixtureStateDepth -ne 0) { throw 'Previous fixture leaked state recursion.' }
+    $script:serializeState = $false; $script:serializedState = ''; $script:stateWrites = 0
     $script:now = [DateTime]::UtcNow
     $script:lastCleanupState = $null
     $script:vmQueries = 0
@@ -177,6 +179,59 @@ function New-StaleRetryFixture {
     $script:fail = 'slow-readback'
 }
 try {
+    Check 'successful reconnect diagnostics survive serialized state and the next guardian tick' {
+        foreach ($action in @('connect', 'resume', 'quarantine')) {
+            New-Fixture; $script:vm.State = 'Paused'
+            if ($action -cne 'resume') { $script:adapter.SwitchName = ''; $script:adapter.SwitchId = [guid]::Empty }
+            $r = $script:state.networkRecovery; $r.phase = if ($action -ceq 'resume') { 'resuming' } else { 'connecting' }; $r.operation = if ($action -ceq 'resume') { 'resume' } else { 'connect' }
+            $r.resumeRequired = $action -ceq 'resume'; $r.candidateFingerprint = if ($action -ceq 'quarantine') { 'b' * 64 } else { (Get-RunnerNetworkObservation).fingerprint }
+            $r.episodeStartedUtc = $script:now.ToString('o'); $r.episodeDeadlineUtc = $script:now.AddSeconds(120).ToString('o')
+            Set-FixtureVerifiedRules
+            $deadline = $r.episodeDeadlineUtc; $hard = $r.hardDeadlineUtc; $binding = Copy-Fixture $r.binding
+            $script:serializedState = $script:state | ConvertTo-Json -Depth 30 -Compress; $script:serializeState = $true; $script:fail = 'timing-success'
+            $p = Invoke-RunnerRecoveryReconnect $script:binding 0 $(if ($action -ceq 'resume') { 'resume' } else { 'connect' })
+            Assert-Equal $p.continue $true 'Successful serialized reconnect stopped.'
+            Assert-Equal $p.outcome.operation $action 'Serialized reconnect changed its operation.'
+            $saved = Get-RunnerState
+            Assert-Equal $saved.networkRecovery.diagnostics.($action + 'ElapsedMs') 200 'Successful adapter attempt timing was not durably written.'
+            if ($action -cne 'quarantine') {
+                Assert-Equal $saved.networkRecovery.diagnostics.admissionOperation $action 'Successful admission operation was lost at serialization.'
+                Assert-Equal $saved.networkRecovery.diagnostics.observationAgeMs 100 'Successful actual observation age was lost at serialization.'
+            }
+            Assert-Equal $saved.networkRecovery.generation $p.outcome.generation 'Diagnostic persistence advanced generation.'
+            Assert-Equal $saved.networkRecovery.binding $binding 'Diagnostic persistence changed authority binding.'
+            Assert-Equal $saved.networkRecovery.episodeDeadlineUtc $deadline 'Diagnostic persistence extended the episode.'
+            Assert-Equal $saved.networkRecovery.hardDeadlineUtc $hard 'Diagnostic persistence extended the hard lifetime.'
+            Assert-Equal $script:stateWrites 2 'Success must persist intent and completed diagnostics under the same mutex.'
+            Assert-Equal $script:vmQueries 2 'Persistence added an extra provider identity check.'
+            $effects = @($script:effects); $diagnostic = Copy-Fixture $saved.networkRecovery.diagnostics
+            $tick = Invoke-RunnerNetworkRecoveryTick $saved.vmName ([pscustomobject]@{})
+            $next = Get-RunnerState
+            Assert-Equal $tick.outcome $null 'The next tick fabricated a completed provider outcome.'
+            Assert-Equal $next.networkRecovery.diagnostics.($action + 'ElapsedMs') $diagnostic.($action + 'ElapsedMs') 'Next fresh-state tick lost successful attempt duration.'
+            Assert-Equal $next.networkRecovery.diagnostics.admissionOperation $diagnostic.admissionOperation 'Next fresh-state tick lost admission operation.'
+            Assert-Equal $next.networkRecovery.diagnostics.observationAgeMs $diagnostic.observationAgeMs 'Next fresh-state tick lost admission age.'
+            Assert-Equal $script:effects $effects 'Diagnostic persistence repeated provider mutations.'
+        }
+    }
+    Check 'successful tick quarantine diagnostics survive serialized state and the next guardian tick' {
+        New-Fixture; $script:fail = 'timing-success'
+        $binding = Copy-Fixture $script:state.networkRecovery.binding; $hard = $script:state.networkRecovery.hardDeadlineUtc
+        $script:serializedState = $script:state | ConvertTo-Json -Depth 30 -Compress; $script:serializeState = $true
+        $p = Invoke-RunnerNetworkRecoveryTick $script:state.vmName ([pscustomobject]@{})
+        $saved = Get-RunnerState
+        Assert-Equal $p.outcome.operation 'quarantine' 'Serialized tick did not quarantine drift.'
+        Assert-Equal $saved.networkRecovery.diagnostics.quarantineElapsedMs 300 'Successful quarantine timing was not durably written.'
+        Assert-Equal $saved.networkRecovery.generation $p.outcome.generation 'Diagnostic persistence advanced quarantine generation.'
+        Assert-Equal $saved.networkRecovery.binding $binding 'Diagnostic persistence changed quarantine binding.'
+        Assert-Equal $saved.networkRecovery.hardDeadlineUtc $hard 'Quarantine persistence extended hard lifetime.'
+        Assert-Equal $script:stateWrites 2 'Tick must persist intent and completed quarantine diagnostics under the same mutex.'
+        Assert-Equal $script:effects @('pause', 'disconnect') 'Quarantine persistence changed isolation effects.'
+        $tick = Invoke-RunnerNetworkRecoveryTick $saved.vmName ([pscustomobject]@{})
+        Assert-Equal $tick.outcome $null 'The next tick fabricated quarantine completion.'
+        Assert-Equal (Get-RunnerState).networkRecovery.diagnostics.quarantineElapsedMs 300 'Next fresh-state tick lost successful quarantine timing.'
+        Assert-Equal $script:effects @('pause', 'disconnect') 'The next tick repeated quarantine.'
+    }
     Check 'episode diagnostics distinguish churn from repeated identical observations and reset only on a new episode' {
         New-Fixture; Isolate
         $deadline = $script:recovery.episodeDeadlineUtc; $hard = $script:recovery.hardDeadlineUtc

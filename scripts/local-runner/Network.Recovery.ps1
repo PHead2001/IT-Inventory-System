@@ -555,6 +555,9 @@ function Invoke-RunnerRecoveryReconnect($Binding, [long] $Generation, [ValidateS
         Write-RunnerJson $script:RunnerStatePath $state
         try {
             [void](Invoke-RunnerRecoveryAdapterEffect $state $r $effect)
+            # Adapter-effect finally records admission/elapsed evidence only after
+            # provider readback. Persist it while still holding this generation's lock.
+            Write-RunnerJson $script:RunnerStatePath $state
             return [pscustomobject]@{ continue = $true; outcome = [pscustomobject]@{ generation = $r.generation; operation = $effect; success = $true } }
         } catch {
             if (Test-RunnerIsolatedStaleAdmission $_ $r) {
@@ -673,7 +676,10 @@ function Invoke-RunnerNetworkRecoveryTick([string] $SessionName, $Config, $Outco
         elseif ($plan.action -cne 'none') {
             try {
                 $installed = @(Invoke-RunnerRecoveryAdapterEffect $state $plan.recovery $plan.action)
-                if ($plan.action -ceq 'apply') { $state.networkRecovery.verifiedRules = $installed; Write-RunnerJson $script:RunnerStatePath $state }
+                if ($plan.action -ceq 'apply') { $state.networkRecovery.verifiedRules = $installed }
+                # Both apply and quarantine may finish with new diagnostics.
+                # Publish their completed state before exposing a success outcome.
+                Write-RunnerJson $script:RunnerStatePath $state
                 $result = [pscustomobject]@{ generation = $plan.recovery.generation; operation = $plan.action; success = $true }
             } catch {
                 # No provider cancellation/retry claim. Canonical cleanup can
