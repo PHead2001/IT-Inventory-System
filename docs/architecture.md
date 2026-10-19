@@ -27,6 +27,19 @@ moves also verify current stock and the caller-authorized historical receipt;
 prior receipts remain collapsed, timestamped and immutable while the new intent
 uses a fresh coherent stock/version snapshot.
 
+Native same-record Move task queries have a consumption-only handoff from a
+previously accepted, visible, idle primary. Its receipt binds the actor, root,
+content, immutable server route anchor, navigation identity and privacy/security
+revision. The committed router key must match the actual URL. Only one supported
+Move task and an optional valid return path may differ; all other query values,
+including repeated values, must remain unchanged. Consumption removes only the
+task, preserving the hash and user history state, and rebases that primary's clean
+key without creating a navigation ticket, acknowledging a new route or settling
+pending work. Navigation, traversal, pending work, semantic query changes and
+security withdrawal retire the receipt; cached rendering or reverification alone
+cannot revive it. Normal accepted navigation and task eligibility/draft guards
+remain authoritative.
+
 When a refreshed record withdraws the selected task, the workspace retains its
 mounted draft but hides and disables fresh input/submission. Close or switch
 still requires explicit draft discard. Reintroducing a launcher does not silently

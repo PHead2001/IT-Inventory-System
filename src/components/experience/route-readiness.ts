@@ -69,6 +69,48 @@ export function createRouteReadiness(
         listeners.delete(listener);
       };
     },
+    nativeTaskIdle: () =>
+      !closed &&
+      !suspended &&
+      !history &&
+      !pending.snapshot().pending &&
+      pending.current(pending.snapshot().epoch),
+    consumeNativeTask(
+      root: HTMLElement,
+      cleanKey: string,
+      consume: () => { sourceKey: string; destinationKey: string } | null,
+    ) {
+      const content = Array.from(roots.values()).find(
+        (value) => value.root === root && value.routeKey === cleanKey,
+      );
+      if (
+        closed ||
+        suspended ||
+        history ||
+        pending.snapshot().pending ||
+        !pending.current(pending.snapshot().epoch) ||
+        !content ||
+        content.actorId !== actorId ||
+        !content.contentIdentity ||
+        !root.isConnected ||
+        root.closest('[hidden], [inert]') ||
+        !Array.from(root.children).some(
+          (child) =>
+            child.getClientRects().length > 0 &&
+            getComputedStyle(child).visibility !== 'hidden',
+        ) ||
+        (primary() && primary() !== content)
+      )
+        return null;
+      const handoff = consume();
+      if (!handoff) return null;
+      content.routeKey = handoff.destinationKey;
+      content.consumedTask = handoff;
+      // The independently accepted receipt authorizes only task consumption.
+      // No commit observer, pending settlement or navigation identity is issued.
+      notify();
+      return handoff;
+    },
     consumeTask(
       root: HTMLElement,
       sourceKey: string,

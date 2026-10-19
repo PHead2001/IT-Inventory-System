@@ -1,3 +1,4 @@
+import { createNativeTaskHandoff, type TaskSource } from './route-task-handoff';
 import { afterEach, expect, it, vi } from 'vitest';
 import { createRoutePendingState } from './route-pending-state';
 import { createRouteReadiness } from './route-readiness';
@@ -426,3 +427,106 @@ it.each([true, false])(
     expect(pending.snapshot().pending).toBe(false);
   },
 );
+
+it('native task consumption rebases only the accepted mounted primary without acknowledging navigation or settling work', () => {
+  const path = '/inventory/quantity/record';
+  history.replaceState({ user: 'kept' }, '', path);
+  const pending = createRoutePendingState();
+  const committed = vi.fn(),
+    observed = vi.fn();
+  const readiness = createRouteReadiness('actor', pending, committed, observed);
+  const element = root();
+  readiness.register({
+    actorId: 'actor',
+    routeKey: path,
+    contentIdentity: 'record',
+    root: element,
+  });
+  const accepted = readiness.currentPrimary()!;
+  const handoff = createNativeTaskHandoff();
+  const source: TaskSource = {
+    root: element,
+    actorId: 'actor',
+    contentIdentity: 'record',
+    serverAnchor: path,
+    cleanKey: path,
+    navigationIdentity: 1,
+    securityRevision: 'verified',
+    pendingEpoch: pending.snapshot().epoch,
+    committedKey: path,
+    fresh: true,
+    idle: true,
+    visible: true,
+  };
+  handoff.observe(source, true);
+  committed.mockClear();
+  observed.mockClear();
+  history.replaceState(
+    history.state,
+    '',
+    path + '?returnTo=%2Finventory&task=quantity_move#tasks',
+  );
+  const result = readiness.consumeNativeTask(element, path, () =>
+    handoff.consume(
+      {
+        ...source,
+        committedKey: routeKey(
+          location.pathname,
+          new URLSearchParams(location.search),
+        ),
+      },
+      path,
+      'quantity_move',
+      (href) => history.replaceState(history.state, '', href),
+    ),
+  );
+  expect(result?.destinationKey).toBe(path + '?returnTo=%2Finventory');
+  expect(readiness.currentPrimary()).toBe(accepted);
+  expect(committed).not.toHaveBeenCalled();
+  expect(observed).not.toHaveBeenCalled();
+  expect(pending.snapshot().pending).toBe(false);
+  expect(location.hash).toBe('#tasks');
+  expect(history.state).toEqual({ user: 'kept' });
+});
+it.each([
+  'refresh',
+  'history',
+  'suspended',
+  'closed',
+  'actor',
+  'hidden',
+  'unregistered',
+  'other-primary',
+] as const)('native task receipt cannot bypass %s readiness', (reason) => {
+  const path = '/inventory/assets/record';
+  history.replaceState({}, '', path);
+  const pending = createRoutePendingState(),
+    readiness = createRouteReadiness('actor', pending, vi.fn());
+  const element = root();
+  const stop = readiness.register({
+    actorId: reason === 'actor' ? 'other' : 'actor',
+    routeKey: path,
+    contentIdentity: 'record',
+    root: element,
+  });
+  history.replaceState({}, '', path + '?task=asset_move');
+  if (reason === 'refresh') pending.register();
+  if (reason === 'history') readiness.history();
+  if (reason === 'suspended') readiness.suspend();
+  if (reason === 'closed') readiness.close();
+  if (reason === 'hidden') element.hidden = true;
+  if (reason === 'unregistered') stop();
+  if (reason === 'other-primary')
+    readiness.register({
+      actorId: 'actor',
+      routeKey: path + '?task=asset_move',
+      contentIdentity: 'new',
+      root: root(),
+    });
+  const before = pending.snapshot();
+  const consume = vi.fn(() => ({ sourceKey: path, destinationKey: path }));
+  expect(readiness.consumeNativeTask(element, path, consume)).toBeNull();
+  expect(consume).not.toHaveBeenCalled();
+  expect(pending.snapshot()).toBe(before);
+  expect(location.search).toBe('?task=asset_move');
+});
