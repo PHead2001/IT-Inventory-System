@@ -208,6 +208,10 @@ beforeEach(() => {
     writable: true,
     value: vi.fn(),
   });
+  Object.defineProperty(document, 'activeViewTransition', {
+    configurable: true,
+    value: null,
+  });
   document.documentElement.dataset.motion = 'full';
   history.replaceState(null, '', '/inventory');
 });
@@ -396,7 +400,11 @@ it('revokes synchronously before native cancellation, rejects late callbacks, an
   expect(screen.queryByRole('textbox')).not.toBeInTheDocument();
   // Retained owners remain in the DOM while inaccessible, without changing their business state.
   expect(draft.isConnected).toBe(true);
-  Reflect.deleteProperty(document, 'activeViewTransition');
+  // Finishing a supported transition restores its idle value, not an absent API.
+  Object.defineProperty(document, 'activeViewTransition', {
+    configurable: true,
+    value: null,
+  });
   await act(async () => {
     check.resolve({ status: 'absent' });
     await check.promise;

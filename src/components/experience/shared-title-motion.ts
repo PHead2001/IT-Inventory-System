@@ -69,7 +69,12 @@ export function sharedTitleMotion(
     const height = pixels(destination.height);
     const oldWidth = pixels(first?.width ?? destination.width);
     const oldHeight = pixels(first?.height ?? destination.height);
-    const old = translation(first?.transform ?? destination.transform);
+    // React removes an unchanged identity transform before onShare. Its absence
+    // means none, even when the destination has a nonzero translation. Other
+    // invalid values still fail closed rather than borrowing a destination box.
+    const old = translation(
+      first?.transform === undefined ? 'none' : first.transform,
+    );
     const next = translation(destination.transform);
     if (
       !animations.length ||

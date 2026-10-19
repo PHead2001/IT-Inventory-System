@@ -287,6 +287,10 @@ the presentation gate, never acknowledges primary readiness or cancels actual wo
 
 React owns shared pairing and capture. A narrow `onShare` adapter replaces the
 exact named native group effect: it reads browser-captured source geometry,
+including identity when React omits an unchanged source transform. Paired
+presentation requires both `startViewTransition` and the `activeViewTransition`
+capability used to bind its owned clock; idle `null` is supported. Missing that
+capability keeps ordinary instant navigation and loading fallbacks. The adapter
 holds then cancels native width/height keyframes, reads the fixed destination box, then
 animates only translation/scale at 200 ms. Snapshot image fitting and dimensions
 are static. Unsupported/nonpositive/nonfinite/transformed geometry or unsupported
