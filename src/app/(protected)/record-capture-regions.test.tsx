@@ -127,6 +127,12 @@ vi.mock('@/features/metadata/custom-metadata-list', () => ({
 vi.mock('@/features/files/files-panel', () => ({
   FilesPanel: () => <p>Recorded files</p>,
 }));
+vi.mock('@/features/files/cards.server', () => ({
+  getInventoryFileCards: async () => ({
+    status: 'ready',
+    envelope: { revision: '1', files: [] },
+  }),
+}));
 vi.mock('@/features/inventory/actions', () => ({
   submitInventory: vi.fn(),
   findDuplicateSerials: vi.fn(),

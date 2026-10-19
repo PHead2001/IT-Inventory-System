@@ -39,6 +39,7 @@ import {
   getEntityAssignments,
 } from '@/features/custody/queries.server';
 import { FilesPanel } from '@/features/files/files-panel';
+import { getInventoryFileCards } from '@/features/files/cards.server';
 import {
   HistoryList,
   LocationLink,
@@ -68,6 +69,7 @@ export default async function QuantityPage({
     assignments,
     forms,
     archiveReview,
+    initialFiles,
   ] = await Promise.all([
     getCategories(),
     getLocations(),
@@ -78,6 +80,7 @@ export default async function QuantityPage({
     member.role === 'staff' && !item.archived
       ? getQuantityArchiveReview(id)
       : Promise.resolve(null),
+    getInventoryFileCards('quantity', id),
   ]);
   const readiness = await routeReadyProps(
     '/inventory/quantity/' + encodeURIComponent(id),
@@ -308,6 +311,7 @@ export default async function QuantityPage({
                 aria-label="Record attachments"
               >
                 <FilesPanel
+                  initialState={initialFiles}
                   actorId={member.user_id}
                   parentType="quantity"
                   parentId={item.id}

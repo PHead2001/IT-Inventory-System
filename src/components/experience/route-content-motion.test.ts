@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { routeContentMotion } from './route-content-motion';
+import { createRouteCaptureCompletion } from './route-capture-completion';
 
 const name = 'route-body-owned';
 const group = `::view-transition-group(${name})`;
@@ -106,6 +107,62 @@ afterEach(() => {
   Reflect.deleteProperty(document, 'activeViewTransition');
   Reflect.deleteProperty(document, 'getAnimations');
   Reflect.deleteProperty(document.documentElement, 'animate');
+});
+
+it('collects the real synchronous geometry replacements and waits for every replacement to finish', async () => {
+  const completion = createRouteCaptureCompletion();
+  const approval = {};
+  const complete = vi.fn();
+  const missing = vi.fn();
+  const captured = vi.fn();
+  const finishes: (() => void)[] = [];
+  const installed: Animation[] = [];
+  const nativeAnimations = document.getAnimations();
+  animate.mockImplementation((_frames, options: KeyframeAnimationOptions) => {
+    const animation = {
+      effect: { pseudoElement: options.pseudoElement },
+      cancel: vi.fn(),
+      finished: new Promise<void>((resolve) => finishes.push(resolve)),
+    } as unknown as Animation;
+    installed.push(animation);
+    return animation;
+  });
+  const observe = vi.fn(() =>
+    installed.length ? installed : nativeAnimations,
+  );
+  Object.defineProperty(document, 'getAnimations', { value: observe });
+
+  expect(
+    completion.capture({
+      approval,
+      name,
+      current: () => true,
+      captured,
+      complete,
+      missing,
+      body: () => true,
+    }),
+  ).toBe(true);
+  expect(observe).not.toHaveBeenCalled();
+  const cleanup = routeContentMotion({ name }, () => true);
+  expect(installed).toHaveLength(3);
+  expect(observe).toHaveBeenCalledOnce(); // Geometry reads the native first frame.
+  await Promise.resolve();
+  expect(observe).toHaveBeenCalledTimes(2); // Collector sees the replacements.
+  expect(captured).toHaveBeenCalledOnce();
+  expect(missing).not.toHaveBeenCalled();
+  expect(complete).not.toHaveBeenCalled();
+  for (const finish of finishes.slice(0, -1)) finish();
+  await Promise.resolve();
+  await Promise.resolve();
+  expect(complete).not.toHaveBeenCalled();
+  finishes.at(-1)!();
+  await Promise.resolve();
+  await Promise.resolve();
+  expect(complete).toHaveBeenCalledOnce();
+  cleanup?.();
+  for (const animation of installed)
+    expect(animation.cancel).toHaveBeenCalledOnce();
 });
 
 it('preserves the old scrolled bitmap at y=-602 while the new body begins at y=-77', () => {

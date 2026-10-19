@@ -134,7 +134,7 @@ export function RouteProgress() {
         role={visible && !snapshot.announcement ? 'status' : undefined}
         className="sr-only"
       >
-        {snapshot.announcement ? '' : 'Opening requested content…'}
+        {snapshot.announcement ? '' : 'Working…'}
       </span>
       <span className="experience-route-progress-bar" aria-hidden="true" />
     </div>

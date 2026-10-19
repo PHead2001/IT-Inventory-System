@@ -3,6 +3,11 @@ import { beforeEach, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => ({
   quantity: vi.fn(),
+  fileCards: vi.fn(async (name: string) => {
+    if (name !== 'inventory_file_cards')
+      throw new Error('Unexpected RPC: ' + name);
+    return { data: { revision: '1', files: [] }, error: null };
+  }),
   holdings: vi.fn(),
   assignments: vi.fn(),
   siteDetail: vi.fn(),
@@ -10,7 +15,12 @@ const mocks = vi.hoisted(() => ({
 vi.mock('server-only', () => ({}));
 vi.mock('@/lib/auth/session.server', () => ({
   requireMember: async () => ({
-    member: { role: 'viewer', can_manage_configuration: false },
+    member: {
+      user_id: 'viewer',
+      role: 'viewer',
+      can_manage_configuration: false,
+    },
+    supabase: { rpc: mocks.fileCards },
   }),
 }));
 vi.mock('@/features/inventory/queries.server', () => ({
@@ -113,6 +123,10 @@ it.each([1, 2])(
       },
     ]);
     render(await QuantityPage({ params: Promise.resolve({ id: 'item' }) }));
+    expect(mocks.fileCards).toHaveBeenCalledWith('inventory_file_cards', {
+      p_parent_type: 'quantity',
+      p_parent_id: 'item',
+    });
     for (const name of [
       'Available in storage',
       'Assigned to sites',

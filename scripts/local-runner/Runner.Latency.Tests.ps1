@@ -169,11 +169,32 @@ try {
     }
     Assert-Rejected { Get-RunnerGuestPrerequisites 'unknown' } 'unknown prerequisite profile'
 
+    # Archive publication assertions above keep their dedicated lock contract.
+    # Supervisor reconciliation uses an isolated state lock, never the installed mutex.
+    $script:loopStateLocked = $false
+    $script:loopStateDepth = 0
+    function Enter-RunnerLock {
+        $script:loopStateDepth++
+        $script:loopStateLocked = $true
+        return 'latency-state-fixture'
+    }
+    function Exit-RunnerLock {
+        if ($script:loopStateDepth -le 0) { throw 'Unbalanced latency state release.' }
+        $script:loopStateDepth--; $script:loopStateLocked = $script:loopStateDepth -gt 0
+    }
+    $fixtureOuter = Enter-RunnerLock; $fixtureInner = Enter-RunnerLock
+    Exit-RunnerLock $fixtureInner
+    if (-not $script:loopStateLocked) { throw 'Nested state release exposed memory IO.' }
+    Exit-RunnerLock $fixtureOuter
+    if ($script:loopStateLocked -or $script:loopStateDepth -ne 0) { throw 'Latency state fixture did not balance.' }
     function Assert-RunnerTransitionClear {}
     function Get-RunnerConfig { return [pscustomobject]@{ activation = 'active'; label = 'it-inventory-ephemeral' } }
     function Get-RunnerState { return $null }
     function Get-OwnerToken { return 'fixture' }
-    function Get-RunnerMemoryAdmission { return [pscustomobject]@{ ready = $true; availableBytes = 10GB } }
+    function Get-RunnerMemoryAdmission {
+        if ($script:loopStateLocked) { throw 'Supervisor memory observation ran under its state lock.' }
+        return [pscustomobject]@{ ready = $true; availableBytes = 10GB }
+    }
     function Write-EventLog {}
     function Get-QueuedRunnerJob {
         $script:queueCalls++
@@ -185,18 +206,19 @@ try {
         if ($script:loopCase -eq 'error') { throw 'Fixture session or cleanup failure.' }
         if ($script:loopCase -eq 'completed') {
             if ($script:sessions -eq 2) { [IO.File]::WriteAllText((Join-Path $base 'stop.requested'), 'stop') }
-            return [pscustomobject]@{ outcome = 'job-completed' }
+            return [pscustomobject]@{ outcome = 'runner-exited' }
         }
         return [pscustomobject]@{ outcome = 'demand-withdrawn' }
     }
     function Start-Sleep($Seconds) {
-        if ($Seconds -ne 30) { throw 'Supervisor backoff changed.' }
+        if ($Seconds -ne 1) { throw 'Supervisor stop-aware backoff changed.' }
         $script:loopSleeps++
         [IO.File]::WriteAllText((Join-Path $base 'stop.requested'), 'stop')
     }
     foreach ($script:loopCase in @('completed', 'idle', 'withdrawn', 'error')) {
         $script:loopSleeps = 0; $script:sessions = 0; $script:queueCalls = 0
         Invoke-SupervisorLoop
+        if ($script:loopStateDepth -ne 0 -or $script:loopStateLocked) { throw 'Supervisor loop leaked state recursion.' }
         $expectedSleeps = if ($script:loopCase -eq 'completed') { 0 } else { 1 }
         if ($script:loopSleeps -ne $expectedSleeps -or ($script:loopCase -eq 'completed' -and ($script:sessions -ne 2 -or $script:queueCalls -ne 2))) { throw 'Supervisor skipped required backoff or waited between completed jobs.' }
         Remove-Item -LiteralPath (Join-Path $base 'stop.requested')

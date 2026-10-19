@@ -17,12 +17,15 @@ import {
   RoutePresentationSourceContext,
 } from './route-presentation-source';
 import { createRoutePresentationLifetime } from './route-presentation-lifetime';
+import { routeContentMotion } from './route-content-motion';
+
 vi.mock('./route-content-motion', () => ({ routeContentMotion: vi.fn() }));
 
 const route = vi.hoisted(() => ({
   pathname: '/dashboard',
   enabled: true,
   boundaries: [] as Array<import('react').ViewTransitionProps>,
+  finishSnapshot: vi.fn(),
 }));
 vi.mock('next/navigation', () => ({ usePathname: () => route.pathname }));
 vi.mock('./route-motion', () => ({
@@ -31,7 +34,8 @@ vi.mock('./route-motion', () => ({
     arrivalEnabled: route.enabled,
     finishArrival: vi.fn(),
     cancelIfInvalid: vi.fn(),
-    finishArrivalAfterSnapshot: vi.fn(),
+    finishArrivalAfterSnapshot: route.finishSnapshot,
+    validNow: () => route.enabled,
   }),
 }));
 vi.mock('react', async (importOriginal) => {
@@ -283,6 +287,41 @@ beforeEach(() => {
   route.pathname = '/dashboard';
   route.enabled = true;
   route.boundaries = [];
+});
+
+it('replaces paired geometry synchronously before collecting completion, with scoped cleanup and unchanged single-sided fades', () => {
+  route.pathname = '/inventory';
+  const fixture = () => (
+    <PageArrival pathname={route.pathname}>
+      <PersistentForm />
+    </PageArrival>
+  );
+  const page = render(fixture());
+  const initial = route.boundaries.findLast(
+    (boundary) => boundary.enter !== undefined,
+  )!;
+  initial.onEnter!({ name: 'single-enter' } as never, []);
+  initial.onExit!({ name: 'single-exit' } as never, []);
+  expect(routeContentMotion).not.toHaveBeenCalled();
+  route.finishSnapshot.mockClear();
+  route.pathname = '/history';
+  page.rerender(fixture());
+  const update = route.boundaries.findLast(
+    (boundary) => boundary.update === 'route-content',
+  )!;
+  const cancelGeometry = vi.fn();
+  vi.mocked(routeContentMotion).mockImplementationOnce((_instance, valid) => {
+    expect(valid()).toBe(true);
+    expect(route.finishSnapshot).not.toHaveBeenCalled();
+    return cancelGeometry;
+  });
+  const cleanup = update.onUpdate!({ name: 'paired-body' } as never, []);
+  expect(routeContentMotion).toHaveBeenCalledOnce();
+  expect(route.finishSnapshot).toHaveBeenCalledWith({ name: 'paired-body' });
+  expect(cancelGeometry).not.toHaveBeenCalled();
+  expect(cleanup).toEqual(expect.any(Function));
+  if (typeof cleanup === 'function') cleanup();
+  expect(cancelGeometry).toHaveBeenCalledOnce();
 });
 
 it('leaves the commit to React and preserves drafts on query/refresh updates', () => {

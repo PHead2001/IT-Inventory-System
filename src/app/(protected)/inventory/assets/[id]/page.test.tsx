@@ -88,7 +88,9 @@ vi.mock('@/features/inventory/components/detail-tasks', () => ({
 vi.mock('@/features/metadata/custom-metadata-list', () => ({
   CustomMetadataList: () => null,
 }));
-vi.mock('@/features/files/files-panel', () => ({ FilesPanel: () => null }));
+vi.mock('@/features/files/files-panel', () => ({
+  FilesPanel: vi.fn(() => null),
+}));
 
 it('renders one authoritative asset timeline without duplicating custody or merging separate events', async () => {
   render(await AssetPage({ params: Promise.resolve({ id: 'asset' }) }));
@@ -133,4 +135,48 @@ it('places staff tasks before the optional storage preview even for site custody
     tasks.compareDocumentPosition(preview) & Node.DOCUMENT_POSITION_FOLLOWING,
   ).toBeTruthy();
   memberState.role = 'viewer';
+});
+
+vi.mock('@/features/files/cards.server', () => ({
+  getInventoryFileCards: vi.fn(async () => ({
+    status: 'ready',
+    envelope: { revision: '17', files: [] },
+  })),
+}));
+
+it('passes typed server file state while keeping core detail usable on unavailability and propagating authorization failure', async () => {
+  const { getInventoryFileCards } =
+    await import('@/features/files/cards.server');
+  const { FilesPanel } = await import('@/features/files/files-panel');
+  const Page = AssetPage;
+  const parentId = 'asset';
+  const view = render(
+    await Page({ params: Promise.resolve({ id: parentId }) }),
+  );
+  expect(getInventoryFileCards).toHaveBeenCalledWith('asset', parentId);
+  expect(FilesPanel).toHaveBeenCalledWith(
+    expect.objectContaining({
+      initialState: {
+        status: 'ready',
+        envelope: { revision: '17', files: [] },
+      },
+    }),
+    undefined,
+  );
+  view.unmount();
+  vi.mocked(getInventoryFileCards).mockResolvedValueOnce({
+    status: 'unavailable',
+  });
+  render(await Page({ params: Promise.resolve({ id: parentId }) }));
+  expect(screen.getByRole('heading', { name: 'Switch' })).toBeVisible();
+  expect(FilesPanel).toHaveBeenLastCalledWith(
+    expect.objectContaining({ initialState: { status: 'unavailable' } }),
+    undefined,
+  );
+  vi.mocked(getInventoryFileCards).mockRejectedValueOnce(
+    new Error('Membership denied'),
+  );
+  await expect(
+    Page({ params: Promise.resolve({ id: parentId }) }),
+  ).rejects.toThrow('Membership denied');
 });

@@ -34,6 +34,7 @@ import {
   getAssetReturnSuggestion,
 } from '@/features/custody/queries.server';
 import { FilesPanel } from '@/features/files/files-panel';
+import { getInventoryFileCards } from '@/features/files/cards.server';
 import {
   HistoryList,
   LocationLink,
@@ -55,7 +56,7 @@ export default async function AssetPage({
   const detail = await readAssetPage(id);
   if (!detail) notFound();
   const { asset, location, site, history, duplicateSerialMatches } = detail;
-  const [categories, locations, sites, forms, returnSuggestion] =
+  const [categories, locations, sites, forms, returnSuggestion, initialFiles] =
     await Promise.all([
       getCategories(),
       getLocations(),
@@ -66,6 +67,7 @@ export default async function AssetPage({
             () => null,
           )
         : Promise.resolve(undefined),
+      getInventoryFileCards('asset', id),
     ]);
   const readiness = await routeReadyProps(
     '/inventory/assets/' + encodeURIComponent(id),
@@ -256,6 +258,7 @@ export default async function AssetPage({
                 aria-label="Record attachments"
               >
                 <FilesPanel
+                  initialState={initialFiles}
                   actorId={member.user_id}
                   parentType="asset"
                   parentId={asset.id}

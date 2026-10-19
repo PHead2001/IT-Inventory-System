@@ -12,6 +12,47 @@ const flush = async () => {
 };
 afterEach(() => vi.unstubAllGlobals());
 
+it('collects synchronous replacement animations after exact capture admission and waits for their completion', async () => {
+  const store = createRouteCaptureCompletion();
+  const approval = {};
+  const complete = vi.fn(),
+    missing = vi.fn(),
+    captured = vi.fn();
+  let finish!: () => void;
+  const replacement = {
+    effect: { pseudoElement: '::view-transition-new(body)' },
+    finished: new Promise<void>((resolve) => {
+      finish = resolve;
+    }),
+  };
+  let animations: (typeof replacement)[] = [];
+  const observe = vi.fn(() => animations);
+  vi.stubGlobal('document', { getAnimations: observe });
+  expect(
+    store.capture({
+      approval,
+      name: 'body',
+      current: () => true,
+      captured,
+      complete,
+      missing,
+      body: () => true,
+    }),
+  ).toBe(true);
+  expect(observe).not.toHaveBeenCalled();
+  // The admitted callback freezes old geometry and installs the new image's
+  // intrinsic-size animation before yielding to the completion collector.
+  animations = [replacement];
+  await flush();
+  expect(observe).toHaveBeenCalledOnce();
+  expect(captured).toHaveBeenCalledOnce();
+  expect(missing).not.toHaveBeenCalled();
+  expect(complete).not.toHaveBeenCalled();
+  finish();
+  await flush();
+  expect(complete).toHaveBeenCalledOnce();
+});
+
 it.each(['title-first', 'regions-first'])(
   'seals one synchronous %s capture and waits for every shared and unmatched region',
   async (order) => {
