@@ -376,6 +376,30 @@ The forward migration now applies the verified distance-only `WITH TIES` shape t
 
 Fresh Codex findings also led to neutral “More places” overflow wording and retryable session-check handling. Temporary Auth failures retain the palette and Retry without permitting unchecked commands or search. Definite denials still withdraw private state. The affected provider/search-route batch passed 107 tests; the provider rerun after the final assertion passed 61. Independent architecture review found no blocking source issues in either boundary. Exact-SHA CI, fresh Codex review, unresolved-thread closeout and hosted acceptance remain required. No acceptance row is promoted by this checkpoint.
 
+### PR57 threshold and index-maintenance repair checkpoint, 2026-10-19
+
+Current candidate [96ede9572cc956b30c21c1c3dd39fa2b750fd68e](https://github.com/PHead2001/IT-Inventory-System/commit/96ede9572cc956b30c21c1c3dd39fa2b750fd68e)
+adds two forward migrations: all nine fuzzy thresholds precede `WITH TIES`, and
+service_role receives only EXECUTE on the pure invoker normalization helper for
+already-authorized expression-index maintenance. Palette RPC and table grants
+are unchanged. Independent Astra source reviews found no blocking issues;
+fresh Codex review was requested in [6270571582](https://github.com/PHead2001/IT-Inventory-System/pull/57#issuecomment-6270571582),
+with completion pending.
+
+Earlier candidate `8f8481764ca88a616ef2e0257e6a738eed853641` passed the
+application gate and all 993 pgTAP assertions in [CI run 39271918732](https://github.com/PHead2001/IT-Inventory-System/actions/runs/39271918732).
+Its authenticated palette deadline proof returned PostgreSQL `57014` after
+5005 ms. The later custody integration failed at its service-role location INSERT
+with `42501`, permission denied for `command_palette_normalize`; browser gates
+were skipped. Those passes belong to `8f848176`, not the repaired candidate.
+
+Final-candidate database/KNN/deadline execution, complete CI, fresh remote review
+and browser acceptance remain pending. Hosted acceptance is prepared only against
+the preview bound to exact `8f8481764ca88a616ef2e0257e6a738eed853641`; no fixture
+writes were performed. Preparation is not runtime proof for `96ede957`.
+All 76 matrix rows, accepted history and existing dispositions remain unchanged;
+this checkpoint promotes no acceptance row.
+
 ## PR54 hosted closeout failures at a354eb83
 
 On 2026-10-15, fresh Vercel and Supabase provider reads verified READY preview
