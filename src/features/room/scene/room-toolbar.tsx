@@ -239,7 +239,20 @@ export function RoomToolbar({
   }, [open, onOverlayChange]);
   useEffect(() => {
     const escape = (event: KeyboardEvent) => {
-      if (event.key !== 'Escape' || (!active && !open)) return;
+      if (
+        event.defaultPrevented ||
+        event.key !== 'Escape' ||
+        (!active && !open)
+      )
+        return;
+      const ownerSelector =
+        'dialog[open], [role="dialog"][aria-modal="true"], [role="alertdialog"][aria-modal="true"]';
+      const target =
+        event.target instanceof Element ? event.target : document.activeElement;
+      const modal = target?.closest(ownerSelector);
+      // A focused foreground dialog owns Escape, including its native cancel
+      // default action. Toolbars inside that same dialog still handle their map.
+      if (modal && host.current?.closest(ownerSelector) !== modal) return;
       event.preventDefault();
       setOpen(false);
       setHelp(false);

@@ -1,5 +1,6 @@
 import { beforeEach, expect, it, vi } from 'vitest';
 import { act, render, screen } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import {
   Children,
   isValidElement,
@@ -15,7 +16,10 @@ import {
   readPrivacyRevocationRevision,
 } from '../scan/assign-batch';
 import type { LocationRef } from '../inventory/contracts-ui';
-const scene = vi.hoisted(() => ({ children: null as ReactNode }));
+const scene = vi.hoisted(() => ({
+  children: null as ReactNode,
+  props: null as ComponentProps<typeof RoomScene> | null,
+}));
 vi.mock('../room/scene/safe-canvas', () => ({
   SafeCanvas: ({ children }: { children: ReactNode }) => {
     scene.children = children;
@@ -23,9 +27,10 @@ vi.mock('../room/scene/safe-canvas', () => ({
   },
 }));
 vi.mock('next/dynamic', () => ({
-  default: () => (props: ComponentProps<typeof RoomScene>) => (
-    <RoomScene {...props} />
-  ),
+  default: () => (props: ComponentProps<typeof RoomScene>) => {
+    scene.props = props;
+    return <RoomScene {...props} />;
+  },
 }));
 const root: LocationRef = {
   id: 'root',
@@ -53,6 +58,7 @@ const other = {
   breadcrumb: 'Closet / Drawer 2',
 };
 beforeEach(() => {
+  scene.props = null;
   Object.defineProperty(HTMLDialogElement.prototype, 'showModal', {
     configurable: true,
     value: function (this: HTMLDialogElement) {
@@ -66,6 +72,51 @@ beforeEach(() => {
     },
   });
 });
+it.each([false, true])(
+  'keeps an unmodeled logical candidate and available overview; explicit modeled replacement: %s',
+  async (replace) => {
+    const user = userEvent.setup(),
+      use = vi.fn();
+    const unmodeled = {
+      ...drawer,
+      id: 'software',
+      code: 'SOFTWARE',
+      name: 'Software',
+      breadcrumb: 'Software',
+      parentId: null,
+    };
+    render(
+      <LocationMapPicker
+        locations={[root, drawer, unmodeled]}
+        initialValue={unmodeled.id}
+        disabled={false}
+        onUse={use}
+        onClose={vi.fn()}
+      />,
+    );
+    expect(screen.getByRole('region', { name: 'Location map' })).toBeVisible();
+    expect(scene.props?.selectedCode).toBeNull();
+    expect(scene.props?.focusRequest.code).toBeNull();
+    expect(scene.props?.canFocusSelected).toBe(false);
+    expect(
+      screen.getByText(unmodeled.breadcrumb, { selector: 'p[role="status"]' }),
+    ).toBeVisible();
+    expect(use).not.toHaveBeenCalled();
+    if (replace) {
+      await user.click(
+        screen.getByRole('combobox', { name: 'Choose location in browser' }),
+      );
+      await user.click(screen.getByRole('treeitem', { name: /Drawer 1/ }));
+      expect(scene.props?.selectedCode).toBe(drawer.code);
+      expect(scene.props?.focusRequest.code).toBe(drawer.code);
+    }
+    expect(use).not.toHaveBeenCalled();
+    await user.click(screen.getByRole('button', { name: 'Use location' }));
+    expect(use).toHaveBeenCalledExactlyOnceWith(
+      replace ? drawer.code : unmodeled.code,
+    );
+  },
+);
 it.each(['actor', 'backend', 'generation'])(
   'blocks a captured production RoomScene selection through the original picker after committed %s A/B/A',
   (field) => {

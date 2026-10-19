@@ -45,6 +45,7 @@ import {
   type PickerTreeRow,
 } from './picker-model';
 type MapIntent = {
+  id: number;
   generation: string;
   revision: number;
   epoch: number;
@@ -142,6 +143,7 @@ export function LocationPicker({
   const [mapIntent, setMapIntent] = useState<MapIntent | null>(null);
   const [mountedIntent, setMountedIntent] = useState<MapIntent | null>(null);
   const mapIntentRef = useRef<MapIntent | null>(null);
+  const mapIntentSequence = useRef(0);
   const latestPrivacy = useRef(privacy);
   const emptyAccessibleLabel =
     emptyLabel === 'All locations'
@@ -656,6 +658,7 @@ export function LocationPicker({
               if (!unmanaged && !freshPresentationGrant(activation)) return;
               let retired = false;
               const intent: MapIntent = {
+                id: ++mapIntentSequence.current,
                 generation: activation.generation,
                 revision: unmanaged
                   ? readPrivacyRevocationRevision()
@@ -686,6 +689,7 @@ export function LocationPicker({
             }}
           >
             <RoomRegionBoundary
+              key={mapIntent.id}
               fallback={
                 <p role="status" className="text-sm">
                   Map unavailable. Choose a location in the browser.

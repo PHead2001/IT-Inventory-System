@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { act, render, screen, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { RoomToolbar, placeRoomControls } from './room-toolbar';
@@ -8,6 +8,7 @@ function setupToolbar({
   initialActive = true,
   canFocusSelected = true,
   onOverlayChange = vi.fn(),
+  withinDialog = false,
 } = {}) {
   const onActiveChange = vi.fn();
   const onRequestFocus = vi.fn(),
@@ -34,7 +35,15 @@ function setupToolbar({
       />
     );
   }
-  const rendered = render(<Toolbar />);
+  const rendered = render(
+    withinDialog ? (
+      <dialog open>
+        <Toolbar />
+      </dialog>
+    ) : (
+      <Toolbar />
+    ),
+  );
   return {
     user: userEvent.setup(),
     onActiveChange,
@@ -305,6 +314,77 @@ describe('measured controls placement', () => {
 });
 
 describe('room toolbar Escape', () => {
+  it.each(['target', 'activeElement'] as const)(
+    'leaves a foreground native dialog Escape (%s ownership) available for its cancel/focus return',
+    async (origin) => {
+      const { user, onActiveChange, onCommand } = setupToolbar();
+      await user.click(
+        screen.getByRole('button', { name: 'More map controls' }),
+      );
+      const opener = document.createElement('button');
+      opener.textContent = 'Open foreground dialog';
+      document.body.append(opener);
+      const dialog = document.createElement('dialog');
+      dialog.open = true;
+      const control = document.createElement('button');
+      control.textContent = 'Foreground control';
+      dialog.append(control);
+      document.body.append(dialog);
+      dialog.addEventListener('cancel', () => {
+        dialog.open = false;
+        opener.focus();
+      });
+      try {
+        control.focus();
+        const escape = new KeyboardEvent('keydown', {
+          key: 'Escape',
+          bubbles: true,
+          cancelable: true,
+        });
+        (origin === 'target' ? control : document).dispatchEvent(escape);
+        expect(escape.defaultPrevented).toBe(false);
+        expect(control).toHaveFocus();
+        expect(onActiveChange).not.toHaveBeenCalled();
+        expect(onCommand).not.toHaveBeenCalled();
+        expect(
+          screen.getByRole('region', { name: 'More map controls' }),
+        ).toBeVisible();
+        // jsdom has no native Escape default action; deliver the browser cancel
+        // request separately only after proving the background did not cancel it.
+        fireEvent(dialog, new Event('cancel', { cancelable: true }));
+        expect(dialog.open).toBe(false);
+        expect(opener).toHaveFocus();
+      } finally {
+        dialog.remove();
+        opener.remove();
+      }
+    },
+  );
+  it('honors an already handled Escape without changing interaction or focus', () => {
+    const { onActiveChange } = setupToolbar();
+    const trigger = screen.getByRole('button', {
+      name: 'Done interacting with map',
+    });
+    trigger.focus();
+    const escape = new KeyboardEvent('keydown', {
+      key: 'Escape',
+      bubbles: true,
+      cancelable: true,
+    });
+    escape.preventDefault();
+    act(() => trigger.dispatchEvent(escape));
+    expect(onActiveChange).not.toHaveBeenCalled();
+    expect(trigger).toHaveFocus();
+  });
+  it('still handles Escape from its own native modal and restores its own Interact control', async () => {
+    const { user, onActiveChange } = setupToolbar({ withinDialog: true });
+    await user.click(screen.getByRole('button', { name: 'More map controls' }));
+    await user.keyboard('{Escape}');
+    expect(onActiveChange).toHaveBeenCalledExactlyOnceWith(false);
+    expect(
+      screen.getByRole('button', { name: 'Interact with map' }),
+    ).toHaveFocus();
+  });
   it('focuses the first popover control then Escape disarms and restores Interact', async () => {
     const { user, onActiveChange } = setupToolbar();
     const more = screen.getByRole('button', { name: 'More map controls' });

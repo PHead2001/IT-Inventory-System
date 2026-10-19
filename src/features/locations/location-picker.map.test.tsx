@@ -14,6 +14,7 @@ import {
 import type { LocationRef } from '../inventory/contracts-ui';
 const chunks = vi.hoisted(() => ({
   pending: false,
+  failed: false,
   captured: null as null | {
     onUse(code: string): void;
     onClose(): void;
@@ -22,6 +23,7 @@ const chunks = vi.hoisted(() => ({
 }));
 afterEach(() => {
   chunks.pending = false;
+  chunks.failed = false;
 });
 vi.mock('next/dynamic', () => {
   function Loaded(props: {
@@ -56,6 +58,7 @@ vi.mock('next/dynamic', () => {
         onClose(): void;
         onMounted?(): void;
       }) => {
+        if (chunks.failed) throw new Error('Map chunk failed');
         chunks.captured = props;
         return chunks.pending ? options.loading() : <Loaded {...props} />;
       },
@@ -70,6 +73,51 @@ const location: LocationRef = {
   active: true,
   can_hold_inventory: true,
 };
+it('a fresh explicit map launch recovers a failed optional region without changing the selected UUID or form draft', async () => {
+  const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+  try {
+    const user = userEvent.setup(),
+      change = vi.fn(),
+      submit = vi.fn();
+    const view = render(
+      <form onSubmit={submit}>
+        <input aria-label="Reason" defaultValue="Keep this draft" />
+        <LocationPicker
+          locations={[location]}
+          mode="destination"
+          label="Destination"
+          name="location"
+          defaultValue={location.id}
+          onValueChange={change}
+        />
+      </form>,
+    );
+    chunks.failed = true;
+    await user.click(screen.getByRole('button', { name: 'Pick on map' }));
+    expect(screen.getByRole('status')).toHaveTextContent('Map unavailable');
+    expect(
+      new FormData(view.container.querySelector('form')!).get('location'),
+    ).toBe(location.id);
+    chunks.failed = false;
+    await user.click(screen.getByRole('button', { name: 'Pick on map' }));
+    expect(
+      screen.getByRole('button', { name: 'Use staged drawer' }),
+    ).toBeVisible();
+    expect(
+      screen.queryByText('Map unavailable. Choose a location in the browser.'),
+    ).toBeNull();
+    expect(screen.getByLabelText('Reason')).toHaveValue('Keep this draft');
+    expect(
+      new FormData(view.container.querySelector('form')!).get('location'),
+    ).toBe(location.id);
+    expect(change).not.toHaveBeenCalled();
+    expect(submit).not.toHaveBeenCalled();
+    await user.click(screen.getByRole('button', { name: 'Cancel map' }));
+    expect(screen.getByRole('combobox', { name: 'Destination' })).toHaveFocus();
+  } finally {
+    error.mockRestore();
+  }
+});
 it('map and tree fill the same UUID successful control without submitting or discarding other fields', async () => {
   const user = userEvent.setup(),
     change = vi.fn(),
