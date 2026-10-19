@@ -184,11 +184,14 @@ export function TaskWorkspace({
       '/' +
       encodeURIComponent(recordId);
     if (url.pathname.toLowerCase() !== currentRecordPath.toLowerCase()) return;
-    if (!taskIntent) {
-      if (!url.searchParams.has('task')) consumedIntents.current.clear();
+    // Native same-primary consumption cleans the URL without refetching cached
+    // server props. A later deliberate task URL is a new intent even when that
+    // original taskIntent prop is still mounted.
+    if (!url.searchParams.has('task')) {
+      consumedIntents.current.clear();
       return;
     }
-    if (url.searchParams.get('task') !== taskIntent) return;
+    if (!taskIntent || url.searchParams.get('task') !== taskIntent) return;
     const identity = recordIdentity + ':' + taskIntent;
     if (consumedIntents.current.has(identity)) return;
     // Consume before opening: refresh/remount must never reopen a task or

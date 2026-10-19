@@ -941,7 +941,6 @@ it.each([401, 403])(
 
 function CachedTaskCommandSource() {
   const path = '/inventory/assets/' + row.id;
-  const task = new URLSearchParams(location.search).get('task') ?? undefined;
   return (
     <Authority>
       <CommandProvider actorId="actor" backend="local-backend" staff>
@@ -957,7 +956,7 @@ function CachedTaskCommandSource() {
               choices={[{ id: 'asset_move', label: 'Move asset' }]}
               context="Laptop"
               recordIdentity={'asset:' + row.id}
-              taskIntent={task}
+              taskIntent="asset_move"
             >
               {() => <input aria-label="Move destination" />}
             </TaskWorkspace>
@@ -967,7 +966,7 @@ function CachedTaskCommandSource() {
     </Authority>
   );
 }
-it('a real palette Move command reopens a consumed same-record task while the server readiness key remains cached', async () => {
+it('a real palette Move command reopens a consumed same-record task while server readiness and intent props remain cached', async () => {
   const path = '/inventory/assets/' + row.id;
   navigation.pathname = path;
   history.replaceState({}, '', path + '?task=asset_move');
@@ -1736,6 +1735,43 @@ it.each(['success', 'transient', 'denial'] as const)(
   },
 );
 
+it.each([
+  ['asset', 'active', 'Active'],
+  ['asset', 'retired', 'Retired'],
+  ['quantity', 'archived', 'Archived'],
+  ['location', 'inactive', 'Inactive'],
+  ['site', 'inactive', 'Inactive'],
+] as const)(
+  'uses established lifecycle presentation for %s %s',
+  async (kind, status, label) => {
+    vi.mocked(fetch).mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          identity: { actorId: 'actor', backend: 'local-backend' },
+          result: {
+            version: 1,
+            rows: [{ ...row, kind, status }],
+            hasMore: false,
+          },
+        }),
+      ),
+    );
+    render(<Workspace />);
+    fireEvent.change(open(), { target: { value: 'camera' } });
+    fireEvent.click(screen.getByRole('checkbox', { name: /Include retired/ }));
+    await settle();
+    const option = screen.getByRole('option', { name: /Camera laptop/ });
+    if (status === 'active') {
+      expect(option).not.toHaveTextContent(label);
+      expect(screen.queryByText(label, { exact: true })).toBeNull();
+    } else {
+      expect(option).toHaveTextContent(label);
+      expect(screen.getByText(label, { exact: true })).toBeVisible();
+    }
+    expect(screen.queryByText(status, { exact: true })).toBeNull();
+  },
+);
+
 it.each(['storage', 'empty', 'legacy'] as const)(
   'labels retired asset %s context as historical without claiming current custody',
   async (kind) => {
@@ -1775,7 +1811,7 @@ it.each(['storage', 'empty', 'legacy'] as const)(
     fireEvent.click(screen.getByRole('checkbox', { name: /Include retired/ }));
     await settle();
     const option = screen.getByRole('option', { name: /Camera laptop/ });
-    expect(option).toHaveTextContent('retired');
+    expect(option).toHaveTextContent('Retired');
     expect(option).not.toHaveTextContent('No current storage or site');
     if (kind === 'storage') {
       expect(option).toHaveTextContent(

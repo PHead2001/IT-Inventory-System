@@ -173,7 +173,7 @@ it('routes an incoming intent through explicit dirty discard guards', async () =
   await act(async () => {});
   expect(screen.queryByRole('alertdialog')).toBeNull();
   expect(screen.getByLabelText('receive entry')).toHaveValue('Retained draft');
-  view.rerender(<IntentWorkspace />);
+  view.rerender(<IntentWorkspace intent="quantity_move" />);
   await act(async () => {});
   intentUrl('quantity_move');
   view.rerender(<IntentWorkspace intent="quantity_move" />);
@@ -215,7 +215,7 @@ it.each(['unknown_task', 'asset_move'])(
     expect(screen.getByLabelText('receive entry')).toHaveValue('Keep');
   },
 );
-it('preserves router state, unrelated query/hash, and permits a later deliberate absent-to-present intent', async () => {
+it('preserves router state and unrelated query/hash while rearming a later intent with unchanged cached props', async () => {
   intentUrl('quantity_move');
   const view = render(<IntentWorkspace intent="quantity_move" />);
   await act(async () => {});
@@ -223,12 +223,16 @@ it('preserves router state, unrelated query/hash, and permits a later deliberate
   expect(window.location.search).toBe('?returnTo=%2Finventory');
   expect(window.location.hash).toBe('#tasks');
   fireEvent.click(screen.getByRole('button', { name: 'Close task' }));
-  view.rerender(<IntentWorkspace />);
+  // Cached server props retain the original intent after the native URL handoff.
+  view.rerender(<IntentWorkspace intent="quantity_move" />);
   await act(async () => {});
   intentUrl('quantity_move');
   view.rerender(<IntentWorkspace intent="quantity_move" />);
   await act(async () => {});
   expect(screen.getByRole('heading', { name: 'Move stock' })).toBeVisible();
+  expect(window.history.state).toEqual({ next: 'retained' });
+  expect(window.location.search).toBe('?returnTo=%2Finventory');
+  expect(window.location.hash).toBe('#tasks');
 });
 it('does not consume an intent for a newer record while old record props remain', async () => {
   window.history.replaceState(

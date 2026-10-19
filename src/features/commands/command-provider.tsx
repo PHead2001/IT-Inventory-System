@@ -58,6 +58,7 @@ import { createShortcutPreference } from './shortcut-preference';
 import { TrackingTypeChoices } from '@/features/inventory/components/add-item-launcher';
 import { createSupabaseBrowserClient } from '@/lib/supabase/browser';
 import { requestAppNavigation } from '@/lib/navigation/guard';
+import { recordStatusLabel } from '@/lib/record-status';
 
 type CommandContextValue = {
   enabled: boolean;
@@ -1176,7 +1177,7 @@ export function CommandProvider({
                           </span>
                           {row.status !== 'active' && (
                             <span className="block font-semibold">
-                              {row.status}
+                              {recordStatusLabel(row.status)}
                             </span>
                           )}
                         </span>
