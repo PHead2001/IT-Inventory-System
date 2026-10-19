@@ -125,6 +125,15 @@ export function routeContentMotion(
       { transform: 'translateY(8px)', opacity: 0 },
       { transform: 'translateY(0px)', opacity: 1 },
     ]);
+    // Independent animate() calls may acquire different automatic start times.
+    // One document-clock origin keeps the fixed box and both fades concurrent
+    // without lengthening their duration or deferring registration to a frame.
+    const startTime = document.timeline?.currentTime;
+    if (typeof startTime !== 'number' || !Number.isFinite(startTime))
+      throw new Error('Unsupported body snapshot document clock');
+    replacements.forEach((animation) => {
+      animation.startTime = startTime;
+    });
     return () => replacements.forEach((animation) => animation.cancel());
   } catch {
     replacements.forEach((animation) => animation.cancel());

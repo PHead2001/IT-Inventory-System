@@ -431,3 +431,19 @@ and 20 events. No inventory, original audit fixture, production or staging write
 occurred. All 76 acceptance rows and their existing dispositions remain;
 exact-final-candidate gates, unresolved visual repair and integrated-staging
 prerequisites are not promoted by this checkpoint.
+
+## PR54 shared-clock and native-window repair checkpoint, 2026-10-19
+
+The working-tree repair based on `aeda97f6` gives all three body replacement
+effects one finite document-clock start time while preserving their 200 ms
+duration, easing, crossfade and 8 px entrance. An unavailable clock cancels the
+replacement set and falls back. The browser probe now qualifies running effects
+owned by the observed snapshot before signalling; synchronous callback validation
+releases the fetched real denial without another browser validation round trip.
+The actual-running cancellation assertion and strict 250 ms budget remain.
+Shared-clock/invalid-clock and dispatch regressions failed before their fixes;
+176 focused tests across seven suites, scoped lint/format and discovery of 39
+browser tests pass with a 512 MiB Node heap and one worker. These are source and
+test-harness checks, not browser execution. Fresh exact-candidate CI, independent
+review, hosted and broader motion/theme acceptance remain pending. All 76 rows
+and existing dispositions remain unchanged.

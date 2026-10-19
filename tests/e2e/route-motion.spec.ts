@@ -1,6 +1,6 @@
 import { expect, test, type Page, type Request } from '@playwright/test';
 import { withHeldQuantityPrimary } from './route-primary-delay';
-import { armNativeReady } from './native-ready';
+import { armNativeReady, type NativeReadyEvidence } from './native-ready';
 import {
   routePresentationTiming,
   pairedBodyCrossfade,
@@ -76,13 +76,19 @@ type Proof = {
     completionMs?: number;
     finishRejected?: boolean;
     readyAt?: number;
+    notifiedAt?: number;
     finishedAt?: number;
+    lastFrame?: NativeReadyEvidence;
     effects: RouteEffectTiming[];
     timingErrors: string[];
     timingComplete: boolean;
   }>;
   cancellations: Array<{ pseudo: string; whileActive: boolean }>;
-  snapshotSkips: Array<{ whileActive: boolean }>;
+  snapshotSkips: Array<{
+    whileActive: boolean;
+    at: number;
+    effects: NativeReadyEvidence['effects'];
+  }>;
   replacements: Array<{
     pseudo: string;
     frames: Keyframe[];
@@ -91,6 +97,53 @@ type Proof = {
   }>;
   cls: number;
 };
+const denialWindows = new WeakMap<
+  Page,
+  {
+    fetchedAtNode: number | null;
+    releasedAtNode: number | null;
+    deliveredAtNode: number | null;
+    releaseReason: 'native-ready' | 'cleanup' | null;
+  }
+>();
+
+test.afterEach(async ({ page }, info) => {
+  if (info.status === info.expectedStatus) return;
+  const diagnostic = await page
+    .evaluate(() => {
+      const proof = (window as Window & { routeMotionProof?: Proof })
+        .routeMotionProof;
+      if (!proof) return null;
+      return {
+        transitions: proof.transitions.slice(-3).map((entry) => ({
+          ready: entry.ready,
+          finished: entry.finished,
+          readyAt: entry.readyAt,
+          notifiedAt: entry.notifiedAt,
+          finishedAt: entry.finishedAt,
+          lastFrame: entry.lastFrame && {
+            ...entry.lastFrame,
+            effects: entry.lastFrame.effects.slice(0, 6),
+          },
+          effects: entry.effects.slice(0, 6),
+          timingErrors: entry.timingErrors.slice(0, 3),
+        })),
+        skips: proof.snapshotSkips
+          .slice(-3)
+          .map((entry) => ({ ...entry, effects: entry.effects.slice(0, 6) })),
+        cancellations: proof.cancellations.slice(-6),
+      };
+    })
+    .catch(() => null);
+  // No URLs, actor IDs, names, response bodies or credentials in failure logs.
+  console.log(
+    'Native route failure window: ' +
+      JSON.stringify({
+        browser: diagnostic,
+        denialTransport: denialWindows.get(page),
+      }),
+  );
+});
 
 /** Passive native/WAAPI observation; React still invokes and commits transitions. */
 async function observeMotion(page: Page, unsupported = false) {
@@ -197,18 +250,59 @@ async function observeMotion(page: Page, unsupported = false) {
             ? wrapped
             : { ...options, update: wrapped },
         );
+        const liveEffects = (): NativeReadyEvidence['effects'] => {
+          const names = new Set(
+            [...entry.old, ...entry.next].map((capture) => capture.name),
+          );
+          return document.getAnimations().flatMap((animation) => {
+            const effect = animation.effect as KeyframeEffect | null;
+            const pseudo = effect?.pseudoElement;
+            const name =
+              /^::view-transition-(?:group|old|new)\(([^)]+)\)$/.exec(
+                pseudo ?? '',
+              )?.[1];
+            if (!effect || !pseudo || !name || !names.has(name)) return [];
+            const timing = effect.getComputedTiming();
+            return [
+              {
+                pseudo,
+                playState: animation.playState,
+                startTime:
+                  typeof animation.startTime === 'number'
+                    ? animation.startTime
+                    : null,
+                currentTime:
+                  typeof animation.currentTime === 'number'
+                    ? animation.currentTime
+                    : null,
+                activeDuration: Number(timing.activeDuration),
+                endTime: Number(timing.endTime),
+                progress: timing.progress,
+              },
+            ];
+          });
+        };
+        const running = (effects: NativeReadyEvidence['effects']) =>
+          effects.some(
+            (effect) =>
+              effect.playState === 'running' &&
+              effect.progress !== null &&
+              Number.isFinite(effect.activeDuration) &&
+              effect.activeDuration > 0 &&
+              effect.startTime !== null &&
+              Number.isFinite(effect.startTime) &&
+              effect.currentTime !== null &&
+              Number.isFinite(effect.currentTime) &&
+              effect.currentTime >= 0 &&
+              effect.currentTime < effect.endTime,
+          );
         const skip = transition.skipTransition.bind(transition);
         transition.skipTransition = () => {
+          const effects = liveEffects();
           proof.snapshotSkips.push({
-            whileActive: document
-              .getAnimations()
-              .some(
-                (animation) =>
-                  (
-                    animation.effect as KeyframeEffect | null
-                  )?.pseudoElement?.startsWith('::view-transition') &&
-                  animation.playState === 'running',
-              ),
+            at: performance.now(),
+            effects,
+            whileActive: entry.ready && !entry.finished && running(effects),
           });
           return skip();
         };
@@ -282,14 +376,30 @@ async function observeMotion(page: Page, unsupported = false) {
         };
         const frame = () => {
           sample();
-          if (!notified && entry.ready) {
+          const evidence: NativeReadyEvidence = {
+            at: performance.now(),
+            ready: entry.ready,
+            finished: entry.finished,
+            effects: liveEffects(),
+          };
+          entry.lastFrame = evidence;
+          if (
+            !notified &&
+            entry.ready &&
+            !entry.finished &&
+            running(evidence.effects)
+          ) {
             notified = true;
-            // React replaces paused geometry in its own ready callback. The
-            // first frame observes the surviving effects after those callbacks,
-            // rather than racing a pending replacement at native ready.
+            entry.notifiedAt = evidence.at;
+            // Qualify the owned real animation in this browser frame. Passing
+            // evidence avoids a second Node-to-browser validation round trip.
             void (
-              window as Window & { routeMotionReady?: () => Promise<void> }
-            ).routeMotionReady?.();
+              window as Window & {
+                routeMotionReady?: (
+                  evidence: NativeReadyEvidence,
+                ) => Promise<void>;
+              }
+            ).routeMotionReady?.(evidence);
           }
           if (!entry.finished) requestAnimationFrame(frame);
         };
@@ -645,6 +755,18 @@ async function withMotionActor(
 
 /** Hold delivery of a genuine read-only server denial, never fabricate Flight. */
 async function holdIdentityDenial(page: Page, actorId: string) {
+  const diagnostic = {
+    fetchedAtNode: null,
+    releasedAtNode: null,
+    deliveredAtNode: null,
+    releaseReason: null,
+  } as {
+    fetchedAtNode: number | null;
+    releasedAtNode: number | null;
+    deliveredAtNode: number | null;
+    releaseReason: 'native-ready' | 'cleanup' | null;
+  };
+  denialWindows.set(page, diagnostic);
   let release!: () => void;
   let fetched!: () => void;
   let fetchFailed!: (error: unknown) => void;
@@ -653,6 +775,13 @@ async function holdIdentityDenial(page: Page, actorId: string) {
   const gate = new Promise<void>((resolve) => {
     release = resolve;
   });
+  const releaseHeld = (reason: 'native-ready' | 'cleanup') => {
+    if (diagnostic.releasedAtNode === null) {
+      diagnostic.releasedAtNode = Date.now();
+      diagnostic.releaseReason = reason;
+    }
+    release();
+  };
   const ready = new Promise<void>((resolve, reject) => {
     fetched = resolve;
     fetchFailed = reject;
@@ -676,9 +805,11 @@ async function holdIdentityDenial(page: Page, actorId: string) {
       const response = await route.fetch({ timeout: 15_000 });
       expect(response.ok()).toBe(true);
       expect(await response.text()).toMatch(/"ok":false[^\n]*"code":"P1001"/);
+      diagnostic.fetchedAtNode = Date.now();
       fetched();
       await gate;
       await route.fulfill({ response });
+      diagnostic.deliveredAtNode = Date.now();
       delivered();
     } catch (error) {
       fetchFailed(error);
@@ -699,15 +830,15 @@ async function holdIdentityDenial(page: Page, actorId: string) {
     await request;
     await ready;
   } catch (error) {
-    release();
+    releaseHeld('cleanup');
     await page.unroute(pattern, handler);
     throw error;
   }
   return {
-    release,
+    release: () => releaseHeld('native-ready'),
     delivery,
     dispose: async () => {
-      release();
+      releaseHeld('cleanup');
       await delivery;
       await page.unroute(pattern, handler);
     },
@@ -734,26 +865,20 @@ async function assertNoNativeSnapshots(page: Page) {
 async function atNextNativeReady(page: Page, run: () => Promise<void>) {
   return armNativeReady(
     page,
-    async () => {
-      const active = await page.evaluate(() => {
-        const p = (window as Window & { routeMotionProof?: Proof })
-          .routeMotionProof!;
-        return (
-          p.transitions.some((entry) => entry.ready && !entry.finished) &&
-          document
-            .getAnimations()
-            .some(
-              (animation) =>
-                (
-                  animation.effect as KeyframeEffect | null
-                )?.pseudoElement?.startsWith('::view-transition') &&
-                animation.playState === 'running',
-            )
+    (evidence) => {
+      const active =
+        evidence?.ready &&
+        !evidence.finished &&
+        evidence.effects.some(
+          (effect) =>
+            effect.playState === 'running' &&
+            effect.progress !== null &&
+            effect.activeDuration > 0,
         );
-      });
       expect(
         active,
-        'The operation must occur during an actual running native snapshot animation',
+        'The operation must occur during an actual running owned native snapshot animation: ' +
+          JSON.stringify(evidence),
       ).toBe(true);
     },
     run,

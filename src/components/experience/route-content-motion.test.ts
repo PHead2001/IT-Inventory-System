@@ -13,8 +13,13 @@ let nativeCancel: ReturnType<typeof vi.fn>;
 let skip: ReturnType<typeof vi.fn>;
 let imageCancel: ReturnType<typeof vi.fn>;
 let unrelatedCancel: ReturnType<typeof vi.fn>;
-let replacements: Array<{ cancel: ReturnType<typeof vi.fn> }>;
+let replacements: Array<{
+  cancel: ReturnType<typeof vi.fn>;
+  startTime: number | null;
+}>;
 let duration: string;
+let clock: unknown;
+let clockReads: number;
 
 beforeEach(() => {
   duration = '200ms';
@@ -37,8 +42,22 @@ beforeEach(() => {
   unrelatedCancel = vi.fn();
   skip = vi.fn();
   replacements = [];
+  clock = 500;
+  clockReads = 0;
+  Object.defineProperty(document, 'timeline', {
+    configurable: true,
+    value: {
+      get currentTime() {
+        clockReads++;
+        return clock;
+      },
+    },
+  });
   animate = vi.fn(() => {
-    const replacement = { cancel: vi.fn() };
+    const replacement = {
+      cancel: vi.fn(),
+      startTime: 500 + replacements.length * 66,
+    };
     replacements.push(replacement);
     return replacement;
   });
@@ -106,7 +125,31 @@ afterEach(() => {
   Reflect.deleteProperty(document, 'activeViewTransition');
   Reflect.deleteProperty(document, 'getAnimations');
   Reflect.deleteProperty(document.documentElement, 'animate');
+  Reflect.deleteProperty(document, 'timeline');
 });
+
+it('starts every body replacement on one sampled document clock despite independently assigned animation starts', () => {
+  clock = 723.25;
+  routeContentMotion({ name }, () => true);
+  expect(animate).toHaveBeenCalledTimes(3);
+  expect(clockReads).toBe(1);
+  expect(replacements.map((effect) => effect.startTime)).toEqual([
+    723.25, 723.25, 723.25,
+  ]);
+});
+
+it.each([null, undefined, NaN, Infinity, { value: 500 }])(
+  'retires all replacements if the document clock is unavailable or invalid: %s',
+  (value) => {
+    clock = value;
+    const unsupported = vi.fn();
+    routeContentMotion({ name }, () => true, unsupported);
+    expect(animate).toHaveBeenCalledTimes(3);
+    replacements.forEach(({ cancel }) => expect(cancel).toHaveBeenCalledOnce());
+    expect(unsupported).toHaveBeenCalledOnce();
+    expect(skip).toHaveBeenCalledOnce();
+  },
+);
 
 it('preserves the old scrolled bitmap at y=-602 while the new body begins at y=-77', () => {
   const cleanup = routeContentMotion({ name }, () => true);
@@ -293,7 +336,7 @@ it.each([
 it('cancels partially created effects if pseudo-element animation is unsupported', () => {
   animate
     .mockImplementationOnce(() => {
-      const replacement = { cancel: vi.fn() };
+      const replacement = { cancel: vi.fn(), startTime: null };
       replacements.push(replacement);
       return replacement;
     })
@@ -302,6 +345,26 @@ it('cancels partially created effects if pseudo-element animation is unsupported
     });
   routeContentMotion({ name }, () => true);
   expect(replacements[0].cancel).toHaveBeenCalledOnce();
+  expect(skip).toHaveBeenCalledOnce();
+});
+
+it('cancels the full replacement set if assigning the shared clock is unsupported', () => {
+  animate.mockImplementationOnce(() => {
+    const replacement = {
+      cancel: vi.fn(),
+      get startTime() {
+        return null;
+      },
+      set startTime(_value: number | null) {
+        throw new Error('Unsupported animation clock');
+      },
+    };
+    replacements.push(replacement);
+    return replacement;
+  });
+  routeContentMotion({ name }, () => true);
+  expect(animate).toHaveBeenCalledTimes(3);
+  replacements.forEach(({ cancel }) => expect(cancel).toHaveBeenCalledOnce());
   expect(skip).toHaveBeenCalledOnce();
 });
 
