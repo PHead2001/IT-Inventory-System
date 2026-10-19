@@ -400,6 +400,17 @@ writes were performed. Preparation is not runtime proof for `96ede957`.
 All 76 matrix rows, accepted history and existing dispositions remain unchanged;
 this checkpoint promotes no acceptance row.
 
+### PR57 Move empty-result guidance checkpoint, 2026-10-19
+
+The working-tree repair based on `61caf976` removes the historical-record
+suggestion from Move's active-only empty results. Ordinary active search retains
+that guidance, and ordinary historical search does not repeat it. The three-case
+regression first failed only for Move, then the complete provider suite passed
+110 tests with a 512 MiB Node heap and one worker. Scoped lint, formatting and
+diff checks passed. This is source/component proof only: final-candidate database,
+CI, remote review, hosted, motion and theme acceptance remain pending. All 76
+matrix rows and their existing dispositions remain unchanged.
+
 ## PR54 hosted closeout failures at a354eb83
 
 On 2026-10-15, fresh Vercel and Supabase provider reads verified READY preview

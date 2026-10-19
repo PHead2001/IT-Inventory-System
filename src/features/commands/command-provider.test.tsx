@@ -1358,6 +1358,49 @@ it.each(['search', 'add'] as const)(
   },
 );
 
+it.each(['move', 'open-active', 'open-historical'] as const)(
+  'empty result guidance matches the available scope in %s',
+  async (mode) => {
+    vi.mocked(fetch).mockImplementation(() =>
+      Promise.resolve(
+        new Response(
+          JSON.stringify({
+            identity: { actorId: 'actor', backend: 'local-backend' },
+            result: { version: 1, rows: [], hasMore: false },
+          }),
+        ),
+      ),
+    );
+    render(<Workspace />);
+    open();
+    await act(async () => {});
+    if (mode === 'move')
+      fireEvent.click(
+        screen.getByRole('option', { name: /Move asset or stock/ }),
+      );
+    if (mode === 'open-historical')
+      fireEvent.click(
+        screen.getByRole('checkbox', { name: /Include retired/ }),
+      );
+    fireEvent.change(screen.getByRole('combobox'), {
+      target: { value: 'unfindable-equipment' },
+    });
+    await settle();
+    const suggestHistorical = mode === 'open-active';
+    expect(
+      screen.getByText(
+        'No matches. Try a name, tag, serial, or code' +
+          (suggestHistorical ? ', or include historical records' : '') +
+          '.',
+      ),
+    ).toBeVisible();
+    expect(
+      screen.queryByRole('checkbox', { name: /Include retired/ }) !== null,
+    ).toBe(mode !== 'move');
+    expect(navigation.push).not.toHaveBeenCalled();
+  },
+);
+
 it('hides historical scope in Move, sends active-only purpose and rejects retired destinations', async () => {
   vi.mocked(fetch).mockImplementation(() =>
     Promise.resolve(

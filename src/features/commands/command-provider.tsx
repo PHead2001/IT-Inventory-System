@@ -1192,7 +1192,7 @@ export function CommandProvider({
                   actions.length === 0 && (
                     <p role="status">
                       No matches. Try a name, tag, serial, or code
-                      {scope === 'active'
+                      {intent !== 'move' && scope === 'active'
                         ? ', or include historical records'
                         : ''}
                       .
