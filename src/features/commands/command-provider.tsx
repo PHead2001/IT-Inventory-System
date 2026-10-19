@@ -6,6 +6,7 @@ import {
   useEffect,
   useEffectEvent,
   useInsertionEffect,
+  useId,
   useLayoutEffect,
   useRef,
   useState,
@@ -61,6 +62,7 @@ import { requestAppNavigation } from '@/lib/navigation/guard';
 import { recordStatusLabel } from '@/lib/record-status';
 
 type CommandContextValue = {
+  available: boolean;
   enabled: boolean;
   held: boolean;
   persistence: boolean;
@@ -103,12 +105,16 @@ export function useShortcutHint(href: string) {
 }
 export function CommandButtons() {
   const context = useContext(CommandContext);
+  const statusId = useId();
+  const available = context?.available === true;
   return (
     <>
       <Button
         type="button"
         variant="outline"
         data-command-launcher="true"
+        disabled={!available}
+        aria-describedby={available ? undefined : statusId}
         onClick={(event) => context?.open('palette', event.currentTarget)}
         aria-label="Search and commands"
       >
@@ -121,11 +127,21 @@ export function CommandButtons() {
       <Button
         type="button"
         variant="outline"
+        disabled={!available}
+        aria-describedby={available ? undefined : statusId}
         onClick={(event) => context?.open('help', event.currentTarget)}
         aria-label="Keyboard shortcuts"
       >
         <Keyboard size={18} aria-hidden="true" />
       </Button>
+      {!available && (
+        <span id={statusId} role="status" className="experience-muted text-xs">
+          Checking access.{' '}
+          <span className="sr-only">
+            Search and help are temporarily unavailable.
+          </span>
+        </span>
+      )}
     </>
   );
 }
@@ -164,6 +180,13 @@ export function CommandProvider({
   const router = useRouteRouter();
   const boundary = useRouteCommandBoundary(actorId, backend);
   const privacy = usePrivacyReadiness();
+  // Read the same authority as open(), including a post-commit subscription
+  // check when the route provider publishes its fresh grant after child render.
+  const available = useSyncExternalStore(
+    boundary.subscribe,
+    () => freshPresentationGrant(privacy) && boundary.authorized(),
+    () => false,
+  );
   const latestPrivacy = useRef(privacy);
   useInsertionEffect(() => {
     latestPrivacy.current = privacy;
@@ -877,7 +900,7 @@ export function CommandProvider({
   }
   return (
     <CommandContext.Provider
-      value={{ enabled, held, persistence, setEnabled, open }}
+      value={{ available, enabled, held, persistence, setEnabled, open }}
     >
       <div
         ref={shell}

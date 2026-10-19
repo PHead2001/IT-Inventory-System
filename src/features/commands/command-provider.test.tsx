@@ -596,6 +596,13 @@ it('disables every shortcut including K/help, persists by actor/backend, and lea
   expect(navigation.push).not.toHaveBeenCalled();
   fireEvent.click(screen.getByRole('button', { name: 'Keyboard shortcuts' }));
   expect(screen.getByText(/Application shortcuts are disabled/)).toBeVisible();
+  fireEvent.click(screen.getByRole('button', { name: 'Close dialog' }));
+  expect(
+    screen.getByRole('button', { name: 'Search and commands' }),
+  ).toBeEnabled();
+  open();
+  await settle();
+  expect(screen.getByRole('combobox')).toHaveValue('');
 });
 it('reports unavailable storage honestly with a session fallback', () => {
   render(<Workspace />);
@@ -831,6 +838,35 @@ it.each(['privacy', 'assignment'] as const)(
     expect(launcher).not.toHaveFocus();
   },
 );
+it('disables Search and Help until fresh authority returns without queuing an opening or changing a draft', async () => {
+  const view = render(<Workspace fresh={false} />);
+  const draft = screen.getByLabelText('Retained draft');
+  fireEvent.change(draft, { target: { value: 'Unchanged local draft' } });
+  const search = screen.getByRole('button', { name: 'Search and commands' });
+  const help = screen.getByRole('button', { name: 'Keyboard shortcuts' });
+  for (const launcher of [search, help]) {
+    expect(launcher).toBeDisabled();
+    expect(launcher).toHaveAccessibleDescription(
+      'Checking access. Search and help are temporarily unavailable.',
+    );
+    fireEvent.click(launcher);
+  }
+  expect(screen.getByRole('status')).toHaveTextContent('Checking access');
+  expect(screen.queryByRole('dialog')).toBeNull();
+  view.rerender(<Workspace />);
+  await act(async () => {});
+  expect(search).toBeEnabled();
+  expect(help).toBeEnabled();
+  expect(search).not.toHaveAttribute('aria-describedby');
+  expect(screen.queryByRole('dialog')).toBeNull();
+  expect(draft).toHaveValue('Unchanged local draft');
+  expect(navigation.push).not.toHaveBeenCalled();
+  fireEvent.click(help);
+  expect(
+    screen.getByRole('dialog', { name: 'Keyboard shortcuts' }),
+  ).toBeVisible();
+});
+
 it('dismisses search during ordinary recheck and never lets getUser alone authorize opening or executing', async () => {
   const view = render(<Workspace />);
   const draft = screen.getByLabelText('Retained draft');
@@ -840,6 +876,12 @@ it('dismisses search during ordinary recheck and never lets getUser alone author
   await settle();
   view.rerender(<Workspace fresh={false} />);
   expect(screen.queryByRole('dialog')).toBeNull();
+  expect(
+    screen.getByRole('button', { name: 'Search and commands' }),
+  ).toBeDisabled();
+  expect(
+    screen.getByRole('button', { name: 'Keyboard shortcuts' }),
+  ).toBeDisabled();
   fireEvent.click(screen.getByRole('button', { name: 'Search and commands' }));
   fireEvent.keyDown(window, { key: 's' });
   await act(async () => {});
@@ -847,6 +889,8 @@ it('dismisses search during ordinary recheck and never lets getUser alone author
   expect(navigation.push).not.toHaveBeenCalled();
   expect(draft).toHaveValue('Untouched');
   view.rerender(<Workspace />);
+  await act(async () => {});
+  expect(screen.queryByRole('dialog')).toBeNull();
   open();
   await act(async () => {});
   await settle();

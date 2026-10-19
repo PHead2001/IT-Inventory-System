@@ -411,6 +411,18 @@ diff checks passed. This is source/component proof only: final-candidate databas
 CI, remote review, hosted, motion and theme acceptance remain pending. All 76
 matrix rows and their existing dispositions remain unchanged.
 
+### PR57 launcher availability checkpoint, 2026-10-19
+
+The working-tree repair based on `3ca00b28` exposes existing fresh privacy/route
+authority as launcher availability. Search and Help are disabled with accessible
+checking feedback while unavailable; fresh recovery enables them without opening
+an overlay or changing a retained draft. Both buttons remain usable with keyboard
+shortcuts disabled. Two readiness regressions failed before the repair; all 111
+provider tests then passed with a 512 MiB Node heap and one worker. This source
+UX repair does not establish the cause of any earlier hosted failure or provide
+browser acceptance. All 76 rows, existing dispositions and pending database, CI,
+remote review, hosted, motion and theme gates remain unchanged.
+
 ## PR54 hosted closeout failures at a354eb83
 
 On 2026-10-15, fresh Vercel and Supabase provider reads verified READY preview
