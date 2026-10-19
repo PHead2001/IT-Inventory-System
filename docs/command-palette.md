@@ -274,6 +274,15 @@ does not establish those contracts. Planner flags, cost constants and operator
 leakproof flags remain unchanged; a failed budget or eligibility check remains
 an unresolved criterion.
 
+The emitted-order observer converts each whole portal record to JSON before
+extracting its ID. PL/pgSQL caches the type of a statically referenced record
+field, so the text anti-sort fixture followed by deployed UUID rows must not use
+`candidate.id`, even with a later cast. Same-backend regressions alternate text,
+UUID with a different row descriptor, text again, numeric and null IDs. They
+retain native JSON values and actual portal order without rewriting or sorting
+the deployed query. This observer repair does not change the 54 full-projection
+cost/semantic cases, nine index-eligibility plans or required Data API proof.
+
 For historical context, diagnostic commit
 `856f828b74c38c433cecbf8d2c90931e432acf4a` is dated 2026-10-15.
 [CI run 38807984527](https://github.com/PHead2001/IT-Inventory-System/actions/runs/38807984527)

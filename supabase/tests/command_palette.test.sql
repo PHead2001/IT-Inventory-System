@@ -418,16 +418,33 @@ begin
  return answer;
 end $$;
 -- Iterate the actual portal stream. Never sort deployed rows in the observer.
+-- The same session observes text anti-sort fixtures and native deployed UUIDs.
+-- A static candidate.id expression caches the first record-field type, even if
+-- cast afterward. Convert the whole anonymous record to fixed jsonb first.
 create function pg_temp.cost_emitted_ids(p_sql text) returns jsonb language plpgsql security invoker as $$
 declare candidate record; answer jsonb:='[]'::jsonb;
 begin
  for candidate in execute p_sql loop
-  answer:=answer||jsonb_build_array(candidate.id);
+  answer:=answer||jsonb_build_array(to_jsonb(candidate)->'id');
  end loop;
  return answer;
 end $$;
 select is(pg_temp.cost_emitted_ids('select id from (values (1,''second''),(2,''first'')) emitted(position,id) order by position'),
  '["second","first"]'::jsonb,'emitted-order observer preserves deliberately nonalphabetical stream');
+-- Change both the id type and anonymous row descriptor in this same backend;
+-- the deployed query remains untouched, and JSON numbers/null must not be text.
+select is(pg_temp.cost_emitted_ids($stream$
+ select 'uuid fixture' description,id from (values
+ (1,'a3010000-0000-4000-8000-000000000009'::uuid),
+ (2,'a3010000-0000-4000-8000-000000000001'::uuid)) emitted(position,id) order by position
+$stream$),'["a3010000-0000-4000-8000-000000000009","a3010000-0000-4000-8000-000000000001"]'::jsonb,
+ 'emitted-order observer accepts UUID IDs and a changed descriptor after text without sorting');
+select is(pg_temp.cost_emitted_ids('select id from (values (1,''tail''),(2,''head'')) emitted(position,id) order by position'),
+ '["tail","head"]'::jsonb,'emitted-order observer returns to text after UUID in the same backend');
+select is(pg_temp.cost_emitted_ids('select id from (values (1,2),(2,1)) emitted(position,id) order by position'),
+ '[2,1]'::jsonb,'emitted-order observer preserves native numeric JSON IDs instead of casting to text');
+select is(pg_temp.cost_emitted_ids('select null::uuid id'),
+ '[null]'::jsonb,'emitted-order observer preserves native null after changing ID types');
 create function pg_temp.cost_nodes(p_plan jsonb) returns setof jsonb language sql security invoker as $$
  with recursive nodes(node) as (
   select p_plan->0->'Plan' union all
