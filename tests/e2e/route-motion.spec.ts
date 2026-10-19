@@ -277,7 +277,7 @@ async function observeMotion(page: Page, unsupported = false) {
                     : null,
                 activeDuration: Number(timing.activeDuration),
                 endTime: Number(timing.endTime),
-                progress: timing.progress,
+                progress: timing.progress ?? null,
               },
             ];
           });
