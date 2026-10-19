@@ -10,11 +10,25 @@ const refPattern = /^[a-z0-9]{20}$/;
 const shaPattern = /^[0-9a-f]{40}$/;
 
 export class PreviewAccessError extends Error {
-  constructor(code, message, pending = false) {
+  constructor(code, message, pending = false, reason) {
     super(message);
     this.code = code;
     this.pending = pending;
+    this.reason = reason;
   }
+}
+
+// Fixed allowlist only: never print provider bodies, branch fields or errors.
+export function previewFailureGuidance(error) {
+  if (error?.code === 'BRANCH_PENDING') {
+    if (error.reason === 'BRANCH_ABSENT')
+      return 'BRANCH_ABSENT: No matching native Supabase child exists. Inspect the Supabase GitHub integration and its PR provisioning result; follow docs/preview-staff-access.md before retrying. Staff workflow_dispatch reconciles an existing child and cannot create one. Capacity refusal is not established by absence alone.';
+    if (error.reason === 'BRANCH_UNHEALTHY')
+      return 'BRANCH_UNHEALTHY: The matching child exists but is not healthy. Inspect its native Supabase provisioning result and recover that child before retrying staff reconciliation; see docs/preview-staff-access.md.';
+  }
+  if (error?.code === 'DEPLOYMENT_PENDING')
+    return 'DEPLOYMENT_PENDING: The exact PR revision has no successful verified Supabase deployment. Inspect the native Supabase Preview check for the current head SHA and child; after native recovery, retry staff reconciliation. See docs/preview-staff-access.md.';
+  return '';
 }
 
 export function assertPullRequest(pr, repository, expectedSha) {
@@ -48,6 +62,7 @@ export function selectPreviewBranch(branches, pr) {
       'BRANCH_PENDING',
       'Preview branch has not been created',
       true,
+      'BRANCH_ABSENT',
     );
   if (matches.length !== 1)
     throw new PreviewAccessError(
@@ -137,6 +152,7 @@ export function assertReady(branch, checks, sha) {
       'BRANCH_PENDING',
       'Preview branch is not healthy',
       true,
+      'BRANCH_UNHEALTHY',
     );
   const check = selectDeploymentCheck(checks, sha, branch.project_ref);
   if (check.status !== 'completed' || check.conclusion !== 'success') {

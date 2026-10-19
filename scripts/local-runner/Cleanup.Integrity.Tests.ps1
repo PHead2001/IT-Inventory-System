@@ -75,6 +75,10 @@ function Get-VMHardDiskDrive {
     if ($script:mode -in @('rename-nested-config','rename-root-config')) { [pscustomobject]@{ Path = Join-Path $script:RunnerRoot 'external-disk.vhdx' }; return }
     [pscustomobject]@{ Path = $script:diskPath }
 }
+function Get-VHD($Path) {
+    if ($Path -ine $script:diskPath -and $Path -ine (Join-Path $script:RunnerRoot 'external-disk.vhdx')) { throw 'Disk lookup escaped the fixed cleanup fixture.' }
+    return [pscustomobject]@{ VhdType = 'Dynamic'; ParentPath = '' }
+}
 function Stop-VM {
     [CmdletBinding()]
     param($VM, $Name, [switch] $TurnOff, [switch] $Force)

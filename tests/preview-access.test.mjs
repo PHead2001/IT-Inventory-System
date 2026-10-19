@@ -15,6 +15,7 @@ import {
   CHECK_APP,
   authPolicyPatch,
   selectDeploymentCheck,
+  previewFailureGuidance,
 } from '../scripts/preview-access-core.mjs';
 
 const repository = 'PHead2001/IT-Inventory-System';
@@ -161,6 +162,81 @@ const weakPassword = () =>
   Object.assign(new Error('Preview access request failed'), {
     code: 'AUTH_PASSWORD_LENGTH_PENDING',
   });
+
+test('missing and unhealthy native branches retain pending compatibility with distinct recovery guidance', async () => {
+  for (const [reason, overrides] of [
+    ['BRANCH_ABSENT', { branches: [] }],
+    [
+      'BRANCH_UNHEALTHY',
+      {
+        branches: [
+          {
+            project_ref: ref,
+            parent_project_ref: PARENT_REF,
+            is_default: false,
+            git_branch: 'feature',
+            pr_number: 9,
+            status: 'COMING_UP',
+          },
+        ],
+      },
+    ],
+  ]) {
+    const { run, writes } = fixture(overrides);
+    let pauses = 0;
+    await assert.rejects(
+      run({
+        attempts: 2,
+        pause: async () => {
+          pauses++;
+        },
+      }),
+      (error) => {
+        assert.equal(error.code, 'BRANCH_PENDING');
+        assert.equal(error.reason, reason);
+        assert.equal(error.pending, true);
+        const guidance = previewFailureGuidance(error);
+        assert.match(guidance, new RegExp(reason));
+        if (reason === 'BRANCH_ABSENT') {
+          assert.match(guidance, /cannot create one/);
+          assert.match(guidance, /not established by absence alone/);
+        } else assert.match(guidance, /exists but is not healthy/);
+        return true;
+      },
+    );
+    assert.equal(pauses, 1);
+    assert.deepEqual(writes, []);
+  }
+});
+
+test('native deployment guidance is fixed and never renders provider error content', async () => {
+  const { run, writes } = fixture({
+    checks: listing({ ...successfulCheck, conclusion: 'failure' }),
+  });
+  await assert.rejects(run(), (error) => {
+    assert.equal(error.code, 'DEPLOYMENT_PENDING');
+    assert.match(previewFailureGuidance(error), /exact PR revision/);
+    return true;
+  });
+  assert.deepEqual(writes, []);
+  const sentinel = 'PRIVATE_PROVIDER_BODY';
+  assert.equal(
+    previewFailureGuidance({
+      code: sentinel,
+      reason: sentinel,
+      message: sentinel,
+    }),
+    '',
+  );
+  assert.doesNotMatch(
+    previewFailureGuidance({
+      code: 'BRANCH_PENDING',
+      reason: 'BRANCH_ABSENT',
+      message: sentinel,
+    }),
+    /PRIVATE_PROVIDER_BODY/,
+  );
+});
 
 test('retries delayed Auth policy propagation for create and update after fresh guards', async (t) => {
   for (const existing of [false, true])

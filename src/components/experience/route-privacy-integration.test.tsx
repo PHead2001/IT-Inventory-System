@@ -521,7 +521,7 @@ it.each(['denial', 'logout', 'auth'] as const)(
   },
 );
 
-it('declining the real unknown-outcome logout guard preserves presentation; approved exit invalidates before action dispatch', async () => {
+it('declining the real unknown-outcome logout guard preserves presentation; failed approved exit needs fresh verification', async () => {
   await admitted();
   const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false);
   const form = screen
@@ -530,15 +530,33 @@ it('declining the real unknown-outcome logout guard preserves presentation; appr
   fireEvent.submit(form);
   expect(runtime.signOut).not.toHaveBeenCalled();
   expect(controls.motion.enabled).toBe(true);
-  runtime.signOut.mockImplementation(async () => {
+  const logout = deferred<{ ok: false; message: string }>();
+  runtime.signOut.mockImplementation(() => {
     expect(document.documentElement.dataset.routeMotionPrivate).toBe('false');
     expect(controls.scope.state.snapshot().pending).toBe(false);
-    return { ok: false, message: 'Sign-out unavailable.' };
+    return logout.promise;
   });
   confirm.mockReturnValue(true);
   fireEvent.submit(form);
   await waitFor(() => expect(runtime.signOut).toHaveBeenCalledOnce());
   expect(controls.motion.enabled).toBe(false);
+  const identity = deferred<{
+    status: 'match';
+    generation: { status: 'absent' };
+  }>();
+  runtime.identity.mockReturnValue(identity.promise);
+  const priorChecks = runtime.identity.mock.calls.length;
+  await act(async () =>
+    logout.resolve({ ok: false, message: 'Sign-out unavailable.' }),
+  );
+  await waitFor(() =>
+    expect(runtime.identity.mock.calls.length).toBeGreaterThan(priorChecks),
+  );
+  expect(controls.motion.enabled).toBe(false);
+  await act(async () =>
+    identity.resolve({ status: 'match', generation: { status: 'absent' } }),
+  );
+  await waitFor(() => expect(controls.motion.enabled).toBe(true));
 });
 
 // The injected stale context here targets the insertion-order race independently

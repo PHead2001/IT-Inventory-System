@@ -9,6 +9,9 @@ import {
   RoutePresentationSourceContext,
 } from './route-presentation-source';
 import { createRoutePresentationLifetime } from './route-presentation-lifetime';
+import { routeContentMotion } from './route-content-motion';
+
+vi.mock('./route-content-motion', () => ({ routeContentMotion: vi.fn() }));
 
 const state = vi.hoisted(() => ({
   boundaries: [] as ViewTransitionProps[],
@@ -25,6 +28,7 @@ vi.mock('./route-motion', () => ({
     return {
       enabled: state.enabled,
       current: () => state.current,
+      validNow: () => state.current && state.enabled,
       intent: primary
         ? null
         : {
@@ -55,6 +59,7 @@ vi.mock('./route-motion', () => ({
           : null,
       cancelIfInvalid: state.cancel,
       finishPairedContentAfterSnapshot: state.finish,
+      rejectTitleSnapshot: vi.fn(),
     };
   },
 }));
@@ -135,6 +140,12 @@ it('inherits the original source denial lease through body capture and releases 
   expect(ticket.current()).toBe(true); // No competing source was mounted.
   lifetime.navigation();
   const callback = state.boundaries.at(-1)!.onShare!;
+  const cancelGeometry = vi.fn(() => expect(ticket.current()).toBe(true));
+  vi.mocked(routeContentMotion).mockImplementationOnce((_instance, valid) => {
+    expect(valid()).toBe(true);
+    expect(state.finish).not.toHaveBeenCalled();
+    return cancelGeometry;
+  });
   let cleanup: unknown;
   act(() => {
     cleanup = callback({ name: 'inventory-title-proof-content' } as never, []);
@@ -142,12 +153,18 @@ it('inherits the original source denial lease through body capture and releases 
   expect(state.finish).toHaveBeenCalledWith({
     name: 'inventory-title-proof-content',
   });
+  expect(routeContentMotion).toHaveBeenCalledWith(
+    { name: 'inventory-title-proof-content' },
+    expect.any(Function),
+    expect.any(Function),
+  );
   expect(ticket.current()).toBe(true);
   expect(cleanup).toEqual(expect.any(Function));
   act(() => {
     if (typeof cleanup === 'function') cleanup();
   });
   expect(ticket.current()).toBe(false);
+  expect(cancelGeometry).toHaveBeenCalledOnce();
   const next = lifetime.capture(
     source,
     () => true,
@@ -175,6 +192,7 @@ it('rejects unrelated or retired callbacks before acquiring a source handoff', (
   state.current = false;
   callback({ name: 'inventory-title-proof-content' } as never, []);
   expect(state.finish).not.toHaveBeenCalled();
+  expect(routeContentMotion).not.toHaveBeenCalled();
 });
 
 it('rejects an old exact primary callback before acquiring the renewed source exit lease', () => {

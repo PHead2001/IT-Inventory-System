@@ -18,6 +18,7 @@ import {
 import {
   assignmentEpoch,
   readPrivacyRevocationRevision,
+  revokePrivatePresentation,
   subscribePrivacyRevocation,
 } from '@/features/scan/assign-batch';
 import {
@@ -71,6 +72,7 @@ const RouteMotionContext = createContext<{
   actorId: string;
   latestPrivacy: { current: ReturnType<typeof usePrivacyReadiness> };
   withdrawGrant: () => void;
+  beginLogoutAttempt: () => (confirmed: boolean) => void;
 } | null>(null);
 // Client insertion effects alone bind this opaque presentation owner. No actor,
 // credentials, request state or private DOM is stored in a module singleton.
@@ -122,6 +124,12 @@ export function useInvalidateRouteMotion() {
   };
 }
 
+/** Suspension releases only through a new authoritative privacy check. */
+export function useRouteMotionLogoutAttempt() {
+  const context = useContext(RouteMotionContext);
+  return () => context?.beginLogoutAttempt() ?? (() => {});
+}
+
 export function RouteMotionProvider({
   actorId,
   children,
@@ -135,6 +143,7 @@ export function RouteMotionProvider({
   const [mountedActor] = useState(actorId);
   const liveScrollActor = useRef(actorId);
   const suspended = useRef(true);
+  const logoutAttempt = useRef<symbol | null>(null);
   const acceptedGrant = useRef<{ revision: number; epoch: number } | null>(
     null,
   );
@@ -505,7 +514,11 @@ export function RouteMotionProvider({
   ]);
   useLayoutEffect(() => {
     if (!lifecycleRef.current || currentRouteProvider !== providerToken) return;
-    if (mountedActor === actorId && freshPresentationGrant(privacy)) {
+    if (
+      mountedActor === actorId &&
+      freshPresentationGrant(privacy) &&
+      logoutAttempt.current === null
+    ) {
       if (suspended.current && state.resume()) {
         suspended.current = false;
         readiness.resume();
@@ -732,6 +745,34 @@ export function RouteMotionProvider({
           suspended.current = true;
           acceptedGrant.current = null;
           presentation.invalidate();
+        },
+        beginLogoutAttempt: () => {
+          const current = () =>
+            lifecycleRef.current && currentRouteProvider === providerToken;
+          if (!current()) return () => {};
+          const attempt = Symbol();
+          logoutAttempt.current = attempt;
+          // The existing privacy subscriber synchronously suspends stores and
+          // cancels native snapshots before the form dispatches its action.
+          revokePrivatePresentation();
+          return (confirmed) => {
+            if (!current() || logoutAttempt.current !== attempt) return;
+            logoutAttempt.current = null;
+            if (confirmed) {
+              nativeScroll.invalidate();
+              latestPrivacy.current.navigation?.retire(providerToken);
+              suspended.current = true;
+              acceptedGrant.current = null;
+              presentation.invalidate();
+              loading.cancel();
+              pending.cancel(true);
+              readiness.close();
+              invalidateRouteMotion(state);
+            }
+            // Neither failure nor transport uncertainty is a grant. Retire any
+            // check from during the attempt and ask the coordinator anew.
+            revokePrivatePresentation();
+          };
         },
       }}
     >

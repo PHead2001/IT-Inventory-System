@@ -8,6 +8,14 @@ Workflow concurrency groups PR events and manual dispatches by execution ref and
 
 This policy takes effect after the owner merges the workflow into trusted `main`. It does not retroactively coalesce runs already queued under the earlier workflow. GitHub controls pending-run replacement; local contract tests verify the workflow configuration, while hosted acceptance must confirm that repeated PR updates leave only the active and newest pending runs.
 
+## Native branch failure recovery
+
+Staff reconciliation waits for existing native provisioning; it does not create a Supabase child. After its bounded readiness retries expire, `BRANCH_PENDING` now includes fixed guidance for `BRANCH_ABSENT` (no exact branch/PR match) or `BRANCH_UNHEALTHY` (the verified child exists but is not healthy). `DEPLOYMENT_PENDING` means no successful verified native check for the exact current PR head SHA and child. None of these conditions grants permission to skip the native check, use another child or change configuration.
+
+For an absent child, inspect the parent's Supabase GitHub integration and native PR provisioning result using the [native GitHub integration procedure](https://supabase.com/docs/guides/deployment/branching/github-integration). Confirm automatic branching and the configured Supabase-changes-only policy match the intended PR lifecycle. For an existing unhealthy child or failed deployment, inspect that child's native provisioning/check result and correct the reported cause through the existing provider procedure. Do not reset a child or close/reopen a PR as an automatic recovery step. Only diagnose provider capacity refusal when the provider supplies explicit evidence; an absent branch alone does not establish quota/capacity failure, and this workflow does not read a verified refusal signal.
+
+Once native provisioning has created the matching healthy child and its current-SHA Supabase Preview check succeeds, rerun the trusted-main staff workflow by PR number. `workflow_dispatch` can reconcile that existing child; it cannot create a missing native branch. A retry of staff reconciliation alone cannot repair native capacity or integration configuration. Activation still requires the owner merge into trusted `main`.
+
 ## Activation
 
 An owner must create a dedicated GitHub environment named `preview-access`, restrict its deployment branch policy to `main` only, and verify that restriction before adding any secrets. The environment name alone does not enforce this. The workflow also skips its privileged job unless `github.ref` is `refs/heads/main`. Do not copy any `production-database` environment secrets.

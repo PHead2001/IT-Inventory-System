@@ -328,6 +328,38 @@ describe('disposable local runner workflow contracts', () => {
     );
   });
 
+  it('supersedes older pilot runs per PR while keeping PRs and manual main dispatches separate', () => {
+    const { concurrency } = load(pilot);
+    const expression = '${{ github.event.pull_request.number || github.ref }}';
+    expect(concurrency).toEqual({
+      group: `local-runner-pilot-${expression}`,
+      'cancel-in-progress': true,
+    });
+
+    const groupFor = ({ pullRequestNumber, ref }) =>
+      concurrency.group.replace(expression, String(pullRequestNumber || ref));
+    expect(
+      groupFor({
+        pullRequestNumber: 53,
+        ref: 'refs/pull/53/merge',
+        headSha: 'older-head-sha',
+      }),
+    ).toBe(
+      groupFor({
+        pullRequestNumber: 53,
+        ref: 'refs/pull/53/merge',
+        headSha: 'newer-head-sha',
+      }),
+    );
+    expect(
+      groupFor({ pullRequestNumber: 54, ref: 'refs/pull/54/merge' }),
+    ).not.toBe(groupFor({ pullRequestNumber: 53, ref: 'refs/pull/53/merge' }));
+    expect(groupFor({ ref: 'refs/heads/main' })).toBe(
+      'local-runner-pilot-refs/heads/main',
+    );
+    expect(pilot).not.toMatch(/uses:\s*actions\/checkout@|secrets\./);
+  });
+
   it('makes only diagnostics and future-reuse inspection best-effort and preserves failing test gates', () => {
     const required = ci
       .split('  required:')[1]

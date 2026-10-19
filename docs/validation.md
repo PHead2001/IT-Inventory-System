@@ -610,6 +610,18 @@ The diagnostic `Local runner pilot` uses its exact workflow/head SHA and must re
 
 Failure reports retain seven-day GitHub artifact storage. Uploads are best-effort and warn when quota or availability prevents them; failed tests still fail the `required` job. An absent upload is a diagnostics limitation, never evidence that tests passed. Disposal must also occur after failed or cancelled jobs.
 
+Before artifact upload, the existing Playwright performance reporter prints and appends bounded Browser failure metadata to the job summary: up to twenty failed/interrupted/timed-out attempts, repository E2E source file/line, status, retry, worker index, error count and whether Playwright attached a trace. It reports omitted attempts explicitly. Titles, assertion messages/stacks, test output, attachment paths/contents, environment values and HTTP bodies are excluded. The existing list reporter remains the source for assertion details in the Validate browser workflows log. If artifact upload fails, the workflow also records the limitation in the summary: there is no downloadable trace from that upload. Cancellation or process termination before reporter completion can leave this metadata absent too. This fallback improves diagnosis and does not repair provider storage quota, preserve host traces or change test outcomes.
+
+`Contract.Tests.ps1` includes `Queue.Fairness.Tests.ps1`: newest-first queued
+previews versus older in-progress continuations, UTC/numeric ordering, duplicate
+status snapshots, undated compatibility, strict profile/capacity skipping and
+100-run/job overflow refusal with no pagination. The focused command is
+`powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File scripts/local-runner/Queue.Fairness.Tests.ps1`.
+Pilot binding and pickup-suspension suites also preserve exact-SHA eligibility
+and Stop checks around all read-only requests. These mocked checks prove demand
+selection; real GitHub job assignment and live installed queue draining need
+separate host evidence.
+
 ## Certification and provenance
 
 PR jobs check out and assert the exact head SHA. Main jobs report the actual post-merge SHA. The `required` check succeeds only when every mandatory stage succeeds. After it succeeds on main, the separate `Production database ready` job fails closed unless explicitly enabled and fully configured, then checks the pinned project and migration history before and after forward delivery. It is a production Vercel Deployment Check, not a PR branch-protection check. Failure artifacts include reports, traces, resource summaries and regenerated types, never credentials/environment dumps.

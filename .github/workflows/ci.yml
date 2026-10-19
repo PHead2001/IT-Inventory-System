@@ -169,7 +169,9 @@ jobs:
           retention-days: 7
       - name: Warn when failure diagnostics cannot be uploaded
         if: ${{ always() && steps.failure_artifact.outcome == 'failure' }}
-        run: echo '::warning::Failure diagnostics could not be uploaded; GitHub artifact storage quota or availability may prevent retrieval. Test failures remain failures.'
+        run: |
+          echo '::warning::Failure diagnostics could not be uploaded; no downloadable trace is available from this upload. Inspect Validate browser workflows logs and the bounded Browser failure metadata summary, when Playwright reached its reporter. Test failures remain failures.'
+          echo 'Failure artifact upload failed. GitHub storage quota or service availability may prevent retrieval. No downloadable trace is available from this upload; use the browser validation log and bounded failure metadata above if emitted. If the process terminated before the reporter finished, metadata may also be absent.' >> "$GITHUB_STEP_SUMMARY"
   production_database:
     name: ${{ github.event_name == 'push' && 'Production database ready' || 'Production database inactive (PR)' }}
     if: ${{ always() && github.event_name == 'push' && github.ref == 'refs/heads/main' }}

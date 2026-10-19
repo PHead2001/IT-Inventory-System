@@ -20,10 +20,377 @@ function Initialize-RunnerDpapi {
     Add-Type -AssemblyName System.Security -ErrorAction Stop
 }
 
-function Write-RunnerFailure([string] $Stage, [ValidateSet('STAGE_FAILED', 'NETWORK_CHANGED', 'NETWORK_INSPECTION_FAILED', 'OWNER_EXITED', 'DEADLINE_REACHED')][string] $Code, [string] $SessionName = '') {
+function Write-RunnerFailure([string] $Stage, [ValidateSet('STAGE_FAILED', 'NETWORK_CHANGED', 'NETWORK_INSPECTION_FAILED', 'RECOVERY_FAILED', 'OWNER_EXITED', 'DEADLINE_REACHED')][string] $Code, [string] $SessionName = '') {
     Write-RunnerJson (Join-Path $script:RunnerRoot 'last-error.json') ([ordered]@{
         atUtc = [DateTime]::UtcNow.ToString('o'); stage = $Stage; code = $Code; sessionName = $SessionName
     })
+}
+
+# Failure-only projection. Never serialize a state, exception, message or path.
+# Every observation consumes the already evaluated guard result, not a reread.
+function Get-RunnerRecoveryDiagnosticNumber($Value, [long] $Maximum = 86400000, [switch] $Signed) {
+    if ($Value -isnot [ValueType] -or $Value -is [bool] -or [double]::IsNaN([double]$Value) -or [double]::IsInfinity([double]$Value) -or
+        $Value -ne [Math]::Truncate([double]$Value) -or $Value -gt $Maximum -or $Value -lt $(if ($Signed) { -$Maximum } else { 0 })) { throw 'Invalid recovery diagnostic number.' }
+    return [long]$Value
+}
+
+function Assert-RunnerRecoveryDiagnostic($Diagnostic) {
+    $enums = @{
+        operation = @('', 'quarantine', 'apply', 'connect', 'resume', 'probe', 'other')
+        trigger = @('', 'observation-unavailable', 'fingerprint-change', 'connectivity-lost', 'other')
+        lastTransition = @('healthy', 'quarantining', 'isolated', 'applying', 'verified', 'connecting', 'resuming', 'probing', 'failed', 'sealed-preparation', 'other')
+        refusal = @('', 'stale-observation', 'dispatch-deadline', 'provider-uncertain', 'operation-uncertain', 'stop', 'owner-dead', 'identity-changed', 'hard-deadline', 'outage-deadline', 'guardian-progress-expired', 'clock-regressed', 'vm-state-uncertain', 'connectivity-state-uncertain', 'watchdog-expired', 'other')
+    }
+    $numbers = @('generation', 'episodeAgeMs', 'episodeRemainingMs', 'operationAgeMs', 'observationUnavailableCount', 'fingerprintChangeCount', 'staleAdmissionCount', 'applyCount', 'observationElapsedMs', 'preflightElapsedMs', 'applyElapsedMs')
+    if ($Diagnostic -isnot [pscustomobject] -or (@($Diagnostic.PSObject.Properties.Name | Sort-Object) -join ',') -cne (@(@($enums.Keys) + $numbers | Sort-Object) -join ',')) { throw 'Invalid recovery diagnostic fields.' }
+    foreach ($name in $enums.Keys) {
+        if ($Diagnostic.$name -isnot [string] -or $Diagnostic.$name -cnotin $enums[$name]) { throw 'Invalid recovery diagnostic enum.' }
+    }
+    foreach ($name in $numbers) {
+        $max = if ($name -ceq 'generation') { 2147483647 } elseif ($name -clike '*Count') { 1000000 } else { 86400000 }
+        [void](Get-RunnerRecoveryDiagnosticNumber $Diagnostic.$name $max -Signed:($name -ceq 'episodeRemainingMs'))
+    }
+}
+
+function New-RunnerRecoveryDiagnostic($Recovery, [DateTime] $NowUtc) {
+    $phases = @('healthy', 'quarantining', 'isolated', 'applying', 'verified', 'connecting', 'resuming', 'probing', 'failed', 'sealed-preparation')
+    $value = [ordered]@{
+        operation = ''; trigger = ''; lastTransition = 'other'; refusal = ''
+        generation = if ($Recovery.PSObject.Properties.Name -contains 'generation') { Get-RunnerRecoveryDiagnosticNumber $Recovery.generation 2147483647 } else { 0 }
+        episodeAgeMs = 0; episodeRemainingMs = 0; operationAgeMs = 0
+        observationUnavailableCount = 0; fingerprintChangeCount = 0; staleAdmissionCount = 0; applyCount = 0
+        observationElapsedMs = 0; preflightElapsedMs = 0; applyElapsedMs = 0
+    }
+    if ($Recovery.PSObject.Properties.Name -contains 'operation') { $value.operation = if ($Recovery.operation -cin @('', 'quarantine', 'apply', 'connect', 'resume', 'probe')) { $Recovery.operation } else { 'other' } }
+    if ($Recovery.PSObject.Properties.Name -contains 'diagnostics') {
+        $d = $Recovery.diagnostics
+        foreach ($name in @('observationUnavailableCount', 'fingerprintChangeCount', 'staleAdmissionCount', 'applyCount', 'observationElapsedMs', 'preflightElapsedMs', 'applyElapsedMs')) {
+            $value[$name] = Get-RunnerRecoveryDiagnosticNumber $d.$name $(if ($name -clike '*Count') { 1000000 } else { 86400000 })
+        }
+        $value.trigger = if ($d.trigger -cin @('', 'observation-unavailable', 'fingerprint-change', 'connectivity-lost')) { $d.trigger } else { 'other' }
+        $value.lastTransition = if ($d.lastTransition -cin $phases) { $d.lastTransition } else { 'other' }
+        $refusals = @('', 'stale-observation', 'dispatch-deadline', 'provider-uncertain', 'operation-uncertain', 'stop', 'owner-dead', 'identity-changed', 'hard-deadline', 'outage-deadline', 'guardian-progress-expired', 'clock-regressed', 'vm-state-uncertain', 'connectivity-state-uncertain', 'watchdog-expired')
+        $value.refusal = if ($d.refusal -cin $refusals) { $d.refusal } else { 'other' }
+        if ($Recovery.phase -ceq 'failed' -and -not $Recovery.operation) {
+            $value.operation = if ($d.operation -cin @('', 'quarantine', 'apply', 'connect', 'resume', 'probe')) { $d.operation } else { 'other' }
+        }
+    }
+    foreach ($pair in @(@('episodeStartedUtc', 'episodeAgeMs'), @('operationStartedUtc', 'operationAgeMs'), @('episodeDeadlineUtc', 'episodeRemainingMs'))) {
+        $stamp = if ($Recovery.PSObject.Properties.Name -contains $pair[0]) { $Recovery.($pair[0]) } else { '' }
+        if ($pair[0] -ceq 'operationStartedUtc' -and $Recovery.phase -ceq 'failed' -and -not $stamp -and $Recovery.PSObject.Properties.Name -contains 'diagnostics') { $stamp = $Recovery.diagnostics.operationStartedUtc }
+        if ($pair[0] -ceq 'operationStartedUtc' -and -not $value.operation) { $stamp = '' }
+        if ($stamp) {
+            $elapsed = ($NowUtc - [DateTime]::Parse($stamp).ToUniversalTime()).TotalMilliseconds
+            if ($pair[1] -ceq 'episodeRemainingMs') { $elapsed = -$elapsed } else { $elapsed = [Math]::Max(0, $elapsed) }
+            $value[$pair[1]] = [long][Math]::Truncate([Math]::Max(-86400000, [Math]::Min(86400000, $elapsed)))
+        }
+    }
+    $result = [pscustomobject]$value
+    Assert-RunnerRecoveryDiagnostic $result
+    return $result
+}
+
+function New-RunnerFailureObservation([string] $Origin, [string] $Reason, $State, [DateTime] $NowUtc,
+    [string] $StopReason = '', [string] $Expiry = '', [hashtable] $Checks = @{}) {
+    $record = [ordered]@{ schema = 1; capture = 'complete' }
+    try {
+        $origins = @('session-initial', 'session-current', 'session-guardian', 'guardian-catch', 'watchdog', 'recovery-plan', 'recovery-dispatch')
+        $reasons = @('deadline', 'stop', 'guardian-identity', 'guardian-failed', 'recovery-expiry', 'guard-exception', 'watchdog-condition', 'recovery-cleanup', 'dispatch-deadline', 'provider-uncertain')
+        $stops = @('', 'none', 'instance-marker', 'state-absent', 'claim-mismatch', 'purpose-ineligible', 'unavailable')
+        $expiries = @('', 'hard-deadline', 'outage-deadline', 'guardian-progress-expired')
+        $record.origin = if ($Origin -cin $origins) { $Origin } else { 'other' }
+        $record.reason = if ($Reason -cin $reasons) { $Reason } else { 'other' }
+        $record.stopReason = if ($StopReason -cin $stops) { $StopReason } else { 'other' }
+        $record.expiry = if ($Expiry -cin $expiries) { $Expiry } else { 'other' }
+        $record.atUtc = $NowUtc.ToUniversalTime().ToString('o')
+        $record.statePresent = $null -ne $State
+        $record.checks = [ordered]@{}
+        foreach ($name in @('deadlineReached', 'ownerAlive', 'guardianAlive', 'guardianRecorded', 'guardianDead', 'recoveryExpired', 'sealedInvalid')) {
+            if ($Checks.ContainsKey($name)) {
+                if ($Checks[$name] -isnot [bool]) { throw 'Invalid diagnostic flag.' }
+                $record.checks[$name] = $Checks[$name]
+            }
+        }
+        if ($null -ne $State) {
+            $record.purpose = if ($State.PSObject.Properties.Name -contains 'purpose' -and $State.purpose -cin @('job', 'prepare', 'verify-image')) { $State.purpose } else { 'other' }
+            $record.phase = if ($State.PSObject.Properties.Name -notcontains 'phase') { 'initial' } elseif ($State.phase -cin @('creating', 'owned', 'sealed-off')) { $State.phase } else { 'other' }
+            if ($State.PSObject.Properties.Name -contains 'deadlineUtc') {
+                $record.deadlineRemainingMs = ($([DateTime]::Parse($State.deadlineUtc).ToUniversalTime()) - $NowUtc).TotalMilliseconds
+            }
+            if ($State.PSObject.Properties.Name -contains 'networkRecovery') {
+                $r = $State.networkRecovery
+                $record.recoveryPhase = if ($r.phase -cin @('healthy', 'quarantining', 'isolated', 'applying', 'verified', 'connecting', 'resuming', 'probing', 'failed', 'sealed-preparation')) { $r.phase } else { 'other' }
+                $record.progressAgeMs = ($NowUtc - [DateTime]::Parse($r.progressUtc).ToUniversalTime()).TotalMilliseconds
+                $record.failureSet = $false; $record.recoveryFailure = ''
+                if ($r.PSObject.Properties.Name -contains 'failure') {
+                    $record.failureSet = -not [string]::IsNullOrEmpty([string]$r.failure)
+                    $record.recoveryFailure = if ($r.failure -cin @('', 'stop', 'owner-dead', 'identity-changed', 'hard-deadline', 'outage-deadline', 'guardian-progress-expired', 'clock-regressed', 'vm-state-uncertain', 'connectivity-state-uncertain', 'operation-uncertain', 'dispatch-deadline', 'provider-uncertain', 'watchdog-expired')) { $r.failure } else { 'other' }
+                }
+                $record.recoveryDiagnostic = New-RunnerRecoveryDiagnostic $r $NowUtc
+            }
+        }
+        if ([Text.Encoding]::UTF8.GetByteCount((ConvertTo-Json -InputObject $record -Depth 4 -Compress)) -gt 2048) { throw 'Diagnostic bound.' }
+        return $record
+    } catch {
+        return [ordered]@{ schema = 1; capture = 'unavailable'; atUtc = $NowUtc.ToUniversalTime().ToString('o') }
+    }
+}
+
+function New-RunnerObservedFailure([string] $Message, $Observation) {
+    $failure = [Management.Automation.RuntimeException]::new($Message)
+    try { $failure.Data['runnerFailureObservation'] = $Observation }
+    catch { $failure.Data['runnerFailureCapture'] = 'unavailable' }
+    return $failure
+}
+
+function Assert-RunnerFailureRecord($Record) {
+    $enums = @{
+        capture = @('complete', 'unavailable')
+        origin = @('session-initial', 'session-current', 'session-guardian', 'guardian-catch', 'watchdog', 'recovery-plan', 'recovery-dispatch', 'other')
+        reason = @('deadline', 'stop', 'guardian-identity', 'guardian-failed', 'recovery-expiry', 'guard-exception', 'watchdog-condition', 'recovery-cleanup', 'dispatch-deadline', 'provider-uncertain', 'other')
+        stopReason = @('', 'none', 'instance-marker', 'state-absent', 'claim-mismatch', 'purpose-ineligible', 'unavailable', 'other')
+        expiry = @('', 'hard-deadline', 'outage-deadline', 'guardian-progress-expired', 'other')
+        purpose = @('job', 'prepare', 'verify-image', 'other')
+        phase = @('initial', 'creating', 'owned', 'sealed-off', 'other')
+        recoveryPhase = @('healthy', 'quarantining', 'isolated', 'applying', 'verified', 'connecting', 'resuming', 'probing', 'failed', 'sealed-preparation', 'other')
+        recoveryFailure = @('', 'stop', 'owner-dead', 'identity-changed', 'hard-deadline', 'outage-deadline', 'guardian-progress-expired', 'clock-regressed', 'vm-state-uncertain', 'connectivity-state-uncertain', 'operation-uncertain', 'dispatch-deadline', 'provider-uncertain', 'watchdog-expired', 'other')
+        errorSource = @('Runner.ps1', 'Common.ps1', 'Network.Recovery.ps1', 'Network.Recovery.Probe.ps1', 'other')
+    }
+    if ($Record -isnot [pscustomobject] -or $Record.schema -isnot [int] -or $Record.schema -ne 1 -or $Record.capture -cnotin $enums.capture -or
+        [DateTime]::Parse($Record.atUtc).ToUniversalTime().ToString('o') -cne $Record.atUtc) { throw 'Invalid diagnostic record.' }
+    if ($Record.capture -ceq 'unavailable') {
+        if ((@($Record.PSObject.Properties.Name | Sort-Object) -join ',') -cne 'atUtc,capture,schema') { throw 'Invalid unavailable capture.' }
+    } else {
+        foreach ($required in @('origin', 'reason', 'stopReason', 'expiry', 'statePresent', 'checks')) {
+            if ($Record.PSObject.Properties.Name -cnotcontains $required) { throw 'Incomplete diagnostic record.' }
+        }
+    }
+    foreach ($property in $Record.PSObject.Properties) {
+        $name = $property.Name; $value = $property.Value
+        if ($enums.ContainsKey($name)) { if ($value -isnot [string] -or $value -cnotin $enums[$name]) { throw 'Invalid diagnostic enum.' }; continue }
+        switch -CaseSensitive ($name) {
+            'schema' { if ($value -ne 1) { throw 'Invalid diagnostic schema.' } }
+            'atUtc' { }
+            'statePresent' { if ($value -isnot [bool]) { throw 'Invalid diagnostic flag.' } }
+            'failureSet' { if ($value -isnot [bool]) { throw 'Invalid diagnostic flag.' } }
+            'recoveryDiagnostic' { Assert-RunnerRecoveryDiagnostic $value }
+            'checks' {
+                if ($value -isnot [pscustomobject]) { throw 'Invalid diagnostic checks.' }
+                foreach ($flag in $value.PSObject.Properties) {
+                    if ($flag.Name -cnotin @('deadlineReached', 'ownerAlive', 'guardianAlive', 'guardianRecorded', 'guardianDead', 'recoveryExpired', 'sealedInvalid') -or $flag.Value -isnot [bool]) { throw 'Invalid diagnostic check.' }
+                }
+            }
+            { $_ -cin @('deadlineRemainingMs', 'progressAgeMs', 'errorLine') } {
+                if ($value -isnot [ValueType] -or $value -is [bool] -or [double]::IsNaN([double]$value) -or [double]::IsInfinity([double]$value)) { throw 'Invalid diagnostic number.' }
+                if ($name -ceq 'errorLine' -and ($value -lt 0 -or $value -gt 100000 -or $value -ne [Math]::Truncate($value))) { throw 'Invalid diagnostic line.' }
+            }
+            default { throw 'Unknown diagnostic field.' }
+        }
+    }
+    if ($Record.PSObject.Properties.Name -contains 'failureSet' -and
+        ($Record.PSObject.Properties.Name -notcontains 'recoveryFailure' -or $Record.failureSet -ne (-not [string]::IsNullOrEmpty($Record.recoveryFailure)))) { throw 'Inconsistent recovery failure evidence.' }
+}
+
+function Assert-RunnerCleanupJournal($Journal) {
+    if ($Journal -isnot [pscustomobject] -or $Journal.schema -isnot [int] -or $Journal.schema -notin @(2, 3) -or
+        (@($Journal.PSObject.Properties.Name | Sort-Object) -join ',') -cne 'first,identity,latest,schema' -or
+        $Journal.identity -isnot [pscustomobject] -or $Journal.identity.sessionId -isnot [string] -or
+        $Journal.identity.sessionId -cnotmatch '^[0-9a-f]{32}$' -or $Journal.identity.ownerStartedUtc -isnot [string] -or
+        [DateTime]::Parse($Journal.identity.ownerStartedUtc).ToUniversalTime().ToString('o') -cne $Journal.identity.ownerStartedUtc) { throw 'Invalid diagnostic journal.' }
+    $identityFields = if ($Journal.schema -eq 2) { 'ownerStartedUtc,sessionId,vmId' } else { 'ownerStartedUtc,phase,sessionId,vmId' }
+    if ((@($Journal.identity.PSObject.Properties.Name | Sort-Object) -join ',') -cne $identityFields) { throw 'Invalid diagnostic journal identity.' }
+    if ($Journal.schema -eq 3 -and ($Journal.identity.phase -isnot [string] -or $Journal.identity.phase -cnotin @('initial', 'creating', 'owned', 'sealed-off'))) { throw 'Invalid diagnostic identity phase.' }
+    if ($null -eq $Journal.identity.vmId) {
+        if ($Journal.schema -ne 3 -or $Journal.identity.phase -cnotin @('initial', 'creating')) { throw 'Unrecorded diagnostic VM ID is not eligible.' }
+    } elseif ($Journal.identity.vmId -isnot [string] -or $Journal.identity.vmId -cnotmatch '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' -or [guid]$Journal.identity.vmId -eq [guid]::Empty) { throw 'Invalid diagnostic VM ID.' }
+    Assert-RunnerFailureRecord $Journal.first
+    Assert-RunnerFailureRecord $Journal.latest
+    if ([Text.Encoding]::UTF8.GetByteCount((ConvertTo-Json -InputObject $Journal -Depth 6 -Compress)) -gt 4096) { throw 'Diagnostic journal bound.' }
+}
+
+function Write-RunnerCleanupObservation([string] $Origin, [string] $Reason, $State, [DateTime] $NowUtc,
+    [string] $StopReason = '', [string] $Expiry = '', [hashtable] $Checks = @{}, $Failure = $null, $CapturedRecord = $null) {
+    # Callers hold the existing state mutex. Preserve the first decision for the
+    # exact instance; later cleanup failures/retries replace only latest.
+    try {
+        $record = New-RunnerFailureObservation $Origin $Reason $State $NowUtc $StopReason $Expiry $Checks
+        if ($null -ne $CapturedRecord) {
+            $captured = ConvertTo-Json -InputObject $CapturedRecord -Depth 4 -Compress | ConvertFrom-Json
+            Assert-RunnerFailureRecord $captured
+            $record = [ordered]@{}
+            foreach ($property in $captured.PSObject.Properties) { $record[$property.Name] = $property.Value }
+        }
+        $record.atUtc = $NowUtc.ToUniversalTime().ToString('o')
+        if ($null -ne $Failure -and $record.capture -ceq 'complete') {
+            $source = [IO.Path]::GetFileName($Failure.InvocationInfo.ScriptName)
+            $record.errorSource = if ($source -cin @('Runner.ps1', 'Common.ps1', 'Network.Recovery.ps1', 'Network.Recovery.Probe.ps1')) { $source } else { 'other' }
+            $record.errorLine = [Math]::Max(0, [Math]::Min(100000, [int]$Failure.InvocationInfo.ScriptLineNumber))
+        }
+        if ([Text.Encoding]::UTF8.GetByteCount((ConvertTo-Json -InputObject $record -Depth 4 -Compress)) -gt 2048) { throw 'Diagnostic bound.' }
+        Assert-SecureRoot
+        $path = Assert-OwnedPath (Join-Path $script:RunnerRoot 'failure-cleanup.json')
+        Assert-StateIdentity $State
+        if ($State.vmName -cnotmatch '^ITIR-[0-9a-f]{32}$') { throw 'Invalid diagnostic instance.' }
+        $phase = if ($State.PSObject.Properties.Name -notcontains 'phase') { 'initial' } elseif ($State.phase -cin @('creating', 'owned', 'sealed-off')) { $State.phase } else { throw 'Invalid diagnostic state phase.' }
+        $vmId = $null
+        if ($State.PSObject.Properties.Name -contains 'vmId') {
+            if ([string]$State.vmId -cnotmatch '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$' -or [guid]$State.vmId -eq [guid]::Empty) { throw 'Invalid recorded diagnostic VM ID.' }
+            $vmId = ([guid]$State.vmId).ToString()
+        } elseif ($phase -cnotin @('initial', 'creating')) { throw 'Owned diagnostic state requires its recorded VM ID.' }
+        # Null means the GUID was not recorded yet, never authoritative VM absence.
+        $identity = [ordered]@{ sessionId = $State.vmName.Substring(5); vmId = $vmId; ownerStartedUtc = [DateTime]::Parse($State.supervisorStartUtc).ToUniversalTime().ToString('o'); phase = $phase }
+        $journal = [ordered]@{ schema = 3; identity = $identity; first = $record; latest = $record }
+        if (Test-Path -LiteralPath $path) {
+            Assert-RunnerProtectedPath $path
+            $existing = Read-RunnerJson $path
+            Assert-RunnerCleanupJournal $existing
+            if ($existing.identity.sessionId -ceq $identity.sessionId -and $existing.identity.ownerStartedUtc -ceq $identity.ownerStartedUtc) {
+                if ($null -ne $existing.identity.vmId -and $null -eq $identity.vmId) { throw 'Diagnostic VM identity may not be downgraded.' }
+                if ($null -eq $existing.identity.vmId -or $existing.identity.vmId -ceq $identity.vmId) { $journal.first = $existing.first }
+            }
+        }
+        # Roundtrip to validate exactly the JSON property representation read by
+        # the helper, including an unavailable capture's attribution envelope.
+        $validated = ConvertTo-Json -InputObject $journal -Depth 6 -Compress | ConvertFrom-Json
+        Assert-RunnerCleanupJournal $validated
+        Write-RunnerJson $path $journal
+        Assert-RunnerProtectedPath $path
+    } catch {
+        try { Write-Warning 'RUNNER_FAILURE_CAPTURE_UNAVAILABLE' -WarningAction Continue } catch { }
+    }
+}
+
+function Write-RunnerSessionFailureObservation($State, $Failure) {
+    # Only an observed failure from this invocation is eligible; healthy cleanup
+    # never creates evidence. Capture errors must not mask the initiating error.
+    try {
+        if ($null -eq $Failure) { return }
+        $record = $Failure.Exception.Data['runnerFailureObservation']
+        if ($null -eq $record) { return }
+        $captured = ConvertTo-Json -InputObject $record -Depth 4 -Compress | ConvertFrom-Json
+        Assert-RunnerFailureRecord $captured
+        Write-RunnerCleanupObservation '' '' $State ([DateTime]::Parse($captured.atUtc)) -CapturedRecord $captured
+    } catch {
+        try { Write-Warning 'RUNNER_FAILURE_CAPTURE_UNAVAILABLE' -WarningAction Continue } catch { }
+    }
+}
+
+function New-RunnerExecutionFailure([ValidateSet('runner-exit')][string] $Class, [int] $ExitCode = 0) {
+    # Only these trusted call sites tag a failure. No guest text is accepted.
+    $failure = [Management.Automation.RuntimeException]::new('Runner execution failed; consult the bounded session failure record.')
+    $failure.Data['runnerFailureClass'] = $Class
+    if ($Class -ceq 'runner-exit') { $failure.Data['runnerFailureExitCode'] = $ExitCode }
+    return $failure
+}
+
+function Get-RunnerSessionFailureEnums {
+    return @{
+        stage = @('idle', 'preflight', 'disk-copy', 'disk-clone', 'key-generation', 'vm-creation', 'vm-configuration', 'network-isolation', 'vm-boot', 'guest-readiness', 'image-clone-readiness', 'image-preparation', 'runner-download', 'runner-transfer', 'jit-registration', 'job-execution', 'memory-admission', 'queue-inspection', 'pilot-consumption', 'pilot-verification', 'cleanup', 'other')
+        source = @('Runner.ps1', 'Common.ps1', 'PreparedImage.ps1', 'Network.Recovery.ps1', 'Network.Recovery.Probe.ps1', 'other')
+        exceptionType = @('System.Management.Automation.RuntimeException', 'System.Management.Automation.CmdletInvocationException', 'System.Management.Automation.CommandNotFoundException', 'System.Management.Automation.ParameterBindingException', 'System.InvalidOperationException', 'System.IO.IOException', 'System.UnauthorizedAccessException', 'System.TimeoutException', 'System.ArgumentException', 'other')
+        category = @('NotSpecified', 'InvalidData', 'InvalidOperation', 'InvalidArgument', 'ObjectNotFound', 'PermissionDenied', 'ResourceUnavailable', 'OperationTimeout', 'ReadError', 'WriteError', 'ParserError', 'SecurityError', 'ConnectionError', 'LimitsExceeded', 'other')
+        errorId = @('RuntimeException', 'CommandNotFoundException', 'ParameterBindingException', 'PositionalParameterNotFound', 'NativeCommandError', 'other')
+        failureClass = @('receipt-invalid', 'runner-exit', 'other')
+        capture = @('complete', 'unavailable')
+    }
+}
+
+function New-RunnerSessionFailureRecord($Failure, [string] $Stage) {
+    $enums = Get-RunnerSessionFailureEnums
+    $record = [ordered]@{ atUtc = [DateTime]::UtcNow.ToString('o'); stage = 'other'; capture = 'unavailable'; source = 'other'; line = 0; exceptionType = 'other'; hResult = 0; category = 'other'; errorId = 'other'; failureClass = 'other'; exitCode = $null }
+    if ($Stage -cin $enums.stage) { $record.stage = $Stage }
+    try {
+        if ($Failure -isnot [Management.Automation.ErrorRecord] -or $null -eq $Failure.Exception -or $null -eq $Failure.InvocationInfo) { return $record }
+        $source = [IO.Path]::GetFileName($Failure.InvocationInfo.ScriptName)
+        if ($source -cin $enums.source) { $record.source = $source }
+        $record.line = [Math]::Max(0, [Math]::Min(100000, $Failure.InvocationInfo.ScriptLineNumber))
+        $type = $Failure.Exception.GetType().FullName
+        if ($type -cin $enums.exceptionType) { $record.exceptionType = $type }
+        $record.hResult = [int]$Failure.Exception.HResult
+        $category = $Failure.CategoryInfo.Category.ToString()
+        if ($category -cin $enums.category) { $record.category = $category }
+        if ($Failure.FullyQualifiedErrorId -cin $enums.errorId) { $record.errorId = $Failure.FullyQualifiedErrorId }
+        # Read only fixed scalar tags, never serialize the Data dictionary.
+        $class = $Failure.Exception.Data['runnerFailureClass']
+        if ($class -is [string] -and $class -cin @('receipt-invalid', 'runner-exit')) {
+            $record.failureClass = $class
+            $exit = $Failure.Exception.Data['runnerFailureExitCode']
+            if ($class -ceq 'runner-exit' -and $exit -is [int]) { $record.exitCode = $exit }
+        }
+        $record.capture = 'complete'
+    } catch { $record.capture = 'unavailable' }
+    return $record
+}
+
+function Assert-RunnerSessionFailureJournal($Journal) {
+    if ($Journal -isnot [pscustomobject] -or (@($Journal.PSObject.Properties.Name | Sort-Object) -join ',') -cne 'schema,sessions' -or
+        $Journal.schema -isnot [int] -or $Journal.schema -ne 1 -or $Journal.sessions -isnot [array] -or $Journal.sessions.Count -gt 8) { throw 'Invalid session failure journal.' }
+    $enums = Get-RunnerSessionFailureEnums; $seen = @{}
+    foreach ($session in $Journal.sessions) {
+        if ($session -isnot [pscustomobject] -or (@($session.PSObject.Properties.Name | Sort-Object) -join ',') -cne 'first,latest,sessionId,vmId' -or
+            $session.sessionId -isnot [string] -or $session.sessionId -cnotmatch '^[0-9a-f]{32}$' -or [guid]$session.sessionId -eq [guid]::Empty -or $seen.ContainsKey($session.sessionId)) { throw 'Invalid session failure identity.' }
+        $seen[$session.sessionId] = $true
+        if ($null -ne $session.vmId -and ($session.vmId -isnot [string] -or $session.vmId -cnotmatch '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' -or [guid]$session.vmId -eq [guid]::Empty)) { throw 'Invalid session failure VM identity.' }
+        foreach ($record in @($session.first, $session.latest)) {
+            if ($record -isnot [pscustomobject] -or (@($record.PSObject.Properties.Name | Sort-Object) -join ',') -cne 'atUtc,capture,category,errorId,exceptionType,exitCode,failureClass,hResult,line,source,stage' -or
+                $record.atUtc -isnot [string] -or [DateTime]::Parse($record.atUtc).ToUniversalTime().ToString('o') -cne $record.atUtc) { throw 'Invalid session failure projection.' }
+            foreach ($key in $enums.Keys) { if ($record.$key -isnot [string] -or $record.$key -cnotin $enums[$key]) { throw 'Invalid session failure enum.' } }
+            if ($record.line -isnot [int] -or $record.line -lt 0 -or $record.line -gt 100000 -or $record.hResult -isnot [int] -or
+                ($null -ne $record.exitCode -and ($record.exitCode -isnot [int] -or $record.failureClass -cne 'runner-exit'))) { throw 'Invalid session failure number.' }
+        }
+    }
+    if ([Text.Encoding]::UTF8.GetByteCount((ConvertTo-Json -InputObject $Journal -Depth 6 -Compress)) -gt 16384) { throw 'Session failure journal bound.' }
+}
+
+function Write-RunnerSessionFailure([string] $SessionName, $Failure, [string] $Stage, [switch] $LockHeld, [switch] $FirstOnly) {
+    # One state lock protects this bounded root journal independently of the
+    # ephemeral state. A missing state can never erase attributed evidence.
+    $mutex = $null
+    try {
+        if ($null -eq $Failure -or $SessionName -cnotmatch '^ITIR-[0-9a-f]{32}$' -or [guid]$SessionName.Substring(5) -eq [guid]::Empty) { return }
+        $record = New-RunnerSessionFailureRecord $Failure $Stage
+        if (-not $LockHeld) { $mutex = Enter-RunnerLock }
+        Assert-SecureRoot
+        $path = Assert-OwnedPath (Join-Path $script:RunnerRoot 'session-failures.json')
+        $sessions = @()
+        if (Test-Path -LiteralPath $path) {
+            Assert-RunnerProtectedPath $path
+            if ((Get-Item -LiteralPath $path).Length -gt 16384) { throw 'Session failure journal bound.' }
+            $existing = Read-RunnerJson $path
+            Assert-RunnerSessionFailureJournal $existing
+            $sessions = @($existing.sessions)
+        }
+        $id = $SessionName.Substring(5)
+        $prior = @($sessions | Where-Object { $_.sessionId -ceq $id })
+        if ($FirstOnly -and $prior.Count -eq 1) { return }
+        $vmId = if ($prior.Count -eq 1) { $prior[0].vmId } else { $null }
+        # VM attribution is optional and best effort; do not invoke providers or
+        # use a different/stale session's state to infer identity or health.
+        try {
+            $current = Get-RunnerState
+            if ($null -ne $current -and $current.vmName -ceq $SessionName -and $current.PSObject.Properties.Name -contains 'vmId') {
+                if ($current.vmId -isnot [string] -or $current.vmId -cnotmatch '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$' -or [guid]$current.vmId -eq [guid]::Empty) { throw 'Invalid diagnostic VM identity.' }
+                $known = ([guid]$current.vmId).ToString()
+                if ($null -ne $vmId -and $vmId -cne $known) { throw 'Changed diagnostic VM identity.' }
+                $vmId = $known
+            }
+        } catch { $record.capture = 'unavailable' }
+        $entry = [ordered]@{ sessionId = $id; vmId = $vmId; first = $record; latest = $record }
+        if ($prior.Count -eq 1) { $entry.first = $prior[0].first }
+        $sessions = @($sessions | Where-Object { $_.sessionId -cne $id }) + @($entry)
+        if ($sessions.Count -gt 8) { $sessions = @($sessions | Select-Object -Last 8) }
+        $journal = [ordered]@{ schema = 1; sessions = @($sessions) }
+        Assert-RunnerSessionFailureJournal (ConvertTo-Json -InputObject $journal -Depth 6 -Compress | ConvertFrom-Json)
+        Write-RunnerJson $path $journal
+        Assert-RunnerProtectedPath $path
+    } catch {
+        try { Write-Warning 'RUNNER_SESSION_FAILURE_CAPTURE_UNAVAILABLE' -WarningAction Continue } catch { }
+    } finally {
+        if ($null -ne $mutex) {
+            try { Exit-RunnerLock $mutex }
+            catch { try { Write-Warning 'RUNNER_SESSION_FAILURE_CAPTURE_UNAVAILABLE' -WarningAction Continue } catch { } }
+        }
+    }
 }
 
 function Get-HostNetworkFingerprint {
@@ -544,7 +911,44 @@ function Assert-SecureRoot {
     }
 }
 
-function Get-RunnerState { return Read-RunnerJson $script:RunnerStatePath }
+function Get-RunnerState {
+    # File.Replace publication can be transiently absent to Windows providers.
+    # Share the writers' reentrant mutex for the entire existence/read sequence.
+    $mutex = Enter-RunnerLock
+    try { return Read-RunnerJson $script:RunnerStatePath }
+    finally { Exit-RunnerLock $mutex }
+}
+
+function Test-RunnerSessionStopRequested($State, $Observation = $null) {
+    # An instance marker always cancels. The root marker also suspends pickup
+    # during explicit owner image preparation; never infer that exemption from
+    # a stale caller snapshot or a process-local preparation flag.
+    $mutex = Enter-RunnerLock
+    try {
+        if ($null -ne $Observation) { $Observation.Value = 'unavailable' }
+        if (Test-Path -LiteralPath (Join-Path $State.instancePath 'stop.requested')) {
+            if ($null -ne $Observation) { $Observation.Value = 'instance-marker' }; return $true
+        }
+        if (-not (Test-Path -LiteralPath (Join-Path $script:RunnerRoot 'stop.requested'))) {
+            if ($null -ne $Observation) { $Observation.Value = 'none' }; return $false
+        }
+        Assert-RunnerProtectedPath $script:RunnerStatePath
+        $current = Get-RunnerState
+        if ($null -eq $current) { if ($null -ne $Observation) { $Observation.Value = 'state-absent' }; return $true }
+        Assert-StateIdentity $current
+        if ($current.vmName -cne $State.vmName -or $current.instancePath -ine $State.instancePath -or
+            ($State.PSObject.Properties.Name -contains 'vmId' -and
+                ($current.PSObject.Properties.Name -notcontains 'vmId' -or [guid]$current.vmId -ne [guid]$State.vmId))) {
+            if ($null -ne $Observation) { $Observation.Value = 'claim-mismatch' }; return $true
+        }
+        if ($current.PSObject.Properties.Name -notcontains 'purpose' -or $current.purpose -cnotin @('prepare', 'verify-image')) {
+            if ($null -ne $Observation) { $Observation.Value = 'purpose-ineligible' }; return $true
+        }
+        $requested = Test-Path -LiteralPath (Join-Path $current.instancePath 'stop.requested')
+        if ($null -ne $Observation) { $Observation.Value = if ($requested) { 'instance-marker' } else { 'none' } }
+        return $requested
+    } finally { Exit-RunnerLock $mutex }
+}
 
 function Get-RunnerBytesHash([byte[]] $Bytes) {
     $hash = [Security.Cryptography.SHA256]::Create()
@@ -611,10 +1015,62 @@ function Assert-RunnerTransitionClear {
 }
 
 function Assert-RunnerClaimOpen {
+    Assert-RunnerControllerOpen
+    Assert-RunnerJitRegistrationClear
+}
+
+function Assert-RunnerControllerOpen {
     Assert-RunnerTransitionClear
+    # Restarting the reconciler is not admission of a new VM or JIT request.
+    # A valid unresolved barrier may be reconciled; malformed evidence refuses.
+    [void](Get-RunnerJitRegistration)
     if (Test-Path -LiteralPath (Assert-OwnedPath (Join-Path $script:RunnerRoot 'stop.requested'))) {
         throw 'Pickup suspension requested; no new job may be consumed or created.'
     }
+}
+
+# This root-level, nonsecret barrier survives deletion of an ephemeral session.
+# It records only the sole registration operation; it is not a job queue.
+function Assert-RunnerJitRegistration($Record) {
+    $fields = @('schema', 'tag', 'phase', 'operationId', 'repo', 'vmName', 'vmId', 'instancePath', 'supervisorPid', 'supervisorStartUtc', 'labels', 'runnerGroupId', 'runnerId')
+    if ($null -eq $Record -or @($Record.PSObject.Properties.Name).Count -ne $fields.Count -or
+        @($fields | Where-Object { $Record.PSObject.Properties.Name -notcontains $_ }).Count -ne 0 -or
+        $Record.schema -ne 1 -or $Record.tag -cne $script:RunnerTag -or
+        $Record.phase -cnotin @('intent', 'registered', 'handed-off', 'removal-intent', 'complete') -or
+        $Record.operationId -cnotmatch '^[0-9a-f]{32}$' -or $Record.repo -cnotmatch '^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$' -or
+        [string]$Record.supervisorPid -cnotmatch '^[1-9][0-9]*$' -or [string]$Record.runnerGroupId -cnotmatch '^[1-9][0-9]*$' -or
+        [string]$Record.runnerId -cnotmatch '^(0|[1-9][0-9]*)$' -or
+        ($Record.phase -ceq 'intent' -and $Record.runnerId -ne 0) -or ($Record.phase -cne 'intent' -and $Record.runnerId -le 0)) { throw 'JIT registration barrier identity is invalid.' }
+    Assert-StateIdentity $Record
+    [void][DateTime]::Parse($Record.supervisorStartUtc).ToUniversalTime()
+    $labels = @($Record.labels)
+    if ($labels.Count -ne 4 -or @($labels | Select-Object -Unique).Count -ne 4 -or
+        @('self-hosted', 'Linux', 'X64' | Where-Object { $labels -cnotcontains $_ }).Count -ne 0 -or
+        @($labels | Where-Object { $_ -cmatch '^it-inventory-(light|mid|heavy|ephemeral|pilot-[0-9a-f]{40})$' }).Count -ne 1) { throw 'JIT registration barrier labels are invalid.' }
+}
+
+function Get-RunnerJitRegistration {
+    $path = Assert-OwnedPath (Join-Path $script:RunnerRoot 'jit-registration.json')
+    if (-not (Test-Path -LiteralPath $path)) { return $null }
+    Assert-RunnerProtectedPath $path
+    $record = Read-RunnerJson $path
+    Assert-RunnerJitRegistration $record
+    return $record
+}
+
+function Assert-RunnerJitRegistrationClear {
+    $record = Get-RunnerJitRegistration
+    if ($null -ne $record -and $record.phase -cne 'complete') {
+        throw 'Unresolved JIT registration blocks new claims and pilot retry; supervisor reconciliation is required.'
+    }
+}
+
+function Write-RunnerJitRegistration($Record) {
+    Assert-RunnerJitRegistration $Record
+    $path = Assert-OwnedPath (Join-Path $script:RunnerRoot 'jit-registration.json')
+    Write-RunnerJson $path $Record
+    $actual = Get-RunnerJitRegistration
+    if ((Get-RunnerJsonEvidence $actual).hash -cne (Get-RunnerJsonEvidence $Record).hash) { throw 'JIT registration barrier readback differs.' }
 }
 
 function Get-RunnerVmInventory {
@@ -721,6 +1177,70 @@ function Assert-StateIdentity($State) {
     }
 }
 
+function Get-RunnerDiskChain([string] $Path) {
+    $seen = @{}
+    for ($depth = 0; $depth -lt 32; $depth++) {
+        if ([string]::IsNullOrEmpty($Path) -or -not [IO.Path]::IsPathRooted($Path)) { throw 'Disk ancestry path is unknown; retain files.' }
+        $Path = [IO.Path]::GetFullPath($Path)
+        if ($seen.ContainsKey($Path)) { throw 'Disk ancestry cycle; retain files.' }
+        $seen[$Path] = $true
+        $disk = Get-VHD -Path $Path -ErrorAction Stop
+        if ($null -eq $disk -or $disk.VhdType -cnotin @('Fixed','Dynamic','Differencing')) { throw 'Disk ancestry type is unknown; retain files.' }
+        $Path
+        if ($disk.VhdType -cne 'Differencing') {
+            if (-not [string]::IsNullOrEmpty($disk.ParentPath)) { throw 'Standalone disk has an unexpected parent; retain files.' }
+            return
+        }
+        $Path = $disk.ParentPath
+    }
+    throw 'Disk ancestry exceeds its bounded depth; retain files.'
+}
+
+function Get-RunnerManagedDiskRoots([string] $ExcludedInstance = '') {
+    $root = Assert-OwnedPath (Join-Path $script:RunnerRoot 'instances')
+    if (-not (Test-Path -LiteralPath $root)) { return }
+    $entries = @(Get-ChildItem -LiteralPath $root -Force -ErrorAction Stop)
+    if ($entries.Count -gt 128) { throw 'Instance inventory exceeds its bounded view; retain files.' }
+    $count = 0
+    foreach ($entry in $entries) {
+        if (-not $entry.PSIsContainer -or $entry.Name -cnotmatch '^ITIR-[0-9a-f]{32}$') { throw 'Unknown managed instance entry; retain files.' }
+        [void](Assert-OwnedPath $entry.FullName)
+        if ($ExcludedInstance -and $entry.FullName -ieq $ExcludedInstance) { continue }
+        $pending = [Collections.Generic.Queue[string]]::new()
+        $pending.Enqueue($entry.FullName)
+        while ($pending.Count) {
+            foreach ($file in @(Get-ChildItem -LiteralPath $pending.Dequeue() -Force -ErrorAction Stop)) {
+                $count++
+                if ($count -gt 2048) { throw 'Managed file inventory exceeds its bounded view; retain files.' }
+                [void](Assert-OwnedPath $file.FullName)
+                if ($file.PSIsContainer) { $pending.Enqueue($file.FullName) }
+                elseif ($file.Extension -imatch '^\.vhdx?$') { $file.FullName }
+            }
+        }
+    }
+}
+
+function Assert-RunnerDiskReferencesAbsent([string] $Path, [switch] $Directory, [string] $ExcludedInstance = '') {
+    $Path = Assert-OwnedPath $Path
+    $prefix = $Path.TrimEnd('\') + '\'
+    $roots = @()
+    foreach ($vm in @(Get-RunnerVmInventory)) {
+        foreach ($disk in @(Get-VMHardDiskDrive -VM $vm -ErrorAction Stop)) {
+            if ([string]::IsNullOrEmpty($disk.Path)) { throw 'VM disk reference is unknown; retain files.' }
+            $roots += $disk.Path
+            if ($roots.Count -gt 512) { throw 'VM disk view exceeds its bound; retain files.' }
+        }
+    }
+    # An offline managed file is not a reference to itself. VM attachments
+    # above still count, and every other managed child's ancestry is inspected.
+    $roots += @(Get-RunnerManagedDiskRoots $ExcludedInstance | Where-Object { $_ -ine $Path })
+    foreach ($root in $roots) {
+        foreach ($ancestor in @(Get-RunnerDiskChain $root)) {
+            if ($ancestor -ieq $Path -or ($Directory -and $ancestor.StartsWith($prefix, [StringComparison]::OrdinalIgnoreCase))) { throw 'A disk chain still references the protected target; retain files.' }
+        }
+    }
+}
+
 function Assert-RunnerInstanceUnreferenced($State) {
     $instancePath = Assert-OwnedPath $State.instancePath
     $instancePrefix = $instancePath.TrimEnd('\') + '\'
@@ -730,14 +1250,8 @@ function Assert-RunnerInstanceUnreferenced($State) {
         if ($configurationPath.StartsWith($instancePrefix, [StringComparison]::OrdinalIgnoreCase) -or $configurationPath.Equals($instancePath, [StringComparison]::OrdinalIgnoreCase)) {
             throw 'A registered VM still references the recorded instance configuration path; runner files/state are retained.'
         }
-        foreach ($disk in @(Get-VMHardDiskDrive -VM $entry -ErrorAction Stop)) {
-            if ([string]::IsNullOrEmpty($disk.Path)) { throw 'VM disk path inspection failed; runner files/state are retained.' }
-            $diskPath = [IO.Path]::GetFullPath($disk.Path)
-            if ($diskPath.StartsWith($instancePrefix, [StringComparison]::OrdinalIgnoreCase) -or $diskPath.Equals($instancePath, [StringComparison]::OrdinalIgnoreCase)) {
-                throw 'A registered VM still references the recorded instance disk path; runner files/state are retained.'
-            }
-        }
     }
+    Assert-RunnerDiskReferencesAbsent $instancePath -Directory -ExcludedInstance $instancePath
 }
 
 function Remove-RunnerInstance($State) {
@@ -793,3 +1307,42 @@ function Remove-RunnerInstance($State) {
 }
 
 . (Join-Path $PSScriptRoot 'PreparedImage.ps1')
+
+function Invoke-RunnerReceiptNative([string] $Executable, [string[]] $Arguments, [ValidateRange(1, 30)][int] $TimeoutSeconds = 12) {
+    # Only a fixed non-secret guest receipt is captured. Limit memory before
+    # appending, discard stderr, and bound the SSH process independently.
+    $start = [Diagnostics.ProcessStartInfo]::new()
+    $start.FileName = $Executable
+    $start.Arguments = ($Arguments | ForEach-Object { ConvertTo-NativeArgument $_ }) -join ' '
+    $start.UseShellExecute = $false; $start.CreateNoWindow = $true
+    $start.RedirectStandardOutput = $true; $start.RedirectStandardError = $true; $start.RedirectStandardInput = $true
+    $start.StandardOutputEncoding = [Text.UTF8Encoding]::new($false)
+    $process = [Diagnostics.Process]::Start($start)
+    $clock = [Diagnostics.Stopwatch]::StartNew()
+    try {
+        $process.StandardInput.Close()
+        $discard = $process.StandardError.BaseStream.CopyToAsync([IO.Stream]::Null)
+        $buffer = New-Object char[] 512
+        $output = [Text.StringBuilder]::new()
+        while ($true) {
+            $read = $process.StandardOutput.ReadAsync($buffer, 0, $buffer.Length)
+            while (-not $read.IsCompleted) {
+                if ($clock.Elapsed.TotalSeconds -ge $TimeoutSeconds) { throw 'Receipt transport timed out.' }
+                [void]$read.Wait(100)
+            }
+            $length = $read.GetAwaiter().GetResult()
+            if ($length -eq 0) { break }
+            if ($output.Length + $length -gt 4096) { throw 'Guest receipt exceeded its bounded protocol.' }
+            [void]$output.Append($buffer, 0, $length)
+            if ($clock.Elapsed.TotalSeconds -ge $TimeoutSeconds) { throw 'Receipt transport timed out.' }
+        }
+        $remaining = [Math]::Max(1, [int](($TimeoutSeconds - $clock.Elapsed.TotalSeconds) * 1000))
+        if (-not $process.WaitForExit($remaining)) { throw 'Receipt transport timed out.' }
+        [void]$discard.GetAwaiter().GetResult()
+        return [pscustomobject]@{ ExitCode = $process.ExitCode; Output = $output.ToString() }
+    } finally {
+        # This kills only the host SSH monitor, never the detached guest service.
+        if (-not $process.HasExited) { $process.Kill() }
+        $process.Dispose()
+    }
+}

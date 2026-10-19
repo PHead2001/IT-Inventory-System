@@ -31,3 +31,39 @@ export const cleanupResultSchema = z
       (value.status !== 'failed' || (value.deleted === 0 && value.failed > 0)),
   );
 export type CleanupResult = z.infer<typeof cleanupResultSchema>;
+
+// Caller-authorized card metadata; no private object paths or capabilities.
+export const inventoryFileCardSchema = z.strictObject({
+  id: z.string().min(1),
+  name: z.string(),
+  filename: z.string(),
+  uploader: z.string(),
+  ready_at: z.string().nullable(),
+  type: z.string().min(1),
+  bytes: z.number().int().nonnegative().nullable(),
+  purpose: z.string().min(1),
+  state: z.enum([
+    'reserved',
+    'uploaded',
+    'validating',
+    'validated',
+    'ready',
+    'rejected',
+    'removed',
+    'cancelled',
+    'expired',
+  ]),
+  created_at: z.string().min(1),
+  version: fileRevisionSchema,
+  replaces_file_id: z.string().nullable(),
+  reviewed_replaced_file_version: fileRevisionSchema.nullable(),
+});
+export const inventoryFileCardsSchema = z.strictObject({
+  revision: fileRevisionSchema,
+  files: z.array(inventoryFileCardSchema),
+});
+export type InventoryFileCard = z.infer<typeof inventoryFileCardSchema>;
+export type InventoryFileCards = z.infer<typeof inventoryFileCardsSchema>;
+
+export type InventoryFileCardsState =
+  { status: 'ready'; envelope: InventoryFileCards } | { status: 'unavailable' };

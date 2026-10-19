@@ -3,31 +3,22 @@ import { afterTransitionCapture } from '@/components/forms/transition-capture';
 import {
   LoadingAnnouncement,
   LoadingReveal,
-  LoadingSkeleton,
 } from '@/components/ui/loading-skeleton';
 import { OperationalTimestamp } from '@/components/operational-time';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { createSupabaseBrowserClient } from '@/lib/supabase/browser';
 import { formatFileSize } from '@/lib/file-size';
-import { cleanupResultSchema, type CleanupResult } from './contract';
+import {
+  cleanupResultSchema,
+  inventoryFileCardsSchema,
+  type CleanupResult,
+  type InventoryFileCard as Card,
+  type InventoryFileCards as CardsEnvelope,
+  type InventoryFileCardsState,
+} from './contract';
 import { validateSelectedFile } from './selection';
 
 const bucket = 'inventory-files';
-type Card = {
-  id: string;
-  name: string;
-  filename: string;
-  uploader: string;
-  ready_at: string | null;
-  type: string;
-  bytes: number | null;
-  purpose: string;
-  state: string;
-  created_at: string;
-  version: string;
-  replaces_file_id: string | null;
-  reviewed_replaced_file_version: string | null;
-};
 type FileHistory = {
   id: string;
   action: string;
@@ -39,7 +30,6 @@ type FileHistory = {
   file_bytes: number;
   collection_revision: string;
 };
-type CardsEnvelope = { revision: string; files: Card[] };
 function fileState(state: string) {
   switch (state) {
     case 'ready':
@@ -146,6 +136,7 @@ export function FilesPanel({
   staff,
   actorId,
   parentName = 'this inventory record',
+  initialState,
 }: {
   parentType: 'asset' | 'quantity';
   parentId: string;
@@ -153,6 +144,7 @@ export function FilesPanel({
   staff: boolean;
   actorId: string;
   parentName?: string;
+  initialState: InventoryFileCardsState;
 }) {
   return (
     <BoundFilesPanel
@@ -162,6 +154,7 @@ export function FilesPanel({
       active={active}
       staff={staff}
       parentName={parentName}
+      initialState={initialState}
     />
   );
 }
@@ -172,16 +165,24 @@ function BoundFilesPanel({
   active,
   staff,
   parentName,
+  initialState,
 }: {
   parentType: 'asset' | 'quantity';
   parentId: string;
   active: boolean;
   staff: boolean;
   parentName: string;
+  initialState: InventoryFileCardsState;
 }) {
   const [client] = useState(createSupabaseBrowserClient);
-  const [cards, setCards] = useState<Card[]>([]);
-  const [collectionRevision, setCollectionRevision] = useState('1');
+  const [cards, setCards] = useState<Card[]>(() =>
+    initialState.status === 'ready' ? initialState.envelope.files : [],
+  );
+  const [collectionRevision, setCollectionRevision] = useState<string | null>(
+    () =>
+      initialState.status === 'ready' ? initialState.envelope.revision : null,
+  );
+  const collectionKnown = collectionRevision !== null;
   const [history, setHistory] = useState<FileHistory[]>([]);
   const [historyPage, setHistoryPage] = useState(1);
   const [historyMore, setHistoryMore] = useState(false);
@@ -198,6 +199,7 @@ function BoundFilesPanel({
     [],
   );
   function handleSelectedFile(next: File | null) {
+    if (next && !collectionKnown) return;
     if (selectedPreviewRef.current)
       URL.revokeObjectURL(selectedPreviewRef.current);
     selectedPreviewRef.current = null;
@@ -255,6 +257,9 @@ function BoundFilesPanel({
     });
   }, [removal]);
   const [message, setMessage] = useState('');
+  const [readError, setReadError] = useState(
+    initialState.status === 'unavailable',
+  );
   useEffect(() => {
     function preventFileNavigation(event: DragEvent) {
       if (event.dataTransfer?.types.includes('Files')) event.preventDefault();
@@ -266,7 +271,7 @@ function BoundFilesPanel({
       document.removeEventListener('drop', preventFileNavigation);
     };
   }, []);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(false);
   const [historyError, setHistoryError] = useState(false);
   const [cleanupPending, setCleanupPending] = useState(false);
   const [preview, setPreview] = useState<{
@@ -277,33 +282,55 @@ function BoundFilesPanel({
   const [rpc] = useState(() => client.rpc.bind(client) as unknown as Rpc);
   const mounted = useRef(true);
   const invalidatedFiles = useRef(new Set<string>());
+  const readGeneration = useRef(0);
   useEffect(() => {
     mounted.current = true;
     return () => {
       mounted.current = false;
     };
   }, []);
-  const load = useCallback(async (): Promise<CardsEnvelope | null> => {
-    const { data, error } = await rpc('inventory_file_cards', {
-      p_parent_type: parentType,
-      p_parent_id: parentId,
-    });
-    if (!mounted.current) return null;
-    if (error) {
-      setMessage('Files could not be loaded.');
-      return null;
-    }
-    const envelope = data as CardsEnvelope;
-    setCards(
-      Array.isArray(envelope?.files)
-        ? envelope.files.filter(
+  const load = useCallback(
+    async (
+      isCurrent: () => boolean = () => true,
+    ): Promise<CardsEnvelope | null> => {
+      const generation = ++readGeneration.current;
+      try {
+        const { data, error } = await rpc('inventory_file_cards', {
+          p_parent_type: parentType,
+          p_parent_id: parentId,
+        });
+        if (
+          !mounted.current ||
+          !isCurrent() ||
+          generation !== readGeneration.current
+        )
+          return null;
+        const parsed = inventoryFileCardsSchema.safeParse(data);
+        if (error || !parsed.success) {
+          setReadError(true);
+          return null;
+        }
+        const envelope = parsed.data;
+        setCards(
+          envelope.files.filter(
             (card) => !invalidatedFiles.current.has(card.id),
-          )
-        : [],
-    );
-    setCollectionRevision(envelope?.revision ?? '1');
-    return envelope;
-  }, [rpc, parentType, parentId]);
+          ),
+        );
+        setCollectionRevision(envelope.revision);
+        setReadError(false);
+        return envelope;
+      } catch {
+        if (
+          mounted.current &&
+          isCurrent() &&
+          generation === readGeneration.current
+        )
+          setReadError(true);
+        return null;
+      }
+    },
+    [rpc, parentType, parentId],
+  );
   async function cleanupTerminalFiles() {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 15000);
@@ -326,25 +353,32 @@ function BoundFilesPanel({
       clearTimeout(timeout);
     }
   }
+  const seenEnvelope = useRef(initialState);
+  const refreshPending = useRef(false);
   useEffect(() => {
-    let cancelled = false;
-    void rpc('inventory_file_cards', {
-      p_parent_type: parentType,
-      p_parent_id: parentId,
-    }).then(({ data, error }) => {
-      if (cancelled) return;
-      setLoading(false);
-      if (error) setMessage('Files could not be loaded.');
-      else {
-        const envelope = data as CardsEnvelope;
-        setCards(Array.isArray(envelope?.files) ? envelope.files : []);
-        setCollectionRevision(envelope?.revision ?? '1');
-      }
+    if (seenEnvelope.current !== initialState) {
+      seenEnvelope.current = initialState;
+      refreshPending.current = true;
+    }
+    // RSC refresh props are an invalidation signal, never an ordered snapshot:
+    // pending file versions can change without advancing collection revision.
+    // Keep local intents and ambiguous removal outcomes intact until settled.
+    // Feedback and cleanup retries survive rereads; they are not refresh locks.
+    if (!refreshPending.current || busy || removal || file || replace) return;
+    refreshPending.current = false;
+    setLoading(true);
+    let current = true;
+    let completed = false;
+    void load(() => current).finally(() => {
+      completed = true;
+      if (mounted.current && current) setLoading(false);
     });
     return () => {
-      cancelled = true;
+      current = false;
+      setLoading(false);
+      if (!completed) refreshPending.current = true;
     };
-  }, [rpc, parentType, parentId]);
+  }, [initialState, busy, removal, file, replace, load]);
   useEffect(() => {
     let cancelled = false;
     void rpc('inventory_file_history', {
@@ -411,6 +445,8 @@ function BoundFilesPanel({
     requestId = crypto.randomUUID(),
     replacedId: string | null = null,
   ) {
+    if (!collectionKnown)
+      throw new Error('Load current files before publishing.');
     const response = await fetch('/api/inventory-files/validate', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -465,7 +501,7 @@ function BoundFilesPanel({
   }
 
   function beginPicker(target: string) {
-    if (busy) return;
+    if (busy || !collectionKnown) return;
     // A new picker intent must not reuse bytes if the native picker is cancelled.
     handleSelectedFile(null);
     if (fileInput.current) fileInput.current.value = '';
@@ -474,7 +510,7 @@ function BoundFilesPanel({
   }
 
   async function upload() {
-    if (!file) return;
+    if (!file || !collectionKnown) return;
     setBusy(true);
     setMessage('');
     try {
@@ -547,6 +583,7 @@ function BoundFilesPanel({
   }
 
   async function pendingAction(card: Card, action: 'validate' | 'cancel') {
+    if (!collectionKnown) return;
     setBusy(true);
     setMessage('');
     try {
@@ -732,6 +769,7 @@ function BoundFilesPanel({
   }
 
   async function rename(card: Card) {
+    if (!collectionKnown) return;
     const title = window.prompt('File title', card.name)?.trim();
     if (title === undefined || title === card.name) return;
     setBusy(true);
@@ -778,23 +816,33 @@ function BoundFilesPanel({
             ? 'JPEG, PNG or still WebP · Up to 20 MiB. Photos are normalized before display.'
             : 'JPEG, PNG, still WebP or PDF · Up to 20 MiB. Photos are normalized before display; PDFs download as attachments.'}
         </p>
-        {message && !removal && (
+        {(message || readError) && !removal && (
           <p
             role="alert"
             className="experience-feedback mt-3 break-words text-amber-100"
           >
-            {message}
+            {message && <span className="block">{message}</span>}
+            {readError && (
+              <span className="block">Files could not be loaded.</span>
+            )}
           </p>
         )}
-        {loading && (
-          <LoadingSkeleton
-            shape="files"
-            label="Loading files…"
-            announce={false}
-            className="mt-3"
-          />
+        {readError && (
+          <button
+            type="button"
+            disabled={busy || loading || Boolean(removal)}
+            className="mt-2 min-h-11 text-cyan-300 underline disabled:opacity-50"
+            onClick={() => {
+              setLoading(true);
+              void load().finally(() => {
+                if (mounted.current) setLoading(false);
+              });
+            }}
+          >
+            Retry files
+          </button>
         )}
-        <LoadingReveal busy={loading} reveal={!message}>
+        <LoadingReveal busy={loading} reveal={!message && !readError}>
           <ul className="mt-3 space-y-2">
             {cards
               .toSorted(
@@ -858,7 +906,7 @@ function BoundFilesPanel({
                     {staff && card.state === 'ready' && (
                       <button
                         type="button"
-                        disabled={busy || Boolean(removal)}
+                        disabled={busy || Boolean(removal) || !collectionKnown}
                         className="min-h-11 text-cyan-300 underline disabled:opacity-50"
                         onClick={() => beginPicker(card.id)}
                       >
@@ -868,7 +916,7 @@ function BoundFilesPanel({
                     {staff && card.state === 'ready' && (
                       <button
                         type="button"
-                        disabled={busy || Boolean(removal)}
+                        disabled={busy || Boolean(removal) || !collectionKnown}
                         className="min-h-11 text-cyan-300 underline disabled:opacity-50"
                         onClick={() => void rename(card)}
                       >
@@ -878,10 +926,11 @@ function BoundFilesPanel({
                     {staff && card.state === 'ready' && (
                       <button
                         type="button"
-                        disabled={busy || Boolean(removal)}
+                        disabled={busy || Boolean(removal) || !collectionKnown}
                         className="ml-2 min-h-11 border-l border-amber-200/30 pl-4 text-amber-200 underline disabled:opacity-50"
                         onClick={(event) => {
-                          if (busy || removal) return;
+                          if (busy || removal || collectionRevision === null)
+                            return;
                           setMessage('');
                           removalTrigger.current = event.currentTarget;
                           setRemoval({
@@ -900,7 +949,9 @@ function BoundFilesPanel({
                       <>
                         <button
                           type="button"
-                          disabled={busy || Boolean(removal)}
+                          disabled={
+                            busy || Boolean(removal) || !collectionKnown
+                          }
                           className="min-h-11 text-cyan-300 underline disabled:opacity-50"
                           onClick={() => void pendingAction(card, 'validate')}
                         >
@@ -910,7 +961,9 @@ function BoundFilesPanel({
                         </button>
                         <button
                           type="button"
-                          disabled={busy || Boolean(removal)}
+                          disabled={
+                            busy || Boolean(removal) || !collectionKnown
+                          }
                           className="min-h-11 text-amber-200 underline disabled:opacity-50"
                           onClick={() => void pendingAction(card, 'cancel')}
                         >
@@ -922,13 +975,17 @@ function BoundFilesPanel({
                 </li>
               ))}
           </ul>
-          {!loading && !busy && cards.length === 0 && !message && (
-            <p className="experience-muted mt-3 rounded-lg border border-dashed border-cyan-100/20 px-3 py-2 text-sm">
-              {parentType === 'quantity'
-                ? 'No photo yet.'
-                : 'No attachments yet.'}
-            </p>
-          )}
+          {collectionKnown &&
+            !busy &&
+            cards.length === 0 &&
+            !message &&
+            !readError && (
+              <p className="experience-muted mt-3 rounded-lg border border-dashed border-cyan-100/20 px-3 py-2 text-sm">
+                {parentType === 'quantity'
+                  ? 'No photo yet.'
+                  : 'No attachments yet.'}
+              </p>
+            )}
         </LoadingReveal>
         {staff && (
           <div className="mt-4 space-y-3 border-t border-cyan-100/15 pt-4">
@@ -940,7 +997,7 @@ function BoundFilesPanel({
               onDrop={(event) => {
                 event.preventDefault();
                 event.stopPropagation();
-                if (busy || removal) return;
+                if (busy || removal || !collectionKnown) return;
                 if (event.dataTransfer.files.length !== 1) {
                   handleSelectedFile(null);
                   if (fileInput.current) fileInput.current.value = '';
@@ -969,7 +1026,7 @@ function BoundFilesPanel({
                 type="file"
                 className="sr-only"
                 tabIndex={-1}
-                disabled={busy || Boolean(removal)}
+                disabled={busy || Boolean(removal) || !collectionKnown}
                 accept={
                   parentType === 'quantity'
                     ? 'image/jpeg,image/png,image/webp'
@@ -985,7 +1042,7 @@ function BoundFilesPanel({
               </p>
               <button
                 type="button"
-                disabled={busy || Boolean(removal)}
+                disabled={busy || Boolean(removal) || !collectionKnown}
                 className="min-h-11 rounded border border-cyan-400 px-4 py-2 text-cyan-200 disabled:opacity-50"
                 onClick={() =>
                   beginPicker(
@@ -1020,7 +1077,7 @@ function BoundFilesPanel({
                   )}
                   <button
                     type="button"
-                    disabled={busy || Boolean(removal)}
+                    disabled={busy || Boolean(removal) || !collectionKnown}
                     className="min-h-11 text-cyan-200 underline"
                     onClick={() => {
                       handleSelectedFile(null);
@@ -1068,7 +1125,7 @@ function BoundFilesPanel({
             )}
             <button
               type="button"
-              disabled={!file || busy || replaceUnavailable}
+              disabled={!file || busy || replaceUnavailable || !collectionKnown}
               className="min-h-11 rounded-lg bg-cyan-700 px-4 py-2 font-semibold text-white disabled:opacity-50"
               onClick={() => void upload()}
             >

@@ -6,6 +6,7 @@ import {
   provisionPreview,
   PARENT_REF,
   CHECK_NAME,
+  previewFailureGuidance,
 } from './preview-access-core.mjs';
 
 async function main() {
@@ -234,5 +235,7 @@ await main().catch((error) => {
       ? error.code
       : 'UNEXPECTED';
   process.stderr.write(`Preview staff setup failed: ${code}\n`);
+  const guidance = previewFailureGuidance(error);
+  if (guidance) process.stderr.write(`${guidance}\n`);
   process.exitCode = 1;
 });

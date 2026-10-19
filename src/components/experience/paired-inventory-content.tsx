@@ -5,6 +5,7 @@ import { useRouteMotion } from './route-motion';
 import { RouteContentIdentityContext } from './route-content-identity';
 import { matchesTitleListRoute } from './route-motion-state';
 import { useRoutePresentationSource } from './route-presentation-source';
+import { routeContentMotion } from './route-content-motion';
 
 /** Successful conventional inventory primaries only; no readiness authority. */
 export function PairedInventoryContent({
@@ -61,8 +62,17 @@ export function PairedInventoryContent({
         if (!matches && !motion.finishPrimaryAfterSnapshot(instance)) return;
         const finish = handoff();
         motion.cancelIfInvalid();
+        const cleanup = routeContentMotion(
+          instance,
+          motion.validNow,
+          matches ? motion.rejectTitleSnapshot : undefined,
+        );
         if (matches) motion.finishPairedContentAfterSnapshot(instance);
-        return finish;
+        if (!cleanup && !finish) return;
+        return () => {
+          cleanup?.();
+          finish?.();
+        };
       }}
     >
       <div className="experience-paired-inventory-content">{children}</div>

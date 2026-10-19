@@ -126,7 +126,7 @@ it('tracks the actual async task and releases progress only after completion UI 
     </Harness>,
   );
   const idleProgress = progress();
-  expect(idleProgress).toHaveTextContent('Opening requested content…');
+  expect(idleProgress).toHaveTextContent('Working…');
   expect(idleProgress).toHaveAttribute('data-visible', 'false');
   expect(idleProgress).toHaveAttribute('aria-hidden', 'true');
   expect(screen.queryByRole('status')).not.toBeInTheDocument();
@@ -138,9 +138,7 @@ it('tracks the actual async task and releases progress only after completion UI 
   );
   expect(progress()).toBe(idleProgress);
   expect(progress()).toHaveAttribute('aria-hidden', 'false');
-  expect(screen.getByRole('status')).toHaveTextContent(
-    'Opening requested content…',
-  );
+  expect(screen.getByRole('status')).toHaveTextContent('Working…');
   await act(async () => {
     work.resolve();
     await work.promise;
@@ -150,7 +148,7 @@ it('tracks the actual async task and releases progress only after completion UI 
     expect(progress()).toHaveAttribute('data-visible', 'false'),
   );
   expect(progress()).toBe(idleProgress);
-  expect(progress()).toHaveTextContent('Opening requested content…');
+  expect(progress()).toHaveTextContent('Working…');
   expect(progress()).toHaveAttribute('aria-hidden', 'true');
   expect(screen.queryByRole('status')).not.toBeInTheDocument();
 });
