@@ -89,6 +89,7 @@ type Proof = {
     timingComplete: boolean;
   }>;
   cancellations: Array<{ pseudo: string; whileActive: boolean }>;
+  snapshotSkips: Array<{ whileActive: boolean }>;
   replacements: Array<{
     pseudo: string;
     frames: Keyframe[];
@@ -105,6 +106,7 @@ async function observeMotion(page: Page, unsupported = false) {
       const proof: Proof = {
         transitions: [],
         cancellations: [],
+        snapshotSkips: [],
         replacements: [],
         cls: 0,
       };
@@ -237,6 +239,21 @@ async function observeMotion(page: Page, unsupported = false) {
             ? wrapped
             : { ...options, update: wrapped },
         );
+        const skip = transition.skipTransition.bind(transition);
+        transition.skipTransition = () => {
+          proof.snapshotSkips.push({
+            whileActive: document
+              .getAnimations()
+              .some(
+                (animation) =>
+                  (
+                    animation.effect as KeyframeEffect | null
+                  )?.pseudoElement?.startsWith('::view-transition') &&
+                  animation.playState === 'running',
+              ),
+          });
+          return skip();
+        };
         const observed = new Set<Animation>();
         const pending = new Set<Promise<void>>();
         const sample = () => {
@@ -307,8 +324,18 @@ async function observeMotion(page: Page, unsupported = false) {
         };
         const frame = () => {
           sample();
+          if (!notified && entry.ready) {
+            notified = true;
+            // React replaces paused geometry in its own ready callback. The
+            // first frame observes the surviving effects after those callbacks,
+            // rather than racing a pending replacement at native ready.
+            void (
+              window as Window & { routeMotionReady?: () => Promise<void> }
+            ).routeMotionReady?.();
+          }
           if (!entry.finished) requestAnimationFrame(frame);
         };
+        let notified = false;
         let readyAt: number | undefined;
         void transition.ready.then(
           () => {
@@ -319,11 +346,6 @@ async function observeMotion(page: Page, unsupported = false) {
             // in this ready turn. Observe actual surviving/added effects from
             // the next frame and continuously through native completion.
             requestAnimationFrame(frame);
-            // A timing barrier only: the binding never starts, pauses or
-            // changes the native animation or React's commit.
-            void (
-              window as Window & { routeMotionReady?: () => Promise<void> }
-            ).routeMotionReady?.();
           },
           () => {},
         );
@@ -363,7 +385,8 @@ async function observeMotion(page: Page, unsupported = false) {
           typeof options === 'object' &&
           options.pseudoElement?.startsWith(
             '::view-transition-group(inventory-title-',
-          )
+          ) &&
+          !options.pseudoElement.includes('-content')
         ) {
           proof.replacements.push({
             pseudo: options.pseudoElement,
@@ -399,6 +422,7 @@ async function resetProof(page: Page) {
       .routeMotionProof!;
     p.transitions = [];
     p.cancellations = [];
+    p.snapshotSkips = [];
     p.replacements = [];
     p.cls = 0;
   });
@@ -469,7 +493,7 @@ async function completedTitlePair(
     entry.old.some(
       (old) =>
         old.name.startsWith('inventory-title-') &&
-        !old.name.endsWith('-content') &&
+        !old.name.includes('-content') &&
         entry.next.some((next) => next.name === old.name),
     ),
   );
@@ -513,11 +537,7 @@ async function completedTitlePair(
             viewport,
           })),
         layout: entry.layout,
-        effects: entry.effects.slice(0, 24).map((effect) => ({
-          pseudo: effect.pseudo,
-          opacity: effect.opacityFrames,
-          activeDuration: effect.activeDuration,
-        })),
+        effects: entry.effects.slice(0, 24),
       })),
     });
   if (settlementError) throw new Error(diagnostic, { cause: settlementError });
@@ -533,7 +553,7 @@ async function completedTitlePair(
   expect(presentation.durationMs, diagnostic).toBeLessThanOrEqual(250);
   const titleName = paired[0].old.find(
     (old) =>
-      old.name.startsWith('inventory-title-') && !old.name.endsWith('-content'),
+      old.name.startsWith('inventory-title-') && !old.name.includes('-content'),
   )!.name;
   expect(pairedBodyCrossfade(observed.transitions, titleName), diagnostic).toBe(
     true,
@@ -834,7 +854,16 @@ for (const width of [1280, 390]) {
       });
       const timing = routePresentationTiming(observed.transitions);
       expect(timing.animatedStages).toBe(1);
-      expect(timing.durationMs).toBeLessThanOrEqual(250);
+      expect(
+        timing.durationMs,
+        'Native route document-clock timing: ' +
+          JSON.stringify({
+            timing,
+            effects: observed.transitions
+              .flatMap((entry) => entry.effects)
+              .slice(0, 24),
+          }),
+      ).toBeLessThanOrEqual(250);
       const pair = observed.transitions.find((entry) =>
         entry.old.some(
           (old) =>
@@ -897,7 +926,7 @@ for (const width of [1280, 390]) {
     );
     await assertNoNativeSnapshots(page);
     const cancelled = await proof(page);
-    expect(cancelled.cancellations.some((entry) => entry.whileActive)).toBe(
+    expect(cancelled.snapshotSkips.some((entry) => entry.whileActive)).toBe(
       true,
     );
     await info.attach('logout-during-native-route-animation', {
@@ -947,7 +976,7 @@ for (const width of [1280, 390]) {
         await assertNoNativeSnapshots(page);
         const cancelled = await proof(page);
         expect(cancelled.transitions.some((entry) => entry.ready)).toBe(true);
-        expect(cancelled.cancellations.some((entry) => entry.whileActive)).toBe(
+        expect(cancelled.snapshotSkips.some((entry) => entry.whileActive)).toBe(
           true,
         );
         await info.attach('real-read-action-denial-snapshot-cancellation', {
@@ -1047,7 +1076,7 @@ for (const width of [1280, 390]) {
         ).toBe(true);
         const replacement = await proof(page);
         expect(
-          replacement.cancellations.filter((entry) => entry.whileActive),
+          replacement.snapshotSkips.filter((entry) => entry.whileActive),
         ).toHaveLength(0);
         await resetProof(page);
         await (await navigationLink(page, 'Inventory')).click();
@@ -1062,7 +1091,7 @@ for (const width of [1280, 390]) {
         const later = await proof(page);
         expect(later.transitions.some((entry) => entry.ready)).toBe(true);
         expect(
-          later.cancellations.filter((entry) => entry.whileActive),
+          later.snapshotSkips.filter((entry) => entry.whileActive),
         ).toHaveLength(0);
         await info.attach(
           'deferred-denial-transport-and-replacement-navigation',
@@ -1135,7 +1164,7 @@ for (const width of [1280, 390]) {
         ).toBeVisible();
         await assertNoNativeSnapshots(page);
         const cancelled = await proof(page);
-        expect(cancelled.cancellations.some((entry) => entry.whileActive)).toBe(
+        expect(cancelled.snapshotSkips.some((entry) => entry.whileActive)).toBe(
           true,
         );
         await info.attach('in-flight-effective-reduction', {
@@ -1549,7 +1578,7 @@ for (const width of [1280, 390]) {
       entry.old.filter(
         (old) =>
           old.name.startsWith('inventory-title-') &&
-          !old.name.endsWith('-content') &&
+          !old.name.includes('-content') &&
           entry.next.some((next) => next.name === old.name),
       ),
     );
@@ -1641,14 +1670,14 @@ for (const width of [1280, 390]) {
       entry.old.some(
         (old) =>
           old.name.startsWith('inventory-title-') &&
-          !old.name.endsWith('-content'),
+          !old.name.includes('-content'),
       ),
     )!;
     expect(
       pair.next.filter(
         (next) =>
           next.name.startsWith('inventory-title-') &&
-          !next.name.endsWith('-content'),
+          !next.name.includes('-content'),
       ),
     ).toHaveLength(1);
     expect(back.cls).toBe(0);

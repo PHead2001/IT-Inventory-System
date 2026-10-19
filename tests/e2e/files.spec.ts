@@ -14,6 +14,8 @@ import fixture from '../fixtures/auth.json' with { type: 'json' };
 import { chooseLocation } from './location-picker';
 import { displayedInstant } from '../helpers/displayed-instant';
 import { exactOperationalTime as exactTime } from '../helpers/operational-time';
+import { auditReadback } from './audit-two-controls';
+import { inventoryFileCardsSchema } from '../../src/features/files/contract';
 
 function richStatePath(name: string) {
   const directory = resolve('.local-tools/experience-visual/rich-states');
@@ -685,13 +687,25 @@ test('asset PDF is structurally validated and downloads as an attachment', async
     })
     .first();
   await expect(listRow.getByText('1 PDF')).toBeVisible();
-  const reviewedCards = page.waitForResponse((response) =>
-    response.url().includes('/rpc/inventory_file_cards'),
-  );
   await page.goto(assetUrl);
-  const reviewedFiles = (await (await reviewedCards).json()) as {
-    files: { id: string; version: string }[];
-  };
+  await expect(
+    cards.getByText('Updated manual title', { exact: true }),
+  ).toBeVisible();
+  // Detail cards are server-seeded. Read the reviewed version through the same
+  // caller-scoped RPC rather than waiting for a browser request that cannot occur.
+  const readback = await auditReadback();
+  const reviewedFiles = await (async () => {
+    try {
+      const result = await readback.rpc('inventory_file_cards', {
+        p_parent_type: 'asset',
+        p_parent_id: new URL(assetUrl).pathname.split('/').at(-1)!,
+      });
+      expect(result.error).toBeNull();
+      return inventoryFileCardsSchema.parse(result.data);
+    } finally {
+      await readback.auth.signOut({ scope: 'local' });
+    }
+  })();
   const input = files.getByLabel('Add photo or PDF');
   let reserves = 0;
   const countReserve = (request: import('@playwright/test').Request) => {
