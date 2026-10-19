@@ -54,6 +54,10 @@ beforeEach(() => {
     configurable: true,
     value: { skipTransition: skip },
   });
+  Object.defineProperty(document, 'timeline', {
+    configurable: true,
+    value: { currentTime: 500 },
+  });
   Object.defineProperty(document, 'getAnimations', {
     configurable: true,
     value: () => [

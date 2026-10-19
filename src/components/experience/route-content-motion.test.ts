@@ -14,8 +14,13 @@ let nativeCancel: ReturnType<typeof vi.fn>;
 let skip: ReturnType<typeof vi.fn>;
 let imageCancel: ReturnType<typeof vi.fn>;
 let unrelatedCancel: ReturnType<typeof vi.fn>;
-let replacements: Array<{ cancel: ReturnType<typeof vi.fn> }>;
+let replacements: Array<{
+  cancel: ReturnType<typeof vi.fn>;
+  startTime: number | null;
+}>;
 let duration: string;
+let clock: unknown;
+let clockReads: number;
 
 beforeEach(() => {
   duration = '200ms';
@@ -38,8 +43,22 @@ beforeEach(() => {
   unrelatedCancel = vi.fn();
   skip = vi.fn();
   replacements = [];
+  clock = 500;
+  clockReads = 0;
+  Object.defineProperty(document, 'timeline', {
+    configurable: true,
+    value: {
+      get currentTime() {
+        clockReads++;
+        return clock;
+      },
+    },
+  });
   animate = vi.fn(() => {
-    const replacement = { cancel: vi.fn() };
+    const replacement = {
+      cancel: vi.fn(),
+      startTime: 500 + replacements.length * 66,
+    };
     replacements.push(replacement);
     return replacement;
   });
@@ -107,6 +126,7 @@ afterEach(() => {
   Reflect.deleteProperty(document, 'activeViewTransition');
   Reflect.deleteProperty(document, 'getAnimations');
   Reflect.deleteProperty(document.documentElement, 'animate');
+  Reflect.deleteProperty(document, 'timeline');
 });
 
 it('collects the real synchronous geometry replacements and waits for every replacement to finish', async () => {
@@ -149,6 +169,11 @@ it('collects the real synchronous geometry replacements and waits for every repl
   expect(observe).toHaveBeenCalledOnce(); // Geometry reads the native first frame.
   await Promise.resolve();
   expect(observe).toHaveBeenCalledTimes(2); // Collector sees the replacements.
+  // The joined clock finalizer must preserve those same completion-owned
+  // effects while aligning every replacement before their finished promises.
+  expect(installed.map((animation) => animation.startTime)).toEqual([
+    500, 500, 500,
+  ]);
   expect(captured).toHaveBeenCalledOnce();
   expect(missing).not.toHaveBeenCalled();
   expect(complete).not.toHaveBeenCalled();
@@ -164,6 +189,31 @@ it('collects the real synchronous geometry replacements and waits for every repl
   for (const animation of installed)
     expect(animation.cancel).toHaveBeenCalledOnce();
 });
+
+it('starts every body replacement on one sampled document clock despite independently assigned animation starts', async () => {
+  clock = 723.25;
+  routeContentMotion({ name }, () => true);
+  expect(animate).toHaveBeenCalledTimes(3);
+  await Promise.resolve();
+  expect(clockReads).toBe(1);
+  expect(replacements.map((effect) => effect.startTime)).toEqual([
+    723.25, 723.25, 723.25,
+  ]);
+});
+
+it.each([null, undefined, NaN, Infinity, { value: 500 }])(
+  'retires all replacements if the document clock is unavailable or invalid: %s',
+  async (value) => {
+    clock = value;
+    const unsupported = vi.fn();
+    routeContentMotion({ name }, () => true, unsupported);
+    await Promise.resolve();
+    expect(animate).toHaveBeenCalledTimes(3);
+    replacements.forEach(({ cancel }) => expect(cancel).toHaveBeenCalledOnce());
+    expect(unsupported).toHaveBeenCalledOnce();
+    expect(skip).toHaveBeenCalledOnce();
+  },
+);
 
 it('preserves the old scrolled bitmap at y=-602 while the new body begins at y=-77', () => {
   const cleanup = routeContentMotion({ name }, () => true);
@@ -297,6 +347,35 @@ it('falls back if privacy or Reduced motion invalidates authority during geometr
   expect(skip).toHaveBeenCalledOnce();
 });
 
+it('accepts React-normalized unchanged dimensions and omitted identity transform without mistaking destination translation for the old transform', async () => {
+  // React's ready processing removes equal dimensions and transform:none before
+  // invoking onUpdate; these absent properties are a supported captured shape.
+  frames = [
+    { offset: 0, computedOffset: 0 },
+    { offset: 1, computedOffset: 1 },
+  ];
+  const unsupported = vi.fn();
+  routeContentMotion({ name }, () => true, unsupported);
+  await Promise.resolve();
+  expect(unsupported).not.toHaveBeenCalled();
+  expect(skip).not.toHaveBeenCalled();
+  expect(animate).toHaveBeenCalledTimes(3);
+  expect(animate.mock.calls[1][0]).toEqual([
+    {
+      width: '1180px',
+      height: '7622px',
+      transform: 'translate(-40px, 77px)',
+      opacity: 1,
+    },
+    {
+      width: '1180px',
+      height: '7622px',
+      transform: 'translate(-40px, 77px)',
+      opacity: 0,
+    },
+  ]);
+});
+
 it.each([
   [
     'missing old dimensions',
@@ -350,7 +429,7 @@ it.each([
 it('cancels partially created effects if pseudo-element animation is unsupported', () => {
   animate
     .mockImplementationOnce(() => {
-      const replacement = { cancel: vi.fn() };
+      const replacement = { cancel: vi.fn(), startTime: null };
       replacements.push(replacement);
       return replacement;
     })
@@ -359,6 +438,27 @@ it('cancels partially created effects if pseudo-element animation is unsupported
     });
   routeContentMotion({ name }, () => true);
   expect(replacements[0].cancel).toHaveBeenCalledOnce();
+  expect(skip).toHaveBeenCalledOnce();
+});
+
+it('cancels the full replacement set if assigning the shared clock is unsupported', async () => {
+  animate.mockImplementationOnce(() => {
+    const replacement = {
+      cancel: vi.fn(),
+      get startTime() {
+        return null;
+      },
+      set startTime(_value: number | null) {
+        throw new Error('Unsupported animation clock');
+      },
+    };
+    replacements.push(replacement);
+    return replacement;
+  });
+  routeContentMotion({ name }, () => true);
+  await Promise.resolve();
+  expect(animate).toHaveBeenCalledTimes(3);
+  replacements.forEach(({ cancel }) => expect(cancel).toHaveBeenCalledOnce());
   expect(skip).toHaveBeenCalledOnce();
 });
 

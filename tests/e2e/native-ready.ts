@@ -1,17 +1,45 @@
 import type { Page } from '@playwright/test';
 
+export type NativeReadyEvidence = {
+  at: number;
+  ready: boolean;
+  finished: boolean;
+  terminal?: 'finished-before-running' | 'ready-rejected' | 'finished-rejected';
+  firstSkip?: {
+    at: number;
+    reason: 'skip-transition';
+    caller: string[];
+    geometry: Array<{
+      pseudo: string;
+      width: boolean;
+      height: boolean;
+      transform: 'missing' | 'identity' | 'other';
+    }>;
+  };
+  effects: Array<{
+    pseudo: string;
+    playState: AnimationPlayState;
+    startTime: number | null;
+    currentTime: number | null;
+    activeDuration: number;
+    endTime: number;
+    progress: number | null;
+  }>;
+};
+
 type Dispatcher = {
   registered: Promise<void>;
-  run: (() => Promise<void>) | null;
+  run: ((evidence: NativeReadyEvidence) => Promise<void>) | null;
   cancel: ((error: Error) => void) | null;
   busy: boolean;
 };
 const dispatchers = new WeakMap<Page, Dispatcher>();
 
-/** Register once per page; each arm still validates the real native animation. */
+/** Register once per page; validation uses the browser's actual running frame.
+ * Keep validation synchronous so a held response can release before any await. */
 export async function armNativeReady(
   page: Page,
-  validate: () => Promise<void>,
+  validate: (evidence: NativeReadyEvidence) => void,
   run: () => Promise<void>,
 ) {
   let dispatcher = dispatchers.get(page);
@@ -24,11 +52,14 @@ export async function armNativeReady(
     };
     dispatchers.set(page, registered);
     registered.registered = page
-      .exposeBinding('routeMotionReady', async () => {
-        const next = registered.run;
-        registered.run = null;
-        await next?.();
-      })
+      .exposeBinding(
+        'routeMotionReady',
+        async (_source, evidence: NativeReadyEvidence) => {
+          const next = registered.run;
+          registered.run = null;
+          await next?.(evidence);
+        },
+      )
       .then(() => {});
     page.once('close', () => {
       registered.cancel?.(
@@ -47,9 +78,16 @@ export async function armNativeReady(
   current.busy = true;
   const completed = new Promise<void>((resolve, reject) => {
     current.cancel = reject;
-    current.run = async () => {
+    current.run = async (evidence) => {
       try {
-        await validate();
+        if (evidence.terminal)
+          throw new Error(
+            'Native snapshot ' +
+              evidence.terminal +
+              ': ' +
+              JSON.stringify(evidence),
+          );
+        validate(evidence);
         await run();
         resolve();
       } catch (error) {

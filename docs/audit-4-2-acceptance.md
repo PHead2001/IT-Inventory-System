@@ -454,3 +454,67 @@ the cancel request separately to check focus return. Exact-final-candidate CI,
 fresh remote review and native populated hosted/WebGL proof remain pending.
 All 76 acceptance rows and their existing statuses and broader prerequisites
 remain unchanged.
+
+## PR54 shared-clock and native-window repair checkpoint, 2026-10-19
+
+The working-tree repair based on `aeda97f6` gives all three body replacement
+effects one finite document-clock start time while preserving their 200 ms
+duration, easing, crossfade and 8 px entrance. An unavailable clock cancels the
+replacement set and falls back. The browser probe now qualifies running effects
+owned by the observed snapshot before signalling; synchronous callback validation
+releases the fetched real denial without another browser validation round trip.
+The actual-running cancellation assertion and strict 250 ms budget remain.
+Shared-clock/invalid-clock and dispatch regressions failed before their fixes;
+176 focused tests across seven suites, scoped lint/format and discovery of 39
+browser tests pass with a 512 MiB Node heap and one worker. These are source and
+test-harness checks, not browser execution. Fresh exact-candidate CI, independent
+review, hosted and broader motion/theme acceptance remain pending. All 76 rows
+and existing dispositions remain unchanged.
+
+## PR54 complete owned-clock and early-cancellation checkpoint, 2026-10-19
+
+The repair based on `934bdbe` registers the body replacements, title geometry
+replacement and surviving exact-name native title fades synchronously, then
+aligns them in one guarded microtask on the same finite document clock. Callback
+order and automatic-start skew no longer create separate owned timelines. The
+200 ms duration and strict 250 ms total budget remain unchanged; canceled,
+withdrawn, invalid or superseded ownership cannot be revived. Unavailable clocks
+and late callbacks fail closed.
+
+The installed React ready path removes both unchanged dimensions and identity
+transforms before invoking application callbacks. A failing regression reproduced
+the body helper rejecting that valid captured shape. The repair accepts only the
+paired dimension omission using the equal destination dimensions, and interprets
+an omitted identity transform as `none`, independently of destination translation.
+Partial, invalid, missing-frame and unsupported geometry still falls back.
+
+The browser observer now rejects terminal completion before a genuinely running
+owned frame instead of leaving the held denial unresolved until the test timeout.
+This is a diagnostic failure, never a successful cancellation assertion. Bounded
+first-skip caller/geometry diagnostics omit route/query values, and the decisive
+real in-flight cancellation assertion remains. Focused source/type checks do not
+identify the exact CI early-cancellation caller or prove actual native timing.
+The eight affected focused suites pass 177 tests with a 512 MiB Node heap and
+one worker, including strict installed-DOM type checks of the actual helper and
+observer source. Scoped lint/format and discovery of 39 browser tests pass.
+Instrumented browser execution, exact-candidate CI, independent review and broader
+hosted/motion/theme acceptance remain pending. All 76 rows and statuses remain.
+
+## PR56 integration of PR54 9f170ef4, local merge checkpoint
+
+The uncommitted PR56 integration based on `04c4032d` includes exact PR54
+`9f170ef4cd27e4b5db12fe716437c012e227a1c8`. Both the PR56 capture-completion
+regression and PR54 shared-clock/invalid-clock regressions are retained. The
+joined regression additionally verifies that the completion collector waits on
+the same three body effects aligned by the document-clock finalizer; completion
+still waits for every effect and cleanup cancels only those effects.
+
+The merged motion, privacy, auxiliary-region, application-return and room scene
+authority batch passed **328 tests across 21 suites**, using a 512 MiB Node heap
+and one worker. This includes strict installed-DOM type checks for the actual
+clock/body/title helpers and native observer checks. Scoped lint/format checks
+and discovery of all 39 route-motion browser tests passed. These are local source
+and authored-harness checks, not browser execution or full canonical typecheck.
+All 76 rows and dispositions remain unchanged. Exact merged-SHA CI/review,
+hosted populated native/WebGL proof, broader motion/theme acceptance and the
+existing database/integrated-staging prerequisites remain pending.
