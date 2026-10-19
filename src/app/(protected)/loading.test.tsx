@@ -150,9 +150,7 @@ it.each([
     expect(runtime.committed).toHaveBeenCalled();
     // Readiness closes only history. The fallback withdraws only its own wait.
     expect(runtime.pending.snapshot().pending).toBe(true);
-    expect(screen.getByRole('status')).toHaveTextContent(
-      'Opening requested content…',
-    );
+    expect(screen.getByRole('status')).toHaveTextContent('Working…');
     act(unrelated);
     expect(runtime.pending.snapshot().pending).toBe(false);
     unmount();
