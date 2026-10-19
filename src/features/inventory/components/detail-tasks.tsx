@@ -1,5 +1,5 @@
 'use client';
-import { InventoryCaptureRegion } from '@/components/experience/inventory-capture-region';
+import { InventoryCaptureGroup } from '@/components/experience/inventory-capture-region';
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import type {
@@ -172,7 +172,7 @@ export function DetailTasks(props: {
       {(selected) => {
         if (selected === 'metadata')
           return (
-            <InventoryCaptureRegion region="task-metadata">
+            <InventoryCaptureGroup region="task-metadata">
               <MetadataForm
                 actorId={props.actorId}
                 recoveryBackend={props.backendScope}
@@ -183,17 +183,17 @@ export function DetailTasks(props: {
                 locations={props.locations}
                 forms={props.forms}
               />
-            </InventoryCaptureRegion>
+            </InventoryCaptureGroup>
           );
         if (selected === 'archive')
           return (
-            <InventoryCaptureRegion region="task-archive">
+            <InventoryCaptureGroup region="task-archive">
               <ArchiveQuantityForm
                 itemName={entity.name}
                 actorId={props.actorId}
                 latestReview={props.archiveReview ?? lastArchiveReview!}
               />
-            </InventoryCaptureRegion>
+            </InventoryCaptureGroup>
           );
         if (selected.startsWith('custody:'))
           return (
