@@ -17,6 +17,7 @@ vi.mock('./route-motion', () => ({
     listHref: '/inventory',
     arm: presentation.arm,
     armBack: presentation.armBack,
+    registerReturnSource: () => () => {},
     retireTitle: vi.fn(),
     current: () => true,
     validNow: () => true,
