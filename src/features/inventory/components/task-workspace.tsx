@@ -76,6 +76,10 @@ export function TaskWorkspace({
   const heading = useRef<HTMLHeadingElement | null>(null);
   const tasksHeading = useRef<HTMLHeadingElement | null>(null);
   const returnFocusRequested = useRef(false);
+  const stayFocusRequested = useRef<{
+    selected: string;
+    instance: number;
+  } | null>(null);
   const stayButton = useRef<HTMLButtonElement>(null);
   const locked = state.pending || state.uncertain;
   useEffect(() => {
@@ -88,6 +92,65 @@ export function TaskWorkspace({
         stayButton.current?.focus(),
       );
   }, [requested, locked]);
+  useEffect(() => {
+    const intent = stayFocusRequested.current;
+    if (!intent) return;
+    if (
+      requested !== undefined ||
+      selected !== intent.selected ||
+      instance !== intent.instance ||
+      !selectedEligible ||
+      invalidated ||
+      locked ||
+      state.completed
+    ) {
+      stayFocusRequested.current = null;
+      return;
+    }
+    // React has now removed the task's inert attribute. Capture may still own
+    // the DOM, so retain only this exact task instance's one-shot focus intent.
+    const target = heading.current;
+    const cancel = afterTransitionCapture(document, () => {
+      if (stayFocusRequested.current !== intent) return;
+      stayFocusRequested.current = null;
+      if (
+        !target?.isConnected ||
+        target !== heading.current ||
+        stateRef.current.pending ||
+        stateRef.current.uncertain ||
+        stateRef.current.completed ||
+        target.closest('[hidden], [inert], [aria-hidden="true"]')
+      )
+        return;
+      for (
+        let node: HTMLElement | null = target;
+        node;
+        node = node.parentElement
+      ) {
+        const style = node.ownerDocument.defaultView?.getComputedStyle(node);
+        if (
+          style?.display === 'none' ||
+          style?.visibility === 'hidden' ||
+          style?.visibility === 'collapse'
+        )
+          return;
+      }
+      target.focus();
+    });
+    return () => {
+      cancel();
+      if (stayFocusRequested.current === intent)
+        stayFocusRequested.current = null;
+    };
+  }, [
+    requested,
+    selected,
+    instance,
+    selectedEligible,
+    invalidated,
+    locked,
+    state.completed,
+  ]);
   const launcher = useRef<HTMLButtonElement | null>(null);
   const unavailable = invalidated && !locked && !state.completed;
   useEffect(() => {
@@ -264,8 +327,10 @@ export function TaskWorkspace({
             ref={stayButton}
             disabled={locked}
             onClick={() => {
+              stayFocusRequested.current = selected
+                ? { selected, instance }
+                : null;
               setRequested(undefined);
-              heading.current?.focus();
             }}
           >
             Stay with this task

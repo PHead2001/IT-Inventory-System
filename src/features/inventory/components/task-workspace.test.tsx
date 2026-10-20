@@ -182,6 +182,107 @@ it('keeps focus on the draft after Stay and restores the launcher after explicit
   expect(screen.queryByLabelText('receive entry')).toBeNull();
   expect(screen.getByRole('button', { name: 'Receive stock' })).toHaveFocus();
 });
+it('focuses the retained task only after Stay removes its inert ancestor', () => {
+  render(<Workspace />);
+  fireEvent.click(screen.getByRole('button', { name: 'Receive stock' }));
+  fireEvent.change(screen.getByLabelText('receive entry'), {
+    target: { value: 'retained' },
+  });
+  fireEvent.click(screen.getByRole('button', { name: 'Close task' }));
+  const heading = screen.getByRole('heading', { name: 'Receive stock' });
+  const nativeFocus = heading.focus.bind(heading);
+  const inertAttempts: boolean[] = [];
+  const focus = vi.spyOn(heading, 'focus').mockImplementation(() => {
+    const inert = Boolean(heading.closest('[inert]'));
+    inertAttempts.push(inert);
+    // JSDOM does not enforce inert. Model the browser rejecting this focus.
+    if (!inert) nativeFocus();
+  });
+  try {
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Stay with this task' }),
+    );
+    expect(screen.queryByRole('alertdialog')).toBeNull();
+    expect(screen.getByLabelText('receive entry')).toHaveValue('retained');
+    expect(heading).toHaveFocus();
+    expect(inertAttempts).toEqual([false]);
+  } finally {
+    focus.mockRestore();
+  }
+});
+it.each([
+  'release',
+  'reopen',
+  'switch',
+  'unmount',
+  'hidden',
+  'css-hidden',
+  'aria-hidden',
+  'inert',
+  'pending',
+  'complete',
+  'repeat-stay',
+])('fences retained-task Stay focus through capture on %s', async (outcome) => {
+  const view = render(<Workspace />);
+  fireEvent.click(screen.getByRole('button', { name: 'Receive stock' }));
+  fireEvent.change(screen.getByLabelText('receive entry'), {
+    target: { value: 'retained' },
+  });
+  fireEvent.click(screen.getByRole('button', { name: 'Close task' }));
+  const heading = screen.getByRole('heading', { name: 'Receive stock' });
+  const focus = vi.spyOn(heading, 'focus');
+  const capture = holdTransitionCapture();
+  try {
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Stay with this task' }),
+    );
+    expect(focus).not.toHaveBeenCalled();
+    if (outcome === 'reopen' || outcome === 'repeat-stay') {
+      fireEvent.click(screen.getByRole('button', { name: 'Close task' }));
+      if (outcome === 'repeat-stay')
+        fireEvent.click(
+          screen.getByRole('button', { name: 'Stay with this task' }),
+        );
+    }
+    if (outcome === 'switch') {
+      fireEvent.click(screen.getByRole('button', { name: 'Move stock' }));
+      fireEvent.click(
+        screen.getByRole('button', { name: 'Discard and switch' }),
+      );
+    }
+    if (outcome === 'unmount') view.unmount();
+    if (outcome === 'hidden') heading.parentElement!.hidden = true;
+    if (outcome === 'css-hidden') heading.parentElement!.style.display = 'none';
+    if (outcome === 'aria-hidden')
+      heading.parentElement!.setAttribute('aria-hidden', 'true');
+    if (outcome === 'inert') heading.parentElement!.setAttribute('inert', '');
+    if (outcome === 'pending' || outcome === 'complete')
+      fireEvent.click(
+        screen.getByRole('button', { name: outcome, exact: true }),
+      );
+    await act(capture.release);
+    if (outcome === 'release' || outcome === 'repeat-stay') {
+      expect(heading).toHaveFocus();
+      expect(focus).toHaveBeenCalledTimes(1);
+      expect(screen.getByLabelText('receive entry')).toHaveValue('retained');
+    } else {
+      expect(focus).not.toHaveBeenCalled();
+      if (outcome === 'reopen')
+        expect(
+          screen.getByRole('button', { name: 'Stay with this task' }),
+        ).toHaveFocus();
+      if (outcome === 'switch')
+        expect(
+          screen.getByRole('heading', { name: 'Move stock' }),
+        ).toHaveFocus();
+    }
+  } finally {
+    view.unmount();
+    await act(capture.release);
+    capture.dispose();
+    focus.mockRestore();
+  }
+});
 it('mounts lazily, retains a dirty draft on Stay, then discards only explicitly', () => {
   render(<Workspace />);
   expect(screen.queryByLabelText('receive entry')).toBeNull();
