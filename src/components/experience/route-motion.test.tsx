@@ -979,12 +979,13 @@ it.each(['privacy', 'reduced', 'supersession'] as const)(
             actorId="staff"
             routeKey="/inventory"
             contentIdentity="ready-source"
+            pairedInventory
             conventionalPrimary
             capture="regions"
           >
             <InventoryCaptureRegion region="header">
               <header>
-                <RouteLink href="/history">Auxiliary history</RouteLink>
+                <List />
                 <RouteLink href="/labels">Auxiliary supersession</RouteLink>
                 <input
                   aria-label="Retained auxiliary draft"
@@ -1003,10 +1004,10 @@ it.each(['privacy', 'reduced', 'supersession'] as const)(
       name: 'Retained auxiliary draft',
     });
     const header = draft.parentElement!;
-    fireEvent.click(screen.getByRole('link', { name: 'Auxiliary history' }));
+    fireEvent.click(screen.getByRole('link', { name: 'Cable row 2' }));
     expect(document.startViewTransition()).toBe(native.handle);
     expect(header.style.viewTransitionName).toMatch(
-      /^route-primary-.*-header$/,
+      /^inventory-title-.*-content-header$/,
     );
     if (withdrawal === 'privacy') act(() => revokePrivatePresentation());
     else if (withdrawal === 'reduced')
@@ -3709,86 +3710,97 @@ it('shares the measured record heading while disclosure keeps one stable accessi
   }
 });
 
-for (const order of ['inner-first', 'outer-first'] as const) {
-  it(`unmanaged React fallback captures the same exact generic primary arrival across ${order} without a late outer stage`, async () => {
-    vi.spyOn(HTMLElement.prototype, 'getClientRects').mockReturnValue([
-      { width: 30, height: 20 },
-    ] as unknown as DOMRectList);
-    history.replaceState(null, '', '/inventory');
-    let primaryKey = '/inventory';
-    let motion!: ReturnType<typeof useRouteMotion>;
-    let owner:
-      | import('./paired-route-loading-state').PairedLoadingOwner
-      | null
-      | undefined;
-    function ObservePrimary() {
-      const next = useRouteMotion();
-      const loading = useContext(PairedRouteLoadingContext);
-      useLayoutEffect(() => {
-        motion = next;
-        owner = loading?.store.snapshot();
-      });
-      return null;
-    }
-    const fixture = () =>
-      view(
-        <>
-          <ObservePrimary />
-          <PageArrival pathname={runtime.pathname}>
-            <RouteReady
-              actorId="staff"
-              routeKey={primaryKey}
-              contentIdentity={primaryKey}
-              conventionalPrimary
-            >
-              <h1>{primaryKey}</h1>
-              <input aria-label="Generic draft" defaultValue="retained" />
-              <RouteLink href="/history">Open ordinary History</RouteLink>
-            </RouteReady>
-          </PageArrival>
-        </>,
-        'staff',
-        'route-fixture',
-        true,
+for (const managed of [false, true]) {
+  for (const order of ['inner-first', 'outer-first'] as const) {
+    it(`${managed ? 'auxiliary-enabled primary' : 'unmanaged React fallback'} captures the same exact generic primary arrival across ${order} without a late outer stage`, async () => {
+      vi.spyOn(HTMLElement.prototype, 'getClientRects').mockReturnValue([
+        { width: 30, height: 20 },
+      ] as unknown as DOMRectList);
+      history.replaceState(null, '', '/inventory');
+      let primaryKey = '/inventory';
+      let motion!: ReturnType<typeof useRouteMotion>;
+      let auxiliary!: import('react').ContextType<
+        typeof AuxiliaryRouteCaptureContext
+      >;
+      let owner:
+        | import('./paired-route-loading-state').PairedLoadingOwner
+        | null
+        | undefined;
+      function ObservePrimary() {
+        const next = useRouteMotion();
+        const loading = useContext(PairedRouteLoadingContext);
+        const registry = useContext(AuxiliaryRouteCaptureContext);
+        useLayoutEffect(() => {
+          motion = next;
+          auxiliary = registry;
+          owner = loading?.store.snapshot();
+        });
+        return null;
+      }
+      const fixture = () =>
+        view(
+          <>
+            <ObservePrimary />
+            <PageArrival pathname={runtime.pathname}>
+              <RouteReady
+                actorId="staff"
+                routeKey={primaryKey}
+                contentIdentity={primaryKey}
+                conventionalPrimary
+              >
+                <h1>{primaryKey}</h1>
+                <input aria-label="Generic draft" defaultValue="retained" />
+                <RouteLink href="/history">Open ordinary History</RouteLink>
+              </RouteReady>
+            </PageArrival>
+          </>,
+          'staff',
+          'route-fixture',
+          !managed,
+        );
+      const page = render(fixture());
+      const draft = screen.getByRole('textbox');
+      const armAuxiliary = auxiliary ? vi.spyOn(auxiliary, 'arm') : undefined;
+      fireEvent.click(
+        screen.getByRole('link', { name: 'Open ordinary History' }),
       );
-    const page = render(fixture());
-    const draft = screen.getByRole('textbox');
-    fireEvent.click(
-      screen.getByRole('link', { name: 'Open ordinary History' }),
-    );
-    const approval = motion.arrival!;
-    expect(approval.presentation).toBe('primary');
-    expect(owner).toMatchObject({ kind: 'primary', arrival: approval });
-    expect(motion.arrivalEnabled).toBe(false);
-    expect(draft).toHaveValue('retained');
-    const source = runtime.boundaries.findLast(
-      (b) => b.name === approval.name,
-    )!;
-    expect(source.share).toBe('route-content');
-    history.replaceState(null, '', '/history');
-    if (order === 'outer-first') runtime.pathname = '/history';
-    else primaryKey = '/history';
-    page.rerender(fixture());
-    expect(motion.arrival).toBe(approval);
-    expect(
-      runtime.boundaries.filter((b) => b.update === 'route-content'),
-    ).toHaveLength(0);
-    primaryKey = '/history';
-    runtime.pathname = '/history';
-    page.rerender(fixture());
-    const dest = runtime.boundaries.findLast((b) => b.name === approval.name)!;
-    expect(dest.share).toBe('route-content');
-    await act(async () => {
-      source.onShare!({ name: approval.name });
-      dest.onShare!({ name: approval.name });
+      const approval = motion.arrival!;
+      expect(approval.presentation).toBe('primary');
+      if (managed) expect(armAuxiliary).not.toHaveBeenCalled();
+      expect(owner).toMatchObject({ kind: 'primary', arrival: approval });
+      expect(motion.arrivalEnabled).toBe(false);
+      expect(draft).toHaveValue('retained');
+      const source = runtime.boundaries.findLast(
+        (b) => b.name === approval.name,
+      )!;
+      expect(source.share).toBe('route-content');
+      history.replaceState(null, '', '/history');
+      if (order === 'outer-first') runtime.pathname = '/history';
+      else primaryKey = '/history';
+      page.rerender(fixture());
+      expect(motion.arrival).toBe(approval);
+      expect(
+        runtime.boundaries.filter((b) => b.update === 'route-content'),
+      ).toHaveLength(0);
+      primaryKey = '/history';
+      runtime.pathname = '/history';
+      page.rerender(fixture());
+      const dest = runtime.boundaries.findLast(
+        (b) => b.name === approval.name,
+      )!;
+      expect(dest.share).toBe('route-content');
+      await act(async () => {
+        source.onShare!({ name: approval.name });
+        dest.onShare!({ name: approval.name });
+      });
+      expect(motion.arrival).toBeNull();
+      page.rerender(fixture());
+      expect(
+        runtime.boundaries.filter((b) => b.update === 'route-content'),
+      ).toHaveLength(0);
+      vi.restoreAllMocks();
     });
-    expect(motion.arrival).toBeNull();
-    page.rerender(fixture());
-    expect(
-      runtime.boundaries.filter((b) => b.update === 'route-content'),
-    ).toHaveLength(0);
-    vi.restoreAllMocks();
-  });
+  }
 }
 
 it.each(['inner-first', 'outer-first'] as const)(

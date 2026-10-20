@@ -1,5 +1,6 @@
 import { render, screen } from '@testing-library/react';
-import { expect, it, vi } from 'vitest';
+import { beforeEach, expect, it, vi } from 'vitest';
+import type { ViewTransitionProps } from 'react';
 import { createAuxiliaryRouteCapture } from './auxiliary-route-capture';
 import { AuxiliaryRouteCaptureContext } from './auxiliary-route-context';
 import {
@@ -9,9 +10,95 @@ import {
 import { RouteContentIdentityContext } from './route-content-identity';
 import { RoutePresentationSourceContext } from './route-presentation-source';
 
-vi.mock('./route-motion', () => ({
-  useRouteMotion: () => ({ validNow: () => true, captureAvailable: true }),
+const state = vi.hoisted(() => ({
+  boundaries: [] as ViewTransitionProps[],
+  primary: false,
+  enabled: true,
 }));
+vi.mock('./route-motion', () => ({
+  useRouteMotion: () => ({
+    validNow: () => state.enabled,
+    current: () => true,
+    captureAvailable: true,
+    enabled: state.enabled,
+    intent: null,
+    titleArrival: null,
+    arrival: state.primary
+      ? {
+          name: 'route-primary-proof',
+          presentation: 'primary',
+          sourceKey: '/inventory',
+          destinationKey: '/history',
+          epoch: 1,
+        }
+      : null,
+  }),
+}));
+vi.mock('react', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('react')>();
+  return {
+    ...actual,
+    ViewTransition: (props: ViewTransitionProps) => {
+      state.boundaries.push(props);
+      return props.children;
+    },
+  };
+});
+beforeEach(() => {
+  state.boundaries = [];
+  state.primary = false;
+  state.enabled = true;
+});
+
+it('retains a real primary boundary with auxiliary support without remounting authored DOM or arming it for title pairs', () => {
+  const registry = createAuxiliaryRouteCapture();
+  const source = Symbol();
+  const fixture = () => (
+    <AuxiliaryRouteCaptureContext value={registry}>
+      <InventoryCaptureRegionsContext
+        value={{
+          enabled: true,
+          pairedInventory: true,
+          conventionalPrimary: true,
+        }}
+      >
+        <RoutePresentationSourceContext value={source}>
+          <RouteContentIdentityContext
+            value={{
+              pathname: '/inventory',
+              listHref: '/inventory',
+              rawRouteKey: '/inventory',
+            }}
+          >
+            <InventoryCaptureRegion region="body">
+              <input aria-label="Retained primary draft" defaultValue="draft" />
+            </InventoryCaptureRegion>
+          </RouteContentIdentityContext>
+        </RoutePresentationSourceContext>
+      </InventoryCaptureRegionsContext>
+    </AuxiliaryRouteCaptureContext>
+  );
+  const page = render(fixture());
+  const input = screen.getByRole('textbox');
+  expect(state.boundaries.at(-1)?.name).toBeUndefined();
+  state.primary = true;
+  page.rerender(fixture());
+  expect(state.boundaries.at(-1)).toMatchObject({
+    name: 'route-primary-proof',
+    share: 'route-content',
+    enter: 'route-content',
+    exit: 'route-content',
+  });
+  state.primary = false;
+  page.rerender(fixture());
+  expect(state.boundaries.at(-1)?.name).toBeUndefined();
+  state.primary = true;
+  state.enabled = false;
+  page.rerender(fixture());
+  expect(state.boundaries.at(-1)?.name).toBeUndefined();
+  expect(screen.getByRole('textbox')).toBe(input);
+  expect(input).toHaveValue('draft');
+});
 
 it.each(['header', 'body'] as const)(
   'requires the exact server route key for %s and retires participation when that identity is withdrawn',

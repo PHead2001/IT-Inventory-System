@@ -330,11 +330,7 @@ export function RouteMotionProvider({
           if (primaryPresentation && approval) loading.armPrimary(approval);
         });
         const pairName = state.snapshot()?.name;
-        const approval = pairName
-          ? state.titleArrivalSnapshot()
-          : state.arrivalSnapshot()?.presentation === 'primary'
-            ? state.arrivalSnapshot()
-            : null;
+        const approval = pairName ? state.titleArrivalSnapshot() : null;
         const grant = acceptedGrant.current;
         const generation = latestPrivacy.current.generation;
         const source =
@@ -342,6 +338,7 @@ export function RouteMotionProvider({
             ? auxiliary.source(sourcePrimary.root, approval.sourceKey)
             : undefined;
         if (
+          pairName &&
           approval &&
           sourcePrimary?.conventionalPrimary === true &&
           sourcePrimary.routeKey === approval.sourceKey &&
@@ -364,11 +361,9 @@ export function RouteMotionProvider({
             document.documentElement.dataset.routeMotionPrivate === 'true';
           const admitted = () =>
             current() &&
-            (pairName
-              ? state.titleArrivalSnapshot() === approval &&
-                state.snapshot()?.name === pairName
-              : state.arrivalSnapshot() === approval);
-          const base = pairName ? pairName + '-content' : approval.name;
+            state.titleArrivalSnapshot() === approval &&
+            state.snapshot()?.name === pairName;
+          const base = pairName + '-content';
           auxiliary.arm({
             token: approval,
             base,
