@@ -20,6 +20,9 @@ const emptySnapshot = () => null;
 export function supportsPairedRouteLoading() {
   return (
     typeof document.startViewTransition === 'function' &&
+    // The owned snapshot clock requires this capability. Null is the normal
+    // idle value; requiring a live transition here would disable every Link.
+    'activeViewTransition' in document &&
     typeof CSS !== 'undefined' &&
     typeof CSS.supports === 'function' &&
     CSS.supports('selector(::view-transition-group(.route-content))')

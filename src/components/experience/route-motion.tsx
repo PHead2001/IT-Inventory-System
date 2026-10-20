@@ -80,11 +80,7 @@ const RouteMotionContext = createContext<{
 // credentials, request state or private DOM is stored in a module singleton.
 let currentRouteProvider: symbol | undefined;
 const subscribeSupport = () => () => {};
-const supported = () =>
-  typeof document.startViewTransition === 'function' &&
-  typeof CSS !== 'undefined' &&
-  typeof CSS.supports === 'function' &&
-  CSS.supports('selector(::view-transition-group(.route-content))');
+const supported = supportsPairedRouteLoading;
 const serverSupported = () => false;
 const commandDestination = (href: string | undefined) => {
   if (!href) return null;

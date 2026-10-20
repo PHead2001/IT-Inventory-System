@@ -54,6 +54,10 @@ beforeEach(() => {
     configurable: true,
     value: { skipTransition: skip },
   });
+  Object.defineProperty(document, 'timeline', {
+    configurable: true,
+    value: { currentTime: 500 },
+  });
   Object.defineProperty(document, 'getAnimations', {
     configurable: true,
     value: () => [
@@ -225,7 +229,34 @@ it('supports a source implicit dimension endpoint without inventing another box'
   });
 });
 
+it.each([false, true])(
+  'uses identity for an omitted captured transform with unchanged dimensions=%s instead of borrowing the translated destination',
+  (unchangedDimensions) => {
+    delete frames[0].transform;
+    if (unchangedDimensions) {
+      delete frames[0].width;
+      delete frames[0].height;
+    }
+    sharedTitleMotion({ name }, () => true);
+    expect(animate.mock.calls[0][0]).toEqual([
+      {
+        transform: unchangedDimensions
+          ? 'translate(0px, 0px) scale(1, 1)'
+          : 'translate(0px, 0px) scale(0.5, 0.4166666666666667)',
+      },
+      { transform: 'translate(100px, 80px) scale(1, 1)' },
+    ]);
+    expect(skip).not.toHaveBeenCalled();
+  },
+);
+
 it.each([
+  [
+    'null source transform',
+    () => {
+      frames[0].transform = null;
+    },
+  ],
   [
     'zero width',
     () => {

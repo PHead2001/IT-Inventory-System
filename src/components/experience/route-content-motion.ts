@@ -1,4 +1,5 @@
 import { cancelRouteSnapshots } from './route-motion-state';
+import { registerRouteSnapshotClock } from './route-snapshot-clock';
 
 function pixels(value: unknown) {
   if (typeof value !== 'string' || !/^\d+(?:\.\d+)?px$/.test(value))
@@ -62,9 +63,21 @@ export function routeContentMotion(
     const destination = getComputedStyle(document.documentElement, group);
     const width = pixels(destination.width);
     const height = pixels(destination.height);
-    const oldWidth = pixels(first?.width);
-    const oldHeight = pixels(first?.height);
-    const old = translation(first?.transform);
+    // React removes both unchanged dimensions before this callback. Only that
+    // paired omission means the captured and destination dimensions are equal.
+    // A removed transform is specifically its identity (`none`), never the
+    // destination translation; partial/invalid geometry still fails closed.
+    const unchangedDimensions =
+      first?.width === undefined && first?.height === undefined;
+    const oldWidth = pixels(
+      unchangedDimensions ? destination.width : first?.width,
+    );
+    const oldHeight = pixels(
+      unchangedDimensions ? destination.height : first?.height,
+    );
+    const old = translation(
+      first?.transform === undefined ? 'none' : first.transform,
+    );
     const next = translation(destination.transform);
     const tokens = getComputedStyle(document.documentElement);
     const time = /^([+-]?(?:\d+(?:\.\d+)?|\.\d+)(?:e[+-]?\d+)?)(ms|s)$/i.exec(
@@ -125,7 +138,15 @@ export function routeContentMotion(
       { transform: 'translateY(8px)', opacity: 0 },
       { transform: 'translateY(0px)', opacity: 1 },
     ]);
-    return () => replacements.forEach((animation) => animation.cancel());
+    const retireClock = registerRouteSnapshotClock(
+      replacements,
+      valid,
+      unsupported,
+    );
+    return () => {
+      retireClock();
+      replacements.forEach((animation) => animation.cancel());
+    };
   } catch {
     replacements.forEach((animation) => animation.cancel());
     unsupported?.();

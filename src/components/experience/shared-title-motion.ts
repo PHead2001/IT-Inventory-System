@@ -1,4 +1,5 @@
 import { cancelRouteSnapshots } from './route-motion-state';
+import { registerRouteSnapshotClock } from './route-snapshot-clock';
 
 function pixels(value: unknown) {
   if (typeof value !== 'string' || !/^\d+(?:\.\d+)?px$/.test(value))
@@ -68,7 +69,12 @@ export function sharedTitleMotion(
     const height = pixels(destination.height);
     const oldWidth = pixels(first?.width ?? destination.width);
     const oldHeight = pixels(first?.height ?? destination.height);
-    const old = translation(first?.transform ?? destination.transform);
+    // React removes an unchanged identity transform before onShare. Its absence
+    // means none, even when the destination has a nonzero translation. Other
+    // invalid values still fail closed rather than borrowing a destination box.
+    const old = translation(
+      first?.transform === undefined ? 'none' : first.transform,
+    );
     const next = translation(destination.transform);
     if (
       !animations.length ||
@@ -115,7 +121,25 @@ export function sharedTitleMotion(
       ],
       { duration, delay: 0, easing, pseudoElement: group },
     );
-    return () => replacement?.cancel();
+    const images = document
+      .getAnimations()
+      .filter((animation) =>
+        [
+          `::view-transition-old(${instance.name})`,
+          `::view-transition-new(${instance.name})`,
+        ].includes(
+          (animation.effect as KeyframeEffect | null)?.pseudoElement ?? '',
+        ),
+      );
+    const retireClock = registerRouteSnapshotClock(
+      [replacement, ...images],
+      valid,
+      unsupported,
+    );
+    return () => {
+      retireClock();
+      replacement?.cancel();
+    };
   } catch {
     // A post-capture failure cannot rebuild the parent's image without retaining
     // private DOM. Skip the entire snapshot, revealing the live destination now.

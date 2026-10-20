@@ -124,6 +124,10 @@ beforeEach(() => {
     writable: true,
     value: vi.fn(),
   });
+  Object.defineProperty(document, 'activeViewTransition', {
+    configurable: true,
+    value: null,
+  });
   document.documentElement.dataset.motion = 'full';
   localStorage.removeItem('it-inventory-reduce-motion');
   privacyNavigation.prepare.mockReset();
@@ -134,6 +138,7 @@ afterEach(() => {
   vi.unstubAllGlobals();
   Reflect.deleteProperty(window, 'navigation');
   Reflect.deleteProperty(document, 'startViewTransition');
+  Reflect.deleteProperty(document, 'activeViewTransition');
   Reflect.deleteProperty(document, 'visibilityState');
   window.history.replaceState(null, '', originalHref);
   localStorage.removeItem('it-inventory-reduce-motion');
