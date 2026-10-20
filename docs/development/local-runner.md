@@ -385,7 +385,42 @@ Before constructing the NoCloud seed, the host assigns a collision-checked rando
 
 After a consumed pilot fails, preserve `pilot-attempt.json` and the recorded failure; do not clear the receipt or restart pickup blindly. The owner can run `DiagnoseNetwork.ps1` elevated for read-only host routes, ACL capability and owned-network evidence. After independent review and explicit owner authorization, `ProbeNetworkAcl.ps1` can reproduce the current policy on one fresh, diskless VM that is never booted. It reports the exact failing rule or readback error and removes only its verified VM ID/name/Off state/path/tag/diskless identity and owned folder. Inspect its JSON `cleanupVerified` and `cleanupError` fields; a successful shell exit alone is insufficient. Its two-minute limit applies between ACL commands, not to the duration of an individual Windows management call. Coordinate concurrent WSL/Docker network work so it does not change the network during the diagnosis.
 
-A separate per-session Windows guardian starts and confirms readiness before VM boot. Its protected recovery journal retains the exact VM GUID, adapter ID, Internal switch GUID, static MAC, claim and process identities. It observes host IPv4/IPv6 addresses and routes, including destination, next hop and interface, between one-second loop waits. On drift or failed inspection, it pauses its running VM, disconnects the owned adapter and verifies isolation before changing ACLs. An Off VM stays Off. Fingerprint and policy consume one retained capture bracketed by matching complete captures; three spaced matching observations precede policy installation and three more precede reconnect. After slow identity/ACL preflight, a new observation outside the state lock precedes serialized Connect/Resume admission, which rechecks deadlines, generation, Stop and observation age. The supervisor waits for this guardian rather than repairing independently or reusing startup ACL arrays. Flaps keep the original 120-second outage episode and unchanged hard deadline. Uncertain provider results, ownership changes, Stop, dead owners or expired guardian progress use canonical cleanup; refusal retains protected state/files.
+A separate per-session Windows guardian starts and confirms readiness before VM boot. Its protected recovery journal retains the exact VM GUID, adapter ID, Internal switch GUID, static MAC, claim and process identities. It observes host IPv4/IPv6 addresses and routes, including destination, next hop and interface, between one-second loop waits. On drift or failed inspection, it pauses its running VM, disconnects the owned adapter and verifies isolation before changing ACLs. An Off VM stays Off. Fingerprint and policy consume one retained capture bracketed by matching complete captures; three spaced matching observations precede policy installation and three more precede reconnect. After reducer identity/connectivity reads, a new observation outside the state lock precedes serialized Connect/Resume admission with final live provider/ACL readbacks and deadline, generation, Stop and observation-age checks. The supervisor waits for this guardian rather than repairing independently or reusing startup ACL arrays. Flaps keep the original 120-second outage episode and unchanged hard deadline. Uncertain provider results, ownership changes, Stop, dead owners or expired guardian progress use canonical cleanup; refusal retains protected state/files.
+
+Connect/Resume handoff does not repeat an early ACL inspection before that final
+observation. It retains the reducer's VM/switch/adapter identity and connectivity
+reads, then performs every final live VM, adapter, switch, isolation and exact ACL
+readback after the fresh observation. No cached provider object replaces those
+reads. The original retained-capture timestamp still has a two-second admission
+lease; synchronous provider inspection can consume it and admission remains closed.
+
+If final exact ACL/binding checks passed but that lease became stale, recovery
+disconnects and positively reads back the isolated paused/Off VM. Only this tagged,
+same-binding/generation/fingerprint/rules attempt may retain the verified policy
+phase. It retires the operation, advances generation and resets stability, requiring
+three new spaced matching observations followed by all final live checks. It never
+reconnects immediately or reapplies an unchanged verified policy solely because the
+previous lease was stale. Changed fingerprints require policy application again;
+ACL/binding/readback uncertainty or an arbitrary provider exception is terminal.
+Stop, owner/generation changes, clock regression and the original episode/hard
+deadlines still preempt retry. Neither timestamp nor deadline is extended. Slow or
+unstable providers can therefore still exhaust the original recovery budget.
+
+The bounded failure projection adds the last admission operation and actual age
+of the retained capture, plus maximum quarantine/connect/resume attempt durations.
+A negative capture age records a future-clock refusal; it is not a fresh lease.
+Successful connect/resume and quarantine attempts persist their completed
+diagnostics under the existing state mutex before returning success. The next
+guardian tick therefore reads the same admission operation, observation age and
+attempt duration from serialized state. This adds no provider read or mutation,
+generation advance, authority change or deadline extension. Offline regressions
+round-trip the state through JSON and check the following tick.
+Existing observation/preflight/apply diagnostics retain their meanings. Older
+protected diagnostic records remain readable; unknown fields and invalid numbers
+remain rejected. These source changes and offline regressions do not establish a
+particular host failure's cause or live recovery acceptance. Owner-controlled
+installation, reviewed installed/source parity and real isolated recovery evidence
+remain separate steps.
 
 During explicit owner image preparation, the root Stop marker suspends pickup while the builder and verifier run. Only a freshly read protected state passing the existing identity, purpose and candidate checks can retain that preparation exemption. An instance cancellation always wins; job sessions and missing purposes still honor root Stop. Owner Stop still removes the exact recorded instance, and removed or replaced state cannot authorize a later provider operation. Creation still requires the existing owner preparation authorization.
 
