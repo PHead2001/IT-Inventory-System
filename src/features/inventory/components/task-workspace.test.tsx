@@ -257,9 +257,7 @@ it.each([
       heading.parentElement!.setAttribute('aria-hidden', 'true');
     if (outcome === 'inert') heading.parentElement!.setAttribute('inert', '');
     if (outcome === 'pending' || outcome === 'complete')
-      fireEvent.click(
-        screen.getByRole('button', { name: outcome, exact: true }),
-      );
+      fireEvent.click(screen.getByRole('button', { name: outcome }));
     await act(capture.release);
     if (outcome === 'release' || outcome === 'repeat-stay') {
       expect(heading).toHaveFocus();
