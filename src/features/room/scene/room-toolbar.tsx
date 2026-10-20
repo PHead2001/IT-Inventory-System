@@ -108,6 +108,7 @@ export function RoomToolbar({
   onCountsChange,
   interactionRef,
   onOverlayChange,
+  selectionEnabled = true,
 }: {
   active: boolean;
   onActiveChange(active: boolean): void;
@@ -122,6 +123,7 @@ export function RoomToolbar({
   onCountsChange(): void;
   interactionRef?: RefObject<HTMLButtonElement | null>;
   onOverlayChange?: () => void;
+  selectionEnabled?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const [help, setHelp] = useState(false);
@@ -237,7 +239,20 @@ export function RoomToolbar({
   }, [open, onOverlayChange]);
   useEffect(() => {
     const escape = (event: KeyboardEvent) => {
-      if (event.key !== 'Escape' || (!active && !open)) return;
+      if (
+        event.defaultPrevented ||
+        event.key !== 'Escape' ||
+        (!active && !open)
+      )
+        return;
+      const ownerSelector =
+        'dialog[open], [role="dialog"][aria-modal="true"], [role="alertdialog"][aria-modal="true"]';
+      const target =
+        event.target instanceof Element ? event.target : document.activeElement;
+      const modal = target?.closest(ownerSelector);
+      // A focused foreground dialog owns Escape, including its native cancel
+      // default action. Toolbars inside that same dialog still handle their map.
+      if (modal && host.current?.closest(ownerSelector) !== modal) return;
       event.preventDefault();
       setOpen(false);
       setHelp(false);
@@ -424,8 +439,10 @@ export function RoomToolbar({
           {help && (
             <div className={styles.controlsHelp}>
               <p>
-                Click or tap a location to select it. Outside Interact mode,
-                scroll and swipe move the page.
+                {selectionEnabled
+                  ? 'Click or tap a location to select it.'
+                  : 'This preview shows the recorded location.'}{' '}
+                Outside Interact mode, scroll and swipe move the page.
               </p>
               <p>
                 Choose Interact with map to rotate by dragging, or zoom with an

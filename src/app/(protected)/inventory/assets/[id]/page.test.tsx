@@ -7,6 +7,7 @@ import type {
 } from '@/features/inventory/contracts-ui';
 import AssetPage from './page';
 
+const memberState = vi.hoisted(() => ({ role: 'viewer' }));
 const custodyEvent: HistoryEvent = {
   id: 'issued-first',
   kind: 'asset',
@@ -33,7 +34,7 @@ const custodyEvent: HistoryEvent = {
 };
 vi.mock('@/lib/auth/session.server', () => ({
   requireMember: async () => ({
-    member: { user_id: 'viewer', role: 'viewer' },
+    member: { user_id: 'viewer', role: memberState.role },
   }),
 }));
 vi.mock('@/features/inventory/queries.server', () => ({
@@ -72,12 +73,17 @@ vi.mock('@/features/inventory/queries.server', () => ({
 }));
 vi.mock('@/features/custody/queries.server', () => ({
   getSites: async () => [],
+  getAssetReturnSuggestion: async () => undefined,
 }));
 vi.mock('@/features/metadata/queries.server', () => ({
   getPublishedForms: async () => ({}),
 }));
 vi.mock('@/features/inventory/components/detail-tasks', () => ({
-  DetailTasks: () => null,
+  DetailTasks: () => (
+    <section aria-label="Record tasks">
+      <h2>Tasks</h2>
+    </section>
+  ),
 }));
 vi.mock('@/features/metadata/custom-metadata-list', () => ({
   CustomMetadataList: () => null,
@@ -119,6 +125,21 @@ it('renders one authoritative asset timeline without duplicating custody or merg
   ).toBeVisible();
 });
 vi.mock('server-only', () => ({}));
+
+it('places staff tasks before supporting asset details and the optional storage preview even for site custody', async () => {
+  memberState.role = 'staff';
+  render(await AssetPage({ params: Promise.resolve({ id: 'asset' }) }));
+  const tasks = screen.getByRole('region', { name: 'Record tasks' });
+  const preview = screen.getByRole('region', { name: 'Storage preview' });
+  const details = screen.getByRole('heading', { name: 'Asset details' });
+  expect(
+    tasks.compareDocumentPosition(details) & Node.DOCUMENT_POSITION_FOLLOWING,
+  ).toBeTruthy();
+  expect(
+    tasks.compareDocumentPosition(preview) & Node.DOCUMENT_POSITION_FOLLOWING,
+  ).toBeTruthy();
+  memberState.role = 'viewer';
+});
 
 vi.mock('@/features/files/cards.server', () => ({
   getInventoryFileCards: vi.fn(async () => ({

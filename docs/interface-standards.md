@@ -305,6 +305,24 @@ adding that control must not shift following record content. Names that fit
 leave no focusable control. Expansion retains the same heading and native title
 identity; it does not reserve a separate empty row under short names.
 
+Quantity and asset detail pages put their actual description and manufacturer/model
+section immediately after the record hero, before task launchers and storage maps.
+That compact section owns the paired body region. Descriptions use a measured
+three-line preview; the labeled manufacturer/model values use a measured one-line
+preview. Server HTML is bounded before measurement. Both preserve the entire
+actual text node and provide a 44 px disclosure alongside the text only when it
+overflows, with descriptive **Show full / Show less** accessible labels. The
+reserved control column avoids a separate button row. Resize, viewport and font
+changes remeasure natural text height; a focused expanded control remains
+available even when the new width fits. Expansion animates height in ordinary
+page flow using the existing 220 ms disclosure pattern. The first measured cap is
+installed before paint. Live Reduced motion explicitly stops in-flight height
+animation and sets its end state, including when its target did not change.
+No character-count heuristic, measurement clone or nested scroller is used. Short
+fitting text remains fully visible. Custom fields, files, stock/site holdings
+and history retain their trailing `record-supporting-content` capture region;
+neither conventional region encloses a map or its loading slot.
+
 Effective motion reduction suppresses/cancels native snapshots synchronously.
 The protected provider cancels on null/different Supabase actor, permitted logout
 submission, actor replacement and unmount (including access-denied redirects).

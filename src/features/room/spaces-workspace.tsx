@@ -39,6 +39,11 @@ import { useRoomOccupancy } from './use-room-occupancy';
 import { cameraViewKey, type CameraView } from './scene/camera-view';
 import { useRoomCameraSnapshot } from './scene/camera-snapshot-provider';
 import {
+  focusToken,
+  sameFocusToken,
+  type FocusToken,
+} from './scene/spatial-reveal';
+import {
   parseRoomContentsResponse,
   roomContentsFilter,
 } from './contents-contract';
@@ -155,7 +160,14 @@ export function SpacesWorkspace({
   const [focusTick, setFocusTick] = useState(0);
   const [focusEpoch, setFocusEpoch] = useState(0);
   const [focusOnRestore, setFocusOnRestore] = useState(Boolean(initialCode));
-  const cancelFocus = useCallback(() => setFocusOnRestore(false), []);
+  const [focusOrigin, setFocusOrigin] = useState<
+    'arrival' | 'selection' | 'restore'
+  >('arrival');
+  const activeFocusToken = useRef<FocusToken | null>(null);
+  const cancelFocus = useCallback((token?: FocusToken) => {
+    if (!token || sameFocusToken(token, activeFocusToken.current))
+      setFocusOnRestore(false);
+  }, []);
   const selectionRef = useRef(selection);
   const [focusCompletion, setFocusCompletion] = useState<{
     scope: string;
@@ -191,13 +203,6 @@ export function SpacesWorkspace({
         : null,
     [userId, selection.space.id, room],
   );
-  const occupancy = useRoomOccupancy(
-    showCounts && visible && Boolean(room),
-    userId,
-    selection.space.id,
-    attemptKey,
-    backend,
-  );
   // Mutations live on other routes. Refresh on return (including retained pages)
   // and tab focus; never persist private counts or imply realtime updates.
   useEffect(() => {
@@ -232,22 +237,40 @@ export function SpacesWorkspace({
   const selected = scoped.find((location) => location.code === selection.code);
   const bound =
     !!selected && bindings.some((binding) => binding.code === selected.code);
+  const selectedCountEligible =
+    bound &&
+    !!selected?.active &&
+    !!selected.can_hold_inventory &&
+    !scoped.some((location) => location.parentId === selected.id);
+  const occupancy = useRoomOccupancy(
+    (showCounts || selectedCountEligible) && visible && Boolean(room),
+    userId,
+    selection.space.id,
+    attemptKey,
+    backend,
+  );
   const highlightedCodes = useMemo(
     () => inventoryDescendantCodes(scoped, selection.code),
     [scoped, selection.code],
   );
-  const focusRequest = useMemo(
-    () => ({
-      code: bound ? selection.code : null,
-      requestId: focusEpoch + focusTick,
-    }),
-    [bound, selection.code, focusEpoch, focusTick],
-  );
   const focusScope = [
     userId,
     typeof window === 'undefined' ? '' : window.location.origin,
+    backend,
     selection.space.id,
   ].join('|');
+  const focusRequest = useMemo(
+    () =>
+      Object.freeze({
+        code: bound ? selection.code : null,
+        scope: focusScope,
+        generation: focusEpoch,
+        requestId: focusEpoch + focusTick,
+        fitBeforeFlight: focusOrigin === 'arrival',
+        preserveView: focusOrigin === 'restore',
+      }),
+    [bound, selection.code, focusEpoch, focusTick, focusScope, focusOrigin],
+  );
   const focusIdentity = [
     focusScope,
     selection.code ?? '',
@@ -256,8 +279,12 @@ export function SpacesWorkspace({
   ].join('|');
   useLayoutEffect(() => {
     activeFocusIdentity.current = focusIdentity;
+    activeFocusToken.current = focusToken(
+      focusRequest,
+      room?.roomId ?? selection.space.id,
+    );
     selectionRef.current = selection;
-  }, [focusIdentity, selection]);
+  }, [focusIdentity, focusRequest, room, selection]);
   const shownFocusCompletion =
     focusCompletion.scope === focusScope
       ? {
@@ -295,7 +322,8 @@ export function SpacesWorkspace({
         next.code !== selectionRef.current.code
       ) {
         setFocusCompletion({ scope: '', request: '', code: null, count: 0 });
-        setFocusOnRestore(Boolean(next.code));
+        setFocusOnRestore(false);
+        setFocusOrigin('restore');
         setFocusEpoch((epoch) => epoch + 1);
       }
       if (
@@ -490,6 +518,7 @@ export function SpacesWorkspace({
   ]);
   const navigate = useCallback(
     (next: Selection) => {
+      setFocusOrigin('selection');
       if (next.space.id !== selection.space.id || next.code !== selection.code)
         setFocusEpoch((epoch) => epoch + 1);
       if (next.space.id !== selection.space.id || next.code !== selection.code)
@@ -513,6 +542,7 @@ export function SpacesWorkspace({
     const space = containingSpace(locations, code);
     if (!space) return;
     if (selection.code === code && selection.space.id === space.id) {
+      setFocusOrigin('selection');
       setFocusOnRestore(true);
       setFocusTick((tick) => tick + 1);
       return;
@@ -703,9 +733,15 @@ export function SpacesWorkspace({
                       focusRequest={focusRequest}
                       focusOnRestore={focusOnRestore && bound}
                       onSelect={selectCode}
+                      permittedCodes={scoped.map((location) => location.code)}
                       onReady={() => setReadySceneSpace(selection.space.id)}
                       onFailure={setSceneError}
-                      onFocusComplete={(code) => {
+                      onFocusComplete={(code, token) => {
+                        if (
+                          token &&
+                          !sameFocusToken(token, activeFocusToken.current)
+                        )
+                          return;
                         if (activeFocusIdentity.current !== focusIdentity)
                           return;
                         setFocusOnRestore(false);
@@ -722,6 +758,7 @@ export function SpacesWorkspace({
                       onFocusCancel={cancelFocus}
                       canFocusSelected={bound}
                       onRequestFocus={() => {
+                        setFocusOrigin('selection');
                         setFocusOnRestore(true);
                         setFocusTick((tick) => tick + 1);
                       }}

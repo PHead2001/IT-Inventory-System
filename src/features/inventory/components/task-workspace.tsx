@@ -17,6 +17,10 @@ import {
   type TaskState,
   type TaskDiscard,
 } from './task-state';
+import {
+  InventoryCaptureGroup,
+  InventoryCaptureRegion,
+} from '@/components/experience/inventory-capture-region';
 import { Button } from '@/components/ui/button';
 import { useConsumeRouteTask } from '@/components/experience/route-ready';
 import { afterTransitionCapture } from '@/components/forms/transition-capture';
@@ -237,161 +241,165 @@ export function TaskWorkspace({
       aria-label="Record tasks"
       className="experience-surface my-5 space-y-4 p-4"
     >
-      <h2 ref={tasksHeading} tabIndex={-1} className="text-xl font-semibold">
-        Tasks
-      </h2>
-      {context}
-      {warning && (
-        <div className="experience-feedback space-y-2 text-sm text-amber-200">
-          <p role="alert">{warning}</p>
-          <Button
-            type="button"
-            variant="outline"
-            onClick={() => setWarning('')}
-          >
-            Dismiss warning
-          </Button>
-        </div>
-      )}
-      {(['primary', 'secondary', 'consequential'] as const).map((group) => {
-        const tasks = choices.filter(
-          (choice) => (choice.group ?? 'primary') === group,
-        );
-        if (!tasks.length) return null;
-        const controls = (
-          <div className="flex flex-wrap gap-2">
-            {tasks.map((choice) => (
-              <Button
-                key={choice.id}
-                type="button"
-                variant="outline"
-                disabled={locked}
-                aria-pressed={choice.id === selected}
-                aria-describedby={
-                  choice.description
-                    ? `${scope}-${choice.id}-description`
-                    : undefined
-                }
-                onClick={(event) => {
-                  if (stateRef.current.dirty && !stateRef.current.completed)
-                    requestedLauncher.current = event.currentTarget;
-                  else launcher.current = event.currentTarget;
-                  change(choice.id);
-                }}
-              >
-                {choice.label}
-              </Button>
-            ))}
+      <InventoryCaptureGroup region="task-launcher" className="space-y-4">
+        <h2 ref={tasksHeading} tabIndex={-1} className="text-xl font-semibold">
+          Tasks
+        </h2>
+        {context}
+        {warning && (
+          <div className="experience-feedback space-y-2 text-sm text-amber-200">
+            <p role="alert">{warning}</p>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => setWarning('')}
+            >
+              Dismiss warning
+            </Button>
           </div>
-        );
-        const descriptions = tasks.map(
-          (task) =>
-            task.description && (
-              <p
-                id={`${scope}-${task.id}-description`}
-                className="mt-2 text-sm text-slate-400"
-                key={task.id}
-              >
-                {task.label}: {task.description}
-              </p>
-            ),
-        );
-        return group === 'primary' ? (
-          <div key={group}>
-            {controls}
-            {descriptions}
-          </div>
-        ) : (
-          <details key={group}>
-            <summary className="min-h-11 cursor-pointer py-2 font-semibold">
-              {group === 'secondary' ? 'Other tasks' : 'Retire or archive'}
-            </summary>
-            {controls}
-            {descriptions}
-          </details>
-        );
-      })}
-      {locked && (
-        <p role="status" className="text-sm text-amber-100">
-          {state.uncertain
-            ? 'The result is unconfirmed. Retry the same transaction before switching tasks.'
-            : state.completed
-              ? 'Updating this task. Wait before starting another transaction.'
-              : 'Saving this task. Wait for its result before switching.'}
-        </p>
-      )}
-      {requested !== undefined && (
-        <div
-          role="alertdialog"
-          aria-label="Discard task draft?"
-          className="space-y-3 rounded border border-amber-700 p-3"
-        >
-          <p>Your current task has unsaved entries.</p>
-          <Button
-            type="button"
-            ref={stayButton}
-            disabled={locked}
-            onClick={() => {
-              setRequested(undefined);
-              heading.current?.focus();
-            }}
+        )}
+        {(['primary', 'secondary', 'consequential'] as const).map((group) => {
+          const tasks = choices.filter(
+            (choice) => (choice.group ?? 'primary') === group,
+          );
+          if (!tasks.length) return null;
+          const controls = (
+            <div className="flex flex-wrap gap-2">
+              {tasks.map((choice) => (
+                <Button
+                  key={choice.id}
+                  type="button"
+                  variant="outline"
+                  disabled={locked}
+                  aria-pressed={choice.id === selected}
+                  aria-describedby={
+                    choice.description
+                      ? `${scope}-${choice.id}-description`
+                      : undefined
+                  }
+                  onClick={(event) => {
+                    if (stateRef.current.dirty && !stateRef.current.completed)
+                      requestedLauncher.current = event.currentTarget;
+                    else launcher.current = event.currentTarget;
+                    change(choice.id);
+                  }}
+                >
+                  {choice.label}
+                </Button>
+              ))}
+            </div>
+          );
+          const descriptions = tasks.map(
+            (task) =>
+              task.description && (
+                <p
+                  id={`${scope}-${task.id}-description`}
+                  className="mt-2 text-sm text-slate-400"
+                  key={task.id}
+                >
+                  {task.label}: {task.description}
+                </p>
+              ),
+          );
+          return group === 'primary' ? (
+            <div key={group}>
+              {controls}
+              {descriptions}
+            </div>
+          ) : (
+            <details key={group}>
+              <summary className="min-h-11 cursor-pointer py-2 font-semibold">
+                {group === 'secondary' ? 'Other tasks' : 'Retire or archive'}
+              </summary>
+              {controls}
+              {descriptions}
+            </details>
+          );
+        })}
+        {locked && (
+          <p role="status" className="text-sm text-amber-100">
+            {state.uncertain
+              ? 'The result is unconfirmed. Retry the same transaction before switching tasks.'
+              : state.completed
+                ? 'Updating this task. Wait before starting another transaction.'
+                : 'Saving this task. Wait for its result before switching.'}
+          </p>
+        )}
+        {requested !== undefined && (
+          <div
+            role="alertdialog"
+            aria-label="Discard task draft?"
+            className="space-y-3 rounded border border-amber-700 p-3"
           >
-            Stay with this task
-          </Button>
-          <Button
-            type="button"
-            variant="outline"
-            disabled={
-              locked ||
-              state.completed ||
-              (requested !== null &&
-                !choices.some((choice) => choice.id === requested))
-            }
-            onClick={() => {
-              if (
-                stateRef.current.pending ||
-                stateRef.current.uncertain ||
-                stateRef.current.completed ||
+            <p>Your current task has unsaved entries.</p>
+            <Button
+              type="button"
+              ref={stayButton}
+              disabled={locked}
+              onClick={() => {
+                setRequested(undefined);
+                heading.current?.focus();
+              }}
+            >
+              Stay with this task
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              disabled={
+                locked ||
+                state.completed ||
                 (requested !== null &&
                   !choices.some((choice) => choice.id === requested))
-              )
-                return;
-              if (discardTask.current && !discardTask.current()) return;
-              if (requested !== null)
-                launcher.current = requestedLauncher.current;
-              setActiveLabel(
-                choices.find((choice) => choice.id === requested)?.label ??
-                  activeLabel,
-              );
-              setInvalidated(false);
-              setInstance((value) => value + 1);
-              setSelected(requested);
-              setRequested(undefined);
-              stateRef.current = clean;
-              setState(clean);
-              if (requested === null) returnFocusRequested.current = true;
-            }}
-          >
-            Discard and {requested === null ? 'close' : 'switch'}
-          </Button>
-        </div>
-      )}
+              }
+              onClick={() => {
+                if (
+                  stateRef.current.pending ||
+                  stateRef.current.uncertain ||
+                  stateRef.current.completed ||
+                  (requested !== null &&
+                    !choices.some((choice) => choice.id === requested))
+                )
+                  return;
+                if (discardTask.current && !discardTask.current()) return;
+                if (requested !== null)
+                  launcher.current = requestedLauncher.current;
+                setActiveLabel(
+                  choices.find((choice) => choice.id === requested)?.label ??
+                    activeLabel,
+                );
+                setInvalidated(false);
+                setInstance((value) => value + 1);
+                setSelected(requested);
+                setRequested(undefined);
+                stateRef.current = clean;
+                setState(clean);
+                if (requested === null) returnFocusRequested.current = true;
+              }}
+            >
+              Discard and {requested === null ? 'close' : 'switch'}
+            </Button>
+          </div>
+        )}
+      </InventoryCaptureGroup>
       {selected && (
         <div
           key={`${selected}:${instance}`}
           inert={requested !== undefined}
           className="min-w-0 space-y-3"
         >
-          <h3 ref={heading} tabIndex={-1} className="font-semibold">
-            {activeLabel}
-          </h3>
+          <InventoryCaptureGroup region="task-heading" className="space-y-3">
+            <h3 ref={heading} tabIndex={-1} className="font-semibold">
+              {activeLabel}
+            </h3>
 
-          {invalidated && (
-            <p role="status">
-              This task is no longer available for a new transaction.
-              {unavailable && ' Close it or choose another task to continue.'}
-            </p>
-          )}
+            {invalidated && (
+              <p role="status">
+                This task is no longer available for a new transaction.
+                {unavailable && ' Close it or choose another task to continue.'}
+              </p>
+            )}
+          </InventoryCaptureGroup>
           <TaskEligibilityContext.Provider
             value={!invalidated && selectedEligible}
           >
@@ -457,14 +465,16 @@ export function TaskWorkspace({
               </TaskDiscardContext.Provider>
             </TaskResetContext.Provider>
           </TaskEligibilityContext.Provider>
-          <Button
-            type="button"
-            variant="outline"
-            disabled={locked}
-            onClick={() => change(null)}
-          >
-            Close task
-          </Button>
+          <InventoryCaptureRegion region="task-close">
+            <Button
+              type="button"
+              variant="outline"
+              disabled={locked}
+              onClick={() => change(null)}
+            >
+              Close task
+            </Button>
+          </InventoryCaptureRegion>
         </div>
       )}
     </section>

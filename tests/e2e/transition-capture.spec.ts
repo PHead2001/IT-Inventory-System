@@ -1,6 +1,7 @@
 import { expect, test } from '@playwright/test';
 import { build } from 'esbuild';
 import { resolve } from 'node:path';
+import { stableRegionHarness } from './native-region-harness';
 
 declare global {
   interface Window {
@@ -10,6 +11,304 @@ declare global {
       transition(): void;
       release(): void;
     };
+    regionHarness: {
+      transition(): void;
+      release?(): void;
+      proof: {
+        old: NativeRegionCapture[];
+        next: NativeRegionCapture[];
+        effects: string[];
+        ready: boolean;
+        finished: boolean;
+        error: string | null;
+      };
+    };
+  }
+}
+
+type NativeRegionCapture = {
+  region: string;
+  name: string;
+  bounds: { x: number; y: number; width: number; height: number };
+  viewport: { width: number; height: number };
+  canvasAncestors?: string[];
+};
+
+type NativeRegionCase =
+  | 'visible paired body'
+  | 'below viewport paired body'
+  | 'unmatched visible header'
+  | 'matching outgoing header';
+
+/** Exercise the installed production React traversal, not a ViewTransition mock.
+ * This negative deliberately replaces the disabled ancestor with the page.
+ * PageArrival is stable; its distinct traversal is exercised below.
+ * The title is always a real visible shared pair; all content is ordinary flow. */
+async function regionHarness(kind: NativeRegionCase) {
+  const below = kind === 'below viewport paired body';
+  const header = kind.includes('header');
+  const matchingHeader = kind === 'matching outgoing header';
+  const result = await build({
+    stdin: {
+      contents: `
+        import React, {startTransition, useState, ViewTransition} from 'react';
+        import {createRoot} from 'react-dom/client';
+        const proof = {old:[], next:[], effects:[], ready:false, finished:false, error:null};
+        const capture = () => Array.from(document.querySelectorAll('[data-region]')).map(element => {
+          const {x,y,width,height} = element.getBoundingClientRect();
+          return {region:element.dataset.region, name:getComputedStyle(element).viewTransitionName,
+            bounds:{x,y,width,height}, viewport:{width:innerWidth,height:innerHeight}};
+        });
+        const native = document.startViewTransition.bind(document);
+        document.startViewTransition = options => {
+          proof.old = capture();
+          const update = typeof options === 'function' ? options : options.update;
+          const wrapped = async () => { await update(); proof.next = capture(); };
+          const transition = native(typeof options === 'function' ? wrapped : {...options,update:wrapped});
+          const sample = () => {
+            for (const animation of document.getAnimations()) {
+              const pseudo = animation.effect?.pseudoElement;
+              if (pseudo?.startsWith('::view-transition') && !proof.effects.includes(pseudo)) proof.effects.push(pseudo);
+            }
+            if (!proof.finished) requestAnimationFrame(sample);
+          };
+          transition.ready.then(() => { proof.ready = true; sample(); }, error => {proof.error = error.name;});
+          transition.finished.then(() => {proof.finished = true;}, error => {proof.error = error.name; proof.finished = true;});
+          return transition;
+        };
+        function App() {
+          const [step,setStep] = useState(0);
+          window.regionHarness = {proof, transition:() => startTransition(() => setStep(n => n+1))};
+          const title = <ViewTransition name="fixture-title" default="none" share="fixture-region">
+            <h1 data-region="title">{step ? 'Record details' : 'Inventory'}</h1>
+          </ViewTransition>;
+          const heading = <header data-region="header">{title}<p>Visible route description {step}</p></header>;
+          return <ViewTransition key={step} default="none" update="none">
+            <main>
+              {${header} && (step || ${matchingHeader}) ?
+                <ViewTransition name="fixture-header" default="none" share="fixture-region" enter="fixture-region" exit="fixture-region">{heading}</ViewTransition> : heading}
+              <ViewTransition name="fixture-body" default="none" share="fixture-region" enter="fixture-region" exit="fixture-region">
+                <section data-region="body" style={{marginTop:${below ? 1100 : 24},padding:20,background:'#eee'}}>
+                  <p>{step ? 'Current record quantity and storage location' : 'Inventory records and locations'}</p>
+                  <button>{step ? 'Move inventory' : 'Open record'}</button>
+                </section>
+              </ViewTransition>
+            </main>
+          </ViewTransition>;
+        }
+        createRoot(document.getElementById('root')).render(<App/>);
+      `,
+      resolveDir: process.cwd(),
+      loader: 'tsx',
+    },
+    bundle: true,
+    write: false,
+    define: { 'process.env.NODE_ENV': '"production"' },
+    alias: {
+      react: resolve('node_modules/next/dist/compiled/react'),
+      'react-dom/client': resolve(
+        'node_modules/next/dist/compiled/react-dom/client',
+      ),
+      'react-dom': resolve('node_modules/next/dist/compiled/react-dom'),
+    },
+  });
+  return result.outputFiles[0].text;
+}
+
+for (const kind of [
+  'visible paired body',
+  'below viewport paired body',
+  'unmatched visible header',
+  'matching outgoing header',
+] as const) {
+  test(`native region traversal: ${kind}`, async ({ page }, info) => {
+    await page.setViewportSize({ width: 1000, height: 700 });
+    await page.setContent(`<style>
+      html {view-transition-name:none}
+      ::view-transition-group(*) {animation-duration:180ms}
+      ::view-transition-old(*), ::view-transition-new(*) {animation-duration:180ms}
+    </style><div id="root"></div>`);
+    await page.addScriptTag({ content: await regionHarness(kind) });
+    await expect(page.getByRole('heading')).toHaveText('Inventory');
+    await page.evaluate(() => window.regionHarness.transition());
+    await expect(page.getByRole('heading')).toHaveText('Record details');
+    await page.waitForFunction(() => window.regionHarness.proof.finished);
+    const proof = await page.evaluate(() => window.regionHarness.proof);
+    await info.attach('native-region-traversal', {
+      body: JSON.stringify({ kind, ...proof }, null, 2),
+      contentType: 'application/json',
+    });
+    const diagnostic = JSON.stringify({ kind, ...proof });
+    expect(proof.error, diagnostic).toBeNull();
+    expect(proof.ready, diagnostic).toBe(true);
+    const hasPair = (name: string) =>
+      ['old', 'new'].every((side) =>
+        proof.effects.includes(`::view-transition-${side}(${name})`),
+      );
+    expect(hasPair('fixture-title'), diagnostic).toBe(true);
+    for (const captures of [proof.old, proof.next]) {
+      const body = captures.find((entry) => entry.region === 'body')!;
+      expect(body.bounds.height, diagnostic).toBeGreaterThan(0);
+      expect(body.bounds.y >= body.viewport.height, diagnostic).toBe(
+        kind === 'below viewport paired body',
+      );
+      expect(body.name, diagnostic).toBe(
+        kind === 'below viewport paired body' ? 'none' : 'fixture-body',
+      );
+    }
+    expect(hasPair('fixture-body'), diagnostic).toBe(
+      kind !== 'below viewport paired body',
+    );
+    expect(
+      proof.effects.some((pseudo) => pseudo.includes('(fixture-body)')),
+      diagnostic,
+    ).toBe(kind !== 'below viewport paired body');
+    expect(hasPair('fixture-header'), diagnostic).toBe(
+      kind === 'matching outgoing header',
+    );
+    if (kind === 'unmatched visible header') {
+      expect(
+        proof.effects.some((pseudo) => pseudo.includes('(fixture-header)')),
+        diagnostic,
+      ).toBe(false);
+      const header = proof.next.find((entry) => entry.region === 'header')!;
+      expect(header.bounds.y, diagnostic).toBeLessThan(header.viewport.height);
+      expect(header.name, diagnostic).toBe('none');
+    }
+  });
+}
+
+// Model the actual stable Privacy/Suspense/PageArrival boundaries separately from
+// the keyed-disabled-ancestor negative above. Only Next's page/template changes.
+for (const topology of [
+  'keyed template',
+  'retained Activity',
+  'delayed Suspense',
+] as const) {
+  for (const reverse of topology === 'delayed Suspense'
+    ? [false]
+    : [false, true]) {
+    test(`native stable PageArrival traversal: ${topology} ${reverse ? 'source-only header exits' : 'destination-only header enters'}`, async ({
+      page,
+    }, info) => {
+      await page.setViewportSize({ width: 1000, height: 700 });
+      await page.setContent(`<style>
+        html {view-transition-name:none; --motion-route:200ms; --ease-workspace:ease}
+        ::view-transition-group(*) {animation-duration:200ms}
+        ::view-transition-old(*), ::view-transition-new(*) {animation-duration:200ms}
+      </style><div id="root"></div>`);
+      await page.addScriptTag({
+        content: await stableRegionHarness(topology, reverse),
+      });
+      await expect(page.getByRole('heading')).toHaveText(
+        reverse ? 'Record details' : 'Inventory',
+      );
+      if (topology === 'retained Activity') {
+        // Verify the destination really exists as a hidden retained Activity,
+        // rather than accidentally testing a fresh keyed mount again.
+        await expect(page.locator('main')).toHaveCount(2);
+      }
+      await expect(page.locator('#privacy')).toHaveAttribute(
+        'data-admitted',
+        'true',
+      );
+      await page.evaluate(() => window.regionHarness.transition());
+      if (topology === 'delayed Suspense') {
+        await expect(page.getByRole('heading')).toHaveText('Inventory');
+        expect(
+          await page.evaluate(() => window.regionHarness.proof.ready),
+        ).toBe(false);
+        await page.evaluate(() => window.regionHarness.release!());
+      }
+      await expect(page.getByRole('heading')).toHaveText(
+        reverse ? 'Inventory' : 'Record details',
+      );
+      await page.waitForFunction(() => window.regionHarness.proof.finished);
+      const proof = await page.evaluate(() => window.regionHarness.proof);
+      await info.attach('native-stable-page-arrival', {
+        body: JSON.stringify({ topology, reverse, ...proof }, null, 2),
+        contentType: 'application/json',
+      });
+      const diagnostic = JSON.stringify({
+        topology,
+        reverse,
+        ...proof,
+      });
+      expect(proof.error, diagnostic).toBeNull();
+      expect(proof.ready, diagnostic).toBe(true);
+      for (const name of ['stable-title', 'stable-body']) {
+        expect(proof.effects, diagnostic).toContain(
+          `::view-transition-old(${name})`,
+        );
+        expect(proof.effects, diagnostic).toContain(
+          `::view-transition-new(${name})`,
+        );
+      }
+      expect(proof.effects, diagnostic).toContain(
+        `::view-transition-${reverse ? 'old' : 'new'}(stable-header)`,
+      );
+      expect(proof.effects, diagnostic).not.toContain(
+        `::view-transition-${reverse ? 'new' : 'old'}(stable-header)`,
+      );
+      for (const captures of [proof.old, proof.next]) {
+        const body = captures.find(
+          (entry) => entry.region === 'body' && entry.bounds.height > 0,
+        )!;
+        expect(body.name, diagnostic).toBe('stable-body');
+        expect(body.bounds.y, diagnostic).toBeLessThan(body.viewport.height);
+        for (const capture of captures)
+          expect(capture.canvasAncestors, diagnostic).toEqual([]);
+      }
+    });
+  }
+}
+
+for (const body of ['paired', 'offscreen-source'] as const) {
+  for (const reverse of body === 'paired' ? [false] : [false, true]) {
+    test(`native authored body: ${body} ${reverse ? 'old-only' : 'incoming'}`, async ({
+      page,
+    }) => {
+      await page.setViewportSize({ width: 390, height: 480 });
+      await page.setContent(
+        `<style>html{view-transition-name:none;--motion-route:200ms;--ease-workspace:ease}::view-transition-group(*){animation-duration:200ms}::view-transition-old(*),::view-transition-new(*){animation-duration:200ms}</style><div id="root"></div>`,
+      );
+      await page.addScriptTag({
+        content: await stableRegionHarness(
+          'keyed template',
+          reverse,
+          true,
+          body,
+        ),
+      });
+      await expect(page.locator('#privacy')).toHaveAttribute(
+        'data-admitted',
+        'true',
+      );
+      await page.evaluate(() => window.regionHarness.transition());
+      await page.waitForFunction(() => window.regionHarness.proof.finished);
+      const proof = await page.evaluate(() => window.regionHarness.proof);
+      const diagnostic = JSON.stringify(proof);
+      expect(proof.error, diagnostic).toBeNull();
+      expect(proof.ready, diagnostic).toBe(true);
+      for (const side of ['old', 'new']) {
+        const required =
+          body === 'paired' || side === (reverse ? 'old' : 'new');
+        expect(
+          proof.effects.includes(`::view-transition-${side}(stable-body)`),
+          diagnostic,
+        ).toBe(required);
+      }
+      for (const capture of [...proof.old, ...proof.next])
+        expect(capture.canvasAncestors, diagnostic).toEqual([]);
+      for (const captures of [proof.old, proof.next])
+        expect(
+          captures.filter((entry) => entry.name === 'stable-body'),
+        ).toHaveLength(
+          captures.find((entry) => entry.region === 'body')!.bounds.y >= 480
+            ? 0
+            : 1,
+        );
+    });
   }
 }
 
@@ -172,3 +471,38 @@ for (const guarded of [false, true]) {
     }
   });
 }
+
+// Installed React traverses paired descendants through disabled stable parents,
+// but omits an unmatched nested ViewTransition. Production uses authored DOM
+// registration for that header; this negative keeps the limitation explicit.
+test('native stable PageArrival negative: unmatched React header is omitted', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1000, height: 700 });
+  await page.setContent(
+    `<style>html{view-transition-name:none}::view-transition-group(*){animation-duration:200ms}::view-transition-old(*),::view-transition-new(*){animation-duration:200ms}</style><div id="root"></div>`,
+  );
+  await page.addScriptTag({
+    content: await stableRegionHarness('keyed template', false, false),
+  });
+  await expect(page.getByRole('heading')).toHaveText('Inventory');
+  await expect(page.locator('#privacy')).toHaveAttribute(
+    'data-admitted',
+    'true',
+  );
+  await page.evaluate(() => window.regionHarness.transition());
+  await page.waitForFunction(() => window.regionHarness.proof.finished);
+  const proof = await page.evaluate(() => window.regionHarness.proof);
+  expect(proof.ready, JSON.stringify(proof)).toBe(true);
+  expect(proof.error, JSON.stringify(proof)).toBeNull();
+  for (const name of ['stable-title', 'stable-body']) {
+    for (const side of ['old', 'new'])
+      expect(proof.effects).toContain(`::view-transition-${side}(${name})`);
+  }
+  expect(
+    proof.effects.some((pseudo) => pseudo.includes('(stable-header)')),
+  ).toBe(false);
+  expect(proof.next.find((entry) => entry.region === 'header')?.name).toBe(
+    'none',
+  );
+});

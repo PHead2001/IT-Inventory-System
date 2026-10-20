@@ -17,8 +17,12 @@ An aggregate remains the selected location. Highlighted inventory-bearing descen
 A new camera waits for the layout snapshot's authorized read and committed writer
 before consuming its first measured frame. Pending verification is distinct from
 an authorized empty snapshot: saved pans restore exactly, while an empty snapshot
-uses canonical framing. A selected-location return focuses only after applying
-that saved baseline. A same-session recheck preserves an already initialized camera;
+uses canonical framing. An explicit selected-location focus request runs only
+after applying that saved baseline and the scene's confirmed render. History
+restoration preserves camera intent. Readiness requires an
+initialized room under its original current renderer session; a withheld snapshot
+or replacement context wrapper cannot trigger the ready callback. A same-session
+recheck preserves an already initialized camera;
 the snapshot provider continues to deny writes and retire stale owners as before.
 Reactivating a bare `/room` page reapplies its optional saved-space preference
 without creating another focus request when the space and location are unchanged.
@@ -29,6 +33,9 @@ Replacing either graphics resource waits for the same authorized saved-view gran
 and reapplies that baseline before explicit selection focus. Outgoing resource
 cleanup and frames cannot publish through replacement resources, and consumed
 camera commands do not replay when the saved pose already contains their result.
+Camera resource cleanup retires its own animation without disposing the separate
+reveal controller. Controls attachment and replacement preserve that controller's
+lifetime; an outgoing frame cannot cancel or complete a replacement flight.
 
 The strict Zod room contract is validated without a database at build/test/load time. Binding-to-seeded-location validation stays in the local Supabase integration gate. The production build needs no live Supabase.
 
@@ -66,14 +73,172 @@ The Spaces workspace reconciles the current `/room` URL when its history listene
 attaches, including remounts and React Activity reactivation. Native Back/Forward
 may restore the URL before that listener exists; cached initial props cannot
 override the restored space, location, page, fallback notice or route-readiness key. Reconciliation
-does not rewrite history. Changed locations receive a fresh focus request;
-unchanged locations and page-only restores preserve camera intent. Existing
+does not rewrite history. Changed locations receive a fresh focus/reveal token
+while preserving the restored camera view; unchanged locations and page-only
+restores keep the current camera intent and token. Explicit selection and Center
+selected still request a camera flight. Existing
 uncached contents requests and identity/generation checks retire interrupted reads.
 Another route's history event never becomes room selection.
 
-Use simple reusable geometry and restrained lighting, a capped device pixel ratio and demand rendering. Physical material colors are retained; accent edges/emissive feedback mark selection and other geometry dims slightly until clearing it. Full motion permits one bounded selection pulse; Reduced motion uses a static highlight. A reusable baked contact-alpha footprint and clipped floor grid add depth without dynamic shadow passes. Only controls, relevant hover changes, bounded visibility continuations, bounded focus transitions and the brief Full-motion pulse request extra frames. Nonessential pulses stop offscreen or in a hidden document. No heavy postprocessing or idle camera animation is needed. The canvas exposes passive camera telemetry for real-interaction browser assertions; it cannot set camera state.
+Use simple reusable geometry and restrained lighting, a capped device pixel ratio and demand rendering. Physical material colors are retained; accent edges/emissive feedback mark selection and other geometry dims slightly until clearing it. Full motion permits one bounded selection pulse; Reduced motion uses a static highlight. Standard adds cached contact shadows and lazy selective bloom; Low keeps contacts without bloom, and Off disables both. Static corner grounding and a clipped floor grid retain depth. Controls, relevant hover changes, bounded visibility/focus transitions, contact refreshes and the brief Full-motion pulse request finite extra frames. Nonessential pulses stop offscreen or in a hidden document; the camera stays idle at rest. The canvas exposes passive camera telemetry for real-interaction browser assertions; it cannot set camera state.
+
+## Shared spatial composition and embedded maps
+
+Modeled selection uses one immutable scope/generation/request/code token for a
+750 ms camera flight followed by a 400 ms visual reveal. New selection, clear,
+camera commands and manual input retire an older flight before it can open the
+wrong location. Reduced motion applies the complete endpoint immediately.
+Drawers and containers translate through bounded visual offsets; shelf sections
+lift gently. Reveal metadata is valid only on box nodes, including zero offsets;
+recursive groups cannot declare a reveal because the renderer moves box bodies.
+Resting measurements, logical bindings and room coordinates stay
+unchanged. Moving child geometry retains one verified logical pointer owner.
+Selected labels and known selected counts follow the opened body. Rack and
+aggregate selections use their existing focus/highlight rather than a fabricated
+drawer. History restoration preserves camera intent; explicit selection and
+Center selected still request focus. Existing label visibility transactions run
+after camera and reveal transforms, with the same budgets and fallback actions.
+
+Destination pickers offer **Pick on map** in addition to their conventional tree.
+The optional modal portals outside whole-page transition capture. It stages a
+stable code and commits only after **Use location** resolves the latest eligible
+UUID using `pickerLocations`: active ancestor path, active/can-hold capability,
+source exclusions and the parent form's pending state. It never submits a task or
+moves inventory. Cancel, initialization failure and unmodeled locations retain
+the form draft and keyboard tree. Sites use their existing site picker, not map
+destinations. Every mesh, label, hover and overflow action passes the same latest
+permitted-code and private-session guard.
+Initial verification defers modal opening; a successful same-owner recheck opens
+the dialog. Cancel permanently retires that modal so a later recheck cannot reopen it.
+
+Asset, quantity and location details have an independently lazy storage preview.
+It initializes near the visible region, mounts one compact map, and owns a local
+camera separate from Spaces snapshots. Several positive quantity balances require
+an explicit choice. Site assignment, retired/archived context, inactive locations
+and absent geometry have truthful text. A chunk, graphics or count failure stays
+inside the optional region and cannot delay primary record readiness. Active
+embeds reuse the existing bounded caller-authorized occupancy read after graphics
+readiness; withdrawal aborts the read and conceals old/late counts. Selected reveal
+counts are independent of the initially disabled optional all-location overlay.
+Missing, loading and failed counts remain unknown rather than invented zero.
+An authorized child beneath a modeled room still needs its own geometry binding:
+an unmodeled child retains its recorded text path and Spaces link without an
+embedded canvas, invented camera target or selected-count request.
+
+The protected layout owns one graphics slot shared by Spaces, previews and picker
+maps, including initialization and disposal. Explicit picker maps have priority;
+withdrawn passive maps offer **Resume map**, and waiting never disables the tree.
+Acquisition precedes `createRoot`/renderer initialization. Allocated slots release
+only from the installed public Fiber `unmountComponentAtNode(canvas, callback)`
+completion; requests that never allocate cancel immediately. There is no timeout
+reclamation. The original actor/backend/privacy generation/revision/epoch binds
+each scene session. Revocation synchronously hides/inerts the scene and independent
+DOM portals, and late initialization/frame callbacks cannot publish private data.
+Privacy and session context cross Fiber's separate root explicitly. An ordinary
+visible verification recheck retains the allocated original renderer, scene,
+controls and consumed camera commands. Its lifetime uses the original owner and
+live retained presentation grant; current privacy context continues to propagate
+into Fiber, so inventory selection remains fresh-grant gated. Request admission,
+allocation, the first scene mount after configuration and explicit Resume map
+require a fresh grant. Withheld queued or unallocated requests cancel immediately;
+pending allocated configuration can finish but cannot first mount scene children
+until fresh verification returns, even when viewport dimensions have not changed.
+A different identity cannot rebind the original session.
+Committed actor/backend/generation drift permanently retires each canvas, map
+dialog and embedded-count owner even without a global invalidation event. Returning
+to the original identity cannot revive its scene or staged confirmation. An ordinary
+same-owner visible readiness recheck retains the mounted native dialog, its staged
+candidate and camera. New selections, Use location, first modal opening and focus
+handoff still require fresh verification. Cancel safely closes the retained dialog;
+focus restoration is withheld until its original grant is fresh.
+
+Fiber 9.8.1's public `unmountComponentAtNode(canvas, complete)` handles failed
+and pending configuration, missing scenes and factory-owned async renderer
+disposal, awaiting acquired-renderer disposal before completion. The
+failed-configure adapter invokes that API without rendering the
+rejected root or changing its store. The original lease remains occupied until
+Fiber reports teardown completion. Successful configuration followed by another
+error uses ordinary public teardown. Installed-Fiber regressions cover rejection
+before renderer acquisition, later configuration failure with deferred disposal,
+and pending factories that reject or return a renderer after teardown begins.
+They prove disposal, context-loss request, completion and next-grant ordering;
+they do not create WebGL or prove GPU release. Disposal APIs that throw and
+allocations hidden inside a rejecting factory do not establish actual GPU release
+even when Fiber reports completion, and remain browser/resource acceptance limits.
+A factory that allocates resources and rejects without returning them must clean
+up those allocations itself. SafeCanvas initiates public unmount immediately on
+cleanup, even while configuration is pending, and fences later configure/render
+work. Only Fiber's completion callback releases a created root's original lease;
+a late configuration rejection cannot release it while disposal remains pending.
+Production room callers provide a synchronous renderer configuration object. A
+custom renderer factory that never settles can also prevent Fiber from completing
+teardown; safely reclaiming its unknown resources is not established by a timeout.
+
+A cold Pick on map request immediately announces loading and retains a cancellable
+owner-controlled placeholder; cancelling cannot open a later-resolved dialog or
+change the draft. Pending intent captures the original privacy generation and live
+revocation/assignment epochs at activation. Invalidation permanently retires it;
+late loading, selection or focus callbacks cannot adopt a reauthorized owner or
+clear a successor intent. Ordinary same-authority rechecks retain intent, but a
+fresh grant is required before first dialog mount, confirmation and focus transfer. Renderer startup uses loading feedback until a budget request
+actually queues or is withdrawn; Resume is reserved for genuine paused/retry states.
+Queued maps announce that they are waiting, remain busy and keep their queue
+position without a Resume control. They allocate automatically after the occupied
+renderer finishes disposal, subject to fresh verification.
+Once an allocation is withdrawn by a higher-priority map, it stays paused through
+ordinary privacy refresh and slot release. Only an explicit Resume map with a
+fresh original grant can request a new lease. A queued request withheld before
+allocation may resume automatically when fresh verification returns. Neither path
+releases the disposing renderer's slot before Fiber completion.
+The server detail wrapper derives compact per-choice capability flags from the
+canonical room bindings and supplies server-rendered room links to the client.
+The eager client region, including the links' client descendants, imports no room
+geometry; its near-viewport dynamic chunk owns that load. Capability flags decide
+whether a detail location has modeled geometry before any map footprint is reserved.
+Inventory-only spaces and
+unmodeled children use the same short recorded-context fallback.
+
+Compact embedded maps use their own cold-chunk placeholder, rather than the full
+room/browser skeleton. Offscreen reservation, both dynamic loading boundaries and
+the ready scene share the toolbar, 280px canvas, gaps and status metrics. The
+placeholder already renders the actual authorized selected label, so long labels
+wrap before geometry loads. A permanent two-line count-status slot preserves
+loading/error announcements without inserting a new block when counts arrive;
+normal selected text and the two-line phone interaction note complete the minimum
+status envelope. Long labels, inspections, additional notices and expanded controls
+remain free to grow; this is not a zero-layout-shift claim for every optional state.
+
+Whole-page `PageArrival` capture excludes `/room`, asset/quantity record details
+and location details before their lazy previews load, including the preceding
+canvas-bearing route when leaving. Root capture remains disabled. Detail pages
+also suppress their former whole-body `RouteReady` capture with the explicit
+`capture="regions"` capability under the unchanged canonical readiness/private
+identity. Header, downstream record content, preview text/navigation and task/form
+conventional controls have bounded sibling captures; preview section backgrounds,
+map slots, cold placeholders and live canvases have no active capture ancestor.
+LocationPicker keeps its existing inline loading surface and native dialog portal;
+conventional controls are split around that surface before the lazy chunk loads.
+No maps are cloned, cached, moved or remounted to create the effect. The independent
+record-title pairing and all eligible conventional region fades run concurrently.
+Real browser/WebGL, narrow-screen and Full/Reduced-motion acceptance is still
+required; source regressions do not accept D303.2, W13 or A303.
 
 ## Validation
+
+Reveal-capable selectable boxes retain a selection-only volume in their stationary
+parent-local event group, alongside the moving visible body. Explicit interaction
+hitboxes take precedence; otherwise the volume uses the centered node size.
+Selection rays accept eligible stationary volumes or moved visible surfaces, stop
+at nearer visible furniture, and prefer real surfaces at equal depth. Pointer down,
+up and click use the same resolver and require matching pointer/logical ownership;
+drag, cancellation and current authorization still prevent selection. These invisible
+volumes never supply hover ownership, label visibility, bloom or shadow casters.
+
+Detail maps explicitly use preview selection mode. They retain recorded-location
+choice, focus, reveal, counts, Show in room, pan and zoom, while omitting selection
+mesh handlers and presenting labels, hover details and fallback locations as text.
+The central selection guard also rejects stale callbacks in preview mode. The
+conventional tree and destination map remain selectable under their existing rules.
 
 Pure tests prove transforms, canonical bindings, database-derived descendants, strict URL selection and camera limits. Deterministic fake-clock visibility tests exhaust the cold 8 ms fingerprint/projection/clipping/ray phases, prove same-revision completion without reprojecting triangles, invalidate processed buffer/material and DOM state between slices, conceal stale cached results during incomplete guards, and stop demand frames at completion or the 64-frame/resource ceiling. A canonical physical-geometry probe invokes the actual hook-free room JSX and checks that its guard leaves work allowance and all 28 location queries complete under unchanged aggregate ceilings. It uses deterministic synthetic checkpoint time to prove progress; elapsed samples from separate real-clock runs remain observations and never form a mandatory OS timing assertion. This does not establish browser rendering, frame rate, phone performance or the populated 375px placement acceptance. Component tests prove the scene/application contract, coherent pending navigation, aggregate selection, repeated focus, missing bindings, retry/failure and located/unlocated links.
 
@@ -101,3 +266,83 @@ More assertion failure, the harness emits bounded JSON (128 KiB including existi
 layout telemetry) at `fit-open-selected-before-long-text` and rethrows the original
 assertion. This supplies an observed replay fixture without changing placement,
 visibility, scheduling or the ordinary user flow; it does not establish a repair.
+
+## Session-owned glow and grounding
+
+Fine-pointer hover lifts only the visual child by 0.1 inches and brightens its edge;
+logical hit targets stay at their measured positions. Coarse pointers and Reduced
+motion do not lift. Selected physical mesh references feed lazy selective bloom
+through pinned `@react-three/postprocessing` 3.1.3 and `postprocessing` 6.39.5, with
+Fiber 9.8.1 and React 19.3.0. The offscreen composer retains one raw screen render
+with the original tone mapping, exposure and output color space, followed by an
+additive bloom-only overlay. FBO, shader, allocation and render failures latch
+bloom off and preserve labels and selection.
+
+The actual pinned wrapper receives a narrow, attributed lifecycle patch through
+the repository's `postinstall`. Its manifest verifies upstream, payload and
+installed output SHA256 bytes; already-patched files are verified and unknown
+versions or bytes fail installation. Composer and SelectiveBloom allocations
+belong to committed, captured resource lifetimes. Their optional stable
+`ownerCurrent` predicate guards allocation, resize/pass setup, renderer writes,
+selection/light/default updates and frames. A fresh owner/store generation
+recreates resources without authorizing prior callbacks. Unconditional cleanup
+restores owned state and uses reference ownership tokens and captured overlay
+resources so stale cleanup cannot clear a successor. See the attributed payload
+in `patches/react-three-postprocessing-3.1.3`.
+
+Settings → Appearance & preferences provides **Room appearance in this browser**.
+The shared browser preference applies to the full room, detail previews and map
+pickers. Standard enables bloom and cached contacts; Low disables bloom; Off also
+disables contacts. Storage failure retains the choice in the current tab. Reduced
+motion is independent. `SCENE_EFFECTS.intensity` controls decorative hover, glow,
+selection and grounding only; reveal offsets remain 5.6/4/1 inches and
+camera/reveal timing remains 750/400 ms.
+
+Measured fallback excludes idle gaps, capture frames and startup/composer warmup;
+only adjacent actively requested camera/body/pulse frames count. Two consecutive
+60-frame windows with p95 above 25 ms latch bloom off. This initial threshold needs
+reference-runtime tuning; GPU names do not decide quality. No effect owns a
+continuous loop: the room retains demand rendering and stops at rest.
+
+A cached contact capture owns two render targets, an orthographic camera, depth
+material and separable blur resources. It copies actual caster world matrices
+into an isolated scene and shares source geometry without disposing it. One depth
+pass plus two blur passes produce floor contacts. Complete framebuffer, actual
+shader-link and context-loss checks reject unsupported captures; finally blocks
+restore renderer/debug state. Partial construction and failure release owned
+resources. All registered furniture, drawers, containers and shelf bodies
+contribute; static corner patches supplement those contacts while they are dirty.
+
+Contact cache identity includes scene generation, geometry registration revision,
+settled caster revision, palette revision and quality. Reveal/hover motion hides
+the old receiver immediately and captures once after all transforms settle.
+Camera/count/label/bloom updates do not dirty contacts. Theme token mutations and
+System changes coalesce into a changed-palette revision; cleanup removes observers
+and media listeners and fences already-queued reads. Resting furniture footprints
+are removed to avoid ghost shadows behind opened bodies.
+
+Each effect captures its original renderer session and original graphics lease.
+Withdrawal fences callbacks synchronously, before React unmount or actual Fiber
+disposal finishes. The lease remains occupied until Fiber reports completion.
+Effects fence allocation-owning lazy composer rendering, overlay and contact
+allocation, FBO/shader hooks, composed/raw/overlay draws, quality samples,
+telemetry, readiness/failure callbacks, hover and reveal frames. A replacement
+context wrapper cannot authorize an old owner. Cleanup removes listeners, restores
+owned callbacks and releases resources regardless of current permission.
+
+Layout cleanup immediately and irreversibly disposes the captured store. On
+StrictMode or Activity reconnect, provider setup publishes one fresh context
+generation only while the original renderer session remains current. Descendant
+layout registrations and light refs then reconnect against that fresh store; the
+provider itself stays mounted. No retirement cancellation, pause/resume or store
+reopening path exists. Replay and room replacement cannot revive a retired
+original actor/backend/lease session.
+
+Focused regressions cover retirement/import races, actual public Fiber teardown,
+contact cache/theme/motion invalidation, failure-state restoration and finite
+scheduling. Authored browser journeys remain unrun in this bounded integration.
+Real WebGL recordings at desktop and phone widths, both themes, Full/Reduced
+motion, capability failures, and matched warmed effects-off/on traces on recorded
+reference hardware remain acceptance requirements. Record median/p95 active costs
+and capture spikes separately, viewport/DPR and actual renderer/runtime.
+SwiftShader can prove behavior but does not establish real GPU performance.

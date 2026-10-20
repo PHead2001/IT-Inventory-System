@@ -306,6 +306,218 @@ export async function captureRoomWitness(page: Page): Promise<WitnessSnapshot> {
   );
 }
 
+/** Read actual visual transforms and draw count without subscribing or changing the scene. */
+export async function captureRoomReveal(page: Page) {
+  return page.evaluate(() => {
+    const canvas = document.querySelector('[data-room-surface] canvas');
+    const states = [...(window.__roomWitnessStores ?? [])]
+      .map((store) => store.getState())
+      .filter((state) => state.gl.domElement === canvas);
+    if (states.length !== 1)
+      throw new Error('Expected one committed reveal scene');
+    const offsets: Record<string, number[]> = {};
+    states[0].scene.traverse((object) => {
+      const id: unknown = object.userData.roomRevealNode;
+      if (typeof id === 'string') offsets[id] = object.position.toArray();
+    });
+    return { offsets, drawFrame: states[0].gl.info.render.frame };
+  });
+}
+
+/** Selection-only stationary triangles; never add proxies to hover witnesses. */
+export async function captureRoomSelectionWitness(
+  page: Page,
+): Promise<WitnessSnapshot> {
+  const snapshot = await captureRoomWitness(page);
+  const proxies = await page.evaluate(() => {
+    const canvas = document.querySelector('[data-room-surface] canvas');
+    const states = [...(window.__roomWitnessStores ?? [])]
+      .map((store) => store.getState())
+      .filter((state) => state.gl.domElement === canvas);
+    if (states.length !== 1)
+      throw new Error('Expected one selection witness scene');
+    const triangles: WitnessTriangle[] = [];
+    let volumes = 0;
+    states[0].scene.traverse((object) => {
+      const target: unknown = object.userData.roomSelectionTarget;
+      if (
+        !target ||
+        typeof target !== 'object' ||
+        !('code' in target) ||
+        typeof target.code !== 'string' ||
+        !('isMesh' in object) ||
+        !object.isMesh
+      )
+        return;
+      for (
+        let current: import('three').Object3D | null = object;
+        current;
+        current = current.parent
+      )
+        if (!current.visible) return;
+      if (++volumes > 96) throw new Error('Selection volume witness bound');
+      const mesh = object as import('three').Mesh;
+      const geometry = mesh.geometry,
+        position = geometry.getAttribute('position'),
+        index = geometry.getIndex();
+      if (!index || index.count > 36 || position.itemSize !== 3)
+        throw new Error('Expected bounded selection box');
+      for (let offset = 0; offset < index.count; offset += 3) {
+        const vertices: number[] = [];
+        for (let corner = 0; corner < 3; corner++) {
+          const i = index.getX(offset + corner),
+            m = mesh.matrixWorld.elements;
+          const x = position.getX(i),
+            y = position.getY(i),
+            z = position.getZ(i);
+          vertices.push(
+            m[0] * x + m[4] * y + m[8] * z + m[12],
+            m[1] * x + m[5] * y + m[9] * z + m[13],
+            m[2] * x + m[6] * y + m[10] * z + m[14],
+          );
+        }
+        if (!vertices.every(Number.isFinite))
+          throw new Error('Nonfinite selection witness');
+        triangles.push({ code: target.code, side: 0, vertices });
+      }
+    });
+    return triangles;
+  });
+  // Actual physical surfaces precede proxies for equal-depth intersections.
+  return { ...snapshot, triangles: [...snapshot.triangles, ...proxies] };
+}
+
+/** Passive effects/ref/resource observation; never renders or mutates the scene. */
+export async function captureRoomEffects(page: Page) {
+  return page.evaluate(() => {
+    const canvas = document.querySelector<HTMLCanvasElement>(
+      '[data-room-surface] canvas',
+    );
+    const states = [...(window.__roomWitnessStores ?? [])]
+      .map((store) => store.getState())
+      .filter((state) => state.gl.domElement === canvas);
+    if (states.length !== 1 || !canvas)
+      throw new Error('Expected one committed effects scene');
+    const { scene, gl } = states[0];
+    const hoverOffsets: Record<string, number[]> = {};
+    const bloomCodes = new Set<string>();
+    let bloomMeshes = 0,
+      contactVisible = false;
+    scene.traverse((object) => {
+      const hoverId: unknown = object.userData.roomHoverVisualNode;
+      if (typeof hoverId === 'string')
+        hoverOffsets[hoverId] = object.position.toArray();
+      if (object.userData.roomContactReceiver) contactVisible = object.visible;
+      if (
+        !('isMesh' in object) ||
+        !object.isMesh ||
+        !(object.layers.mask & (1 << 11))
+      )
+        return;
+      bloomMeshes++;
+      for (
+        let parent: import('three').Object3D | null = object;
+        parent;
+        parent = parent.parent
+      ) {
+        const code: unknown = parent.userData.roomHoverTarget?.code;
+        if (typeof code === 'string') {
+          bloomCodes.add(code);
+          break;
+        }
+      }
+    });
+    return {
+      hoverOffsets,
+      bloomCodes: [...bloomCodes].sort(),
+      bloomMeshes,
+      contactVisible,
+      contactCaptures: Number(canvas.dataset.contactCaptures ?? 0),
+      contactCaptureMs: canvas.dataset.contactCaptureMs
+        ? Number(canvas.dataset.contactCaptureMs)
+        : null,
+      contactStatus: canvas.dataset.contactStatus ?? '',
+      bloomStatus: canvas.dataset.bloomStatus ?? '',
+      paletteRevision: Number(canvas.dataset.paletteRevision ?? 0),
+      sceneFrames: Number(canvas.dataset.sceneEffectFrames ?? 0),
+      composerFrames: Number(canvas.dataset.composerFrames ?? 0),
+      drawFrame: gl.info.render.frame,
+      memory: {
+        geometries: gl.info.memory.geometries,
+        textures: gl.info.memory.textures,
+        programs: gl.info.programs?.length ?? 0,
+      },
+      qualityEvidence: canvas.dataset.effectsQualityEvidence ?? '',
+      runtime: {
+        userAgent: navigator.userAgent,
+        renderer: (() => {
+          const context = gl.getContext();
+          const extension = context.getExtension('WEBGL_debug_renderer_info');
+          return {
+            unmaskedAvailable: extension !== null,
+            vendor: String(
+              context.getParameter(
+                extension?.UNMASKED_VENDOR_WEBGL ?? context.VENDOR,
+              ),
+            ),
+            name: String(
+              context.getParameter(
+                extension?.UNMASKED_RENDERER_WEBGL ?? context.RENDERER,
+              ),
+            ),
+            version: String(context.getParameter(context.VERSION)),
+          };
+        })(),
+        dpr: gl.getPixelRatio(),
+        width: gl.domElement.width,
+        height: gl.domElement.height,
+        exposure: gl.toneMappingExposure,
+        toneMapping: gl.toneMapping,
+        outputColorSpace: gl.outputColorSpace,
+        rawToneMapping: canvas.dataset.rawSceneToneMapping,
+        rawExposure: canvas.dataset.rawSceneExposure,
+        rawOutputColorSpace: canvas.dataset.rawSceneOutputColorSpace,
+      },
+    };
+  });
+}
+
+/** Independent first actual triangle at one stationary screen point, including unbound blockers. */
+export function roomWitnessCodeAtPoint(
+  snapshot: WitnessSnapshot,
+  point: { x: number; y: number },
+) {
+  const inverse = new Matrix4()
+    .multiplyMatrices(
+      new Matrix4().fromArray(snapshot.projection),
+      new Matrix4().fromArray(snapshot.view),
+    )
+    .invert();
+  const x = ((point.x - snapshot.frame.x) / snapshot.frame.width) * 2 - 1;
+  const y = 1 - ((point.y - snapshot.frame.y) / snapshot.frame.height) * 2;
+  const near = new Vector3(x, y, -1).applyMatrix4(inverse),
+    far = new Vector3(x, y, 1).applyMatrix4(inverse);
+  const ray = new Ray(near, far.clone().sub(near).normalize());
+  let distance = Infinity,
+    code: string | null = null;
+  for (const face of snapshot.triangles) {
+    const a = new Vector3().fromArray(face.vertices, 0),
+      b = new Vector3().fromArray(face.vertices, 3),
+      c = new Vector3().fromArray(face.vertices, 6);
+    const hit =
+      face.side === 1
+        ? ray.intersectTriangle(c, b, a, true, new Vector3())
+        : ray.intersectTriangle(a, b, c, face.side !== 2, new Vector3());
+    if (!hit) continue;
+    const measured = near.distanceTo(hit);
+    if (measured <= near.distanceTo(far) && measured < distance) {
+      distance = measured;
+      code = face.code;
+    }
+  }
+  return code;
+}
+
 /** Independent bounded ray/triangle oracle. No production visibility helper. */
 export function roomVisibilityWitnessReport(snapshot: WitnessSnapshot) {
   const transform = new Matrix4().multiplyMatrices(

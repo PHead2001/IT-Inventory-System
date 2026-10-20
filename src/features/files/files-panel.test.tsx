@@ -1672,7 +1672,7 @@ describe('file state and role fixtures', () => {
     expect(
       screen.getByRole('button', { name: 'Check file cleanup' }),
     ).toBeVisible();
-    expect(screen.getByRole('alert')).toHaveTextContent(
+    expect(await screen.findByRole('alert')).toHaveTextContent(
       'File activity could not be loaded',
     );
     expect(screen.queryByText('No file changes yet.')).not.toBeInTheDocument();

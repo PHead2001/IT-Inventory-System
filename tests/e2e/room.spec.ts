@@ -7,6 +7,7 @@ import rawRoom from '../../data/rooms/it-closet.json' with { type: 'json' };
 import { buildRoomBindings } from '../../src/features/room/bindings';
 import { roomSchema } from '../../src/features/room/schema';
 import type { RoomOccupancy } from '../../src/features/room/occupancy-contract';
+import { occupancyText } from '../../src/features/room/occupancy-contract';
 import { measureRoomTarget, roomTargetMeetsMinimum } from './room-target-size';
 import {
   enableRoomLayoutDiagnostics,
@@ -17,6 +18,10 @@ import {
 import {
   observeRoomScene,
   captureRoomWitness,
+  captureRoomReveal,
+  captureRoomEffects,
+  captureRoomSelectionWitness,
+  roomWitnessCodeAtPoint,
   roomVisibilityWitnesses,
   roomVisibilityWitnessReport,
   uncoveredRoomWitnesses,
@@ -380,6 +385,467 @@ async function ready(page: Page) {
   return viewer;
 }
 
+test('scene effects retain actual surface ownership and stop drawing after settled selection and palette changes', async ({
+  page,
+}, testInfo) => {
+  test.setTimeout(120_000);
+  await observeRoomScene(page);
+  await page.setViewportSize({ width: 1280, height: 1100 });
+  await page.emulateMedia({ reducedMotion: 'no-preference' });
+  await login(page);
+  await page.goto('/room?space=it-closet');
+  await ready(page);
+  const canvas = page.locator('[data-room-surface] canvas');
+  await expect(canvas).toHaveAttribute('data-contact-status', 'cached');
+  const initial = await captureRoomEffects(page);
+  expect(initial.bloomStatus).toBe('unselected');
+  await canvas.evaluate((element) => {
+    element.dataset.effectsIdentityWitness = 'original';
+  });
+  await keyboardRoomLocation(page, 'ITC-RED');
+  await settledReveal(page, 'ITC-RED');
+  await expect(canvas).toHaveAttribute('data-bloom-status', 'active');
+  await expect(canvas).toHaveAttribute('data-contact-status', 'cached');
+  const opened = await captureRoomEffects(page);
+  expect(opened.bloomCodes).toEqual(['ITC-RED']);
+  expect(opened.bloomMeshes).toBeGreaterThan(1);
+  expect(opened.contactCaptures).toBe(initial.contactCaptures + 1);
+  const targets = await uncoveredRoomWitnesses(
+    page,
+    roomVisibilityWitnesses(await captureRoomWitness(page)),
+  );
+  const point = targets.get('ITC-RED');
+  expect(point, 'Independent exposed container surface').toBeDefined();
+  await page.mouse.move(point!.x, point!.y);
+  await expect(canvas).toHaveAttribute('data-visual-hover-code', 'ITC-RED');
+  await expect
+    .poll(async () =>
+      Object.values((await captureRoomEffects(page)).hoverOffsets).some(
+        (offset) => Math.abs(offset[1] - 0.1) < 0.0001,
+      ),
+    )
+    .toBe(true);
+  const visibleOwner = roomWitnessCodeAtPoint(
+    await captureRoomWitness(page),
+    point!,
+  );
+  await expect(canvas).toHaveAttribute(
+    'data-hover-visible-code',
+    visibleOwner ?? '',
+  );
+  await page.mouse.move(0, 0);
+  await expect
+    .poll(async () =>
+      Object.values((await captureRoomEffects(page)).hoverOffsets).every(
+        (offset) => offset[1] === 0,
+      ),
+    )
+    .toBe(true);
+  await expect(canvas).toHaveAttribute('data-contact-status', 'cached');
+  const beforeCamera = await captureRoomEffects(page);
+  await page.getByRole('button', { name: 'Zoom in', exact: true }).click();
+  await settledLabels(page);
+  await page
+    .getByRole('button', { name: 'Show item counts', exact: true })
+    .click();
+  await settledLabels(page);
+  expect((await captureRoomEffects(page)).contactCaptures).toBe(
+    beforeCamera.contactCaptures,
+  );
+  const originalStyle = await page.locator('html').getAttribute('style');
+  // This exercises live token lifecycle, not acceptance of the forthcoming Light theme tuning.
+  await page.locator('html').evaluate((root) => {
+    root.style.setProperty('--room-canvas-background', '#f4f6f8');
+    root.style.setProperty('--room-grid', '#8793a4');
+  });
+  await expect
+    .poll(async () => (await captureRoomEffects(page)).paletteRevision)
+    .toBeGreaterThan(beforeCamera.paletteRevision);
+  await expect(canvas).toHaveAttribute('data-contact-status', 'cached');
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  await keyboardRoomLocation(page, 'ITC-D07');
+  await settledReveal(page, 'ITC-D07');
+  await expect(canvas).toHaveAttribute('data-bloom-status', 'active');
+  expect((await captureRoomEffects(page)).bloomCodes).toEqual(['ITC-D07']);
+  await keyboardRoomLocation(page, 'ITC-L');
+  await settledReveal(page, 'ITC-L');
+  await expect(canvas).toHaveAttribute('data-bloom-status', 'active');
+  const aggregate = await captureRoomEffects(page);
+  expect(aggregate.bloomCodes.length).toBeGreaterThan(1);
+  expect(
+    aggregate.bloomCodes.every((code) =>
+      /^ITC-(S[12][ABC]|D0[1-6])$/.test(code),
+    ),
+  ).toBe(true);
+  await page.locator('html').evaluate((root, style) => {
+    if (style === null) root.removeAttribute('style');
+    else root.setAttribute('style', style);
+  }, originalStyle);
+  await expect(canvas).toHaveAttribute('data-contact-status', 'cached');
+  await expect(canvas).toHaveAttribute(
+    'data-effects-identity-witness',
+    'original',
+  );
+  await page.waitForTimeout(750);
+  const idleStart = await captureRoomEffects(page);
+  await page.waitForTimeout(500);
+  const idleEnd = await captureRoomEffects(page);
+  expect([
+    idleEnd.sceneFrames,
+    idleEnd.composerFrames,
+    idleEnd.drawFrame,
+    idleEnd.contactCaptures,
+  ]).toEqual([
+    idleStart.sceneFrames,
+    idleStart.composerFrames,
+    idleStart.drawFrame,
+    idleStart.contactCaptures,
+  ]);
+  await testInfo.attach('scene-effects-behavior', {
+    body: JSON.stringify({ initial, opened, aggregate, idleStart, idleEnd }),
+    contentType: 'application/json',
+  });
+});
+
+test('scene effects resources plateau across repeated settled selection and palette cycles', async ({
+  page,
+}, testInfo) => {
+  test.setTimeout(120_000);
+  await observeRoomScene(page);
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  await login(page);
+  await page.goto('/room?space=it-closet');
+  await ready(page);
+  const canvas = page.locator('[data-room-surface] canvas');
+  const originalStyle = await page.locator('html').getAttribute('style');
+  const samples: Awaited<ReturnType<typeof captureRoomEffects>>[] = [];
+  for (let cycle = 0; cycle < 10; cycle++) {
+    for (const code of ['ITC-RED', 'ITC-D07']) {
+      await keyboardRoomLocation(page, code);
+      await settledReveal(page, code);
+      await expect(canvas).toHaveAttribute('data-bloom-status', 'active');
+    }
+    const previous = (await captureRoomEffects(page)).paletteRevision;
+    await page
+      .locator('html')
+      .evaluate(
+        (root, light) =>
+          root.style.setProperty(
+            '--room-canvas-background',
+            light ? '#f4f6f8' : '#101827',
+          ),
+        cycle % 2 === 0,
+      );
+    await expect
+      .poll(async () => (await captureRoomEffects(page)).paletteRevision)
+      .toBeGreaterThan(previous);
+    await expect(canvas).toHaveAttribute('data-contact-status', 'cached');
+    samples.push(await captureRoomEffects(page));
+  }
+  const warm = samples[3].memory,
+    final = samples.at(-1)!.memory;
+  expect(final.geometries).toBeLessThanOrEqual(warm.geometries);
+  expect(final.textures).toBeLessThanOrEqual(warm.textures);
+  expect(final.programs).toBeLessThanOrEqual(warm.programs + 1);
+  await page.locator('html').evaluate((root, style) => {
+    if (style === null) root.removeAttribute('style');
+    else root.setAttribute('style', style);
+  }, originalStyle);
+  await testInfo.attach('scene-effects-resource-cycles', {
+    body: JSON.stringify(samples),
+    contentType: 'application/json',
+  });
+});
+
+async function keyboardRoomLocation(page: Page, code: string) {
+  const browser = page.getByRole('navigation', { name: 'Location browser' });
+  await browser.getByRole('searchbox', { name: 'Browse locations' }).fill(code);
+  const target = browser.getByRole('button', { name: new RegExp(`${code}$`) });
+  await target.focus();
+  await target.press('Enter');
+}
+async function settledReveal(page: Page, code: string) {
+  const canvas = page.locator('[data-room-surface] canvas');
+  await expect(canvas).toHaveAttribute('data-spatial-open-code', code);
+  await expect(canvas).toHaveAttribute('data-spatial-phase', 'settled');
+  await settledLabels(page);
+}
+test('spatial reveal endpoints retain actual picking and labels across oblique, overhead, underside and panned views', async ({
+  page,
+}, testInfo) => {
+  test.setTimeout(180_000);
+  await observeRoomScene(page);
+  await page.setViewportSize({ width: 1280, height: 1100 });
+  await page.emulateMedia({ reducedMotion: 'no-preference' });
+  await login(page);
+  await page.goto('/room?space=it-closet');
+  const viewer = await ready(page),
+    canvas = viewer.locator('canvas');
+  await chooseMapMode(page, 'Free Orbit');
+  const outsideRest = new Set<string>();
+  const exercised = new Set<string>();
+  let countSnapshot: RoomOccupancy | null = null;
+  const expectations: Record<string, { id: string; offset: number[] }> = {
+    'ITC-D01': { id: 'drawer-1', offset: [5.6, 0, 0] },
+    'ITC-D07': { id: 'drawer-7', offset: [-5.6, 0, 0] },
+    'ITC-RED': { id: 'red-container', offset: [4, 0, 0] },
+    'ITC-BLACK': { id: 'black-container', offset: [-4, 0, 0] },
+    'ITC-CLEAR': { id: 'clear-container', offset: [-4, 0, 0] },
+    'ITC-S1A': { id: 'shelf-1a', offset: [0, 1, 0] },
+    'ITC-RACK': { id: 'server-rack', offset: [0, 0, 0] },
+  };
+  for (const pose of ['oblique', 'overhead', 'underside', 'panned'] as const) {
+    if (pose !== 'oblique') {
+      await page
+        .getByRole('button', { name: 'More map controls', exact: true })
+        .click();
+      const command =
+        pose === 'panned'
+          ? 'Pan right'
+          : pose === 'overhead'
+            ? 'Tilt up'
+            : 'Tilt down';
+      const count = pose === 'panned' ? 2 : pose === 'overhead' ? 4 : 11;
+      for (let index = 0; index < count; index++)
+        await page.getByRole('button', { name: command, exact: true }).click();
+      await page
+        .getByRole('button', { name: 'More map controls', exact: true })
+        .click();
+    }
+    for (const [code, expected] of Object.entries(expectations)) {
+      const firstCounts = !countSnapshot
+        ? page.waitForResponse(
+            (response) =>
+              response.url().includes('/api/room/occupancy?') && response.ok(),
+          )
+        : null;
+      await keyboardRoomLocation(page, code);
+      if (firstCounts)
+        countSnapshot = (await (await firstCounts).json())
+          .counts as RoomOccupancy;
+      await settledReveal(page, code);
+      const presentation = await captureRoomReveal(page);
+      near(presentation.offsets[expected.id], expected.offset);
+      for (const [id, offset] of Object.entries(presentation.offsets))
+        if (id !== expected.id) near(offset, [0, 0, 0]);
+      const snapshot = await captureRoomWitness(page);
+      const witnesses = await uncoveredRoomWitnesses(
+        page,
+        roomVisibilityWitnesses(snapshot),
+      );
+      const points = roomVisibilityWitnesses(snapshot).get(code) ?? [];
+      // This assertion records camera poses with a physically exposed selected face.
+      if (!points.length) continue;
+      exercised.add(code);
+      expect(
+        countSnapshot?.[code],
+        `actual scoped occupancy snapshot for ${code}`,
+      ).toBeTruthy();
+      await expect(
+        viewer.locator(`[data-room-label-code="${code}"]`),
+      ).toHaveAttribute(
+        'aria-label',
+        new RegExp(
+          occupancyText(countSnapshot![code], true).replace(
+            /[.*+?^${}()|[\]\\]/g,
+            '\\$&',
+          ),
+        ),
+      );
+      await expect(
+        viewer.locator(
+          `[data-room-label-code="${code}"][data-label-suppressed="false"]`,
+        ),
+      ).toBeVisible();
+      const first = witnesses.get(code);
+      expect(first, `uncovered selected face at ${pose}: ${code}`).toBeTruthy();
+      let point = first!;
+      for (const candidate of points) {
+        if (await pointerRayIntersectsBinding(page, candidate, code)) continue;
+        if (
+          await page.evaluate(
+            ({ x, y }) => document.elementFromPoint(x, y)?.tagName === 'CANVAS',
+            candidate,
+          )
+        ) {
+          outsideRest.add(code);
+          point = candidate;
+          break;
+        }
+      }
+      await page.mouse.move(point.x, point.y);
+      await expect(canvas).toHaveAttribute('data-hover-visible-code', code);
+      const beforePick = await canvas.getAttribute('data-spatial-request');
+      await page.mouse.click(point.x, point.y);
+      await expect(viewer).toHaveAttribute('data-selected-code', code);
+      await expect(canvas).not.toHaveAttribute(
+        'data-spatial-request',
+        beforePick!,
+      );
+      await settledReveal(page, code);
+      await testInfo.attach(`reveal-${pose}-${code}`, {
+        body: await viewer.screenshot(),
+        contentType: 'image/png',
+      });
+    }
+    await keyboardRoomLocation(page, 'ITC-L');
+    await settledReveal(page, 'ITC-L');
+    for (const offset of Object.values((await captureRoomReveal(page)).offsets))
+      near(offset, [0, 0, 0]);
+    expect(
+      await viewer
+        .locator('[data-room-label-code="ITC-L"] [class*="countBadge"]')
+        .count(),
+    ).toBe(0);
+  }
+  expect(
+    outsideRest.has('ITC-D01') || outsideRest.has('ITC-D07'),
+    'a moved drawer face outside resting bindings remains selectable',
+  ).toBe(true);
+  expect(
+    [...exercised].sort(),
+    'every modeled presentation kind gets actual pointer proof in an exposed pose',
+  ).toEqual(Object.keys(expectations).sort());
+  expect(
+    [...outsideRest].some((code) => /RED|BLACK|CLEAR/.test(code)),
+    'a moved container face outside resting bindings remains selectable',
+  ).toBe(true);
+});
+
+test('opened drawer, container and shelf retain their resting selection footprint through actual pointer clicks', async ({
+  page,
+}, testInfo) => {
+  test.setTimeout(120_000);
+  await observeRoomScene(page);
+  await page.setViewportSize({ width: 1280, height: 1100 });
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  await login(page);
+  await page.goto('/room?space=it-closet');
+  const viewer = await ready(page),
+    canvas = viewer.locator('canvas');
+  for (const [code, geometry] of [
+    ['ITC-D01', 'drawer-1'],
+    ['ITC-RED', 'red-container'],
+    ['ITC-S1A', 'shelf-1a'],
+  ] as const) {
+    await keyboardRoomLocation(page, code);
+    await settledReveal(page, code);
+    await page.mouse.move(0, 0);
+    const selection = await captureRoomSelectionWitness(page);
+    const physical = await captureRoomWitness(page);
+    const candidates = roomVisibilityWitnesses(selection).get(code) ?? [];
+    let point: (typeof candidates)[number] | undefined;
+    // A moved-body point cannot prove that the stationary proxy works.
+    for (const candidate of candidates) {
+      if (roomWitnessCodeAtPoint(selection, candidate) !== code) continue;
+      if (roomWitnessCodeAtPoint(physical, candidate) === code) continue;
+      if (
+        await page.evaluate(
+          ({ x, y }) => document.elementFromPoint(x, y)?.tagName === 'CANVAS',
+          candidate,
+        )
+      ) {
+        point = candidate;
+        break;
+      }
+    }
+    expect(
+      point,
+      `${geometry} (${code}) has no exposed resting proxy point outside the moved visible body`,
+    ).toBeDefined();
+    expect(
+      roomWitnessCodeAtPoint(selection, point!),
+      `${geometry}: selection witness owns the resting point`,
+    ).toBe(code);
+    expect(
+      roomWitnessCodeAtPoint(physical, point!),
+      `${geometry}: moved visible body cannot authorize this point`,
+    ).not.toBe(code);
+    const before = await canvas.getAttribute('data-spatial-request');
+    await page.mouse.click(point!.x, point!.y);
+    await expect(canvas).not.toHaveAttribute('data-spatial-request', before!);
+    await expect(viewer).toHaveAttribute('data-selected-code', code);
+    await settledReveal(page, code);
+    await testInfo.attach('resting-selection-' + code, {
+      body: await viewer.screenshot(),
+      contentType: 'image/png',
+    });
+  }
+});
+
+test('spatial interruption, reduced motion, stationary hover and moving down/up cannot revive a stale target', async ({
+  page,
+}) => {
+  test.setTimeout(90_000);
+  await observeRoomScene(page);
+  await page.setViewportSize({ width: 1280, height: 1100 });
+  await page.emulateMedia({ reducedMotion: 'no-preference' });
+  await login(page);
+  await page.goto('/room?space=it-closet');
+  const viewer = await ready(page),
+    canvas = viewer.locator('canvas');
+  await keyboardRoomLocation(page, 'ITC-D01');
+  await expect(canvas).toHaveAttribute('data-spatial-phase', 'flying');
+  await page.getByRole('button', { name: 'Fit room', exact: true }).click();
+  const held = await camera(page);
+  // Deliberate negative deadline window: old 750ms flight plus 400ms opening.
+  await page.waitForTimeout(1300);
+  near((await camera(page)).position, held.position);
+  await expect(canvas).toHaveAttribute('data-spatial-open-code', '');
+  await expect(canvas).toHaveAttribute('data-spatial-phase', 'cancelled');
+  await keyboardRoomLocation(page, 'ITC-D07');
+  await expect(canvas).toHaveAttribute('data-spatial-phase', 'flying');
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  await settledReveal(page, 'ITC-D07');
+  near((await captureRoomReveal(page)).offsets['drawer-7'], [-5.6, 0, 0]);
+  await page.emulateMedia({ reducedMotion: 'no-preference' });
+  await keyboardRoomLocation(page, 'ITC-RED');
+  await expect(canvas).toHaveAttribute('data-spatial-phase', 'revealing');
+  const snapshot = await captureRoomWitness(page);
+  const point = (
+    await uncoveredRoomWitnesses(page, roomVisibilityWitnesses(snapshot))
+  ).get('ITC-RED');
+  expect(
+    point,
+    'selected moving container has an actual exposed pointer face',
+  ).toBeTruthy();
+  await page.mouse.move(point!.x, point!.y);
+  await page.mouse.down();
+  await settledReveal(page, 'ITC-RED');
+  const endpoint = await captureRoomWitness(page);
+  if (
+    await page.evaluate(
+      ({ x, y }) => document.elementFromPoint(x, y)?.tagName === 'CANVAS',
+      point!,
+    )
+  )
+    await expect(canvas).toHaveAttribute(
+      'data-hover-visible-code',
+      roomWitnessCodeAtPoint(endpoint, point!) ?? '',
+    );
+  await page.mouse.up();
+  await expect(viewer).toHaveAttribute('data-selected-code', 'ITC-RED');
+  await settledReveal(page, 'ITC-RED');
+  await keyboardRoomLocation(page, 'ITC-BLACK');
+  await expect(canvas).toHaveAttribute('data-spatial-phase', 'revealing');
+  await page.getByRole('button', { name: 'Zoom in', exact: true }).click();
+  await settledReveal(page, 'ITC-BLACK');
+  near((await captureRoomReveal(page)).offsets['black-container'], [-4, 0, 0]);
+  await keyboardRoomLocation(page, 'ITC-D01');
+  await expect(canvas).toHaveAttribute('data-spatial-phase', 'flying');
+  await keyboardRoomLocation(page, 'ITC-D07');
+  await keyboardRoomLocation(page, 'ITC-D01');
+  await settledReveal(page, 'ITC-D01');
+  await expect(canvas).toHaveAttribute('data-spatial-open-code', 'ITC-D01');
+  near((await captureRoomReveal(page)).offsets['drawer-7'], [0, 0, 0]);
+  // Observe real draw count only after all bounded reveal/label work settles.
+  await page.mouse.move(10, 10);
+  await page.waitForTimeout(700);
+  const idle = await captureRoomReveal(page);
+  await page.waitForTimeout(400);
+  expect((await captureRoomReveal(page)).drawFrame).toBe(idle.drawFrame);
+});
+
 test('room label placement transforms are measurable synchronously in Full and Reduced motion', async ({
   page,
 }) => {
@@ -427,7 +893,7 @@ test('map wheel ownership preserves page/browser zoom and enables deliberate cam
   await login(page);
   await page.goto('/room?location=ITC-S1A');
   const viewer = await ready(page);
-  // Graphics readiness precedes the initial 300ms selection focus. Observe its
+  // Graphics readiness precedes the initial 750ms selection focus. Observe its
   // completion before attributing any camera movement to browser input.
   await expect(viewer).toHaveAttribute('data-focused-code', 'ITC-S1A');
   const canvas = viewer.locator('canvas');
@@ -562,7 +1028,7 @@ test('real Chromium touch swipes scroll passively and activated gestures rotate 
   await login(page);
   await page.goto('/room?location=ITC-S1A');
   const viewer = await ready(page);
-  // Graphics readiness precedes the initial 300ms selection focus. Observe its
+  // Graphics readiness precedes the initial 750ms selection focus. Observe its
   // completion before attributing any camera movement to browser input.
   await expect(viewer).toHaveAttribute('data-focused-code', 'ITC-S1A');
   const canvas = viewer.locator('canvas');
@@ -1804,7 +2270,7 @@ test('manual pointer movement interrupts an in-flight selected-location focus', 
     .click();
   const displaced = await camera(page);
   const completedBefore = Number(await viewer.getAttribute('data-focus-count'));
-  // CI input delivery can exceed the whole 300 ms animation. Control elapsed
+  // CI input delivery can exceed the whole 750 ms flight. Control elapsed
   // time, while still exercising the real focus button and trusted pointer drag.
   await page.clock.pauseAt(await page.evaluate(() => Date.now() + 10_000));
   await toolbar.getByRole('button', { name: 'Center selected' }).click();
@@ -1824,7 +2290,7 @@ test('manual pointer movement interrupts an in-flight selected-location focus', 
   await page.mouse.up({ button: 'right' });
   const stopped = await camera(page);
   expect(stopped.target).not.toEqual(inFlight.target);
-  await page.clock.runFor(400);
+  await page.clock.runFor(1200);
   near((await camera(page)).target, stopped.target);
   expect(Number(await viewer.getAttribute('data-focus-count'))).toBe(
     completedBefore,
@@ -1832,7 +2298,7 @@ test('manual pointer movement interrupts an in-flight selected-location focus', 
   await expect(viewer).toHaveAttribute('data-selected-code', 'ITC-D01');
   // A subsequent uninterrupted request must still complete under the same clock.
   await toolbar.getByRole('button', { name: 'Center selected' }).click();
-  await page.clock.runFor(400);
+  await page.clock.runFor(1200);
   await expect(viewer).toHaveAttribute(
     'data-focus-count',
     String(completedBefore + 1),

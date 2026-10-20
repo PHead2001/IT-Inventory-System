@@ -11,6 +11,7 @@ import {
 } from 'react';
 import { beforeEach, expect, it, vi } from 'vitest';
 import { PageArrival } from './page-arrival';
+import { canvasBearingRoute } from './page-arrival';
 import {
   RoutePresentationLifetimeContext,
   RoutePresentationSourceContext,
@@ -489,4 +490,24 @@ it('a live path recheck cannot remount an accepted page or enable snapshots of a
     enter: 'none',
     exit: 'none',
   });
+});
+it.each([
+  '/room',
+  '/inventory/assets/example',
+  '/inventory/quantity/example',
+  '/locations/ITC-D01',
+])(
+  'excludes %s from whole-page capture before lazy initialization',
+  (pathname) => {
+    expect(canvasBearingRoute(pathname)).toBe(true);
+  },
+);
+it.each([
+  '/inventory',
+  '/inventory/assets/new',
+  '/inventory/quantity/new',
+  '/locations',
+  '/history',
+])('keeps conventional capture available for %s', (pathname) => {
+  expect(canvasBearingRoute(pathname)).toBe(false);
 });

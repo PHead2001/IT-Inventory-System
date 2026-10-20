@@ -100,6 +100,7 @@ import { DocumentAdmission } from './document-admission';
 import { ProtectedPrivacyBoundary } from '@/components/auth/auth-privacy';
 import { ProtectedPrivacyContent } from '@/components/auth/privacy-content';
 import { RoomCameraSnapshotProvider } from '@/features/room/scene/camera-snapshot-provider';
+import { RoomSceneBudgetProvider } from '@/features/room/scene/scene-budget-provider';
 import { OperationalTimeProvider } from '@/components/operational-time';
 import { MotionPreference } from '@/components/experience/motion-preference';
 import { RouteMotionProvider } from '@/components/experience/route-motion';
@@ -237,13 +238,15 @@ it('keeps command privacy and navigation authority inside the unchanged shell pr
   });
   const privacy = layout.props.children;
   const camera = privacy.props.children;
-  const operational = camera.props.children;
+  const budget = camera.props.children;
+  const operational = budget.props.children;
   const motion = operational.props.children[1];
   const routes = motion.props.children;
   const commands = routes.props.children;
   expect(layout.type).toBe(DocumentAdmission);
   expect(privacy.type).toBe(ProtectedPrivacyBoundary);
   expect(camera.type).toBe(RoomCameraSnapshotProvider);
+  expect(budget.type).toBe(RoomSceneBudgetProvider);
   expect(operational.type).toBe(OperationalTimeProvider);
   expect(motion.type).toBe(MotionPreference);
   expect(routes.type).toBe(RouteMotionProvider);
@@ -257,6 +260,7 @@ it('keeps command privacy and navigation authority inside the unchanged shell pr
     layout,
     privacy,
     camera,
+    budget,
     operational,
     motion,
     routes,

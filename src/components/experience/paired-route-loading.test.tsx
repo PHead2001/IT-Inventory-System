@@ -1497,7 +1497,9 @@ it('ordinary actual opaque primary loading retains the one source/draft and rele
   await screen.findByRole('heading', { name: '/history' });
   expect(gate.store.snapshot()).toBeNull();
   expect(ordinaryMotion.arrival).toBe(approval); // Readiness releases wait, never presentation approval.
-  act(() => ordinaryMotion.finishPrimaryAfterSnapshot({ name: approval.name }));
+  await act(async () => {
+    ordinaryMotion.finishPrimaryAfterSnapshot({ name: approval.name });
+  });
   expect(ordinaryMotion.arrival).toBeNull();
   expect(draft).toHaveValue('preserved');
 });

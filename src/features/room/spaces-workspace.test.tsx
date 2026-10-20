@@ -21,7 +21,7 @@ vi.mock('next/dynamic', () => ({
       selectedCode: string | null;
       highlightedCodes: string[];
       onSelect: (code: string) => void;
-      focusRequest: { requestId: number };
+      focusRequest: { requestId: number; preserveView?: boolean };
       focusOnRestore: boolean;
       initialView?: CameraView | null;
       onViewChange?: (view: CameraView) => void;
@@ -41,9 +41,11 @@ vi.mock('next/dynamic', () => ({
         <div
           data-testid="scene-selection"
           data-counts={JSON.stringify(props.locationOccupancy ?? null)}
+          data-optional-counts={String(props.showCounts)}
           data-code={props.selectedCode ?? ''}
           data-highlights={JSON.stringify(props.highlightedCodes)}
           data-focus={props.focusRequest.requestId}
+          data-preserve-view={String(props.focusRequest.preserveView)}
           data-focus-on-restore={String(props.focusOnRestore)}
           data-initial-view={JSON.stringify(props.initialView ?? null)}
         >
@@ -62,7 +64,7 @@ vi.mock('next/dynamic', () => ({
           <button onClick={() => props.onFailure?.('Graphics failed.')}>
             Fail room
           </button>
-          <button onClick={props.onFocusCancel}>Cancel focus</button>
+          <button onClick={() => props.onFocusCancel?.()}>Cancel focus</button>
           <button
             onClick={() =>
               props.onViewChange?.({
@@ -822,7 +824,7 @@ it('restores URL selection on Back and refocuses a repeated selection', async ()
   );
 });
 
-it('replays focus for a modeled location reached through browser history', async () => {
+it('preserves camera history intent while restoring the modeled selection and reveal', async () => {
   window.history.replaceState(null, '', '/room?location=ITC-S1A');
   vi.stubGlobal(
     'fetch',
@@ -852,8 +854,14 @@ it('replays focus for a modeled location reached through browser history', async
     '/room?space=it-closet&location=ITC-S1A',
   );
   act(() => window.dispatchEvent(new PopStateEvent('popstate')));
+  // Audit W14 preserves Back and existing per-space camera context. A history
+  // restoration reuses that view; explicit Center selected still requests flight.
   expect(screen.getByTestId('scene-selection')).toHaveAttribute(
     'data-focus-on-restore',
+    'false',
+  );
+  expect(screen.getByTestId('scene-selection')).toHaveAttribute(
+    'data-preserve-view',
     'true',
   );
   expect(
@@ -918,6 +926,9 @@ it.each([
     const savedView = screen
       .getByTestId('scene-selection')
       .getAttribute('data-initial-view');
+    const previousFocus = Number(
+      screen.getByTestId('scene-selection').getAttribute('data-focus'),
+    );
     const staleFocus = focusCallbacks.at(-1)!;
     view.rerender(workspace('hidden'));
     expect(screen.getByTestId('scene-selection')).not.toBeVisible();
@@ -946,7 +957,11 @@ it.each([
     expect(scene).toHaveAttribute('data-code', code);
     expect(scene).toHaveAttribute('data-highlights', JSON.stringify([code]));
     expect(scene).toHaveAttribute('data-initial-view', savedView);
-    expect(scene).toHaveAttribute('data-focus-on-restore', 'true');
+    expect(scene).toHaveAttribute('data-focus-on-restore', 'false');
+    expect(scene).toHaveAttribute('data-preserve-view', 'true');
+    expect(Number(scene.getAttribute('data-focus'))).toBeGreaterThan(
+      previousFocus,
+    );
     act(() => staleFocus(initialCode));
     expect(screen.getByTestId('room-viewer')).toHaveAttribute(
       'data-focused-code',
@@ -1026,18 +1041,21 @@ it('accepts the current URL over cached server props on remount and retires an i
   }[] = [];
   vi.stubGlobal(
     'fetch',
-    vi.fn(
-      (url: string, options: { signal: AbortSignal }) =>
-        new Promise((resolve) => {
-          pending.push({
-            code: new URL(url, window.location.origin).searchParams.get(
-              'location',
-            )!,
-            signal: options.signal,
-            resolve,
-          });
-        }),
-    ),
+    vi.fn((url: string, options: { signal: AbortSignal }) => {
+      // Selected count reads are independent of the contents lifecycle under
+      // test. Keep them out of the owned interrupted-request queue.
+      if (url.startsWith('/api/room/occupancy?'))
+        return Promise.resolve({ ok: false });
+      return new Promise((resolve) => {
+        pending.push({
+          code: new URL(url, window.location.origin).searchParams.get(
+            'location',
+          )!,
+          signal: options.signal,
+          resolve,
+        });
+      });
+    }),
   );
   const workspace = (
     <SpacesWorkspace
@@ -1535,7 +1553,7 @@ it('announces deferred occupancy outside busy geometry and replaces it with fail
     screen.queryByText('private occupancy detail'),
   ).not.toBeInTheDocument();
 });
-it('loads counts only when enabled and refreshes counts and contents together on return', async () => {
+it('loads selected reveal counts with the optional overlay off and refreshes both snapshots on return', async () => {
   const user = userEvent.setup();
   const fetcher = vi.fn().mockImplementation((url: string) => {
     if (url.startsWith('/api/room/occupancy?'))
@@ -1577,7 +1595,13 @@ it('loads counts only when enabled and refreshes counts and contents together on
   await screen.findByText('Cable');
   expect(
     fetcher.mock.calls.filter(([url]) => String(url).includes('/occupancy?')),
-  ).toHaveLength(0);
+  ).toHaveLength(1);
+  // Audit W13 requires the opened selected target's count independently of the
+  // optional all-location overlay. The overlay still starts and stays off.
+  expect(screen.getByTestId('scene-selection')).toHaveAttribute(
+    'data-optional-counts',
+    'false',
+  );
   await user.click(screen.getByRole('button', { name: 'Toggle item counts' }));
   await waitFor(() =>
     expect(screen.getByTestId('scene-selection')).toHaveAttribute(
@@ -1602,10 +1626,14 @@ it('loads counts only when enabled and refreshes counts and contents together on
   await waitFor(() =>
     expect(screen.getByTestId('scene-selection')).toHaveAttribute(
       'data-counts',
-      'null',
+      '{"ITC-D01":{"quantity_product_count":"1","quantity_unit_count":"31","asset_count":"2"}}',
     ),
   );
   expect(countsExplanation).not.toBeInTheDocument();
+  expect(screen.getByTestId('scene-selection')).toHaveAttribute(
+    'data-optional-counts',
+    'false',
+  );
   expect(
     screen.queryByText(
       'Counts show quantity items with stock and active individual assets at each storage location.',

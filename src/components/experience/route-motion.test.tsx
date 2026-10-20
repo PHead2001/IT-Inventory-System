@@ -1,5 +1,6 @@
 import {
   act,
+  cleanup,
   fireEvent,
   render,
   screen,
@@ -27,7 +28,7 @@ import {
   useRouteTask,
   useRouteActionResult,
 } from './route-pending';
-import { PageArrival } from './page-arrival';
+import { CanvasFreeRouteContent, PageArrival } from './page-arrival';
 import RouteLink from './route-link';
 import { QueueLogoutForm } from '@/features/labels/queue-logout-form';
 import { PrivacyReadinessContext } from '@/components/auth/privacy-readiness';
@@ -36,6 +37,7 @@ import { ProtectedPrivacyContent } from '@/components/auth/privacy-content';
 import {
   assignmentEpoch,
   readPrivacyRevocationRevision,
+  revokePrivatePresentation,
 } from '@/features/scan/assign-batch';
 import { RecordName } from '@/components/record-name';
 import { SettingsPanel } from '@/features/configuration/settings-panel';
@@ -51,6 +53,9 @@ import { RouteContentIdentityContext } from './route-content-identity';
 import { useLocationBrowserNavigation } from '@/features/room/use-location-browser-navigation';
 import { emptyLocationBrowserState } from '@/features/room/location-browser-state';
 import { RouteReady } from './route-ready';
+import { InventoryCaptureRegion } from './inventory-capture-region';
+import { RoutePresentationLifetimeContext } from './route-presentation-source';
+import { AuxiliaryRouteCaptureContext } from './auxiliary-route-context';
 import { routeKey } from './route-key';
 import { PairedRouteLoadingContext } from './paired-route-loading';
 import { sharedTitleMotion } from './shared-title-motion';
@@ -77,6 +82,14 @@ const runtime = vi.hoisted(() => ({
     name?: string;
     share?: string;
     onShare?: (instance: { name: string }) => void | (() => void);
+    onExit?: (
+      instance: { name: string },
+      types: string[],
+    ) => void | (() => void);
+    onEnter?: (
+      instance: { name: string },
+      types: string[],
+    ) => void | (() => void);
     onUpdate?: (
       instance: { name: string },
       types: string[],
@@ -117,6 +130,9 @@ vi.mock('@/features/configuration/actions', () => ({
 // Intent/callback lifetime only; captured geometry has its own independent suite.
 vi.mock('./shared-title-motion', () => ({ sharedTitleMotion: vi.fn() }));
 vi.mock('./route-content-motion', () => ({ routeContentMotion: vi.fn() }));
+vi.mock('./route-snapshot-clock', () => ({
+  registerRouteSnapshotClock: vi.fn(() => vi.fn()),
+}));
 vi.mock('@/features/labels/queue-model', () => ({
   clearLabelQueueSession: vi.fn(),
 }));
@@ -270,7 +286,9 @@ it('generic snapshot completion before a late inner primary preserves its exact 
     view(
       <>
         <Observe />
-        <PageArrival pathname={runtime.pathname}>
+        {/* This fixture contains conventional title/list content only. The
+            actual detail page is canvas-bearing and cannot own a page snapshot. */}
+        <CanvasFreeRouteContent>
           <RouteContentIdentityContext
             value={{
               pathname: primaryKey,
@@ -280,7 +298,7 @@ it('generic snapshot completion before a late inner primary preserves its exact 
           >
             {primaryKey === '/inventory' ? <List /> : <Detail />}
           </RouteContentIdentityContext>
-        </PageArrival>
+        </CanvasFreeRouteContent>
       </>,
     );
   let finishGeneric!: () => void;
@@ -351,6 +369,9 @@ it('generic snapshot completion before a late inner primary preserves its exact 
     );
     await act(async () => {
       title!.onShare!({ name: original.name });
+      motion.finishPairedContentAfterSnapshot({
+        name: original.name + '-content',
+      });
     });
     expect(motion.intent).toBe(original);
     await act(async () => {
@@ -365,7 +386,7 @@ it('generic snapshot completion before a late inner primary preserves its exact 
 });
 
 it.each(['inner-first', 'outer-first'])(
-  'pairs primary body and title in one capture with %s commits',
+  'unmanaged React fallback pairs primary body and title in one capture with %s commits',
   async (order) => {
     let primaryKey = '/inventory';
     let motion!: ReturnType<typeof useRouteMotion>;
@@ -391,6 +412,9 @@ it.each(['inner-first', 'outer-first'])(
             </RouteReady>
           </PageArrival>
         </>,
+        'staff',
+        'route-fixture',
+        true,
       );
     const page = render(fixture());
     fireEvent.click(screen.getByRole('link', { name: 'Cable row 2' }));
@@ -653,6 +677,11 @@ it('a captured inner title consumes its arrival before a later outer commit can 
     vi.mocked(sharedTitleMotion).mockReturnValueOnce(() => {});
     await act(async () => {
       title.onShare!({ name: original.name });
+      // The existing simulated body effect now has an explicit capture callback;
+      // animation discovery alone cannot grant region authority.
+      motion.finishPairedContentAfterSnapshot({
+        name: original.name + '-content',
+      });
     });
     // The capture belongs to this navigation, while its native title is alive.
     expect(motion.arrival).toBeNull();
@@ -882,6 +911,7 @@ const view = (
   children: ReactNode,
   actorId = 'staff',
   generation = 'route-fixture',
+  unmanagedBody = false,
 ) => (
   <PrivacyReadinessContext
     value={{
@@ -894,9 +924,116 @@ const view = (
   >
     <RouteMotionProvider key={actorId} actorId={actorId}>
       <Probe />
-      {children}
+      {unmanagedBody ? (
+        <AuxiliaryRouteCaptureContext value={null}>
+          {children}
+        </AuxiliaryRouteCaptureContext>
+      ) : (
+        children
+      )}
     </RouteMotionProvider>
   </PrivacyReadinessContext>
+);
+
+/** Protocol fixture only: production native timing remains a browser gate. */
+function auxiliaryNativeFixture() {
+  let ready!: () => void, finished!: () => void, update!: () => void;
+  const handle = {
+    ready: new Promise<void>((resolve) => {
+      ready = resolve;
+    }),
+    finished: new Promise<void>((resolve) => {
+      finished = resolve;
+    }),
+    updateCallbackDone: new Promise<void>((resolve) => {
+      update = resolve;
+    }),
+    skipTransition: vi.fn(),
+  } as unknown as globalThis.ViewTransition;
+  const original = vi.fn(() => handle);
+  document.startViewTransition = original;
+  vi.spyOn(HTMLElement.prototype, 'getClientRects').mockReturnValue([
+    { width: 100, height: 40 },
+  ] as unknown as DOMRectList);
+  vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue({
+    x: 0,
+    y: 10,
+    top: 10,
+    bottom: 50,
+    left: 0,
+    right: 100,
+    width: 100,
+    height: 40,
+  } as DOMRect);
+  return { handle, ready, finished, update, original };
+}
+
+it.each(['privacy', 'reduced', 'supersession'] as const)(
+  'withdraws active auxiliary claims and the exact native handle synchronously on %s',
+  async (withdrawal) => {
+    const native = auxiliaryNativeFixture();
+    history.replaceState(null, '', '/inventory');
+    const page = render(
+      view(
+        <PageArrival pathname="/inventory">
+          <RouteReady
+            actorId="staff"
+            routeKey="/inventory"
+            contentIdentity="ready-source"
+            conventionalPrimary
+            capture="regions"
+          >
+            <InventoryCaptureRegion region="header">
+              <header>
+                <RouteLink href="/history">Auxiliary history</RouteLink>
+                <RouteLink href="/labels">Auxiliary supersession</RouteLink>
+                <input
+                  aria-label="Retained auxiliary draft"
+                  defaultValue="unchanged draft"
+                />
+              </header>
+            </InventoryCaptureRegion>
+            <InventoryCaptureRegion region="body">
+              <section>Conventional body</section>
+            </InventoryCaptureRegion>
+          </RouteReady>
+        </PageArrival>,
+      ),
+    );
+    const draft = screen.getByRole('textbox', {
+      name: 'Retained auxiliary draft',
+    });
+    const header = draft.parentElement!;
+    fireEvent.click(screen.getByRole('link', { name: 'Auxiliary history' }));
+    expect(document.startViewTransition()).toBe(native.handle);
+    expect(header.style.viewTransitionName).toMatch(
+      /^route-primary-.*-header$/,
+    );
+    if (withdrawal === 'privacy') act(() => revokePrivatePresentation());
+    else if (withdrawal === 'reduced')
+      act(() => {
+        localStorage.setItem('it-inventory-reduce-motion', 'true');
+        window.dispatchEvent(
+          new StorageEvent('storage', { key: 'it-inventory-reduce-motion' }),
+        );
+      });
+    else
+      fireEvent.click(
+        screen.getByRole('link', { name: 'Auxiliary supersession' }),
+      );
+    expect(header.style.viewTransitionName).toBe('');
+    expect(native.handle.skipTransition).toHaveBeenCalled();
+    expect(
+      screen.getByRole('textbox', { name: 'Retained auxiliary draft' }),
+    ).toBe(draft);
+    expect(draft).toHaveValue('unchanged draft');
+    native.update();
+    native.ready();
+    native.finished();
+    await Promise.resolve();
+    page.unmount();
+    vi.restoreAllMocks();
+  },
 );
 
 beforeEach(() => {
@@ -940,6 +1077,9 @@ beforeEach(() => {
   localStorage.removeItem('it-inventory-reduce-motion');
 });
 afterEach(() => {
+  // Retire the provider's single native observer before replacing the API stub.
+  // A later-wrapper ownership test deliberately forbids it overwriting stubs.
+  cleanup();
   Reflect.deleteProperty(window, 'navigation');
   vi.unstubAllGlobals();
   delete (document as Partial<Document>).startViewTransition;
@@ -1075,6 +1215,120 @@ it('Reduced application Back preserves command tickets and observer isolation wh
     history.replaceState(null, '', previous);
   }
 });
+
+it.each(['reduced', 'full'] as const)(
+  '%s application Back replays its row anchor after a consumed fallback hash without changing BODY focus',
+  async (mode) => {
+    const scope = '/inventory?q=cable&type=quantity';
+    const returned = scope + '#inventory-row-2';
+    const destination =
+      detailPath + '?' + new URLSearchParams({ returnTo: returned });
+    const previous = location.href;
+    const originalScroll = HTMLElement.prototype.scrollIntoView;
+    const native = mode === 'full' ? auxiliaryNativeFixture() : null;
+    const scroll = vi.fn();
+    HTMLElement.prototype.scrollIntoView = scroll;
+    const geometry = vi
+      .spyOn(HTMLElement.prototype, 'getClientRects')
+      .mockReturnValue([{ width: 300, height: 200 }] as unknown as DOMRectList);
+    if (mode === 'reduced')
+      localStorage.setItem('it-inventory-reduce-motion', 'true');
+    let phase: 'list' | 'detail' | 'fallback' = 'list';
+    const fixture = () =>
+      view(
+        phase === 'fallback' ? (
+          <p role="status">Loading results</p>
+        ) : (
+          <RouteReady
+            actorId="staff"
+            routeKey={
+              phase === 'list'
+                ? scope
+                : routeKey(
+                    detailPath,
+                    new URL(destination, location.origin).searchParams,
+                  )
+            }
+            contentIdentity={phase}
+          >
+            {phase === 'list' ? (
+              <ul>
+                <li id="inventory-row-2">
+                  <InventoryRecordLink
+                    record={record}
+                    holding={initiatingHolding}
+                    returnTo={returned}
+                    href={destination}
+                  >
+                    Original result
+                  </InventoryRecordLink>
+                </li>
+              </ul>
+            ) : (
+              <InventoryBackLink record={record} href={returned}>
+                Back to results
+              </InventoryBackLink>
+            )}
+          </RouteReady>
+        ),
+      );
+    try {
+      history.replaceState(null, '', scope);
+      runtime.query = 'q=cable&type=quantity';
+      const page = render(fixture());
+      expect(
+        screen.getByText(mode === 'reduced' ? 'instant' : 'enabled'),
+      ).toBeVisible();
+      fireEvent.click(screen.getByRole('link', { name: 'Original result' }));
+      history.replaceState(null, '', destination);
+      runtime.pathname = detailPath;
+      runtime.query = new URL(
+        destination,
+        location.origin,
+      ).searchParams.toString();
+      phase = 'detail';
+      page.rerender(fixture());
+      fireEvent.click(screen.getByRole('link', { name: 'Back to results' }));
+      if (native) expect(document.startViewTransition()).toBe(native.handle);
+      history.replaceState(null, '', returned);
+      runtime.pathname = '/inventory';
+      runtime.query = 'q=cable&type=quantity';
+      phase = 'fallback';
+      page.rerender(fixture());
+      expect(scroll).not.toHaveBeenCalled();
+      expect(document.activeElement).toBe(document.body);
+      phase = 'list';
+      page.rerender(fixture());
+      if (native) {
+        // The merged auxiliary observer and return owner share real capture
+        // completion. A revealed row cannot scroll while that capture is held.
+        expect(scroll).not.toHaveBeenCalled();
+        await act(async () => {
+          native.update();
+          native.ready();
+          native.finished();
+        });
+      }
+      expect(scroll).toHaveBeenCalledExactlyOnceWith({
+        behavior: 'instant',
+        block: 'start',
+        inline: 'nearest',
+      });
+      expect(scroll.mock.instances[0]).toBe(
+        document.getElementById('inventory-row-2'),
+      );
+      expect(document.activeElement).toBe(document.body);
+      page.rerender(fixture());
+      expect(scroll).toHaveBeenCalledTimes(1);
+    } finally {
+      geometry.mockRestore();
+      vi.restoreAllMocks();
+      if (originalScroll) HTMLElement.prototype.scrollIntoView = originalScroll;
+      else Reflect.deleteProperty(HTMLElement.prototype, 'scrollIntoView');
+      history.replaceState(null, '', previous);
+    }
+  },
+);
 
 it.each(['reduced', 'unsupported'] as const)(
   '%s accepted navbar exit cancels a held-source search timer, while modified clicks and same-path writes remain ordinary',
@@ -1464,8 +1718,23 @@ it.each(['absent', 'hidden', 'duplicate', 'stale draft', 'reduced'] as const)(
   },
 );
 
-it('names only the initiating holding and the authorized matching title until actual native callback completion', async () => {
-  const { rerender } = render(view(<List />));
+it('names only the initiating holding and matching title before capture seal, retaining intent through native completion', async () => {
+  let motion!: ReturnType<typeof useRouteMotion>;
+  function ObserveTitle() {
+    const next = useRouteMotion();
+    useLayoutEffect(() => {
+      motion = next;
+    });
+    return null;
+  }
+  const fixture = (children: ReactNode) =>
+    view(
+      <>
+        <ObserveTitle />
+        {children}
+      </>,
+    );
+  const { rerender } = render(fixture(<List />));
   fireEvent.click(screen.getByRole('link', { name: 'Cable row 2' }));
   const sourceName = screen
     .getByRole('link', { name: 'Cable row 2' })
@@ -1476,7 +1745,7 @@ it('names only the initiating holding and the authorized matching title until ac
     'data-test-transition-name',
   );
   runtime.pathname = detailPath;
-  rerender(view(<Detail />));
+  rerender(fixture(<Detail />));
   expect(runtime.boundaries).toContainEqual(
     expect.objectContaining({ name: sourceName, share: 'record-title' }),
   );
@@ -1512,16 +1781,19 @@ it('names only the initiating holding and the authorized matching title until ac
   // captured instance callback; geometry/replacement has separate unit coverage.
   await act(async () => {
     captured!.onShare!({ name: sourceName! });
+    motion.finishPairedContentAfterSnapshot({ name: sourceName + '-content' });
   });
-  expect(screen.getByRole('heading')).toHaveAttribute(
+  expect(screen.getByRole('heading')).not.toHaveAttribute(
     'data-test-transition-name',
-    sourceName,
   );
+  expect(motion.intent?.name).toBe(sourceName);
+  expect(motion.captureAvailable).toBe(false);
   await act(async () => {
     finish();
     await finished;
   });
-  // Actual callback completion consumes the name; pathname arrival alone did not.
+  // Sealing consumed capture names; native completion retires the retained intent.
+  expect(motion.intent).toBeNull();
   expect(screen.getByRole('heading')).not.toHaveAttribute(
     'data-test-transition-name',
   );
@@ -2296,6 +2568,9 @@ it('native retirement keeps real destination readiness and a fresh app Back titl
           </RouteReady>
         </PageArrival>
       </>,
+      'staff',
+      'route-fixture',
+      true,
     );
   try {
     window.history.replaceState(null, '', '/inventory');
@@ -2366,6 +2641,13 @@ it('native retirement keeps real destination readiness and a fresh app Back titl
       'data-test-transition-name',
       backName,
     );
+    expect(
+      // The detail route can retain a canvas ancestor. Fresh shared-title
+      // approval must not also authorize a snapshot of the whole page.
+      runtime.boundaries.every(
+        (boundary) => boundary.update !== 'route-content',
+      ),
+    ).toBe(true);
     expect(
       runtime.boundaries.some(
         (boundary) =>
@@ -3597,7 +3879,7 @@ it('shares the measured record heading while disclosure keeps one stable accessi
 });
 
 for (const order of ['inner-first', 'outer-first'] as const) {
-  it(`captures the same exact generic primary arrival across ${order} without a late outer stage`, async () => {
+  it(`unmanaged React fallback captures the same exact generic primary arrival across ${order} without a late outer stage`, async () => {
     vi.spyOn(HTMLElement.prototype, 'getClientRects').mockReturnValue([
       { width: 30, height: 20 },
     ] as unknown as DOMRectList);
@@ -3634,6 +3916,9 @@ for (const order of ['inner-first', 'outer-first'] as const) {
             </RouteReady>
           </PageArrival>
         </>,
+        'staff',
+        'route-fixture',
+        true,
       );
     const page = render(fixture());
     const draft = screen.getByRole('textbox');
@@ -3674,3 +3959,410 @@ for (const order of ['inner-first', 'outer-first'] as const) {
     vi.restoreAllMocks();
   });
 }
+
+it.each(['inner-first', 'outer-first'] as const)(
+  'captures explicit sibling regions once across raw-query %s commits and waits for the final participant',
+  async (order) => {
+    const native = auxiliaryNativeFixture();
+    const sourceKey = '/inventory?q=++USB++',
+      canonical = '/inventory?q=USB';
+    runtime.query = 'q=++USB++';
+    history.replaceState(null, '', sourceKey);
+    let primaryKey = sourceKey;
+    let showLocal = false;
+    let presentation!: NonNullable<
+      React.ContextType<typeof RoutePresentationLifetimeContext>
+    >;
+    let motion!: ReturnType<typeof useRouteMotion>;
+    let auxiliary!: NonNullable<
+      React.ContextType<typeof AuxiliaryRouteCaptureContext>
+    >;
+    function ObserveRegions() {
+      const next = useRouteMotion();
+      const registry = useContext(AuxiliaryRouteCaptureContext)!;
+      const lifetime = useContext(RoutePresentationLifetimeContext)!;
+      useLayoutEffect(() => {
+        motion = next;
+        presentation = lifetime;
+        auxiliary = registry;
+      });
+      return null;
+    }
+    const fixture = () =>
+      view(
+        <>
+          <ObserveRegions />
+          <PageArrival pathname={runtime.pathname}>
+            <RouteReady
+              actorId="staff"
+              routeKey={primaryKey}
+              contentIdentity={primaryKey}
+              pairingHref={primaryKey === sourceKey ? canonical : undefined}
+              pairedInventory
+              conventionalPrimary
+              capture={primaryKey === sourceKey ? 'body' : 'regions'}
+            >
+              {primaryKey === sourceKey ? (
+                <List listHref={canonical} />
+              ) : (
+                <>
+                  <InventoryCaptureRegion region="header">
+                    <div>
+                      <Detail returnHref={canonical + '#inventory-row-2'} />
+                      <RouteLink href="/history">Next navigation</RouteLink>
+                    </div>
+                  </InventoryCaptureRegion>
+                  <section aria-label="Live map surface">
+                    <canvas data-testid="region-map" />
+                  </section>
+                  <InventoryCaptureRegion region="body">
+                    <div>Conventional record body</div>
+                  </InventoryCaptureRegion>
+                  <InventoryCaptureRegion region="task-launcher">
+                    <section>Conventional task launcher</section>
+                  </InventoryCaptureRegion>
+                  {showLocal && (
+                    <InventoryCaptureRegion region="task-close">
+                      <button data-testid="local-region">
+                        New local task control
+                      </button>
+                    </InventoryCaptureRegion>
+                  )}
+                </>
+              )}
+            </RouteReady>
+          </PageArrival>
+        </>,
+      );
+    const page = render(fixture());
+    const armAuxiliary = vi.spyOn(auxiliary, 'arm');
+    fireEvent.click(screen.getByRole('link', { name: 'Cable row 2' }));
+    expect(armAuxiliary).toHaveBeenCalledOnce();
+    expect(armAuxiliary.mock.results[0].value).toBe(true);
+    expect(document.startViewTransition).not.toBe(native.original);
+    expect(document.startViewTransition()).toBe(native.handle);
+    expect(armAuxiliary.mock.calls[0][0].admitted()).toBe(true);
+    const original = motion.intent!,
+      approval = motion.titleArrival!;
+    const source = document.querySelector<HTMLElement>(
+      '[data-route-capture-region="body"]',
+    )!;
+    expect(source.style.viewTransitionName).toBe(original.name + '-content');
+    expect(approval.sourceKey).toBe(sourceKey);
+    expect(motion.arrivalEnabled).toBe(false);
+    if (order === 'outer-first') {
+      runtime.pathname = detailPath;
+      runtime.query = '';
+      page.rerender(fixture());
+    }
+    primaryKey = detailPath;
+    page.rerender(fixture());
+    const header = screen.getByRole('heading', {
+      name: 'Cable title',
+    }).parentElement!;
+    const task = screen.getByText('Conventional task launcher');
+    const headerName = original.name + '-content-header';
+    const taskName = original.name + '-content-task-launcher';
+    const title = runtime.boundaries.findLast(
+      (boundary) => boundary.name === original.name,
+    )!;
+    expect(header.style.viewTransitionName).toBe(headerName);
+    expect(task.style.viewTransitionName).toBe(taskName);
+    expect(header.style.getPropertyValue('view-transition-class')).toBe(
+      'route-content',
+    );
+    expect(
+      screen.getByTestId('region-map').closest('[data-test-transition-name]'),
+    ).toBeNull();
+    // Consume outer arrival before the batch in both commit orders. Sealing
+    // must publish independently of finishArrival's now-no-op exact guard.
+    runtime.pathname = detailPath;
+    runtime.query = '';
+    page.rerender(fixture());
+    expect(motion.arrival).toBeNull();
+    expect(motion.titleArrival).toBe(approval);
+    const handoff = vi.spyOn(presentation, 'handoff');
+    const participants = [
+      original.name,
+      original.name + '-content',
+      headerName,
+      taskName,
+    ];
+    const finishes: (() => void)[] = [];
+    const effects = participants.map((name) => ({
+      effect: { pseudoElement: `::view-transition-new(${name})` },
+      finished: new Promise<void>((resolve) => finishes.push(resolve)),
+      cancel: vi.fn(),
+    }));
+    Object.defineProperty(document, 'getAnimations', {
+      configurable: true,
+      value: () => effects,
+    });
+    try {
+      await act(async () => {
+        void native.handle.ready.then(() => {
+          title.onShare!({ name: original.name });
+        });
+        native.update();
+        native.ready();
+      });
+      expect(motion.arrival).toBeNull();
+      expect(motion.intent).toBe(original);
+      expect(motion.captureAvailable).toBe(false);
+      expect(screen.getByRole('heading')).not.toHaveAttribute(
+        'data-test-transition-name',
+      );
+      const handoffsAtSeal = handoff.mock.calls.length;
+      showLocal = true;
+      page.rerender(fixture());
+      const local = screen.getByTestId('local-region');
+      expect(local.closest('[data-test-transition-name]')).toBeNull();
+      expect(local.style.viewTransitionName).toBe('');
+      expect(header.style.viewTransitionName).toBe('');
+      expect(task.style.viewTransitionName).toBe('');
+      expect(handoff.mock.calls).toHaveLength(handoffsAtSeal);
+      const sharedBeforeLate = vi.mocked(sharedTitleMotion).mock.calls.length;
+      title.onShare!({ name: original.name });
+      expect(vi.mocked(sharedTitleMotion).mock.calls).toHaveLength(
+        sharedBeforeLate,
+      );
+      runtime.pathname = detailPath;
+      runtime.query = '';
+      page.rerender(fixture());
+      await act(async () => {
+        finishes.slice(0, -1).forEach((finish) => finish());
+      });
+      expect(motion.intent).toBe(original);
+      await act(async () => {
+        finishes.at(-1)!();
+      });
+      expect(motion.intent).toBeNull();
+      expect(motion.titleArrival).toBeNull();
+      expect(
+        runtime.boundaries.filter(
+          (boundary) => boundary.update === 'route-content',
+        ),
+      ).toHaveLength(0);
+    } finally {
+      native.update();
+      native.ready();
+      native.finished();
+      await Promise.resolve();
+      handoff.mockRestore();
+      Reflect.deleteProperty(document, 'getAnimations');
+      vi.restoreAllMocks();
+    }
+  },
+);
+
+it.each(['history', 'location'] as const)(
+  '%s source and detail regions withdraw all names at seal and late callbacks cannot affect a fresh app Back',
+  async (kind) => {
+    const native = auxiliaryNativeFixture();
+    const id = '00000000-0000-4000-8000-000000000001';
+    const eventId = '00000000-0000-4000-8000-000000000002';
+    const entity: PresentationTarget =
+      kind === 'history'
+        ? { kind: 'quantity', id }
+        : { kind: 'location', id, code: 'ITC-S1A' };
+    const source =
+      kind === 'history'
+        ? '/history?type=quantity'
+        : '/locations?selected=ITC-S1A';
+    const anchor =
+      kind === 'history'
+        ? `history-event-quantity-${eventId}`
+        : `location-row-desktop-tree-${id}`;
+    const href = source + '#' + anchor;
+    const dest =
+      kind === 'history' ? '/inventory/quantity/' + id : '/locations/ITC-S1A';
+    let key = source;
+    let motion!: ReturnType<typeof useRouteMotion>;
+    function ObserveSource() {
+      const next = useRouteMotion();
+      useLayoutEffect(() => {
+        motion = next;
+      });
+      return null;
+    }
+    const sourceView = () =>
+      kind === 'history' ? (
+        <li id={anchor}>
+          <HistoryRecordLink
+            record={{ kind: 'quantity', id }}
+            event={{ kind: 'quantity', id: eventId }}
+            returnTo={href}
+            href={dest}
+          >
+            Paired source
+          </HistoryRecordLink>
+        </li>
+      ) : (
+        <>
+          <button>
+            <LocationTitleSourceName
+              location={{ kind: 'location', id, code: 'ITC-S1A' }}
+              occurrence="desktop-tree"
+              returnTo={href}
+            >
+              Paired source
+            </LocationTitleSourceName>
+          </button>
+          <LocationDetailLink
+            location={{ kind: 'location', id, code: 'ITC-S1A' }}
+            label="Shelf 1A"
+            occurrence="desktop-tree"
+            returnTo={href}
+            onLeave={() => {}}
+          >
+            Details
+          </LocationDetailLink>
+        </>
+      );
+    const fixture = () =>
+      view(
+        <>
+          <ObserveSource />
+          <PageArrival pathname={runtime.pathname}>
+            <RouteReady
+              actorId="staff"
+              routeKey={key}
+              contentIdentity={key}
+              pairedInventory
+              conventionalPrimary
+              capture={key === source ? 'body' : 'regions'}
+            >
+              {key === source ? (
+                sourceView()
+              ) : (
+                <>
+                  <InventoryCaptureRegion region="header">
+                    <div>
+                      <RecordTitle record={entity}>Paired detail</RecordTitle>
+                      <InventoryBackLink record={entity} href={href}>
+                        Back to source
+                      </InventoryBackLink>
+                    </div>
+                  </InventoryCaptureRegion>
+                  <section aria-label="Uncaptured map">
+                    <canvas data-testid="paired-source-map" />
+                  </section>
+                  <InventoryCaptureRegion region="body">
+                    <div>Paired record body</div>
+                  </InventoryCaptureRegion>
+                </>
+              )}
+            </RouteReady>
+          </PageArrival>
+        </>,
+      );
+    const previous = location.href;
+    vi.spyOn(HTMLElement.prototype, 'getClientRects').mockReturnValue([
+      { width: 30, height: 20 },
+    ] as unknown as DOMRectList);
+    runtime.pathname = source.split('?')[0];
+    runtime.query = source.split('?')[1];
+    history.replaceState(null, '', source);
+    const page = render(fixture());
+    fireEvent.click(
+      screen.getByRole('link', {
+        name:
+          kind === 'history'
+            ? 'Paired source'
+            : 'View Shelf 1A location details',
+      }),
+    );
+    document.startViewTransition();
+    const original = motion.intent!;
+    const oldTitle = runtime.boundaries.findLast(
+      (boundary) => boundary.name === original.name,
+    )!;
+    const oldBody = document.querySelector<HTMLElement>(
+      '[data-route-capture-region="body"]',
+    )!;
+    expect(oldBody.style.viewTransitionName).toBe(original.name + '-content');
+    const link = screen.getByRole('link', {
+      name:
+        kind === 'history' ? 'Paired source' : 'View Shelf 1A location details',
+    });
+    const target = new URL(link.getAttribute('href')!, location.origin);
+    key = routeKey(dest, target.searchParams);
+    runtime.pathname = dest;
+    runtime.query = target.searchParams.toString();
+    history.replaceState(null, '', key);
+    page.rerender(fixture());
+    const header = screen.getByRole('heading', {
+      name: 'Paired detail',
+    }).parentElement!;
+    const headerName = original.name + '-content-header';
+    expect(header.style.viewTransitionName).toBe(headerName);
+    expect(
+      screen
+        .getByTestId('paired-source-map')
+        .closest('[data-test-transition-name]'),
+    ).toBeNull();
+    let finish!: () => void;
+    const finished = new Promise<void>((resolve) => {
+      finish = resolve;
+    });
+    const effects = [original.name, original.name + '-content', headerName].map(
+      (name) => ({
+        effect: { pseudoElement: `::view-transition-new(${name})` },
+        finished,
+        cancel: vi.fn(),
+      }),
+    );
+    Object.defineProperty(document, 'getAnimations', {
+      configurable: true,
+      value: () => effects,
+    });
+    try {
+      await act(async () => {
+        void native.handle.ready.then(() => {
+          oldTitle.onShare!({ name: original.name });
+        });
+        native.update();
+        native.ready();
+      });
+      expect(motion.intent).toBe(original);
+      expect(motion.captureAvailable).toBe(false);
+      expect(
+        screen.getByRole('heading', { name: 'Paired detail' }),
+      ).not.toHaveAttribute('data-test-transition-name');
+      const shares = vi.mocked(sharedTitleMotion).mock.calls.length;
+      expect(oldTitle.onShare!({ name: original.name })).toBeUndefined();
+      expect(vi.mocked(sharedTitleMotion).mock.calls).toHaveLength(shares);
+      fireEvent.click(screen.getByRole('link', { name: 'Back to source' }));
+      const next = motion.intent!;
+      expect(next.name).not.toBe(original.name);
+      key = source;
+      runtime.pathname = source.split('?')[0];
+      runtime.query = source.split('?')[1];
+      history.replaceState(null, '', href);
+      page.rerender(fixture());
+      expect(screen.getByText('Paired source')).toHaveAttribute(
+        'data-test-transition-name',
+        next.name,
+      );
+      expect(motion.captureAvailable).toBe(true);
+      await act(async () => {
+        finish();
+        await finished;
+      });
+      expect(motion.intent).toBe(next);
+      expect(oldTitle.onShare!({ name: original.name })).toBeUndefined();
+      expect(screen.getByText('Paired source')).toHaveAttribute(
+        'data-test-transition-name',
+        next.name,
+      );
+    } finally {
+      native.update();
+      native.ready();
+      native.finished();
+      await Promise.resolve();
+      Reflect.deleteProperty(document, 'getAnimations');
+      history.replaceState(null, '', previous);
+      vi.restoreAllMocks();
+    }
+  },
+);

@@ -28,6 +28,8 @@ import {
   RouteNavigationIdentityContext,
 } from './route-ready';
 import { PrivacyReadinessContext } from '@/components/auth/privacy-readiness';
+import { AuxiliaryRouteCaptureContext } from './auxiliary-route-context';
+import { RoutePresentationSourceContext } from './route-presentation-source';
 import {
   assignmentEpoch,
   readPrivacyRevocationRevision,
@@ -37,6 +39,7 @@ const runtime = vi.hoisted(() => ({
   pathname: '/inventory',
   query: '',
   push: vi.fn(),
+  reduced: true,
 }));
 vi.mock('next/navigation', () => ({
   useRouter: () => ({ push: runtime.push }),
@@ -44,7 +47,7 @@ vi.mock('next/navigation', () => ({
   useSearchParams: () => new URLSearchParams(runtime.query),
 }));
 vi.mock('./motion-preference', () => ({
-  useEffectiveReducedMotion: () => true,
+  useEffectiveReducedMotion: () => runtime.reduced,
 }));
 vi.mock('@/lib/supabase/browser', () => ({
   createSupabaseBrowserClient: () => ({
@@ -61,6 +64,9 @@ let primary: () => ReturnType<
   NonNullable<React.ContextType<typeof RouteReadyContext>>['currentPrimary']
 >;
 let consume: ReturnType<typeof useConsumeRouteTask>;
+let auxiliary: NonNullable<
+  React.ContextType<typeof AuxiliaryRouteCaptureContext>
+>;
 function ConsumptionProbe() {
   const value = useConsumeRouteTask();
   useLayoutEffect(() => {
@@ -96,11 +102,13 @@ function Probe({ backend }: { backend: string }) {
   const navigation = useRouteRouter();
   const pending = useContext(RoutePendingContext);
   const readiness = useContext(RouteReadyContext);
+  const capture = useContext(AuxiliaryRouteCaptureContext);
   useLayoutEffect(() => {
     boundary = value;
     router = navigation;
     scope = pending!;
     primary = () => readiness!.currentPrimary();
+    auxiliary = capture!;
   });
   return null;
 }
@@ -207,6 +215,7 @@ it.each(['generation', 'actor'] as const)(
   },
 );
 beforeEach(() => {
+  runtime.reduced = true;
   runtime.pathname = '/inventory';
   runtime.query = '';
   runtime.push.mockReset();
@@ -218,6 +227,7 @@ beforeEach(() => {
 afterEach(() => {
   cleanup();
   vi.restoreAllMocks();
+  delete document.documentElement.dataset.motion;
 });
 it('waits for the exact real primary rather than a same-path fallback or hidden retained heading', () => {
   const view = render(<Fixture />);
@@ -683,6 +693,7 @@ function NativeTaskPrimary({
   primaryReady = true,
   primaryKey = 'primary',
   work,
+  conventionalPrimary = false,
 }: {
   kind: 'asset' | 'quantity';
   hidden?: boolean;
@@ -694,6 +705,7 @@ function NativeTaskPrimary({
   primaryReady?: boolean;
   primaryKey?: string;
   work?: Promise<void>;
+  conventionalPrimary?: boolean;
 }) {
   const NavigationBoundary = work ? StableNavigation : Fragment;
   const path =
@@ -719,6 +731,7 @@ function NativeTaskPrimary({
                 routeKey={anchor ?? path}
                 contentIdentity={content}
                 ready={primaryReady}
+                conventionalPrimary={conventionalPrimary}
                 key={primaryKey}
               >
                 <main>
@@ -751,6 +764,62 @@ function NativeTaskPrimary({
     </PrivacyReadinessContext>
   );
 }
+it.each(['asset', 'quantity'] as const)(
+  'rebinds authored %s source metadata only to the accepted consumed key and retires stale participants',
+  (kind) => {
+    runtime.reduced = false;
+    document.documentElement.dataset.motion = 'full';
+    const path =
+      '/inventory/' + (kind === 'asset' ? 'assets' : 'quantity') + '/record';
+    const anchor = path + '?task=' + kind + '_move';
+    runtime.pathname = path;
+    runtime.query = '';
+    history.replaceState({}, '', path);
+    const source = Symbol();
+    const fixture = (anchor = path) => (
+      <RoutePresentationSourceContext value={source}>
+        <NativeTaskPrimary kind={kind} anchor={anchor} conventionalPrimary />
+      </RoutePresentationSourceContext>
+    );
+    const view = render(fixture());
+    const root = primary()!.root;
+    expect(auxiliary.source(root, path)).toBe(source);
+    const registrations = vi.spyOn(auxiliary, 'register');
+    for (let repeat = 0; repeat < 2; repeat++) {
+      accept(anchor);
+      runtime.query = 'task=' + kind + '_move';
+      history.replaceState({}, '', anchor);
+      view.rerender(fixture(anchor));
+      expect(primary()?.routeKey).toBe(anchor);
+      expect(auxiliary.source(root, anchor)).toBe(source);
+      expect(auxiliary.source(root, path)).toBeUndefined();
+      act(() =>
+        expect(
+          consume?.(
+            path,
+            kind + '_move',
+            screen.getByText('Native task source'),
+          ),
+        ).toBe(true),
+      );
+      expect(primary()?.routeKey).toBe(path);
+      expect(auxiliary.source(root, path)).toBe(source);
+      expect(auxiliary.source(root, anchor)).toBeUndefined();
+      runtime.query = '';
+      view.rerender(fixture(anchor));
+    }
+    const participant = registrations.mock.calls.at(-1)![0];
+    expect(participant.current()).toBe(true);
+    const capture = boundary.capture();
+    act(() => revokePrivatePresentation());
+    expect(participant.current()).toBe(false);
+    expect(capture()).toBe(false);
+    expect(boundary.issue(anchor)).toBeNull();
+    view.unmount();
+    expect(auxiliary.source(root, path)).toBeUndefined();
+    expect(auxiliary.source(root, anchor)).toBeUndefined();
+  },
+);
 it.each(['asset', 'quantity'] as const)(
   'consumes a native %s task from its accepted clean primary without authorizing navigation or replacing the server anchor',
   (kind) => {

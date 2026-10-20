@@ -1,0 +1,59 @@
+{
+  "package": "@react-three/postprocessing",
+  "version": "3.1.3",
+  "files": [
+    {
+      "path": "dist/index.js",
+      "upstreamSha256": "9e54412dacb5aae89385e09df97b143cbf09f1ba8fa7141ac2b8497f302d7fbe",
+      "patchedSha256": "f36ffed784fb29acf979b8792987b3d9e5898e997f3ede96f5994bb60498962b",
+      "edits": [
+        {
+          "start": "var EffectComposer = /* @__PURE__ */ memo(function EffectComposer(",
+          "end": "//#endregion\n//#region src/EffectGroup.tsx",
+          "upstreamSha256": "c427ae3d708025d2ed0302436ea5119cbdcc616d6756ac6c516913eb3db4a0b5",
+          "payload": "EffectComposer.runtime.txt",
+          "payloadSha256": "2881e8746744e7d83d1166c06effdea35ca87cae026965326547292c19a1b191",
+          "upstreamPayload": "EffectComposer.runtime.upstream.txt"
+        },
+        {
+          "start": "function SelectiveBloom(",
+          "end": "//#endregion\n//#region src/effects/Sepia.tsx",
+          "upstreamSha256": "dc5832bbd40b7c023e5bffd4be7140b31adc29834e90497915c674b158dd2f35",
+          "payload": "SelectiveBloom.runtime.txt",
+          "payloadSha256": "b95623ee6e4fe47fa132031e6dc23593833577acd131fdc87861d4015bf012df",
+          "upstreamPayload": "SelectiveBloom.runtime.upstream.txt"
+        }
+      ]
+    },
+    {
+      "path": "dist/EffectComposer.d.ts",
+      "upstreamSha256": "5ffa6fb29c5ac8ca9d441c65ea4ba66791948bffe50ff19724d57b94030686b0",
+      "patchedSha256": "39fd0b76191703bc9b45d58b57fbfb2dbf1254f9ecab39cf2d427d36216c5510",
+      "edits": [
+        {
+          "start": "import { DepthDownsamplingPass, EffectComposer as EffectComposerImpl, NormalPass, Pass } from 'postprocessing';\nimport { type ReactNode, type Ref } from 'react';\nimport type { Camera, Scene, TextureDataType } from 'three';\nexport declare const EffectComposerContext: import(\"react\").Context<{\n    composer: EffectComposerImpl;\n    normalPass: NormalPass | null;\n    downSamplingPass: DepthDownsamplingPass | null;\n    camera: Camera;\n    scene: Scene;\n    resolutionScale?: number;\n    requestRebuild: () => void;\n    autoClear: boolean;\n}>;\nexport type EffectComposerProps = {\n    enabled?: boolean;\n    children: ReactNode;\n    depthBuffer?: boolean;\n    /** Only used for SSGI currently, leave it disabled for everything else unless it's needed */\n    enableNormalPass?: boolean;\n    stencilBuffer?: boolean;\n    autoClear?: boolean;\n    autoRenderToScreen?: boolean;\n    resolutionScale?: number;\n    multisampling?: number;\n    frameBufferType?: TextureDataType;\n    renderPriority?: number;\n    camera?: Camera;\n    scene?: Scene;\n    renderPass?: (scene: Scene, camera: Camera) => Pass;\n    mergeMode?: 'auto' | 'all' | 'none';\n    ref?: Ref<EffectComposerImpl>;\n};\nexport declare const groupPasses: WeakSet<Pass>;\nexport declare function disposePassWithoutEffects(pass: Pass): void;\nexport declare const EffectComposer: import(\"react\").MemoExoticComponent<({ children, camera: _camera, scene: _scene, resolutionScale, enabled, renderPriority, autoClear, autoRenderToScreen, depthBuffer, enableNormalPass, stencilBuffer, multisampling, frameBufferType, renderPass, mergeMode, ref, }: EffectComposerProps) => import(\"react\").JSX.Element | null>;\n",
+          "end": "",
+          "upstreamSha256": "5ffa6fb29c5ac8ca9d441c65ea4ba66791948bffe50ff19724d57b94030686b0",
+          "payload": "EffectComposer.declaration.txt",
+          "payloadSha256": "39fd0b76191703bc9b45d58b57fbfb2dbf1254f9ecab39cf2d427d36216c5510",
+          "upstreamPayload": "EffectComposer.declaration.upstream.txt"
+        }
+      ]
+    },
+    {
+      "path": "dist/effects/SelectiveBloom.d.ts",
+      "upstreamSha256": "1576b1eb12e22a3602999837a46a4d5c7d549f061b558dd6247995f5558e1099",
+      "patchedSha256": "0b48b14f6e179b357ea40042a8778c5c76168ab52dcbd15e4947ec063da7004d",
+      "edits": [
+        {
+          "start": "import type { BloomEffectOptions } from 'postprocessing';\nimport { SelectiveBloomEffect } from 'postprocessing';\nimport { Ref, RefObject } from 'react';\nimport { Object3D } from 'three';\ntype ObjectRef = RefObject<Object3D | null>;\nexport type SelectiveBloomProps = BloomEffectOptions & Partial<{\n    lights: Object3D[] | ObjectRef[];\n    selection: Object3D | Object3D[] | ObjectRef | ObjectRef[];\n    selectionLayer: number;\n    inverted: boolean;\n    ignoreBackground: boolean;\n    ref?: Ref<SelectiveBloomEffect>;\n}>;\nexport declare function SelectiveBloom({ selection, selectionLayer, lights, luminanceThreshold, luminanceSmoothing, mipmapBlur, radius, levels, resolutionScale, resolutionX, resolutionY, ref, ...liveProps }: SelectiveBloomProps): import(\"react\").JSX.Element;\nexport {};\n",
+          "end": "",
+          "upstreamSha256": "1576b1eb12e22a3602999837a46a4d5c7d549f061b558dd6247995f5558e1099",
+          "payload": "SelectiveBloom.declaration.txt",
+          "payloadSha256": "0b48b14f6e179b357ea40042a8778c5c76168ab52dcbd15e4947ec063da7004d",
+          "upstreamPayload": "SelectiveBloom.declaration.upstream.txt"
+        }
+      ]
+    }
+  ]
+}

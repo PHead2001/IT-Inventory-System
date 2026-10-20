@@ -46,9 +46,13 @@ import {
   supportsPairedRouteLoading,
 } from './paired-route-loading';
 import { routeKey } from './route-key';
+import { createRouteCaptureCompletion } from './route-capture-completion';
+import { isInventoryCaptureName } from './inventory-capture-regions';
 import { supportsConventionalRoutePrimary } from './conventional-route-primary';
 import { createRoutePresentationLifetime } from './route-presentation-lifetime';
 import { RoutePresentationLifetimeContext } from './route-presentation-source';
+import { createAuxiliaryRouteCapture } from './auxiliary-route-capture';
+import { AuxiliaryRouteCaptureContext } from './auxiliary-route-context';
 import {
   RoutePendingContext,
   RouteProgress,
@@ -58,6 +62,7 @@ import {
   cancelRouteSnapshots,
   createRouteMotionState,
   matchesTitleListRoute,
+  observeRouteSnapshotWithdrawal,
 } from './route-motion-state';
 
 const RouteMotionContext = createContext<{
@@ -74,6 +79,7 @@ const RouteMotionContext = createContext<{
   actorId: string;
   latestPrivacy: { current: ReturnType<typeof usePrivacyReadiness> };
   withdrawGrant: () => void;
+  captures: ReturnType<typeof createRouteCaptureCompletion>;
   beginLogoutAttempt: () => (confirmed: boolean) => void;
 } | null>(null);
 // Client insertion effects alone bind this opaque presentation owner. No actor,
@@ -95,6 +101,7 @@ const commandDestination = (href: string | undefined) => {
 };
 const emptyIntent = () => null;
 const emptySubscribe = () => () => {};
+const emptyCaptureRevision = () => 0;
 
 function invalidateRouteMotion(
   state?: ReturnType<typeof createRouteMotionState>,
@@ -159,6 +166,7 @@ export function RouteMotionProvider({
   const [providerToken] = useState(() => Symbol());
   const [commands] = useState(createRouteCommandState);
   const [loading] = useState(() => createPairedRouteLoading(pending));
+  const [auxiliary] = useState(createAuxiliaryRouteCapture);
   const [readiness] = useState(() => {
     const value = createRouteReadiness(
       actorId,
@@ -175,6 +183,7 @@ export function RouteMotionProvider({
           state.finish(intent.name);
       },
       (primary) => {
+        auxiliary.ordinaryCommit(primary.routeKey);
         const owner = loading.snapshot();
         if (
           owner?.kind === 'primary' &&
@@ -198,6 +207,7 @@ export function RouteMotionProvider({
     createApplicationReturn(readiness),
   );
   const [presentation] = useState(createRoutePresentationLifetime);
+  const [captures] = useState(createRouteCaptureCompletion);
   const [owners] = useState(createRoutePendingOwners);
   const [navigationObservers] = useState(
     () => new Set<(href: string) => void>(),
@@ -262,6 +272,7 @@ export function RouteMotionProvider({
           !state.valid()
         )
           return;
+        auxiliary.withdraw();
         commands.navigation(commandDestination(href));
         applicationReturn.acceptNavigation(href, pending.snapshot().epoch);
         navigationObservers.forEach((observer) => {
@@ -338,6 +349,74 @@ export function RouteMotionProvider({
           const approval = state.arrivalSnapshot();
           if (primaryPresentation && approval) loading.armPrimary(approval);
         });
+        const pairName = state.snapshot()?.name;
+        const approval = pairName
+          ? state.titleArrivalSnapshot()
+          : state.arrivalSnapshot()?.presentation === 'primary'
+            ? state.arrivalSnapshot()
+            : null;
+        const grant = acceptedGrant.current;
+        const generation = latestPrivacy.current.generation;
+        const source =
+          approval && sourcePrimary
+            ? auxiliary.source(sourcePrimary.root, approval.sourceKey)
+            : undefined;
+        if (
+          approval &&
+          sourcePrimary?.conventionalPrimary === true &&
+          sourcePrimary.routeKey === approval.sourceKey &&
+          grant &&
+          source &&
+          CSS.supports('view-transition-class', 'route-content')
+        ) {
+          const current = () =>
+            lifecycleRef.current &&
+            currentRouteProvider === providerToken &&
+            pending.current(approval.epoch) &&
+            state.valid() &&
+            !suspended.current &&
+            !latestReduced.current &&
+            acceptedGrant.current?.revision === grant.revision &&
+            acceptedGrant.current?.epoch === grant.epoch &&
+            latestPrivacy.current.generation === generation &&
+            retainedPresentationGrantCurrent(latestPrivacy.current, grant) &&
+            document.documentElement.dataset.motion === 'full' &&
+            document.documentElement.dataset.routeMotionPrivate === 'true';
+          const admitted = () =>
+            current() &&
+            (pairName
+              ? state.titleArrivalSnapshot() === approval &&
+                state.snapshot()?.name === pairName
+              : state.arrivalSnapshot() === approval);
+          const base = pairName ? pairName + '-content' : approval.name;
+          auxiliary.arm({
+            token: approval,
+            base,
+            sourceKey: approval.sourceKey,
+            destinationKey: approval.destinationKey,
+            sourceRoot: sourcePrimary.root,
+            handoff: presentation.exitCallback(source),
+            current,
+            admitted,
+            participate: (name) =>
+              isInventoryCaptureName(name, base) &&
+              captures.capture({
+                approval,
+                name,
+                current: admitted,
+                captured: () => state.finishArrival(approval),
+                body: () => true,
+                complete: () => {
+                  if (pairName) state.finish(pairName);
+                },
+                missing: () => {
+                  state.finishArrival(approval);
+                  if (pairName) state.finish(pairName);
+                  cancelRouteSnapshots();
+                },
+              }),
+          });
+        }
         if (loading.snapshot())
           latestPrivacy.current.navigation?.prepare(href, providerToken);
         else latestPrivacy.current.navigation?.retire(providerToken);
@@ -375,6 +454,8 @@ export function RouteMotionProvider({
       liveRouteKey,
       commands,
       navigationObservers,
+      auxiliary,
+      captures,
       applicationReturn,
     ],
   );
@@ -400,6 +481,13 @@ export function RouteMotionProvider({
   useInsertionEffect(() => {
     lifecycleRef.current = true;
     currentRouteProvider = providerToken;
+    const unobserveAuxiliary = auxiliary.attach(document);
+    const unbindAuxiliaryWithdrawal = observeRouteSnapshotWithdrawal(() =>
+      auxiliary.withdraw(),
+    );
+    const reconcileAuxiliary = () => auxiliary.reconcile();
+    const unbindAuxiliaryState = state.subscribe(reconcileAuxiliary);
+    const unbindAuxiliaryPending = pending.subscribe(reconcileAuxiliary);
     const readAuthority = () => {
       const value = latestPrivacy.current;
       if (
@@ -491,6 +579,11 @@ export function RouteMotionProvider({
     );
     return () => {
       commands.retire(false);
+      auxiliary.withdraw();
+      unobserveAuxiliary();
+      unbindAuxiliaryWithdrawal();
+      unbindAuxiliaryState();
+      unbindAuxiliaryPending();
       unbindPrivacy();
       unbindNavigation?.();
       unbind();
@@ -527,6 +620,7 @@ export function RouteMotionProvider({
     commands,
     applicationReturn,
     navigationObservers,
+    auxiliary,
   ]);
   useLayoutEffect(() => {
     if (!lifecycleRef.current || currentRouteProvider !== providerToken) return;
@@ -763,6 +857,7 @@ export function RouteMotionProvider({
         commands,
         actorId: mountedActor,
         latestPrivacy,
+        captures,
         withdrawGrant: () => {
           commands.retire();
           nativeScroll.invalidate();
@@ -806,46 +901,48 @@ export function RouteMotionProvider({
     >
       <RoutePendingContext.Provider value={scope}>
         <RoutePresentationLifetimeContext value={presentation}>
-          {mountedOwners.map((owner) => (
-            <RouteTransitionRunner
-              key={`${owner.id}:${pendingSnapshot.epoch}`}
-              scope={scope}
-              epoch={pendingSnapshot.epoch}
-              owner={owner}
-            />
-          ))}
-          <RouteProgress />
-          <RouteNavigationIdentityContext
-            value={{ state: commands, committedRouteKey }}
-          >
-            <RouteReadyContext.Provider value={readiness}>
-              <PairedRouteLoadingContext.Provider
-                value={{
-                  store: loading,
-                  valid: (owner) =>
-                    lifecycleRef.current &&
-                    currentRouteProvider === providerToken &&
-                    loading.snapshot() === owner &&
-                    pending.current(owner.epoch) &&
-                    state.valid() &&
-                    mountedActor === actorId &&
-                    !suspended.current &&
-                    retainedPresentationGrantCurrent(
-                      privacy,
-                      acceptedGrant.current,
-                    ) &&
-                    (owner.kind === 'primary'
-                      ? state.arrivalSnapshot() === owner.arrival &&
-                        owner.arrival.presentation === 'primary'
-                      : state.snapshot()?.name === owner.name) &&
-                    document.documentElement.dataset.routeMotionPrivate ===
-                      'true',
-                }}
-              >
-                {children}
-              </PairedRouteLoadingContext.Provider>
-            </RouteReadyContext.Provider>
-          </RouteNavigationIdentityContext>
+          <AuxiliaryRouteCaptureContext value={auxiliary}>
+            {mountedOwners.map((owner) => (
+              <RouteTransitionRunner
+                key={`${owner.id}:${pendingSnapshot.epoch}`}
+                scope={scope}
+                epoch={pendingSnapshot.epoch}
+                owner={owner}
+              />
+            ))}
+            <RouteProgress />
+            <RouteNavigationIdentityContext
+              value={{ state: commands, committedRouteKey }}
+            >
+              <RouteReadyContext.Provider value={readiness}>
+                <PairedRouteLoadingContext.Provider
+                  value={{
+                    store: loading,
+                    valid: (owner) =>
+                      lifecycleRef.current &&
+                      currentRouteProvider === providerToken &&
+                      loading.snapshot() === owner &&
+                      pending.current(owner.epoch) &&
+                      state.valid() &&
+                      mountedActor === actorId &&
+                      !suspended.current &&
+                      retainedPresentationGrantCurrent(
+                        privacy,
+                        acceptedGrant.current,
+                      ) &&
+                      (owner.kind === 'primary'
+                        ? state.arrivalSnapshot() === owner.arrival &&
+                          owner.arrival.presentation === 'primary'
+                        : state.snapshot()?.name === owner.name) &&
+                      document.documentElement.dataset.routeMotionPrivate ===
+                        'true',
+                  }}
+                >
+                  {children}
+                </PairedRouteLoadingContext.Provider>
+              </RouteReadyContext.Provider>
+            </RouteNavigationIdentityContext>
+          </AuxiliaryRouteCaptureContext>
         </RoutePresentationLifetimeContext>
       </RoutePendingContext.Provider>
     </RouteMotionContext.Provider>
@@ -882,6 +979,15 @@ export function useRouteMotion() {
     state?.titleArrivalSnapshot ?? emptyIntent,
     emptyIntent,
   );
+  // A seal must publish even when the outer pathname already consumed arrival.
+  // The receipt changes names only, never route/privacy/readiness authority.
+  useSyncExternalStore(
+    context?.captures.subscribe ?? emptySubscribe,
+    context?.captures.snapshot ?? emptyCaptureRevision,
+    emptyCaptureRevision,
+  );
+  const captureAvailable =
+    context?.captures.available(titleArrival ?? arrival) !== false;
   const epoch = context?.pending.snapshot().epoch;
   const key = context?.listHref
     ? (() => {
@@ -905,40 +1011,39 @@ export function useRouteMotion() {
     body: boolean,
   ) => {
     const name = intent?.name;
+    const approval = titleArrival;
     const contentName = name + '-content';
-    if (!name || instance.name !== (body ? contentName : name) || !current())
-      return;
-    if (titleArrival) state?.finishArrival(titleArrival);
-    // All React capture callbacks (including the title's replacement effect)
-    // run before this microtask. Both names belong to this exact approval.
-    queueMicrotask(() => {
-      if (!current()) return;
-      const animations = document.getAnimations?.() ?? [];
-      const named = (candidate: string) =>
-        animations.filter((animation) =>
-          (animation.effect as KeyframeEffect | null)?.pseudoElement?.endsWith(
-            `(${candidate})`,
-          ),
-        );
-      const title = named(name),
-        content = named(contentName);
-      if (!content.length) {
-        // A title without its opted-in body cannot claim a paired page capture.
+    const owned = () =>
+      current() &&
+      !!approval &&
+      state?.titleArrivalSnapshot() === approval &&
+      context?.pending.current(approval.epoch) === true;
+    if (
+      !name ||
+      !approval ||
+      !(body
+        ? isInventoryCaptureName(instance.name, contentName)
+        : instance.name === name) ||
+      !owned()
+    )
+      return false;
+    return context!.captures.capture({
+      approval,
+      name: instance.name,
+      current: owned,
+      captured: () => state?.finishArrival(approval),
+      body: (participant) => participant !== name,
+      complete: () => state?.finish(name),
+      missing: () => {
+        state?.finishArrival(approval);
         state?.finish(name);
         cancelRouteSnapshots();
-        return;
-      }
-      // Missing/ambiguous titles retain a single body crossfade. Its completion
-      // retires the unused title approval; it never starts a later generic fade.
-      void Promise.allSettled(
-        [...title, ...content].map((animation) => animation.finished),
-      ).then(() => {
-        if (current()) state?.finish(name);
-      });
+      },
     });
   };
   return {
     enabled,
+    captureAvailable,
     arrivalEnabled:
       enabled &&
       !pairedArrivalEnabled &&
@@ -1007,15 +1112,25 @@ export function useRouteMotion() {
     },
     finishPrimaryAfterSnapshot: (instance: { name: string }) => {
       if (
-        current() &&
-        arrival?.presentation === 'primary' &&
-        instance.name === arrival.name &&
-        state?.arrivalSnapshot() === arrival
-      ) {
-        state.finishArrival(arrival);
-        return true;
-      }
-      return false;
+        !current() ||
+        arrival?.presentation !== 'primary' ||
+        !isInventoryCaptureName(instance.name, arrival.name) ||
+        state?.arrivalSnapshot() !== arrival
+      )
+        return false;
+      const approval = arrival;
+      return context!.captures.capture({
+        approval,
+        name: instance.name,
+        current: () => current() && state?.arrivalSnapshot() === approval,
+        captured: () => state?.finishArrival(approval),
+        body: () => true,
+        complete: () => {},
+        missing: () => {
+          state?.finishArrival(approval);
+          cancelRouteSnapshots();
+        },
+      });
     },
     finishArrivalAfterSnapshot: (instance: { name: string }) => {
       if (!arrival || arrival.presentation === 'primary') return;

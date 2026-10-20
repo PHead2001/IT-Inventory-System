@@ -1,5 +1,151 @@
 # Validation
 
+## Spatial composition source slice
+
+### Review repairs: reveal contract and waiting maps
+
+Node-schema regressions reject both zero and nonzero group reveal metadata at
+standalone and nested depths, while retaining ordinary recursive groups and
+canonical drawer, container and shelf box metadata. Existing visual-reveal and
+ray-selection regressions cover resting bindings, presentation bounds, legacy
+v1 data without metadata and moved-body selection. Graphics regressions require
+queued maps to remain busy without Resume, retain admission order across
+rerenders and allocate once automatically only after prior teardown completes.
+Existing preemption and privacy-withholding regressions retain explicit fresh
+Resume for withdrawn allocations and automatic fresh admission for withheld
+unallocated requests. Focused jsdom execution proves these source assertions;
+it does not certify native WebGL disposal, visual copy at desktop/390 px or
+exact-HEAD PR acceptance.
+
+### Draw and temporal evidence harness
+
+The W14 journey now uses an independently witnessed surface and a trusted mouse
+click. Under the controlled browser clock it checks resting geometry at 744 ms,
+observes the first reveal publication between 750 and 776 ms, and checks reveal
+completion between 384 and 416 ms after that publication. The attachment records
+the request/phase timestamps and actual native draw-bearing frame buckets. These
+are authored assertions until the browser journey executes; phase telemetry is a
+passive publication, not an internal controller clock.
+
+`tests/e2e/room-draw-observation.ts` wraps native WebGL draw methods only in the
+test page, preserving their receiver, arguments, return and exceptions. It groups
+successful room-canvas draw submissions by animation-frame boundary, caps the
+buffer at 4096 frames/200,000 draws per frame/180 seconds, reports overflow, and
+restores only its own method descriptors on cleanup. Idle rAF callbacks create no
+draw-frame entries. Its own rAF observer adds measurement overhead but never
+invalidates the scene or renders it. Reported native submission durations are CPU
+measurements; draw-bearing frame intervals are not GPU execution durations.
+
+The opt-in `room-effects-performance.spec.ts` uses real time and five identical
+warmed trusted-pointer drag samples, separate selection/contact-capture samples,
+and a two-second settled draw-free window. It attaches bounded raw observations,
+median/p95 summaries, capture CPU cost, quality/fallback state, graphics readiness,
+resource counts, viewport/DPR, renderer strings and harness-file hashes. A software
+renderer is explicitly classified in the report. No frame-rate acceptance threshold
+or hardware pass is invented by the harness.
+
+Run it after the ordinary local prerequisites, on the reference browser/hardware:
+
+```powershell
+$env:SPATIAL_PERF = '1'
+$env:SPATIAL_PERF_KIND = 'candidate'
+$env:SPATIAL_PERF_SHA = '<exact candidate HEAD>'
+$env:SPATIAL_PERF_QUALITY = 'standard'
+npm run test:e2e -- tests/e2e/room-effects-performance.spec.ts
+```
+
+The approved baseline is `05cd02c4942047dccbeb9c8c4e87b302ad2569e0`; it has no
+SceneEffects owner, bloom or contact-shadow integration. Run the identical harness
+against that baseline production build with `SPATIAL_PERF_KIND=baseline` and its
+exact SHA. The comparison owner supplies the same three test files
+(`room-effects-performance.spec.ts`, `room-draw-observation.ts`,
+`room-visibility-witness.ts`) as a documented harness overlay, preserving baseline
+application/dependency inputs; matching harness hashes are required. Use the same
+browser/GPU, build mode, populated database, viewport and DPR, and retain both JSON
+attachments outside Playwright's cleaned output directory before the next run.
+Candidate `low` and `off` runs use the real Settings preference and isolate contact
+and bloom costs; they are ablations, not historical-baseline substitutes. Compare
+active median/p95 draw intervals and CPU submission costs, separate contact spikes,
+and settled idle draws. Software rendering leaves reference-GPU acceptance open.
+These runs do not certify physical-phone performance, visual theme quality or GPU
+execution time. The temporal journey's fake clock must not be used for performance.
+
+`tests/e2e/spatial-composition.spec.ts` adds the following authored browser
+journeys using the existing loopback-only owned fixtures and audited cleanup.
+The spec is exclusive under the existing scheduling policy. Its observation
+helper reads the installed Fiber scenes and existing WebGL contexts; it never
+sets camera/mesh state or replaces the application path. Screenshots are emitted
+for visual review when the journeys actually execute.
+
+| Scope | Authored real-browser evidence                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| ----- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| A302  | Actual modal/label staging; Cancel preserves destination, quantity and reason; Use location does not submit; explicit map and conventional Receive confirmations persist the same destination UUID; graphics preemption, detached prior canvas and resumed detail map; committed-context samples include detached contexts awaiting teardown. Actual browser context loss keeps the keyboard picker usable; an owned unmodeled destination preserves the draft and recorded location. |
+| A303  | Asset, quantity and location record readiness precedes optional graphics. Small initial viewport tests the near-region lazy boundary; phone-height captures follow. Multiple positive quantity holdings require explicit choice and changing it updates the actual compact scene. An owned unmodeled closet child keeps recorded context and Spaces links on all three surfaces without canvas/count reads.                                                                           |
+| W13   | Full and Reduced journeys inspect actual rendered drawer/container/shelf reveal-group transforms, visible selected count text against the uncached occupancy response with the optional overlay off, screenshots, and reversal to resting transforms after Clear selection.                                                                                                                                                                                                           |
+| W14   | Actual installed renderer and controlled browser clock prove Full flight before reveal, newer selection retirement, toolbar input cancellation and Reduced complete endpoints. The existing trusted-pointer interruption journey in `room.spec.ts` retains its interaction assertions and now waits through the complete 750/400 ms sequence.                                                                                                                                         |
+
+These journeys are authored, not executed browser acceptance. Typechecking,
+scoped lint/format and Playwright discovery establish source validity only.
+Committed-renderer observations do not certify overlap during renderer
+initialization before its first Fiber commit, GPU performance or visual quality.
+Run the real backend/WebGL journeys, inspect their captures, and complete the
+final-candidate gates before marking these matrix scopes accepted. W15/W16
+have source integration and focused lifetime coverage below; browser/GPU
+acceptance remains outstanding.
+Authentication revocation, stale occupancy retirement and ineligible destination
+choices retain their focused unit/component coverage; the nine new browser
+journeys do not establish those additional browser boundaries. The picker-only
+POST counter observes server-action transport, and the unchanged persisted
+record version independently checks that no inventory write occurred.
+
+W13/W14/A302/A303 focused coverage includes immutable focus precedence and
+interruption, 750/400 ms completion ordering, Reduced endpoints, measured-rest
+binding preservation, selected exact counts with the optional overlay off, map
+and tree UUID parity/no submission/draft preservation, current eligibility and
+pending-parent checks, modal revocation masking, lazy multi-balance detail choice,
+independently bounded embedded occupancy, one-scene preemption/resume and late
+initialization rejection.
+Canvas, map-dialog and embedded-count regressions also cover committed
+actor/backend/generation A/B/A retirement without global invalidation, ordinary
+same-owner readiness recovery and pending initialization that finishes after
+retirement. `fiber-teardown.test.ts` executes the installed public
+Fiber 9.8.1 root/configure/unmount contract in jsdom. Four regressions cover
+factory rejection before renderer acquisition, acquired-renderer configuration
+failure with deferred disposal, pending-factory rejection and a pending factory
+returning its renderer after teardown begins. The next lease is granted only
+after Fiber completion; acquired renderers additionally require disposal to settle
+and a context-loss request before completion. The adapter uses public unmount
+without rendering a rejected root or mutating its store. These tests do not create
+WebGL or prove graphics appearance or GPU release. Throwing disposal APIs and
+allocations hidden inside a rejecting factory remain unproven resource-release
+boundaries. Successful-configure errors use ordinary teardown and never enter the
+failed-configure adapter.
+Additional authored regressions cover actual modal opening after initial
+verification, permanent cancel retirement, an unmodeled child within IT Closet,
+captured camera publication and actual RoomScene selections through the original
+picker owner. These source assertions require fresh execution on this candidate.
+The review repair batch adds a real protected-controller focus recheck around the
+mounted destination dialog, retaining its native open state, staged candidate and
+camera while denying fresh selection/confirmation and stale focus restoration.
+Allocated preemption coverage holds teardown completion across privacy refresh
+and slot release, requiring explicit fresh Resume before a new allocation.
+Detail capability parity covers every canonical room binding, unmodeled children
+and ancestry mismatch. Server-rendered pending/unmodeled footprints and an AST
+walk of every eager client boundary (including server-supplied link descendants)
+guard optional geometry loading. Source graph assertions establish import
+separation; they do not substitute for production chunk/network observations or
+real native modal focus/WebGL acceptance.
+
+Use the canonical `npm run test -- --maxWorkers=1` with the affected room,
+location-picker and PageArrival test files, then `npm run typecheck`, scoped
+zero-warning lint and formatting. This local source slice has no migration or
+database mutation. Browser acceptance still requires populated Spaces and all
+three detail surfaces, storage workflows, Full/Reduced motion, desktop/390 px,
+keyboard fallback, manual focus interruption, live mesh/hover/overflow gating,
+Back/camera restoration, context loss and actual disposal/resource overlap.
+Independent architecture review and full exact-HEAD PR certification remain
+separate gates; focused jsdom passes do not fulfill audited visual acceptance.
+
 ## Room label transition correctness
 
 Captured selected-label transition regressions use a deterministic injected clock
@@ -141,6 +287,16 @@ artifact upload hit the storage quota. The header status is a source-confirmed
 layout contributor, not a proven explanation of those CLS failures. Native
 timing, access-denial snapshot readiness, actual Next task re-entry and viewport
 placement remain browser acceptance gaps until rerun on the integrated candidate.
+The PR56 dependency integration retains its authored auxiliary registry, capture
+completion collector and shared document clock. After an explicitly consumed
+task, auxiliary source metadata uses the same effective full key as the accepted
+primary and content identity; the immutable server anchor remains in the native
+task guard. Rebinding cleans the old metadata registration. Asset and quantity
+regressions cover repeated task consumption, exact clean-key lookup, stale
+task-key rejection, live revocation and unmount cleanup. Registry metadata grants
+no route or privacy authority. The joined shell retains both the room scene
+budget and command providers under the existing protected scope, with both room
+effects and shortcut preferences available in Settings.
 The additive database search requires the
 full canonical database gate, including pgTAP authorization/lifecycle/ranking
 fixtures and canonical type regeneration. Under the default planner and caller
@@ -212,6 +368,25 @@ origin with the existing record, holding and anchor checks. Native Back/Forward
 restores the actual history scope without pairing or approving a different query. Focused RouteReady, inventory
 page, pairing-component and motion-state regressions cover these contracts and
 reject unrecorded aliases. They do not replace real browser/native capture proof.
+
+The explicit detail-region follow-up covers actual asset, quantity and location
+page composition with one canonical RouteReady marker. Cold compact slots and
+warm canvas sentinels have no active capture ancestor; actual task launchers,
+MutationForm/CustodyChangeForm and LocationPicker paths split around their lazy
+map surface. The fixed region inventory bounds participant names before capture.
+Coordinator regressions retain both original commit-order/raw-query proofs and
+add concurrent shared/unmatched regions, batch sealing, duplicate/late callbacks,
+final-participant completion and supersession/privacy fences. Both commit orders
+also consume the outer arrival before sealing, then require reliable seal
+publication, withdrawn title/region names and a newly mounted local region with
+no capture name or source handoff. Lifetime regressions
+prove every region receives an exact source lease, only final native cleanup
+retires it, and cancellation makes all old callbacks/cleanups inert. Installed
+React 19.3 dispatches queued native callbacks synchronously and attaches each
+returned cleanup to the same transition.finished promise; the receipt seals only
+after that batch. These component/source checks do not prove WebGL, native capture
+geometry, phone layout or W13/A303/D303.2 acceptance. Independent Astra integrity
+review, real browser/WebGL and exact-candidate certification remain required.
 
 The running local-reduction case uses a second signed-in Settings page in the
 same browser context. Its real motion switch is focused before the first page's
@@ -435,6 +610,10 @@ withheld restoration grants, outgoing-resource cleanup, explicit selection focus
 and consumed-command preservation in both motion modes. Passing these local
 resource regressions does not establish that the hosted reduced-motion failure
 used that resource replacement path; the exact hosted journey remains required.
+The Effects integration also proves controls attachment/replacement preserves the
+reveal controller, confirmed-render readiness still precedes explicit focus, and
+an outgoing frame cannot cancel or complete the replacement flight. A retired
+original renderer session leaves a previously withheld camera untouched.
 Repository runner image inputs were regenerated;
 Bundle coherence/version requires root-owned integration with the current runner
 baseline before final certification.
@@ -1308,6 +1487,42 @@ and diff whitespace checks passed. Independent architecture review found no
 actionable source issue. These are local working-tree results based on
 `43874f64`, not committed-SHA CI or native browser acceptance.
 
+## Pinned room-effects lifetime validation
+
+Fresh `npm ci` must execute `scripts/patch-postprocessing.mjs` and verify the
+exact pinned `@react-three/postprocessing` 3.1.3 upstream-to-patched hashes in
+`patches/react-three-postprocessing-3.1.3/manifest.json`. Do not substitute a
+local ignored wrapper or disable postinstall to pass certification. Reapplying
+already-patched bytes is a verification operation; unknown versions, bytes,
+payloads or output hashes must fail before changing any other target.
+
+Canonical Vitest discovery includes `tests/unit/patch-postprocessing.test.mjs`
+and `src/features/room/scene/patched-postprocessing.test.tsx`. The installer
+regressions cover upstream installation, idempotence and refusal of unknown
+versions/bytes/payloads. The actual installed-package suite instruments lower
+GPU constructors while running the shipped patched exports and actual app
+SceneBloom/SceneEffectsProvider, including StrictMode/Activity fresh-store
+reconnect, retirement before passive allocation, retained frames before resize,
+setup rollback and bounded idle invalidation. These are lifecycle proofs, not
+real GPU or shader-performance evidence. Existing bloom/contact runtime tests
+remain responsible for raw-render color/state restoration, FBO/shader failures,
+contact cache invalidation and partial overlay/capture rollback.
+
+Effects layout cleanup irreversibly disposes its captured store. Descendant
+caster layout registration and light callback refs must reconnect against one
+fresh context generation after StrictMode/Activity setup, without remounting the
+provider or reviving old callbacks. Appearance preference tests include external
+storage changes while every subscriber is unmounted and retention of a genuine
+failed-write fallback. Successful writes must not leave a volatile override that
+masks later persisted changes.
+
+Prepared-image `npm ci --ignore-scripts` populates verified npm tarballs only;
+actual repository CI runs fresh `npm ci` with this postinstall. Refresh only the
+approved derived package/lock/input/bundle artifacts through Write-Bundle after
+package input changes. This patch requires no runner code, permission, installed
+bundle or VM change. Real WebGL, both-theme/phone/Full/Reduced visual acceptance,
+reference-hardware frame costs and the final exact-SHA remote gates remain required.
+
 ## A306/A310 serial identification integration
 
 The following records PR55 iteration coverage and local limitations before final
@@ -1324,3 +1539,33 @@ widths in Full/Reduced motion; report its execution separately from unit coverag
 Focused resolver/parser/chooser/assignment and tag-advisory regressions cover exact spelling, Unicode lengths, legal duplicates, cross-namespace collisions, typed-prefix isolation, unknowns, errors, overflow and retained cancellation/privacy guards. `supabase/tests/serial_scan.test.sql` adds transactional fixtures for stable invoker/empty-search-path grants, active viewer/staff reads, nonmember/inactive/anonymous denial, exact case/whitespace lookup, 200 supplementary Unicode characters, deterministic first21 results, truthful site/retired context and nonmutating reads. The migration and provisional generated-type addition require canonical clean-database execution and `db:types:check`; they have not been validated against local PostgreSQL here because its Docker daemon is unavailable.
 
 `tests/e2e/audit-four-identifier-guidance.spec.ts` retains owned new fixtures for duplicate serials, serial/tag/SKU collisions, tag blur guidance and a synthetic camera QR frame. Scan and tag-blur cases are defined at 1280/390 px with Full/Reduced motion. A separate 390 px Reduced-motion Scan-and-assign journey enters a duplicate serial through the real input, requires a named/contextual chooser, deliberately selects the intended asset, checks the review's immutable record link and storage source, then cancels with **Skip inspection / review**. Caller-scoped reads compare both assets, their versions and their inventory/assignment events before choice, after inspection and after cancellation to prove that no assignment was made. These are durable test definitions; browser/hosted execution and physical-camera testing remain pending. SQL timeout configuration likewise requires effective REST hoisting and elapsed-time proof before it establishes any request-time bound. This is iteration evidence, not final PR certification.
+
+## Visible regional captures and CI repair coverage
+
+The regional native fixture now imports the actual RouteMotionProvider,
+PageArrival, RouteReady and InventoryCaptureRegion/Slot path with the production
+presentation lifetime and CSS registry. It explicitly arms a controlled fixture
+transition; only external Next routing hooks and Auth subscription use adapters.
+It proves native capture traversal, not full Link/RSC/Auth navigation. The prior
+unmatched React header remains a negative witness of the renderer limitation.
+All five header enter/exit cases and actual authored body paired, incoming-only
+and outgoing-only viewport cases passed in Chromium, together with that negative
+witness (nine tests, one worker, 512 MiB heap, no application server/database).
+
+The actual CI 390 by 480 Back capture had a header ending below y606 and its
+first body starting at y626. The source body was offscreen; the visible incoming
+list body lacked a snapshot name. The body now uses the same authored capture
+registration as other regions. Browser acceptance checks each visible authored
+root's exact name, old/new opacity endpoints and overlap with the shared title;
+a regression rejects title/header-only evidence when the incoming body is visible.
+Desktop captures with visible bodies on both sides still require the paired body
+crossfade, and the 200 ms effects/250 ms presentation bound is unchanged.
+
+Controller/shared-clock tests cover single-sided fades sharing the title/body
+clock, ownership expiry and unsupported-clock withdrawal. Picker regressions
+cover graphics failure followed by keyboard selection of an unmodeled logical
+candidate and explicit confirmation. Page-order regressions keep Tasks before
+supporting metadata while retaining all metadata and preview content. The full
+application Back/anchor journey, phone geometry, actual context loss with the
+retained quantity draft, complete validation and exact-SHA CI remain integration
+gates; the focused native fixture does not certify them.

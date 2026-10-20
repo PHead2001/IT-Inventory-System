@@ -1,10 +1,16 @@
-import { beforeEach, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { act, render } from '@testing-library/react';
 import { Activity, StrictMode } from 'react';
 import { MathUtils, OrthographicCamera, Vector3 } from 'three';
 import rawRoom from '../../../../data/rooms/it-closet.json';
 import { roomSchema } from '../schema';
+import { buildRoomBindings } from '../bindings';
+import {
+  createSpatialRevealController,
+  type FocusRequest,
+} from './spatial-reveal';
 import { CameraRig } from './room-scene';
+import { SceneSessionContext } from './scene-budget-provider';
 import { PrivacyReadinessContext } from '@/components/auth/privacy-readiness';
 import {
   assignmentEpoch,
@@ -15,7 +21,6 @@ import {
   RoomCameraSnapshotProvider,
   useRoomCameraSnapshot,
 } from './camera-snapshot-provider';
-import { buildRoomBindings } from '../bindings';
 import type { CameraView } from './camera-view';
 import {
   LabelLayoutProvider,
@@ -23,10 +28,10 @@ import {
 } from './label-layout-runtime';
 
 const mocks = vi.hoisted(() => ({
-  reduced: false,
+  reduced: undefined as boolean | undefined,
   state: null as unknown,
-  control: null as unknown,
   frame: null as (() => void) | null,
+  control: null as unknown,
   attach: null as ((control: unknown) => (() => void) | undefined) | null,
   orbit: null as {
     enabled: boolean;
@@ -35,9 +40,19 @@ const mocks = vi.hoisted(() => ({
     onEnd: () => void;
   } | null,
 }));
-vi.mock('@/components/experience/motion-preference', () => ({
-  useEffectiveReducedMotion: () => mocks.reduced,
-}));
+vi.mock('@/components/experience/motion-preference', async (importOriginal) => {
+  const actual =
+    await importOriginal<
+      typeof import('@/components/experience/motion-preference')
+    >();
+  return {
+    ...actual,
+    useEffectiveReducedMotion: () => {
+      const reduced = actual.useEffectiveReducedMotion();
+      return mocks.reduced ?? reduced;
+    },
+  };
+});
 vi.mock('@react-three/fiber', () => ({
   useThree: () => mocks.state,
   useFrame: (callback: () => void) => {
@@ -68,7 +83,8 @@ let control: {
 };
 beforeEach(() => {
   vi.restoreAllMocks();
-  mocks.reduced = false;
+  window.localStorage.clear();
+  mocks.reduced = undefined;
   camera = new OrthographicCamera(-1, 1, 1, -1, 0.1, 3000);
   camera.position.set(200, 250, 350);
   camera.zoom = 3;
@@ -82,7 +98,10 @@ beforeEach(() => {
   mocks.state = {
     camera,
     size,
-    gl: { domElement: document.createElement('canvas') },
+    gl: {
+      domElement: document.createElement('canvas'),
+      info: { render: { calls: 1 } },
+    },
     invalidate: vi.fn(),
   };
   mocks.control = control;
@@ -90,6 +109,7 @@ beforeEach(() => {
   mocks.frame = null;
   mocks.attach = null;
 });
+afterEach(() => vi.restoreAllMocks());
 
 const savedPose: CameraView = {
   position: [210, 260, 360],
@@ -100,6 +120,7 @@ const savedPose: CameraView = {
 function restorationHarness() {
   const registry = createRoomLabelRegistry(vi.fn());
   const complete = vi.fn();
+  const onReady = vi.fn();
   const bindings = buildRoomBindings(room);
   let snapshot: ReturnType<typeof useRoomCameraSnapshot>;
   function Scene({
@@ -130,7 +151,7 @@ function restorationHarness() {
           }}
           focusOnRestore={selected}
           onFocusComplete={complete}
-          onReady={vi.fn()}
+          onReady={onReady}
           onFailure={vi.fn()}
           command={pan ? { id: 1, kind: 'right' } : { id: 0, kind: 'fit' }}
           orbitMode="free"
@@ -145,6 +166,7 @@ function restorationHarness() {
   }
   return {
     complete,
+    onReady,
     snapshot: () => snapshot,
     ui: (
       ready: boolean,
@@ -307,6 +329,8 @@ it.each([false, true])(
     camera.position.set(200, 300, 300);
     mocks.state = { ...(mocks.state as object), camera };
     view.rerender(rig.ui(true, true, true));
+    act(() => mocks.frame!());
+    act(() => mocks.frame!());
     if (!reduced) {
       vi.spyOn(performance, 'now').mockReturnValue(performance.now() + 1000);
       act(() => mocks.frame!());
@@ -318,7 +342,10 @@ it.each([false, true])(
     expect(
       camera.position.clone().sub(control.target).distanceTo(expectedOffset),
     ).toBeLessThan(1e-8);
-    expect(rig.complete).toHaveBeenLastCalledWith('ITC-S1A');
+    expect(rig.complete).toHaveBeenLastCalledWith(
+      'ITC-S1A',
+      expect.objectContaining({ code: 'ITC-S1A' }),
+    );
     expect(rig.snapshot().view!.target).toEqual([8, 80.5, -18]);
   },
 );
@@ -360,14 +387,31 @@ it.each([false, true])(
     expect(camera.position.toArray()).toEqual([200, 250, 350]);
     expect(control.update).not.toHaveBeenCalled();
     expect(rig.complete).not.toHaveBeenCalled();
+    act(() => {
+      mocks.frame!();
+      mocks.frame!();
+    });
+    expect(rig.onReady).not.toHaveBeenCalled();
+    expect(rig.complete).not.toHaveBeenCalled();
     view.rerender(rig.ui(true, true, selected));
+    expect(camera.position.toArray()).toEqual(savedPose.position);
+    expect(control.target.toArray()).toEqual(savedPose.target);
+    expect(rig.onReady).not.toHaveBeenCalled();
+    expect(rig.complete).not.toHaveBeenCalled();
+    act(() => mocks.frame!());
+    expect(rig.onReady).not.toHaveBeenCalled();
+    act(() => mocks.frame!());
+    expect(rig.onReady).toHaveBeenCalledOnce();
     if (selected) {
       const target = [8, 80.5, -18];
       expect(control.target.toArray()).toEqual(target);
       expect(camera.position.clone().sub(control.target).toArray()).toEqual([
         190, 230, 400,
       ]);
-      expect(rig.complete).toHaveBeenLastCalledWith('ITC-S1A');
+      expect(rig.complete).toHaveBeenLastCalledWith(
+        'ITC-S1A',
+        expect.objectContaining({ code: 'ITC-S1A', requestId: 1 }),
+      );
       expect(rig.snapshot().view!.target).toEqual(target);
     } else {
       expect(camera.position.toArray()).toEqual(savedPose.position);
@@ -382,6 +426,44 @@ it.each([false, true])(
     expect(camera.position.toArray()).toEqual(initialized);
   },
 );
+it('keeps a snapshot-withheld rig unready and does not revive its retired renderer session', () => {
+  size.width = 375;
+  size.height = 400;
+  const rig = restorationHarness();
+  let current = true;
+  const session = { current: () => current };
+  const wrap = (ready: boolean, mounted: boolean, owner = session) => (
+    <SceneSessionContext value={owner}>
+      {rig.ui(ready, mounted, true)}
+    </SceneSessionContext>
+  );
+  const view = render(wrap(true, false));
+  act(() => {
+    expect(rig.snapshot().write(savedPose)).toBe(true);
+  });
+  view.rerender(wrap(false, true));
+  const capturedFrame = mocks.frame!;
+  const capturedEnd = mocks.orbit!.onEnd;
+  act(() => {
+    capturedFrame();
+    capturedFrame();
+    capturedEnd();
+  });
+  expect(rig.onReady).not.toHaveBeenCalled();
+  expect(control.update).not.toHaveBeenCalled();
+  current = false;
+  view.rerender(wrap(true, true, { current: () => true }));
+  expect(camera.position.toArray()).toEqual([200, 250, 350]);
+  expect(control.update).not.toHaveBeenCalled();
+  act(() => {
+    mocks.frame!();
+    mocks.frame!();
+    capturedEnd();
+  });
+  expect(rig.onReady).not.toHaveBeenCalled();
+  expect(rig.complete).not.toHaveBeenCalled();
+  expect(rig.snapshot().view).toEqual(savedPose);
+});
 it.each(['empty', 'revoked', 'session'] as const)(
   'initializes an authorized canonical frame with %s saved state',
   (state) => {
@@ -414,15 +496,21 @@ it.each(['empty', 'revoked', 'session'] as const)(
     });
   },
 );
-function harness() {
+function harness(onViewChange = vi.fn()) {
   const registry = createRoomLabelRegistry(vi.fn());
   const props = {
     room,
     bindings: [],
-    focusRequest: { code: null, requestId: 0 },
+    focusRequest: {
+      code: null,
+      requestId: 0,
+      scope: 'camera-test',
+      generation: 0,
+    },
     onFocusComplete: vi.fn(),
     onReady: vi.fn(),
     onFailure: vi.fn(),
+    onViewChange,
     orbitMode: 'free' as const,
     manualGesture: { current: { active: false, lastMotionAt: 0 } },
     active: false,
@@ -456,6 +544,68 @@ function harness() {
     );
   };
 }
+it('allows captured camera publication after a same-session pause but blocks the retired session after replacement A/B/A', () => {
+  size.width = 375;
+  size.height = 400;
+  const publish = vi.fn();
+  const ui = harness(publish);
+  let ready = true;
+  let retired = false;
+  const original = { current: () => ready && !retired };
+  const replacement = { current: () => true };
+  const wrap = (session = original) => (
+    <SceneSessionContext value={session}>{ui(0)}</SceneSessionContext>
+  );
+  const view = render(wrap());
+  const capturedEnd = mocks.orbit!.onEnd;
+  publish.mockClear();
+  ready = false;
+  act(() => capturedEnd());
+  expect(publish).not.toHaveBeenCalled();
+  ready = true;
+  act(() => capturedEnd());
+  expect(publish).toHaveBeenCalledOnce();
+  retired = true;
+  view.rerender(wrap(replacement));
+  view.rerender(wrap({ current: () => true }));
+  publish.mockClear();
+  act(() => capturedEnd());
+  expect(publish).not.toHaveBeenCalled();
+  view.unmount();
+});
+it('keeps a consumed Pan command from replaying over Reduced selection after a retained visible recheck', () => {
+  mocks.reduced = true;
+  size.width = 390;
+  size.height = 400;
+  const rig = restorationHarness();
+  const session = { current: () => true };
+  const ui = (ready: boolean, selected: boolean, pan: boolean) => (
+    <SceneSessionContext value={session}>
+      {rig.ui(ready, true, selected, 'generation', true, pan)}
+    </SceneSessionContext>
+  );
+  const view = render(ui(true, false, false));
+  act(() => {
+    mocks.frame!();
+    mocks.frame!();
+  });
+  const originalTarget = control.target.toArray();
+  view.rerender(ui(true, false, true));
+  expect(control.target.toArray()).not.toEqual(originalTarget);
+  view.rerender(ui(false, true, true));
+  expect(control.target.toArray()).toEqual([8, 80.5, -18]);
+  view.rerender(ui(true, true, true));
+  expect(control.target.toArray()).toEqual([8, 80.5, -18]);
+  expect(rig.complete).toHaveBeenLastCalledWith(
+    'ITC-S1A',
+    expect.objectContaining({ code: 'ITC-S1A', requestId: 1 }),
+  );
+  const selectedPosition = camera.position.toArray();
+  view.rerender(ui(false, true, true));
+  view.rerender(ui(true, true, true));
+  expect(control.target.toArray()).toEqual([8, 80.5, -18]);
+  expect(camera.position.toArray()).toEqual(selectedPosition);
+});
 function expectCanonicalFirstFrame() {
   const offset = camera.position.clone().sub(control.target);
   expect(Math.atan2(offset.x, offset.z)).toBeCloseTo(
@@ -581,5 +731,250 @@ it.each([NaN, Infinity, -1])(
     view.rerender(ui(2, 'zoom-in', true));
     expect(camera.zoom).toBeCloseTo(2 * 1.2);
     expect(control.update).toHaveBeenCalledTimes(count);
+  },
+);
+
+function spatialHarness() {
+  size.width = 800;
+  size.height = 500;
+  const registry = createRoomLabelRegistry(vi.fn());
+  const reveal = createSpatialRevealController();
+  const complete = vi.fn();
+  const cancel = vi.fn();
+  const props = {
+    room,
+    bindings: buildRoomBindings(room),
+    onFocusComplete: complete,
+    onFocusCancel: cancel,
+    onReady: vi.fn(),
+    onFailure: vi.fn(),
+    orbitMode: 'free' as const,
+    manualGesture: { current: { active: false, lastMotionAt: 0 } },
+    active: false,
+    selectionGesture: { current: { suppressSelection: false } },
+    onDraggingChange: vi.fn(),
+    onPassiveDrag: vi.fn(),
+    revealController: reveal,
+  };
+  const ui = (request: FocusRequest, commandId = 0) => (
+    <LabelLayoutProvider registry={registry}>
+      <CameraRig
+        {...props}
+        focusRequest={request}
+        command={{ id: commandId, kind: 'recenter' }}
+      />
+    </LabelLayoutProvider>
+  );
+  return { reveal, complete, cancel, ui };
+}
+const spatialRequest = (
+  code: string | null,
+  generation: number,
+): FocusRequest =>
+  Object.freeze({
+    code,
+    scope: 'actor|environment|closet',
+    generation,
+    requestId: 0,
+  });
+it.each(['camera', 'controls'] as const)(
+  'controls attachment and replacement %s preserve the reveal lifetime and reject an outgoing frame',
+  (replacement) => {
+    mocks.reduced = false;
+    let now = 0;
+    vi.spyOn(performance, 'now').mockImplementation(() => now);
+    const { ui, reveal, complete } = spatialHarness();
+    const dispose = vi.spyOn(reveal, 'dispose');
+    const view = render(ui(spatialRequest('ITC-D01', 1)));
+    expect(dispose).not.toHaveBeenCalled();
+    act(() => mocks.frame!());
+    act(() => mocks.frame!());
+    now = 200;
+    act(() => mocks.frame!());
+    const oldFrame = mocks.frame!;
+    expect(reveal.getSnapshot().phase).toBe('flying');
+    if (replacement === 'camera') {
+      camera = new OrthographicCamera(-1, 1, 1, -1, 0.1, 3000);
+      camera.position.set(200, 300, 300);
+      mocks.state = { ...(mocks.state as object), camera };
+    } else {
+      control = { ...control, target: new Vector3() };
+      mocks.control = control;
+    }
+    view.rerender(ui(spatialRequest('ITC-D07', 2)));
+    expect(dispose).not.toHaveBeenCalled();
+    expect(complete).not.toHaveBeenCalled();
+    act(() => mocks.frame!());
+    expect(complete).not.toHaveBeenCalled();
+    act(() => mocks.frame!());
+    expect(reveal.getSnapshot().phase).toBe('flying');
+    now = 1000;
+    act(() => oldFrame());
+    expect(reveal.getSnapshot().phase).toBe('flying');
+    expect(complete).not.toHaveBeenCalled();
+    act(() => mocks.frame!());
+    expect(complete).toHaveBeenCalledOnce();
+    expect(complete).toHaveBeenCalledWith(
+      'ITC-D07',
+      expect.objectContaining({ generation: 2 }),
+    );
+    expect(reveal.getSnapshot().phase).toBe('revealing');
+    expect(dispose).not.toHaveBeenCalled();
+    view.unmount();
+    expect(dispose).toHaveBeenCalledOnce();
+  },
+);
+it.each(['idle', 'flight'])(
+  'same-owner provider wrapper churn preserves the %s controller until actual unmount',
+  (phase) => {
+    let now = 0;
+    vi.spyOn(performance, 'now').mockImplementation(() => now);
+    const { ui, reveal, complete } = spatialHarness();
+    const dispose = vi.spyOn(reveal, 'dispose');
+    const request = spatialRequest(phase === 'flight' ? 'ITC-D01' : null, 1);
+    const wrap = () => (
+      <SceneSessionContext value={{ current: () => true }}>
+        {ui(request)}
+      </SceneSessionContext>
+    );
+    const view = render(wrap());
+    act(() => mocks.frame!());
+    act(() => mocks.frame!());
+    now = 200;
+    act(() => mocks.frame!());
+    expect(reveal.getSnapshot().phase).toBe(
+      phase === 'flight' ? 'flying' : 'idle',
+    );
+    view.rerender(wrap());
+    view.rerender(wrap());
+    expect(dispose).not.toHaveBeenCalled();
+    expect(reveal.getSnapshot().phase).toBe(
+      phase === 'flight' ? 'flying' : 'idle',
+    );
+    if (phase === 'flight') {
+      now = 751;
+      act(() => mocks.frame!());
+      expect(complete).toHaveBeenCalledWith(
+        'ITC-D01',
+        expect.objectContaining({ generation: 1 }),
+      );
+      expect(reveal.getSnapshot().phase).toBe('revealing');
+    }
+    view.unmount();
+    expect(dispose).toHaveBeenCalledOnce();
+  },
+);
+it.each([null, 'MISSING'])(
+  'an in-flight camera cannot snap or complete after replacement with %s',
+  (code) => {
+    let now = 0;
+    vi.spyOn(performance, 'now').mockImplementation(() => now);
+    const { ui, reveal, complete } = spatialHarness();
+    const view = render(ui(spatialRequest('ITC-D01', 1)));
+    act(() => mocks.frame!());
+    act(() => mocks.frame!());
+    now = 200;
+    act(() => mocks.frame!());
+    view.rerender(ui(spatialRequest(code, 2)));
+    const heldPosition = camera.position.clone(),
+      heldTarget = control.target.clone(),
+      heldZoom = camera.zoom;
+    now = 2000;
+    act(() => mocks.frame!());
+    expect(camera.position.toArray()).toEqual(heldPosition.toArray());
+    expect(control.target.toArray()).toEqual(heldTarget.toArray());
+    expect(camera.zoom).toBe(heldZoom);
+    expect(complete.mock.calls.some(([value]) => value === 'ITC-D01')).toBe(
+      false,
+    );
+    expect(reveal.getSnapshot().openCode).toBeNull();
+  },
+);
+it('a command during flight cancels queued opening past the old deadline', () => {
+  let now = 0;
+  vi.spyOn(performance, 'now').mockImplementation(() => now);
+  const { ui, reveal, complete, cancel } = spatialHarness(),
+    request = spatialRequest('ITC-D07', 1);
+  const view = render(ui(request));
+  act(() => mocks.frame!());
+  act(() => mocks.frame!());
+  now = 100;
+  act(() => mocks.frame!());
+  view.rerender(ui(request, 1));
+  const held = camera.position.toArray();
+  now = 2000;
+  act(() => mocks.frame!());
+  expect(camera.position.toArray()).toEqual(held);
+  expect(complete).not.toHaveBeenCalled();
+  expect(cancel).toHaveBeenCalledWith(
+    expect.objectContaining({ code: 'ITC-D07', generation: 1 }),
+  );
+  expect(reveal.getSnapshot()).toMatchObject({
+    phase: 'cancelled',
+    openCode: null,
+  });
+});
+it('camera completion carries the immutable current generation and only then reveals', () => {
+  let now = 0;
+  vi.spyOn(performance, 'now').mockImplementation(() => now);
+  const { ui, reveal, complete } = spatialHarness(),
+    request = spatialRequest('ITC-CLEAR', 4);
+  render(ui(request));
+  act(() => mocks.frame!());
+  act(() => mocks.frame!());
+  expect(reveal.getSnapshot()).toMatchObject({
+    phase: 'flying',
+    openCode: null,
+  });
+  now = 751;
+  act(() => mocks.frame!());
+  expect(complete).toHaveBeenCalledWith(
+    'ITC-CLEAR',
+    expect.objectContaining({ generation: 4, scope: request.scope }),
+  );
+  expect(reveal.getSnapshot()).toMatchObject({
+    phase: 'revealing',
+    openCode: 'ITC-CLEAR',
+  });
+  now = 1152;
+  act(() => mocks.frame!());
+  expect(reveal.getSnapshot().phase).toBe('settled');
+});
+it.each([false, true])(
+  'mid-flight Reduced motion completes only a valid token (cancelled=%s)',
+  (cancelled) => {
+    let now = 0;
+    vi.spyOn(performance, 'now').mockImplementation(() => now);
+    const { ui, reveal, complete } = spatialHarness(),
+      request = spatialRequest('ITC-D07', 1);
+    const view = render(ui(request));
+    act(() => mocks.frame!());
+    act(() => mocks.frame!());
+    now = 200;
+    act(() => mocks.frame!());
+    if (cancelled) view.rerender(ui(request, 1));
+    const held = control.target.toArray();
+    act(() => {
+      window.localStorage.setItem('it-inventory-reduce-motion', 'true');
+      window.dispatchEvent(new Event('it-inventory-motion-change'));
+    });
+    if (cancelled) {
+      expect(control.target.toArray()).toEqual(held);
+      expect(reveal.getSnapshot()).toMatchObject({
+        phase: 'cancelled',
+        openCode: null,
+      });
+      expect(complete).not.toHaveBeenCalled();
+    } else {
+      expect(control.target.toArray()).toEqual([76, 39.5, -98]);
+      expect(reveal.getSnapshot()).toMatchObject({
+        phase: 'settled',
+        openCode: 'ITC-D07',
+      });
+      expect(complete).toHaveBeenCalledWith(
+        'ITC-D07',
+        expect.objectContaining({ generation: 1 }),
+      );
+    }
   },
 );

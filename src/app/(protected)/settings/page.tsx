@@ -3,6 +3,7 @@ import { routeReadyProps } from '@/components/experience/route-ready.server';
 import Link from '@/components/experience/route-link';
 import { ProtectedPrivacyContent } from '@/components/auth/privacy-content';
 import { redirect } from 'next/navigation';
+import { RoomEffectsPreference } from '@/components/experience/room-effects-preference';
 import { MotionToggle } from '@/components/experience/motion-preference';
 import { BuildInfo } from '@/features/build-info/build-info';
 import { readBuildProvenance } from '@/features/build-info/read.server';
@@ -76,6 +77,7 @@ export default async function SettingsPage({
             </p>
             <MotionToggle />
             <ShortcutPreference />
+            <RoomEffectsPreference />
           </section>
           <ul className="grid gap-3 md:grid-cols-2">
             {sections.map((section) => (

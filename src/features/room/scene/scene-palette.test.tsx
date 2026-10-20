@@ -19,6 +19,7 @@ import {
 } from 'three';
 import { SelectionMaterial } from './selection-material';
 import { SceneDepth } from './scene-depth';
+import { SceneSessionContext } from './scene-budget-provider';
 import type { RoomDefinition } from '../schema';
 import {
   readScenePalette,
@@ -191,7 +192,7 @@ describe('shared room graphics palette', () => {
     expect(state.gridGeometry?.getAttribute('position').getY(0)).toBeCloseTo(
       0.015,
     );
-    expect(invalidate).not.toHaveBeenCalled();
+    expect(invalidate).toHaveBeenCalledOnce();
     expect(reads).toHaveBeenCalledTimes(1);
     const dispose = vi.spyOn(state.gridGeometry!, 'dispose');
     view.unmount();
@@ -248,4 +249,121 @@ describe('shared room graphics palette', () => {
       'Unsupported room palette token',
     );
   });
+  it('coalesces root theme commits, rereads tokens only on changes and keeps the same scene mount', async () => {
+    const reads = vi.spyOn(window, 'getComputedStyle');
+    const view = render(scene());
+    const initialReads = reads.mock.calls.length;
+    invalidate.mockClear();
+    await act(async () => {
+      canvas.style.setProperty('--accent', '#123456');
+      document.documentElement.setAttribute('data-theme', 'palette-test-light');
+      document.documentElement.classList.add('palette-test');
+    });
+    expect(state.material?.emissive.equals(new Color('#123456'))).toBe(true);
+    expect(reads.mock.calls.length).toBe(initialReads + 1);
+    const invalidations = invalidate.mock.calls.length;
+    await act(async () => {
+      document.documentElement.setAttribute(
+        'data-theme',
+        'palette-test-same-values',
+      );
+    });
+    expect(reads.mock.calls.length).toBe(initialReads + 2);
+    expect(invalidate.mock.calls.length).toBe(invalidations);
+    view.unmount();
+    const unmountedReads = reads.mock.calls.length;
+    await act(async () => {
+      document.documentElement.removeAttribute('data-theme');
+      document.documentElement.classList.remove('palette-test');
+    });
+    expect(reads.mock.calls.length).toBe(unmountedReads);
+  });
+  it('subscribes to System palette commits and removes both pending reads and the media listener on unmount', async () => {
+    const media = { addEventListener: vi.fn(), removeEventListener: vi.fn() };
+    vi.stubGlobal(
+      'matchMedia',
+      vi.fn(() => media),
+    );
+    const reads = vi.spyOn(window, 'getComputedStyle');
+    const view = render(scene());
+    const refresh = media.addEventListener.mock.calls[0][1] as () => void;
+    await act(async () => {
+      canvas.style.setProperty('--accent', '#654321');
+      refresh();
+      refresh();
+    });
+    expect(state.material?.emissive.equals(new Color('#654321'))).toBe(true);
+    expect(reads).toHaveBeenCalledTimes(2);
+    act(() => {
+      refresh();
+      view.unmount();
+    });
+    await act(async () => {
+      refresh();
+    });
+    expect(reads).toHaveBeenCalledTimes(2);
+    expect(media.removeEventListener).toHaveBeenCalledWith('change', refresh);
+    vi.unstubAllGlobals();
+  });
+  it('retains its supported palette if a future root theme commits unsupported room token syntax', async () => {
+    render(scene());
+    await act(async () => {
+      canvas.style.setProperty('--accent', 'color-mix(in srgb, red 50%, blue)');
+      document.documentElement.setAttribute(
+        'data-theme',
+        'unsupported-palette-test',
+      );
+    });
+    expect(state.material?.emissive.equals(new Color('#c040ff'))).toBe(true);
+    expect(canvas.dataset.paletteStatus).toBe('unsupported-token');
+    document.documentElement.removeAttribute('data-theme');
+  });
+});
+
+it('fences saved and queued palette notifications at original-session retirement while removing every listener', async () => {
+  let current = true;
+  const original = { current: () => current };
+  let notify!: MutationCallback;
+  const disconnect = vi.fn();
+  vi.stubGlobal(
+    'MutationObserver',
+    class {
+      constructor(callback: MutationCallback) {
+        notify = callback;
+      }
+      observe() {}
+      disconnect = disconnect;
+    },
+  );
+  const reads = vi.spyOn(window, 'getComputedStyle');
+  const tree = (session = original) => (
+    <SceneSessionContext value={session}>
+      <ScenePaletteProvider>{null}</ScenePaletteProvider>
+    </SceneSessionContext>
+  );
+  const view = render(tree());
+  expect(reads).toHaveBeenCalledOnce();
+  const saved = notify;
+  await act(async () => {
+    saved([], {} as MutationObserver);
+    current = false;
+    await Promise.resolve();
+  });
+  expect(reads).toHaveBeenCalledOnce();
+  invalidate.mockClear();
+  view.rerender(tree({ current: () => true }));
+  saved([], {} as MutationObserver);
+  await act(async () => {
+    await Promise.resolve();
+  });
+  expect(reads).toHaveBeenCalledOnce();
+  expect(invalidate).not.toHaveBeenCalled();
+  view.unmount();
+  expect(disconnect).toHaveBeenCalledOnce();
+  saved([], {} as MutationObserver);
+  await act(async () => {
+    await Promise.resolve();
+  });
+  expect(reads).toHaveBeenCalledOnce();
+  vi.unstubAllGlobals();
 });

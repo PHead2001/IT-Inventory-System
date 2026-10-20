@@ -220,7 +220,7 @@
 .scene {
   position: relative;
   display: grid;
-  gap: 11px;
+  gap: var(--room-scene-gap, 11px);
   container-type: inline-size;
 }
 .cameraToolbar {
@@ -427,6 +427,57 @@
     var(--room-stage-glow) 0,
     var(--room-stage-background) 65%
   );
+}
+
+.compact,
+.compactPreviewSlot {
+  --room-scene-gap: 11px;
+  --room-compact-toolbar-height: 44px;
+  --room-compact-canvas-height: 280px;
+  --room-compact-text-line: 19.5px;
+  --room-compact-status-height: calc(
+    5 * var(--room-compact-text-line) + 2 * var(--room-scene-gap)
+  );
+  --room-compact-height: calc(
+    var(--room-compact-toolbar-height) + var(--room-compact-canvas-height) + 2 *
+      var(--room-scene-gap) + var(--room-compact-status-height)
+  );
+}
+.compact .canvasFrame {
+  height: var(--room-compact-canvas-height);
+}
+.compactPreviewSlot {
+  min-height: calc(var(--room-compact-height) + 2px);
+}
+.sceneMessages {
+  display: contents;
+}
+.compact .sceneMessages {
+  display: grid;
+  align-content: start;
+  gap: var(--room-scene-gap);
+  min-height: var(--room-compact-status-height);
+  font-size: 13px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+.compactCountStatus {
+  min-height: calc(2 * var(--room-compact-text-line));
+}
+.compact .cameraToolbar {
+  min-height: var(--room-compact-toolbar-height);
+}
+.compactToolbarPlaceholder {
+  height: var(--room-compact-toolbar-height);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--muted) 18%, var(--surface));
+}
+.compactCanvasPlaceholder {
+  opacity: 0.65;
+}
+.compactLoadingBoundary {
+  border: 1px solid var(--room-border);
+  border-radius: 12px;
 }
 .sceneStatus {
   color: var(--foreground);

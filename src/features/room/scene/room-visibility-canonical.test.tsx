@@ -25,6 +25,15 @@ import {
   maxSurfaceContinuationFrames,
 } from './projected-visible-surface';
 
+vi.mock('@react-three/fiber', () => ({
+  useThree: () => ({
+    camera: new OrthographicCamera(),
+    scene: new Group(),
+    gl: { domElement: document.createElement('canvas') },
+  }),
+  useFrame: () => {},
+}));
+
 const rendered = vi.hoisted(() => ({ children: null as ReactNode }));
 afterEach(() => vi.restoreAllMocks());
 vi.mock('./safe-canvas', () => ({
@@ -38,6 +47,19 @@ vi.mock('./safe-canvas', () => ({
 // This preserves canonical node transforms, physical furniture decorations,
 // envelope/openings, material opacity, owner ancestry and invisible hitboxes.
 // Lighting, lines, DOM labels and pass-through floor artwork do not occlude.
+function geometryJSX(
+  type: (props: Record<string, unknown>) => ReactNode,
+  props: Record<string, unknown>,
+) {
+  let children: ReactNode = null;
+  function Probe() {
+    children = type(props);
+    return null;
+  }
+  const view = render(<Probe />);
+  view.unmount();
+  return children;
+}
 function physicalScene() {
   const scene = new Group();
   const visit = (children: ReactNode, parent: Object3D) =>
@@ -49,7 +71,10 @@ function physicalScene() {
         ['Envelope', 'NodeVisual', 'Solid', 'OpeningVisual'].includes(type.name)
       ) {
         visit(
-          (type as (props: Record<string, unknown>) => ReactNode)(props),
+          geometryJSX(
+            type as (props: Record<string, unknown>) => ReactNode,
+            props,
+          ),
           parent,
         );
         return;

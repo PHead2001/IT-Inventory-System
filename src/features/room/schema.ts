@@ -10,7 +10,7 @@ const limits = z
   .tuple([finite, finite])
   .refine(([min, max]) => min < max, 'Limits must increase');
 
-export const roomNodeSchema = z.strictObject({
+const roomNodeFields = z.strictObject({
   id: z.string().regex(/^[a-z][a-z0-9-]*$/),
   kind: z.enum(['group', 'box']),
   position: vector,
@@ -26,6 +26,15 @@ export const roomNodeSchema = z.strictObject({
       color: z.string().regex(/^#[0-9a-fA-F]{6}$/),
       opacity: finite.min(0).max(1),
       edges: z.boolean(),
+      reveal: z
+        .strictObject({
+          offset: z.tuple([
+            finite.min(-24).max(24),
+            finite.min(-24).max(24),
+            finite.min(-24).max(24),
+          ]),
+        })
+        .optional(),
     })
     .optional(),
   interaction: z
@@ -38,11 +47,22 @@ export const roomNodeSchema = z.strictObject({
       hitBox: z.strictObject({ center: vector, size }).optional(),
     })
     .optional(),
-  get children(): z.ZodOptional<z.ZodArray<typeof roomNodeSchema>> {
-    return z.array(roomNodeSchema).optional();
-  },
 });
-export type RoomNode = z.infer<typeof roomNodeSchema>;
+export type RoomNode = z.infer<typeof roomNodeFields> & {
+  children?: RoomNode[];
+};
+export const roomNodeSchema: z.ZodType<RoomNode> = roomNodeFields
+  .extend({
+    children: z.lazy(() => z.array(roomNodeSchema)).optional(),
+  })
+  .superRefine((node, ctx) => {
+    if (node.kind !== 'box' && node.visual?.reveal !== undefined)
+      ctx.addIssue({
+        code: 'custom',
+        path: ['visual', 'reveal'],
+        message: 'Only boxes support visual reveal metadata',
+      });
+  });
 
 export const roomSchema = z
   .strictObject({

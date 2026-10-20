@@ -22,16 +22,18 @@ export function occupiedLocation(value: LocationOccupancy | undefined) {
 }
 
 /** Only display formatting crosses BigInt; counts never become JS numbers. */
-export function occupancyText(value: LocationOccupancy) {
+export function occupancyText(value: LocationOccupancy, includeZero = false) {
   const format = (count: string, word: string) =>
     `${BigInt(count).toLocaleString('en-US')} ${word}${count === '1' ? '' : 's'}`;
   return [
-    ...(value.quantity_product_count !== '0'
+    ...(includeZero || value.quantity_product_count !== '0'
       ? [
           format(value.quantity_product_count, 'product'),
           format(value.quantity_unit_count, 'unit'),
         ]
       : []),
-    ...(value.asset_count !== '0' ? [format(value.asset_count, 'asset')] : []),
+    ...(includeZero || value.asset_count !== '0'
+      ? [format(value.asset_count, 'asset')]
+      : []),
   ].join(' / ');
 }

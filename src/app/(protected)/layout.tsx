@@ -14,6 +14,7 @@ import { AssignmentScopeGuard } from '@/features/scan/assignment-scope-guard';
 import { ProtectedPrivacyBoundary } from '@/components/auth/auth-privacy';
 import { ProtectedPrivacyContent } from '@/components/auth/privacy-content';
 import { readLogoutGeneration } from '@/lib/auth/privacy-barrier.server';
+import { RoomSceneBudgetProvider } from '@/features/room/scene/scene-budget-provider';
 import { RoomCameraSnapshotProvider } from '@/features/room/scene/camera-snapshot-provider';
 import {
   CommandProvider,
@@ -47,81 +48,86 @@ export default async function ApplicationLayout({
           actorId={member.user_id}
           backend={new URL(process.env.NEXT_PUBLIC_SUPABASE_URL ?? '').origin}
         >
-          <OperationalTimeProvider>
-            <AssignmentScopeGuard
-              actorId={member.user_id}
-              backend={process.env.NEXT_PUBLIC_SUPABASE_URL ?? ''}
-            />
-            <MotionPreference>
-              <RouteMotionProvider actorId={member.user_id}>
-                <CommandProvider
-                  actorId={member.user_id}
-                  backend={
-                    new URL(process.env.NEXT_PUBLIC_SUPABASE_URL ?? '').origin
-                  }
-                  staff={member.role === 'staff'}
-                >
-                  <div className="experience-app">
-                    <a href="#main-content" className="experience-skip-link">
-                      Skip to content
-                    </a>
-                    <header className="experience-header">
-                      <div className="experience-header-inner max-sm:flex-wrap">
-                        <ProtectedPrivacyContent>
-                          <Link href="/dashboard" className="experience-brand">
-                            <span className="experience-brand-mark">
-                              <Boxes
-                                size={19}
-                                strokeWidth={1.8}
-                                aria-hidden="true"
-                              />
-                            </span>
-                            <span>
-                              <strong>IT Inventory</strong>
-                              <small>Spatial workspace</small>
-                            </span>
-                          </Link>
-                        </ProtectedPrivacyContent>
-                        <div className="experience-account">
+          <RoomSceneBudgetProvider>
+            <OperationalTimeProvider>
+              <AssignmentScopeGuard
+                actorId={member.user_id}
+                backend={process.env.NEXT_PUBLIC_SUPABASE_URL ?? ''}
+              />
+              <MotionPreference>
+                <RouteMotionProvider actorId={member.user_id}>
+                  <CommandProvider
+                    actorId={member.user_id}
+                    backend={
+                      new URL(process.env.NEXT_PUBLIC_SUPABASE_URL ?? '').origin
+                    }
+                    staff={member.role === 'staff'}
+                  >
+                    <div className="experience-app">
+                      <a href="#main-content" className="experience-skip-link">
+                        Skip to content
+                      </a>
+                      <header className="experience-header">
+                        <div className="experience-header-inner max-sm:flex-wrap">
                           <ProtectedPrivacyContent>
-                            <CommandButtons />
-                            <AccountIdentity
-                              name={member.display_name}
-                              role={member.role}
-                            />
+                            <Link
+                              href="/dashboard"
+                              className="experience-brand"
+                            >
+                              <span className="experience-brand-mark">
+                                <Boxes
+                                  size={19}
+                                  strokeWidth={1.8}
+                                  aria-hidden="true"
+                                />
+                              </span>
+                              <span>
+                                <strong>IT Inventory</strong>
+                                <small>Spatial workspace</small>
+                              </span>
+                            </Link>
                           </ProtectedPrivacyContent>
-                          <QueueLogoutForm />
+                          <div className="experience-account">
+                            <ProtectedPrivacyContent>
+                              <CommandButtons />
+                              <AccountIdentity
+                                name={member.display_name}
+                                role={member.role}
+                              />
+                            </ProtectedPrivacyContent>
+                            <QueueLogoutForm />
+                          </div>
                         </div>
+                      </header>
+                      <div className="experience-workspace">
+                        <aside className="experience-sidebar">
+                          <ProtectedPrivacyContent>
+                            <Navigation />
+                          </ProtectedPrivacyContent>
+                        </aside>
+                        <main
+                          id="main-content"
+                          className="experience-main"
+                          tabIndex={-1}
+                        >
+                          <ProtectedRouteArrival>
+                            {children}
+                          </ProtectedRouteArrival>
+                        </main>
                       </div>
-                    </header>
-                    <div className="experience-workspace">
-                      <aside className="experience-sidebar">
-                        <ProtectedPrivacyContent>
-                          <Navigation />
-                        </ProtectedPrivacyContent>
-                      </aside>
-                      <main
-                        id="main-content"
-                        className="experience-main"
-                        tabIndex={-1}
-                      >
-                        <ProtectedRouteArrival>
-                          {children}
-                        </ProtectedRouteArrival>
-                      </main>
+                      <ProtectedPrivacyContent>
+                        {speedInsightsEnabled({
+                          VERCEL_ENV: process.env.VERCEL_ENV,
+                          SPEED_INSIGHTS_ENABLED:
+                            process.env.SPEED_INSIGHTS_ENABLED,
+                        }) && <PrivateSpeedInsights />}
+                      </ProtectedPrivacyContent>
                     </div>
-                    <ProtectedPrivacyContent>
-                      {speedInsightsEnabled({
-                        VERCEL_ENV: process.env.VERCEL_ENV,
-                        SPEED_INSIGHTS_ENABLED:
-                          process.env.SPEED_INSIGHTS_ENABLED,
-                      }) && <PrivateSpeedInsights />}
-                    </ProtectedPrivacyContent>
-                  </div>
-                </CommandProvider>
-              </RouteMotionProvider>
-            </MotionPreference>
-          </OperationalTimeProvider>
+                  </CommandProvider>
+                </RouteMotionProvider>
+              </MotionPreference>
+            </OperationalTimeProvider>
+          </RoomSceneBudgetProvider>
         </RoomCameraSnapshotProvider>
       </ProtectedPrivacyBoundary>
     </DocumentAdmission>
