@@ -2,7 +2,7 @@
 import { expect, it } from 'vitest';
 import { routePrimaryFixture } from '../helpers/route-primary-fixture';
 
-it.each(['primary', 'paired'] as const)(
+it.each(['primary', 'paired', 'history', 'location'] as const)(
   'bundles the actual %s region topology and installed Next React without a fixture body boundary',
   async (kind) => {
     const fixture = await routePrimaryFixture(kind);

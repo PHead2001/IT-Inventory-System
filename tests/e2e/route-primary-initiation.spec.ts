@@ -2,7 +2,10 @@ import { expect, test, type Page } from '@playwright/test';
 import { readFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { freemem } from 'node:os';
-import { routePrimaryFixture } from '../helpers/route-primary-fixture';
+import {
+  routePrimaryFixture,
+  type RoutePrimaryFixtureKind,
+} from '../helpers/route-primary-fixture';
 
 declare global {
   interface Window {
@@ -65,7 +68,7 @@ test.afterEach(async ({}, info) => {
   console.log(JSON.stringify({ localNativeResource: resource }));
 });
 
-async function mount(page: Page, kind: 'primary' | 'paired', width: number) {
+async function mount(page: Page, kind: RoutePrimaryFixtureKind, width: number) {
   const css = await readFile(resolve('src/app/globals.css'), 'utf8');
   const start = css.indexOf('@keyframes route-content-in');
   const end = css.indexOf("html[data-motion='reduced'] *,", start);
@@ -81,10 +84,11 @@ async function mount(page: Page, kind: 'primary' | 'paired', width: number) {
   await page.setContent(
     `<style>:root{--motion-route:${token('--motion-route')};--ease-workspace:${token('--ease-workspace')}}html,body{margin:0}${css.slice(start, end)}</style><div id="root"></div>`,
   );
-  await page.addScriptTag({
-    content: (await routePrimaryFixture(kind)).script,
-  });
-  await expect(page.getByRole('heading', { name: '/inventory' })).toBeVisible();
+  const fixture = await routePrimaryFixture(kind);
+  await page.addScriptTag({ content: fixture.script });
+  await expect(
+    page.getByRole('heading', { name: fixture.sourceRoute }),
+  ).toBeVisible();
 }
 
 for (const width of [1280, 390]) {
@@ -124,42 +128,44 @@ for (const width of [1280, 390]) {
   });
 }
 
-test('inactive enclosing primary boundaries leave paired title and auxiliary header/body capture intact', async ({
-  page,
-}) => {
-  await mount(page, 'paired', 1280);
-  await page.evaluate(() => window.routePrimary.begin());
-  await expect
-    .poll(() => page.evaluate(() => window.routePrimary.proof.ready))
-    .toBe(true);
-  const proof = await page.evaluate(() => window.routePrimary.proof);
-  expect(proof.starts).toBe(1);
-  expect(proof.errors).toEqual([]);
-  for (const name of [
-    'primary-fixture-title',
-    'primary-fixture-title-content',
-    'primary-fixture-title-content-header',
-  ]) {
-    expect(proof.names).toContain(`::view-transition-old(${name})`);
-    expect(proof.names).toContain(`::view-transition-new(${name})`);
-  }
-  expect(proof.callbacks).toEqual([]);
-  expect(proof.auxiliaryNames).toEqual(
-    expect.arrayContaining([
+for (const kind of ['paired', 'history', 'location'] as const) {
+  test(`${kind} source keeps its paired title and auxiliary header/body without activating enclosing primary boundaries`, async ({
+    page,
+  }) => {
+    await mount(page, kind, 1280);
+    await page.evaluate(() => window.routePrimary.begin());
+    await expect
+      .poll(() => page.evaluate(() => window.routePrimary.proof.ready))
+      .toBe(true);
+    const proof = await page.evaluate(() => window.routePrimary.proof);
+    expect(proof.starts).toBe(1);
+    expect(proof.errors).toEqual([]);
+    for (const name of [
+      'primary-fixture-title',
       'primary-fixture-title-content',
       'primary-fixture-title-content-header',
-    ]),
-  );
-  expect(
-    proof.names.some((name) => name.includes('route-primary-fixture')),
-  ).toBe(false);
-  await expect
-    .poll(() => page.evaluate(() => window.routePrimary.proof.finished))
-    .toBe(true);
-  expect(
-    await page.evaluate(() => window.routePrimary.proof.releaseCount),
-  ).toBe(1);
-});
+    ]) {
+      expect(proof.names).toContain(`::view-transition-old(${name})`);
+      expect(proof.names).toContain(`::view-transition-new(${name})`);
+    }
+    expect(proof.callbacks).toEqual([]);
+    expect(proof.auxiliaryNames).toEqual(
+      expect.arrayContaining([
+        'primary-fixture-title-content',
+        'primary-fixture-title-content-header',
+      ]),
+    );
+    expect(
+      proof.names.some((name) => name.includes('route-primary-fixture')),
+    ).toBe(false);
+    await expect
+      .poll(() => page.evaluate(() => window.routePrimary.proof.finished))
+      .toBe(true);
+    expect(
+      await page.evaluate(() => window.routePrimary.proof.releaseCount),
+    ).toBe(1);
+  });
+}
 
 for (const policy of ['reduced', 'private'] as const) {
   test(`${policy} routed replacement remains instant without initiating native capture`, async ({
