@@ -980,12 +980,13 @@ it.each(['privacy', 'reduced', 'supersession'] as const)(
             actorId="staff"
             routeKey="/inventory"
             contentIdentity="ready-source"
+            pairedInventory
             conventionalPrimary
             capture="regions"
           >
             <InventoryCaptureRegion region="header">
               <header>
-                <RouteLink href="/history">Auxiliary history</RouteLink>
+                <List />
                 <RouteLink href="/labels">Auxiliary supersession</RouteLink>
                 <input
                   aria-label="Retained auxiliary draft"
@@ -1004,10 +1005,10 @@ it.each(['privacy', 'reduced', 'supersession'] as const)(
       name: 'Retained auxiliary draft',
     });
     const header = draft.parentElement!;
-    fireEvent.click(screen.getByRole('link', { name: 'Auxiliary history' }));
+    fireEvent.click(screen.getByRole('link', { name: 'Cable row 2' }));
     expect(document.startViewTransition()).toBe(native.handle);
     expect(header.style.viewTransitionName).toMatch(
-      /^route-primary-.*-header$/,
+      /^inventory-title-.*-content-header$/,
     );
     if (withdrawal === 'privacy') act(() => revokePrivatePresentation());
     else if (withdrawal === 'reduced')
@@ -1087,7 +1088,7 @@ afterEach(() => {
   localStorage.removeItem('it-inventory-reduce-motion');
 });
 
-it('Reduced application Back preserves command tickets and observer isolation while replaying its consumed fallback anchor', () => {
+it('Reduced application Back preserves command tickets and observer isolation while replaying its consumed fallback anchor', async () => {
   const scope = '/inventory?q=cable&type=quantity';
   const returned = scope + '#inventory-row-2';
   const destination =
@@ -1197,6 +1198,9 @@ it('Reduced application Back preserves command tickets and observer isolation wh
     expect(document.activeElement).toBe(document.body);
     phase = 'list';
     page.rerender(fixture());
+    await act(async () => {
+      await Promise.resolve();
+    });
     expect(scroll).toHaveBeenCalledExactlyOnceWith({
       behavior: 'instant',
       block: 'start',
@@ -1216,8 +1220,8 @@ it('Reduced application Back preserves command tickets and observer isolation wh
   }
 });
 
-it.each(['reduced', 'full'] as const)(
-  '%s application Back replays its row anchor after a consumed fallback hash without changing BODY focus',
+it.each(['reduced', 'unsupported', 'full'] as const)(
+  '%s application Back restores after the router ancestor scroll commit without changing BODY focus',
   async (mode) => {
     const scope = '/inventory?q=cable&type=quantity';
     const returned = scope + '#inventory-row-2';
@@ -1226,58 +1230,74 @@ it.each(['reduced', 'full'] as const)(
     const previous = location.href;
     const originalScroll = HTMLElement.prototype.scrollIntoView;
     const native = mode === 'full' ? auxiliaryNativeFixture() : null;
-    const scroll = vi.fn();
+    let scrollY = 0;
+    const scroll = vi.fn(() => {
+      scrollY = 234;
+    });
     HTMLElement.prototype.scrollIntoView = scroll;
     const geometry = vi
       .spyOn(HTMLElement.prototype, 'getClientRects')
       .mockReturnValue([{ width: 300, height: 200 }] as unknown as DOMRectList);
     if (mode === 'reduced')
       localStorage.setItem('it-inventory-reduce-motion', 'true');
+    else if (mode === 'unsupported')
+      Reflect.deleteProperty(document, 'activeViewTransition');
     let phase: 'list' | 'detail' | 'fallback' = 'list';
+    let returning = false;
+    function RouterScrollCommit({ children }: { children: ReactNode }) {
+      // Next's layout-router scroll handler is an ancestor layout effect (or
+      // componentDidUpdate). React runs it after the primary's child effects.
+      useLayoutEffect(() => {
+        if (returning && phase === 'list') scrollY = 0;
+      });
+      return children;
+    }
     const fixture = () =>
       view(
-        phase === 'fallback' ? (
-          <p role="status">Loading results</p>
-        ) : (
-          <RouteReady
-            actorId="staff"
-            routeKey={
-              phase === 'list'
-                ? scope
-                : routeKey(
-                    detailPath,
-                    new URL(destination, location.origin).searchParams,
-                  )
-            }
-            contentIdentity={phase}
-          >
-            {phase === 'list' ? (
-              <ul>
-                <li id="inventory-row-2">
-                  <InventoryRecordLink
-                    record={record}
-                    holding={initiatingHolding}
-                    returnTo={returned}
-                    href={destination}
-                  >
-                    Original result
-                  </InventoryRecordLink>
-                </li>
-              </ul>
-            ) : (
-              <InventoryBackLink record={record} href={returned}>
-                Back to results
-              </InventoryBackLink>
-            )}
-          </RouteReady>
-        ),
+        <RouterScrollCommit>
+          {phase === 'fallback' ? (
+            <p role="status">Loading results</p>
+          ) : (
+            <RouteReady
+              actorId="staff"
+              routeKey={
+                phase === 'list'
+                  ? scope
+                  : routeKey(
+                      detailPath,
+                      new URL(destination, location.origin).searchParams,
+                    )
+              }
+              contentIdentity={phase}
+            >
+              {phase === 'list' ? (
+                <ul>
+                  <li id="inventory-row-2">
+                    <InventoryRecordLink
+                      record={record}
+                      holding={initiatingHolding}
+                      returnTo={returned}
+                      href={destination}
+                    >
+                      Original result
+                    </InventoryRecordLink>
+                  </li>
+                </ul>
+              ) : (
+                <InventoryBackLink record={record} href={returned}>
+                  Back to results
+                </InventoryBackLink>
+              )}
+            </RouteReady>
+          )}
+        </RouterScrollCommit>,
       );
     try {
       history.replaceState(null, '', scope);
       runtime.query = 'q=cable&type=quantity';
       const page = render(fixture());
       expect(
-        screen.getByText(mode === 'reduced' ? 'instant' : 'enabled'),
+        screen.getByText(mode === 'full' ? 'enabled' : 'instant'),
       ).toBeVisible();
       fireEvent.click(screen.getByRole('link', { name: 'Original result' }));
       history.replaceState(null, '', destination);
@@ -1297,6 +1317,7 @@ it.each(['reduced', 'full'] as const)(
       page.rerender(fixture());
       expect(scroll).not.toHaveBeenCalled();
       expect(document.activeElement).toBe(document.body);
+      returning = true;
       phase = 'list';
       page.rerender(fixture());
       if (native) {
@@ -1309,6 +1330,10 @@ it.each(['reduced', 'full'] as const)(
           native.finished();
         });
       }
+      await act(async () => {
+        await Promise.resolve();
+      });
+      expect(scrollY).toBe(234);
       expect(scroll).toHaveBeenCalledExactlyOnceWith({
         behavior: 'instant',
         block: 'start',
@@ -1318,6 +1343,7 @@ it.each(['reduced', 'full'] as const)(
         document.getElementById('inventory-row-2'),
       );
       expect(document.activeElement).toBe(document.body);
+      returning = false;
       page.rerender(fixture());
       expect(scroll).toHaveBeenCalledTimes(1);
     } finally {
@@ -3878,86 +3904,97 @@ it('shares the measured record heading while disclosure keeps one stable accessi
   }
 });
 
-for (const order of ['inner-first', 'outer-first'] as const) {
-  it(`unmanaged React fallback captures the same exact generic primary arrival across ${order} without a late outer stage`, async () => {
-    vi.spyOn(HTMLElement.prototype, 'getClientRects').mockReturnValue([
-      { width: 30, height: 20 },
-    ] as unknown as DOMRectList);
-    history.replaceState(null, '', '/inventory');
-    let primaryKey = '/inventory';
-    let motion!: ReturnType<typeof useRouteMotion>;
-    let owner:
-      | import('./paired-route-loading-state').PairedLoadingOwner
-      | null
-      | undefined;
-    function ObservePrimary() {
-      const next = useRouteMotion();
-      const loading = useContext(PairedRouteLoadingContext);
-      useLayoutEffect(() => {
-        motion = next;
-        owner = loading?.store.snapshot();
-      });
-      return null;
-    }
-    const fixture = () =>
-      view(
-        <>
-          <ObservePrimary />
-          <PageArrival pathname={runtime.pathname}>
-            <RouteReady
-              actorId="staff"
-              routeKey={primaryKey}
-              contentIdentity={primaryKey}
-              conventionalPrimary
-            >
-              <h1>{primaryKey}</h1>
-              <input aria-label="Generic draft" defaultValue="retained" />
-              <RouteLink href="/history">Open ordinary History</RouteLink>
-            </RouteReady>
-          </PageArrival>
-        </>,
-        'staff',
-        'route-fixture',
-        true,
+for (const managed of [false, true]) {
+  for (const order of ['inner-first', 'outer-first'] as const) {
+    it(`${managed ? 'auxiliary-enabled primary' : 'unmanaged React fallback'} captures the same exact generic primary arrival across ${order} without a late outer stage`, async () => {
+      vi.spyOn(HTMLElement.prototype, 'getClientRects').mockReturnValue([
+        { width: 30, height: 20 },
+      ] as unknown as DOMRectList);
+      history.replaceState(null, '', '/inventory');
+      let primaryKey = '/inventory';
+      let motion!: ReturnType<typeof useRouteMotion>;
+      let auxiliary!: import('react').ContextType<
+        typeof AuxiliaryRouteCaptureContext
+      >;
+      let owner:
+        | import('./paired-route-loading-state').PairedLoadingOwner
+        | null
+        | undefined;
+      function ObservePrimary() {
+        const next = useRouteMotion();
+        const loading = useContext(PairedRouteLoadingContext);
+        const registry = useContext(AuxiliaryRouteCaptureContext);
+        useLayoutEffect(() => {
+          motion = next;
+          auxiliary = registry;
+          owner = loading?.store.snapshot();
+        });
+        return null;
+      }
+      const fixture = () =>
+        view(
+          <>
+            <ObservePrimary />
+            <PageArrival pathname={runtime.pathname}>
+              <RouteReady
+                actorId="staff"
+                routeKey={primaryKey}
+                contentIdentity={primaryKey}
+                conventionalPrimary
+              >
+                <h1>{primaryKey}</h1>
+                <input aria-label="Generic draft" defaultValue="retained" />
+                <RouteLink href="/history">Open ordinary History</RouteLink>
+              </RouteReady>
+            </PageArrival>
+          </>,
+          'staff',
+          'route-fixture',
+          !managed,
+        );
+      const page = render(fixture());
+      const draft = screen.getByRole('textbox');
+      const armAuxiliary = auxiliary ? vi.spyOn(auxiliary, 'arm') : undefined;
+      fireEvent.click(
+        screen.getByRole('link', { name: 'Open ordinary History' }),
       );
-    const page = render(fixture());
-    const draft = screen.getByRole('textbox');
-    fireEvent.click(
-      screen.getByRole('link', { name: 'Open ordinary History' }),
-    );
-    const approval = motion.arrival!;
-    expect(approval.presentation).toBe('primary');
-    expect(owner).toMatchObject({ kind: 'primary', arrival: approval });
-    expect(motion.arrivalEnabled).toBe(false);
-    expect(draft).toHaveValue('retained');
-    const source = runtime.boundaries.findLast(
-      (b) => b.name === approval.name,
-    )!;
-    expect(source.share).toBe('route-content');
-    history.replaceState(null, '', '/history');
-    if (order === 'outer-first') runtime.pathname = '/history';
-    else primaryKey = '/history';
-    page.rerender(fixture());
-    expect(motion.arrival).toBe(approval);
-    expect(
-      runtime.boundaries.filter((b) => b.update === 'route-content'),
-    ).toHaveLength(0);
-    primaryKey = '/history';
-    runtime.pathname = '/history';
-    page.rerender(fixture());
-    const dest = runtime.boundaries.findLast((b) => b.name === approval.name)!;
-    expect(dest.share).toBe('route-content');
-    await act(async () => {
-      source.onShare!({ name: approval.name });
-      dest.onShare!({ name: approval.name });
+      const approval = motion.arrival!;
+      expect(approval.presentation).toBe('primary');
+      if (managed) expect(armAuxiliary).not.toHaveBeenCalled();
+      expect(owner).toMatchObject({ kind: 'primary', arrival: approval });
+      expect(motion.arrivalEnabled).toBe(false);
+      expect(draft).toHaveValue('retained');
+      const source = runtime.boundaries.findLast(
+        (b) => b.name === approval.name,
+      )!;
+      expect(source.share).toBe('route-content');
+      history.replaceState(null, '', '/history');
+      if (order === 'outer-first') runtime.pathname = '/history';
+      else primaryKey = '/history';
+      page.rerender(fixture());
+      expect(motion.arrival).toBe(approval);
+      expect(
+        runtime.boundaries.filter((b) => b.update === 'route-content'),
+      ).toHaveLength(0);
+      primaryKey = '/history';
+      runtime.pathname = '/history';
+      page.rerender(fixture());
+      const dest = runtime.boundaries.findLast(
+        (b) => b.name === approval.name,
+      )!;
+      expect(dest.share).toBe('route-content');
+      await act(async () => {
+        source.onShare!({ name: approval.name });
+        dest.onShare!({ name: approval.name });
+      });
+      expect(motion.arrival).toBeNull();
+      page.rerender(fixture());
+      expect(
+        runtime.boundaries.filter((b) => b.update === 'route-content'),
+      ).toHaveLength(0);
+      vi.restoreAllMocks();
     });
-    expect(motion.arrival).toBeNull();
-    page.rerender(fixture());
-    expect(
-      runtime.boundaries.filter((b) => b.update === 'route-content'),
-    ).toHaveLength(0);
-    vi.restoreAllMocks();
-  });
+  }
 }
 
 it.each(['inner-first', 'outer-first'] as const)(

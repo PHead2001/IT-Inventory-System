@@ -128,7 +128,11 @@ export async function acceptanceFixtures() {
     sites.add(row.data!.id);
     return { id: row.data!.id as string, code };
   }
-  async function ownedLocation(name: string, parentCode = 'ITO') {
+  async function ownedLocation(
+    name: string,
+    parentCode = 'ITO',
+    kind: 'storage_area' | 'storage_group' = 'storage_area',
+  ) {
     const code = `A3-AC-LOC-${suffix}-${locations.size}`;
     const id = randomUUID();
     locations.add(id);
@@ -139,8 +143,8 @@ export async function acceptanceFixtures() {
         code,
         name,
         parent_id: await location(parentCode),
-        kind: 'storage_area',
-        can_hold_inventory: true,
+        kind,
+        can_hold_inventory: kind !== 'storage_group',
       })
       .select('id,code,name')
       .single();

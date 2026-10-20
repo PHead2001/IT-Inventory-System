@@ -1,6 +1,11 @@
 import { expect, test, type Page, type Request } from '@playwright/test';
 import { withHeldQuantityPrimary } from './route-primary-delay';
-import { armNativeReady, type NativeReadyEvidence } from './native-ready';
+import {
+  armNativeReady,
+  cancelNativeReady,
+  nativeReadyDiagnostic,
+  type NativeReadyEvidence,
+} from './native-ready';
 import { withFailureGeometry } from './failure-geometry';
 import {
   routePresentationTiming,
@@ -131,7 +136,14 @@ const denialWindows = new WeakMap<
 >();
 
 test.afterEach(async ({ page }, info) => {
+  cancelNativeReady(page);
   if (info.status === info.expectedStatus) return;
+  // Emit the fixed stage before any browser round trip: a stuck/closed page or
+  // unavailable artifact upload must not erase the waiter's failure boundary.
+  console.log(
+    'Native-ready failure stage: ' +
+      JSON.stringify(nativeReadyDiagnostic(page)),
+  );
   const diagnostic = await page
     .evaluate(() => {
       const proof = (window as Window & { routeMotionProof?: Proof })
@@ -163,6 +175,7 @@ test.afterEach(async ({ page }, info) => {
   console.log(
     'Native route failure window: ' +
       JSON.stringify({
+        nativeReady: nativeReadyDiagnostic(page),
         browser: diagnostic,
         denialTransport: denialWindows.get(page),
       }),

@@ -61,8 +61,7 @@ function AuxiliaryCaptureRegion({
             const current = latest.current;
             return (
               current.capability?.enabled === true &&
-              (current.capability.pairedInventory ||
-                current.capability.conventionalPrimary) &&
+              current.capability.pairedInventory &&
               current.identity?.rawRouteKey === owned!.routeKey &&
               current.source === owned!.source &&
               current.motion.validNow() &&
@@ -110,11 +109,21 @@ export function InventoryCaptureRegion({
   const capability = useContext(InventoryCaptureRegionsContext);
   const auxiliary = useContext(AuxiliaryRouteCaptureContext);
   if (!capability) return children;
+  // Keep React's primary initiator mounted even when title pairs use authored
+  // auxiliary refs. The two owners never name the same region in one capture.
   if (auxiliary)
     return (
-      <AuxiliaryCaptureRegion region={region}>
-        {children}
-      </AuxiliaryCaptureRegion>
+      <PairedInventoryContent
+        enabled={capability.enabled}
+        conventionalPrimary={capability.conventionalPrimary}
+        pairedInventory={false}
+        region={region}
+        wrap={false}
+      >
+        <AuxiliaryCaptureRegion region={region}>
+          {children}
+        </AuxiliaryCaptureRegion>
+      </PairedInventoryContent>
     );
   return (
     <PairedInventoryContent

@@ -13,6 +13,7 @@ import {
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import {
   RouteMotionProvider,
+  useRouteMotion,
   useRouteCommandBoundary,
   type RouteCommandTicket,
 } from './route-motion';
@@ -122,6 +123,7 @@ function Fixture({
   publication,
   conventionalPrimary = false,
   pairedInventory = false,
+  children,
 }: {
   ready?: boolean;
   generation?: string;
@@ -132,6 +134,7 @@ function Fixture({
   publication?: { ticket: RouteCommandTicket; onLayout: () => void };
   conventionalPrimary?: boolean;
   pairedInventory?: boolean;
+  children?: React.ReactNode;
 }) {
   return (
     <PrivacyReadinessContext
@@ -145,6 +148,7 @@ function Fixture({
     >
       <RouteMotionProvider actorId={actorId}>
         <Probe backend={backend} />
+        {children}
         {publication && <PublicationProbe {...publication} />}
         <div hidden={hidden}>
           <RouteReady
@@ -694,6 +698,7 @@ function NativeTaskPrimary({
   primaryKey = 'primary',
   work,
   conventionalPrimary = false,
+  pairedInventory = false,
 }: {
   kind: 'asset' | 'quantity';
   hidden?: boolean;
@@ -706,6 +711,7 @@ function NativeTaskPrimary({
   primaryKey?: string;
   work?: Promise<void>;
   conventionalPrimary?: boolean;
+  pairedInventory?: boolean;
 }) {
   const NavigationBoundary = work ? StableNavigation : Fragment;
   const path =
@@ -732,6 +738,7 @@ function NativeTaskPrimary({
                 contentIdentity={content}
                 ready={primaryReady}
                 conventionalPrimary={conventionalPrimary}
+                pairedInventory={pairedInventory}
                 key={primaryKey}
               >
                 <main>
@@ -778,7 +785,13 @@ it.each(['asset', 'quantity'] as const)(
     const source = Symbol();
     const fixture = (anchor = path) => (
       <RoutePresentationSourceContext value={source}>
-        <NativeTaskPrimary kind={kind} anchor={anchor} conventionalPrimary />
+        {/* Actual successful asset/quantity pages opt into both capabilities. */}
+        <NativeTaskPrimary
+          kind={kind}
+          anchor={anchor}
+          conventionalPrimary
+          pairedInventory
+        />
       </RoutePresentationSourceContext>
     );
     const view = render(fixture());
@@ -818,6 +831,74 @@ it.each(['asset', 'quantity'] as const)(
     view.unmount();
     expect(auxiliary.source(root, path)).toBeUndefined();
     expect(auxiliary.source(root, anchor)).toBeUndefined();
+  },
+);
+it.each(['/inventory', '/history'])(
+  'keeps ordinary primary navigation from %s command-authorized without arming auxiliary capture',
+  (path) => {
+    runtime.reduced = false;
+    runtime.pathname = path;
+    runtime.query = '';
+    history.replaceState({}, '', path);
+    document.documentElement.dataset.motion = 'full';
+    const originals = [
+      [document, 'startViewTransition'],
+      [document, 'activeViewTransition'],
+      [window, 'navigation'],
+    ] as const;
+    const descriptors = originals.map(([target, key]) =>
+      Object.getOwnPropertyDescriptor(target, key),
+    );
+    Object.defineProperty(document, 'startViewTransition', {
+      configurable: true,
+      writable: true,
+      value: vi.fn(),
+    });
+    Object.defineProperty(document, 'activeViewTransition', {
+      configurable: true,
+      value: null,
+    });
+    Object.defineProperty(window, 'navigation', {
+      configurable: true,
+      value: new EventTarget(),
+    });
+    vi.stubGlobal('CSS', { supports: () => true });
+    let motion!: ReturnType<typeof useRouteMotion>;
+    function ObservePrimaryCapture() {
+      const current = useRouteMotion();
+      useLayoutEffect(() => {
+        motion = current;
+      });
+      return null;
+    }
+    const view = render(
+      <Fixture conventionalPrimary>
+        <ObservePrimaryCapture />
+      </Fixture>,
+    );
+    try {
+      const arm = vi.spyOn(auxiliary, 'arm');
+      expect(primary()?.conventionalPrimary).toBe(true);
+      expect(boundary.capture()()).toBe(true);
+      const destination = path === '/inventory' ? '/history' : '/inventory';
+      const ticket = accept(destination);
+      expect(ticket.current()).toBe(true);
+      expect(motion.arrival).toMatchObject({
+        presentation: 'primary',
+        sourceKey: path,
+        destinationKey: destination,
+      });
+      expect(motion.intent).toBeNull();
+      expect(arm).not.toHaveBeenCalled();
+    } finally {
+      view.unmount();
+      originals.forEach(([target, key], index) => {
+        const descriptor = descriptors[index];
+        if (descriptor) Object.defineProperty(target, key, descriptor);
+        else Reflect.deleteProperty(target, key);
+      });
+      vi.unstubAllGlobals();
+    }
   },
 );
 it.each(['asset', 'quantity'] as const)(
