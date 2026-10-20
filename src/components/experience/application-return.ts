@@ -142,8 +142,22 @@ export function createApplicationReturn(
         // Presentation repair must not interrupt readiness or retry a scroll.
       }
     };
-    const release = afterTransitionCapture(element.ownerDocument, apply);
-    if (pending === operation) scheduled = release;
+    // Primary readiness is published by a child layout effect. Next's ancestor
+    // route scroll handler still runs later in that commit, even without a
+    // native transition (Reduced/unsupported). Keep this one-shot intent until
+    // that commit ends, then respect any capture and recheck all ownership.
+    let active = true;
+    let release = () => {};
+    scheduled = () => {
+      active = false;
+      release();
+    };
+    queueMicrotask(() => {
+      if (!active || pending !== operation) return;
+      release = afterTransitionCapture(element.ownerDocument, () => {
+        if (active) apply();
+      });
+    });
   };
   return {
     bindAuthority: (read: () => Authority) => {

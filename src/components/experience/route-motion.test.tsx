@@ -946,100 +946,125 @@ afterEach(() => {
   localStorage.removeItem('it-inventory-reduce-motion');
 });
 
-it('Reduced application Back replays its row anchor after a consumed fallback hash without changing BODY focus', () => {
-  const scope = '/inventory?q=cable&type=quantity';
-  const returned = scope + '#inventory-row-2';
-  const destination =
-    detailPath + '?' + new URLSearchParams({ returnTo: returned });
-  const previous = location.href;
-  const originalScroll = HTMLElement.prototype.scrollIntoView;
-  const scroll = vi.fn();
-  HTMLElement.prototype.scrollIntoView = scroll;
-  const geometry = vi
-    .spyOn(HTMLElement.prototype, 'getClientRects')
-    .mockReturnValue([{ width: 300, height: 200 }] as unknown as DOMRectList);
-  localStorage.setItem('it-inventory-reduce-motion', 'true');
-  let phase: 'list' | 'detail' | 'fallback' = 'list';
-  const fixture = () =>
-    view(
-      phase === 'fallback' ? (
-        <p role="status">Loading results</p>
-      ) : (
-        <RouteReady
-          actorId="staff"
-          routeKey={
-            phase === 'list'
-              ? scope
-              : routeKey(
-                  detailPath,
-                  new URL(destination, location.origin).searchParams,
-                )
-          }
-          contentIdentity={phase}
-        >
-          {phase === 'list' ? (
-            <ul>
-              <li id="inventory-row-2">
-                <InventoryRecordLink
-                  record={record}
-                  holding={initiatingHolding}
-                  returnTo={returned}
-                  href={destination}
-                >
-                  Original result
-                </InventoryRecordLink>
-              </li>
-            </ul>
-          ) : (
-            <InventoryBackLink record={record} href={returned}>
-              Back to results
-            </InventoryBackLink>
-          )}
-        </RouteReady>
-      ),
-    );
-  try {
-    history.replaceState(null, '', scope);
-    runtime.query = 'q=cable&type=quantity';
-    const page = render(fixture());
-    expect(screen.getByText('instant')).toBeVisible();
-    fireEvent.click(screen.getByRole('link', { name: 'Original result' }));
-    history.replaceState(null, '', destination);
-    runtime.pathname = detailPath;
-    runtime.query = new URL(
-      destination,
-      location.origin,
-    ).searchParams.toString();
-    phase = 'detail';
-    page.rerender(fixture());
-    fireEvent.click(screen.getByRole('link', { name: 'Back to results' }));
-    history.replaceState(null, '', returned);
-    runtime.pathname = '/inventory';
-    runtime.query = 'q=cable&type=quantity';
-    phase = 'fallback';
-    page.rerender(fixture());
-    expect(scroll).not.toHaveBeenCalled();
-    expect(document.activeElement).toBe(document.body);
-    phase = 'list';
-    page.rerender(fixture());
-    expect(scroll).toHaveBeenCalledExactlyOnceWith({
-      behavior: 'instant',
-      block: 'start',
-      inline: 'nearest',
+it.each(['Reduced', 'unsupported'] as const)(
+  '%s application Back restores after the router ancestor scroll commit without changing BODY focus',
+  async (mode) => {
+    const scope = '/inventory?q=cable&type=quantity';
+    const returned = scope + '#inventory-row-2';
+    const destination =
+      detailPath + '?' + new URLSearchParams({ returnTo: returned });
+    const previous = location.href;
+    const originalScroll = HTMLElement.prototype.scrollIntoView;
+    let scrollY = 0;
+    const scroll = vi.fn(() => {
+      scrollY = 234;
     });
-    expect(scroll.mock.instances[0]).toBe(
-      document.getElementById('inventory-row-2'),
-    );
-    expect(document.activeElement).toBe(document.body);
-    page.rerender(fixture());
-    expect(scroll).toHaveBeenCalledTimes(1);
-  } finally {
-    geometry.mockRestore();
-    if (originalScroll) HTMLElement.prototype.scrollIntoView = originalScroll;
-    else Reflect.deleteProperty(HTMLElement.prototype, 'scrollIntoView');
-    history.replaceState(null, '', previous);
-  }
-});
+    HTMLElement.prototype.scrollIntoView = scroll;
+    const geometry = vi
+      .spyOn(HTMLElement.prototype, 'getClientRects')
+      .mockReturnValue([{ width: 300, height: 200 }] as unknown as DOMRectList);
+    if (mode === 'Reduced')
+      localStorage.setItem('it-inventory-reduce-motion', 'true');
+    else Reflect.deleteProperty(document, 'activeViewTransition');
+    let phase: 'list' | 'detail' | 'fallback' = 'list';
+    let returning = false;
+    function RouterScrollCommit({ children }: { children: ReactNode }) {
+      // Next's layout-router scroll handler is an ancestor layout effect (or
+      // componentDidUpdate). React runs it after the primary's child effects.
+      useLayoutEffect(() => {
+        if (returning && phase === 'list') scrollY = 0;
+      });
+      return children;
+    }
+    const fixture = () =>
+      view(
+        <RouterScrollCommit>
+          {phase === 'fallback' ? (
+            <p role="status">Loading results</p>
+          ) : (
+            <RouteReady
+              actorId="staff"
+              routeKey={
+                phase === 'list'
+                  ? scope
+                  : routeKey(
+                      detailPath,
+                      new URL(destination, location.origin).searchParams,
+                    )
+              }
+              contentIdentity={phase}
+            >
+              {phase === 'list' ? (
+                <ul>
+                  <li id="inventory-row-2">
+                    <InventoryRecordLink
+                      record={record}
+                      holding={initiatingHolding}
+                      returnTo={returned}
+                      href={destination}
+                    >
+                      Original result
+                    </InventoryRecordLink>
+                  </li>
+                </ul>
+              ) : (
+                <InventoryBackLink record={record} href={returned}>
+                  Back to results
+                </InventoryBackLink>
+              )}
+            </RouteReady>
+          )}
+        </RouterScrollCommit>,
+      );
+    try {
+      history.replaceState(null, '', scope);
+      runtime.query = 'q=cable&type=quantity';
+      const page = render(fixture());
+      expect(screen.getByText('instant')).toBeVisible();
+      fireEvent.click(screen.getByRole('link', { name: 'Original result' }));
+      history.replaceState(null, '', destination);
+      runtime.pathname = detailPath;
+      runtime.query = new URL(
+        destination,
+        location.origin,
+      ).searchParams.toString();
+      phase = 'detail';
+      page.rerender(fixture());
+      fireEvent.click(screen.getByRole('link', { name: 'Back to results' }));
+      history.replaceState(null, '', returned);
+      runtime.pathname = '/inventory';
+      runtime.query = 'q=cable&type=quantity';
+      phase = 'fallback';
+      page.rerender(fixture());
+      expect(scroll).not.toHaveBeenCalled();
+      expect(document.activeElement).toBe(document.body);
+      returning = true;
+      phase = 'list';
+      page.rerender(fixture());
+      await act(async () => {
+        await Promise.resolve();
+      });
+      expect(scrollY).toBe(234);
+      expect(scroll).toHaveBeenCalledExactlyOnceWith({
+        behavior: 'instant',
+        block: 'start',
+        inline: 'nearest',
+      });
+      expect(scroll.mock.instances[0]).toBe(
+        document.getElementById('inventory-row-2'),
+      );
+      expect(document.activeElement).toBe(document.body);
+      returning = false;
+      page.rerender(fixture());
+      expect(scroll).toHaveBeenCalledTimes(1);
+    } finally {
+      geometry.mockRestore();
+      if (originalScroll) HTMLElement.prototype.scrollIntoView = originalScroll;
+      else Reflect.deleteProperty(HTMLElement.prototype, 'scrollIntoView');
+      history.replaceState(null, '', previous);
+    }
+  },
+);
 
 it.each(['reduced', 'unsupported'] as const)(
   '%s accepted navbar exit cancels a held-source search timer, while modified clicks and same-path writes remain ordinary',

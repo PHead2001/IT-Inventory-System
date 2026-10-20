@@ -155,15 +155,17 @@ function fixture() {
   };
 }
 
-it('replays the accepted Back anchor once after a Reduced fallback reveals its real primary, leaving focus unchanged', () => {
+it('replays the accepted Back anchor once after a Reduced fallback reveals its real primary, leaving focus unchanged', async () => {
   const f = fixture();
   document.documentElement.dataset.motion = 'reduced';
   f.navigateForward();
   f.back();
   f.controller.reconcile();
+  await Promise.resolve();
   expect(f.scroll).not.toHaveBeenCalled();
   expect(document.activeElement).toBe(document.body);
   f.reveal();
+  await Promise.resolve();
   expect(f.scroll).toHaveBeenCalledExactlyOnceWith({
     behavior: 'instant',
     block: 'start',
@@ -174,25 +176,121 @@ it('replays the accepted Back anchor once after a Reduced fallback reveals its r
   );
   expect(document.activeElement).toBe(document.body);
   f.controller.reconcile();
+  await Promise.resolve();
   f.reveal();
+  await Promise.resolve();
   expect(f.scroll).toHaveBeenCalledTimes(1);
 });
 
-it('waits through a same-authority privacy recheck and resumes only with fresh admission', () => {
+it('waits through a same-authority privacy recheck and resumes only with fresh admission', async () => {
   const f = fixture();
   f.navigateForward();
   f.back();
   f.permission().ready = false;
   f.reveal();
+  await Promise.resolve();
   expect(f.scroll).not.toHaveBeenCalled();
   f.permission().ready = true;
   f.controller.reconcile();
+  await Promise.resolve();
   expect(f.scroll).toHaveBeenCalledTimes(1);
 });
 
+it.each([
+  'wheel',
+  'new-navigation',
+  'authority',
+  'unmount',
+  'row-replaced',
+  'destination',
+] as const)(
+  'retires the queued post-commit repair after %s',
+  async (change) => {
+    const f = fixture();
+    f.navigateForward();
+    f.back();
+    f.reveal();
+    expect(f.scroll).not.toHaveBeenCalled();
+    if (change === 'wheel') window.dispatchEvent(new Event('wheel'));
+    if (change === 'new-navigation') {
+      const close = f.controller.beginNavigation('/history', 0);
+      f.controller.acceptNavigation('/history', 0);
+      close();
+    }
+    if (change === 'authority') f.permission().key = 'new-authority';
+    if (change === 'unmount') f.withdraw();
+    if (change === 'row-replaced') f.reveal();
+    if (change === 'destination') history.replaceState(null, '', '/history');
+    await Promise.resolve();
+    expect(f.scroll).not.toHaveBeenCalled();
+    history.replaceState(null, '', returned);
+    f.reveal();
+    f.controller.reconcile();
+    await Promise.resolve();
+    expect(f.scroll).not.toHaveBeenCalled();
+  },
+);
+
+it('a post-commit verification pause retains only the same authority and source for fresh admission', async () => {
+  const f = fixture();
+  f.navigateForward();
+  f.back();
+  f.reveal();
+  f.permission().ready = false;
+  await Promise.resolve();
+  expect(f.scroll).not.toHaveBeenCalled();
+  f.permission().ready = true;
+  f.controller.reconcile();
+  await Promise.resolve();
+  expect(f.scroll).toHaveBeenCalledTimes(1);
+  f.controller.reconcile();
+  await Promise.resolve();
+  expect(f.scroll).toHaveBeenCalledTimes(1);
+});
+
+it.each([false, true])(
+  'observes a capture started during the commit before repairing (cancelled: %s)',
+  async (cancelled) => {
+    const f = fixture();
+    f.navigateForward();
+    f.back();
+    let release!: () => void;
+    const capturing = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const original = document.startViewTransition;
+    Object.defineProperty(document, 'startViewTransition', {
+      configurable: true,
+      writable: true,
+      value: () => ({ updateCallbackDone: capturing }),
+    });
+    const stop = observeTransitionCapture(document, () => {});
+    try {
+      f.reveal();
+      // An ancestor can start capture after the child's readiness notification.
+      document.startViewTransition(() => {});
+      await Promise.resolve();
+      expect(f.scroll).not.toHaveBeenCalled();
+      if (cancelled) window.dispatchEvent(new Event('wheel'));
+      release();
+      await capturing;
+      expect(f.scroll).toHaveBeenCalledTimes(cancelled ? 0 : 1);
+    } finally {
+      stop();
+      if (original)
+        Object.defineProperty(document, 'startViewTransition', {
+          configurable: true,
+          writable: true,
+          value: original,
+        });
+      else Reflect.deleteProperty(document, 'startViewTransition');
+    }
+  },
+);
+
 it.each(['grant-change', 'denial', 'dispose', 'invalidate'])(
   'cannot apply a stale Back repair after %s',
-  (change) => {
+  async (change) => {
     const f = fixture();
     f.navigateForward();
     f.back();
@@ -201,7 +299,9 @@ it.each(['grant-change', 'denial', 'dispose', 'invalidate'])(
     if (change === 'dispose') f.controller.dispose();
     if (change === 'invalidate') f.controller.invalidate();
     f.reveal();
+    await Promise.resolve();
     f.controller.reconcile();
+    await Promise.resolve();
     expect(f.scroll).not.toHaveBeenCalled();
   },
 );
@@ -214,22 +314,25 @@ it.each([
   { duplicateAnchor: true },
 ])(
   'retires a missing/changed/ambiguous source without guessing or retrying: %j',
-  (options) => {
+  async (options) => {
     const f = fixture();
     f.navigateForward();
     f.back();
     f.reveal(options);
+    await Promise.resolve();
     expect(f.scroll).not.toHaveBeenCalled();
     f.reveal();
+    await Promise.resolve();
     expect(f.scroll).not.toHaveBeenCalled();
   },
 );
 
-it('does not admit another actor or a different complete query/hash', () => {
+it('does not admit another actor or a different complete query/hash', async () => {
   const f = fixture();
   f.navigateForward();
   f.back();
   f.reveal({ wrongActor: true });
+  await Promise.resolve();
   expect(f.scroll).not.toHaveBeenCalled();
   history.replaceState(
     null,
@@ -237,15 +340,17 @@ it('does not admit another actor or a different complete query/hash', () => {
     '/inventory?q=other&type=quantity#inventory-row-2',
   );
   f.reveal();
+  await Promise.resolve();
   expect(f.scroll).not.toHaveBeenCalled();
   history.replaceState(null, '', scope + '#inventory-row-1');
   f.reveal();
+  await Promise.resolve();
   expect(f.scroll).not.toHaveBeenCalled();
 });
 
 it.each(['wheel', 'pointerdown', 'touchstart', 'popstate', 'Tab', 'PageDown'])(
   'a fresh user/history intervention %s cancels the pending repair',
-  (type) => {
+  async (type) => {
     const f = fixture();
     f.navigateForward();
     f.back();
@@ -255,13 +360,14 @@ it.each(['wheel', 'pointerdown', 'touchstart', 'popstate', 'Tab', 'PageDown'])(
         : new Event(type),
     );
     f.reveal();
+    await Promise.resolve();
     expect(f.scroll).not.toHaveBeenCalled();
   },
 );
 
 it.each(['other-navigation', 'native-traverse', 'abort'])(
   '%s cannot leave a replayable application Back repair',
-  (kind) => {
+  async (kind) => {
     const f = fixture();
     f.navigateForward();
     f.back();
@@ -269,11 +375,12 @@ it.each(['other-navigation', 'native-traverse', 'abort'])(
     if (kind === 'native-traverse') f.event(returned, 'traverse');
     if (kind === 'abort') f.event(returned).abort();
     f.reveal();
+    await Promise.resolve();
     expect(f.scroll).not.toHaveBeenCalled();
   },
 );
 
-it('a prevented or superseded Link transaction cannot acquire a return origin', () => {
+it('a prevented or superseded Link transaction cannot acquire a return origin', async () => {
   const f = fixture();
   const close = f.controller.beginNavigation(detail, 0);
   f.controller.stageForward(target);
@@ -282,6 +389,7 @@ it('a prevented or superseded Link transaction cannot acquire a return origin', 
   f.withdraw();
   f.back();
   f.reveal();
+  await Promise.resolve();
   expect(f.scroll).not.toHaveBeenCalled();
 });
 
@@ -305,6 +413,7 @@ it.each(['none', 'cancelled', 'replaced', 'url', 'paused'] as const)(
     try {
       document.startViewTransition(() => {});
       f.reveal();
+      await Promise.resolve();
       expect(f.scroll).not.toHaveBeenCalled();
       if (change === 'cancelled') window.dispatchEvent(new Event('wheel'));
       if (change === 'replaced') f.reveal();
@@ -316,7 +425,9 @@ it.each(['none', 'cancelled', 'replaced', 'url', 'paused'] as const)(
       if (change === 'url') history.replaceState(null, '', returned);
       if (change === 'paused') f.permission().ready = true;
       f.controller.reconcile();
+      await Promise.resolve();
       f.reveal();
+      await Promise.resolve();
       expect(f.scroll).toHaveBeenCalledTimes(
         change === 'none' || change === 'paused' ? 1 : 0,
       );
@@ -333,7 +444,7 @@ it.each(['none', 'cancelled', 'replaced', 'url', 'paused'] as const)(
   },
 );
 
-it('an older aborted native attempt cannot cancel the replacement attempt', () => {
+it('an older aborted native attempt cannot cancel the replacement attempt', async () => {
   const f = fixture();
   f.navigateForward();
   f.back();
@@ -341,14 +452,16 @@ it('an older aborted native attempt cannot cancel the replacement attempt', () =
   f.event(returned, 'replace');
   old.abort();
   f.reveal();
+  await Promise.resolve();
   expect(f.scroll).toHaveBeenCalledTimes(1);
 });
 
-it('an unexpected committed router destination cancels repair even without Navigation API observation', () => {
+it('an unexpected committed router destination cancels repair even without Navigation API observation', async () => {
   const f = fixture();
   f.navigateForward();
   f.back();
   f.controller.routeChanged('/history');
   f.reveal();
+  await Promise.resolve();
   expect(f.scroll).not.toHaveBeenCalled();
 });
