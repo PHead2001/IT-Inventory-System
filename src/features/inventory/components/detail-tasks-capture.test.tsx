@@ -157,7 +157,7 @@ it.each([
         ? screen.getByRole('textbox', { name: 'Name' })
         : screen.getByRole('textbox', { name: 'Reason (required)' });
     fireEvent.change(input, { target: { value: 'Retained task draft' } });
-    const heading = screen.getByRole('heading', { name: launch, exact: true });
+    const heading = screen.getByRole('heading', { name: launch });
     const headingRoot = heading.parentElement;
     const capture = holdTransitionCapture();
     const nativeFocus = heading.focus.bind(heading);
