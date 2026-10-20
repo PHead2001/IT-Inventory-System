@@ -3,7 +3,22 @@ import { resolve } from 'node:path';
 
 /** Renderer initiation only. Approval is supplied by this fictional fixture;
  * provider authorization/lifetime has separate real-provider component tests. */
-export async function routePrimaryFixture(kind: 'primary' | 'paired') {
+export type RoutePrimaryFixtureKind =
+  'primary' | 'paired' | 'history' | 'location';
+export async function routePrimaryFixture(kind: RoutePrimaryFixtureKind) {
+  const sourceRoute =
+    kind === 'history'
+      ? '/history?type=quantity'
+      : kind === 'location'
+        ? '/locations?selected=ITC-S1A'
+        : '/inventory';
+  const destinationRoute =
+    kind === 'history'
+      ? '/inventory/quantity/00000000-0000-4000-8000-000000000001'
+      : kind === 'location'
+        ? '/locations/ITC-S1A'
+        : '/history';
+  const conventionalSource = kind === 'history' || kind === 'location';
   const result = await build({
     stdin: {
       resolveDir: process.cwd(),
@@ -19,7 +34,8 @@ export async function routePrimaryFixture(kind: 'primary' | 'paired') {
         import {RoutePresentationSourceContext} from './src/components/experience/route-presentation-source';
         import {isInventoryCaptureName} from './src/components/experience/inventory-capture-regions';
         import {sharedTitleMotion} from './src/components/experience/shared-title-motion';
-        const paired = ${kind === 'paired'};
+        const paired = ${kind !== 'primary'}, conventionalSource = ${conventionalSource};
+        const sourceRoute = ${JSON.stringify(sourceRoute)}, destinationRoute = ${JSON.stringify(destinationRoute)};
         const auxiliary = createAuxiliaryRouteCapture(), source = Symbol();
         let enabled = true, privateReady = true, approval = null, current = true;
         const valid = () => enabled && privateReady && current;
@@ -41,7 +57,7 @@ export async function routePrimaryFixture(kind: 'primary' | 'paired') {
         auxiliary.attach(document);
         state.motion = () => ({
           enabled:valid(), captureAvailable:true, current:()=>current, validNow:valid,
-          intent: paired && approval ? {name:'primary-fixture-title',detailPath:'/history',listHref:'/inventory'} : null,
+          intent: paired && approval ? {name:'primary-fixture-title',detailPath:destinationRoute,listHref:sourceRoute} : null,
           titleArrival: paired ? approval : null,
           arrival: paired ? null : approval,
           cancelIfInvalid:()=>{}, rejectTitleSnapshot:()=>proof.errors.push('title-rejected'),
@@ -53,7 +69,7 @@ export async function routePrimaryFixture(kind: 'primary' | 'paired') {
         });
         function RoutedPrimary({route}) {
           return <RouteReady actorId="fictional" routeKey={route} contentIdentity={route}
-            conventionalPrimary pairedInventory={paired} capture="regions">
+            conventionalPrimary pairedInventory={paired && (!conventionalSource || route!==sourceRoute)} capture="regions">
             <InventoryCaptureRegion region="header">
               <header style={{height:90,background:route==='/inventory'?'#a33':'#33a'}}>
                 {paired ? <ViewTransition default="none" name={approval?'primary-fixture-title':undefined}
@@ -70,7 +86,7 @@ export async function routePrimaryFixture(kind: 'primary' | 'paired') {
         }
         function OpaqueSlot({route}) {return <RoutedPrimary key={route} route={route}/>;}
         function App() {
-          const [route,setRoute] = useState('/inventory');
+          const [route,setRoute] = useState(sourceRoute);
           const [,render] = useState(0);
           state.policy = (full,admitted) => {
             enabled=full;privateReady=admitted;
@@ -79,15 +95,15 @@ export async function routePrimaryFixture(kind: 'primary' | 'paired') {
             flushSync(()=>render(n=>n+1));
           };
           state.begin = () => {
-            approval={name:'route-primary-fixture',presentation:'primary',sourceKey:'/inventory',destinationKey:'/history',epoch:1};
+            approval={name:'route-primary-fixture',presentation:'primary',sourceKey:sourceRoute,destinationKey:destinationRoute,epoch:1};
             flushSync(()=>render(n=>n+1));
             if(paired && valid()) {
               const root=document.querySelector('[data-route-ready]');
-              auxiliary.arm({token:approval,base:'primary-fixture-title-content',sourceKey:'/inventory',destinationKey:'/history',sourceRoot:root,
+              auxiliary.arm({token:approval,base:'primary-fixture-title-content',sourceKey:sourceRoute,destinationKey:destinationRoute,sourceRoot:root,
                 handoff:()=>()=>proof.releaseCount++, admitted:valid,current:valid,participate:name=>{proof.auxiliaryNames.push(name);return true;}});
             }
             // No eligible outer/title fixture boundary exists in primary mode.
-            startTransition(()=>setRoute('/history'));
+            startTransition(()=>setRoute(destinationRoute));
           };
           return <AuxiliaryRouteCaptureContext value={auxiliary}>
             <RoutePresentationSourceContext value={source}><OpaqueSlot route={route}/></RoutePresentationSourceContext>
@@ -118,7 +134,12 @@ export async function routePrimaryFixture(kind: 'primary' | 'paired') {
     write: false,
     outfile: 'route-primary-fixture.js',
     metafile: true,
-    define: { 'process.env.NODE_ENV': '"production"' },
+    define: {
+      'process.env.NODE_ENV': '"production"',
+      // Next replaces this at build time; this repository does not enable
+      // cacheComponents. Keep its real navigation dependency browser-safe too.
+      'process.env.__NEXT_CACHE_COMPONENTS': 'false',
+    },
     alias: {
       react: resolve('node_modules/next/dist/compiled/react'),
       'react-dom/client': resolve(
@@ -132,5 +153,7 @@ export async function routePrimaryFixture(kind: 'primary' | 'paired') {
     styles:
       result.outputFiles.find((file) => file.path.endsWith('.css'))?.text ?? '',
     inputs: Object.keys(result.metafile.inputs),
+    sourceRoute,
+    destinationRoute,
   };
 }

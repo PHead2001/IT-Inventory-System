@@ -4192,9 +4192,14 @@ it.each(['inner-first', 'outer-first'] as const)(
   },
 );
 
-it.each(['history', 'location'] as const)(
-  '%s source and detail regions withdraw all names at seal and late callbacks cannot affect a fresh app Back',
-  async (kind) => {
+it.each([
+  ['history', true],
+  ['location', true],
+  ['history', false],
+  ['location', false],
+] as const)(
+  '%s source and detail regions withdraw all names at seal and late callbacks cannot affect a fresh app Back (source pairedInventory=%s)',
+  async (kind, sourcePaired) => {
     const native = auxiliaryNativeFixture();
     const id = '00000000-0000-4000-8000-000000000001';
     const eventId = '00000000-0000-4000-8000-000000000002';
@@ -4265,7 +4270,7 @@ it.each(['history', 'location'] as const)(
               actorId="staff"
               routeKey={key}
               contentIdentity={key}
-              pairedInventory
+              pairedInventory={key !== source || sourcePaired}
               conventionalPrimary
               capture={key === source ? 'body' : 'regions'}
             >

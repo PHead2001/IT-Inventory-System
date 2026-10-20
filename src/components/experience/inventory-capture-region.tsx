@@ -61,7 +61,8 @@ function AuxiliaryCaptureRegion({
             const current = latest.current;
             return (
               current.capability?.enabled === true &&
-              current.capability.pairedInventory &&
+              (current.capability.pairedInventory ||
+                current.capability.conventionalPrimary) &&
               current.identity?.rawRouteKey === owned!.routeKey &&
               current.source === owned!.source &&
               current.motion.validNow() &&

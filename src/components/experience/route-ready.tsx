@@ -274,12 +274,20 @@ export function RouteReady({
   const auxiliary = useContext(AuxiliaryRouteCaptureContext);
   const source = useContext(RoutePresentationSourceContext);
   useLayoutEffect(() => {
-    if (!ready || !pairedInventory || !root.current || !source || !auxiliary)
+    if (
+      !ready ||
+      !(pairedInventory || conventionalPrimary) ||
+      !root.current ||
+      !source ||
+      !auxiliary
+    )
       return;
     // Identity only. The existing canonical readiness owner still decides which
     // root is accepted; no new presentation source or acknowledgment is created.
     // Match its effective accepted key after task consumption; the immutable
     // server anchor remains separate in the native task guard above.
+    // Conventional History/Locations roots can also supply a title pair; only
+    // the provider's exact accepted title approval may arm auxiliary capture.
     return auxiliary.registerSource(root.current, effective, source);
   }, [
     auxiliary,

@@ -100,19 +100,27 @@ it('retains a real primary boundary with auxiliary support without remounting au
   expect(input).toHaveValue('draft');
 });
 
-it.each(['header', 'body'] as const)(
-  'requires the exact server route key for %s and retires participation when that identity is withdrawn',
-  (region) => {
+it.each([
+  ['header', true, true],
+  ['body', true, true],
+  ['header', true, false],
+  ['body', true, false],
+  ['header', false, true],
+  ['body', false, true],
+] as const)(
+  'requires the exact server route key for %s and retires participation when that identity is withdrawn (paired=%s, conventional=%s)',
+  (region, pairedInventory, conventionalPrimary) => {
     const registry = createAuxiliaryRouteCapture();
     const register = vi.spyOn(registry, 'register');
+    const arm = vi.spyOn(registry, 'arm');
     const source = Symbol();
     const fixture = (rawRouteKey?: string) => (
       <AuxiliaryRouteCaptureContext value={registry}>
         <InventoryCaptureRegionsContext
           value={{
             enabled: true,
-            pairedInventory: true,
-            conventionalPrimary: true,
+            pairedInventory,
+            conventionalPrimary,
           }}
         >
           <RoutePresentationSourceContext value={source}>
@@ -143,6 +151,7 @@ it.each(['header', 'body'] as const)(
     expect(participant.current()).toBe(true);
     page.rerender(fixture());
     expect(participant.current()).toBe(false);
+    expect(arm).not.toHaveBeenCalled();
     expect(screen.getByText('Record description')).toBe(header);
     expect(
       register.mock.calls.every(
