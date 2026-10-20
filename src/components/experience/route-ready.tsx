@@ -129,6 +129,7 @@ export function RouteReady({
       pendingEpoch: snapshot.epoch,
       committedKey: navigation.committedRouteKey,
       fresh: freshPresentationGrant(privacy),
+      continuity: privacy.taskQuery,
       idle:
         !snapshot.pending &&
         pending.state.current(snapshot.epoch) &&

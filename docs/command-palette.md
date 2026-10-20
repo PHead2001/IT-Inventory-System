@@ -9,6 +9,11 @@ navigation focuses the authoritative destination primary heading; inventory
 search focuses its ordinary field.
 Full motion uses a 240ms visual spring; effective Reduced motion opens immediately.
 
+The phone header uses an accessible brand icon and 44 px Search, help and sign-out
+buttons alongside the account disclosure in one row. The desktop shortcut hint
+keeps a fixed slot even when shortcuts are disabled, so first-use font loading or
+the saved preference cannot move the account controls after privacy admission.
+
 ## Commands and preferences
 
 The typed registry supplies commands, shortcut labels, navigation badges and help.
@@ -117,6 +122,21 @@ connected/visible and fresh privacy returns. Identical cached children require
 no remount or forced refresh. Command authority retirement is synchronous during insertion effects, while subscriber publication is coalesced into the following layout phase. Dying-provider cleanup retires without publication; ordinary navigation/privacy events still notify immediately. A raw URL change or unrelated navigation cannot
 rearm it; outgoing pending work retains its clean alias. Native history can
 restore functional readiness while permanently retiring old command focus.
+
+Native same-record Move intents use a separate privacy-controller attestation
+for the exact task/validated-return-scope query change. It preserves only a
+previously accepted clean receipt, with its original root, actor, content, server
+anchor, navigation identity, pending epoch and security revision. The controller
+publishes the pending attestation on the first changed-key render and binds it
+to one verification sequence and the original protected binding, generation,
+server/configuration revisions and cleanup/revocation/callback epochs. Pending
+verification cannot open a task, admit content or restore storage. Only fresh
+success from that exact operation allows one consumption. Its exact successful
+task removal may preserve that receipt through the cleanup query check; later
+deliberate entry requires another exact operation. Generic checks, failure,
+uncertainty, supersession, changed owners, hidden roots, business work and
+security invalidation permanently retire the receipt. A raw URL cannot issue
+or revive one, and the attestation never grants ordinary navigation authority.
 
 ## Caller-authorized bounded search
 

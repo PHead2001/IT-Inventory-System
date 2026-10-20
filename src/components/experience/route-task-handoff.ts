@@ -1,5 +1,6 @@
 import { recordDetailReturnPath } from '@/features/inventory/detail-return';
 import { canonicalRecordPath, routeKey } from './route-key';
+import type { PrivacyTaskQueryContinuity } from '@/components/auth/privacy-task-query';
 
 export type TaskSource = {
   root: HTMLElement;
@@ -14,6 +15,7 @@ export type TaskSource = {
   fresh: boolean;
   idle: boolean;
   visible: boolean;
+  continuity?: PrivacyTaskQueryContinuity;
 };
 function semanticKey(key: string) {
   const url = new URL(key, location.origin);
@@ -45,6 +47,8 @@ export function createNativeTaskHandoff() {
   let candidate: TaskSource | null = null;
   let receipt: TaskSource | null = null;
   let retired = false;
+  let preservedBy: PrivacyTaskQueryContinuity | null = null;
+  let consumedBy: symbol | null = null;
   const retire = () => {
     if (candidate) retired = true;
   };
@@ -54,17 +58,53 @@ export function createNativeTaskHandoff() {
       retire();
       return false;
     }
+    const continuity = source.continuity;
+    const cleanup =
+      continuity?.kind === 'cleanup' &&
+      continuity.parent === consumedBy &&
+      consumedBy !== null &&
+      continuity.destinationKey === receipt.cleanKey;
+    const matchingContinuity =
+      continuity?.current() === true &&
+      continuity.securityRevision === receipt.securityRevision &&
+      source.committedKey === continuity.destinationKey &&
+      (cleanup ||
+        (continuity.kind === 'task' &&
+          (continuity.sourceKey === receipt.cleanKey ||
+            (preservedBy?.identity === continuity.identity &&
+              consumedBy === continuity.identity))));
     if (
-      !source.fresh ||
+      preservedBy &&
+      ((!preservedBy.current() && !cleanup) ||
+        (continuity?.identity !== preservedBy.identity && !cleanup))
+    ) {
+      retire();
+      return false;
+    }
+    if (
       !source.idle ||
       !source.visible ||
-      source.securityRevision !== receipt.securityRevision ||
+      (source.fresh
+        ? source.securityRevision !== receipt.securityRevision
+        : !matchingContinuity) ||
       source.pendingEpoch !== receipt.pendingEpoch ||
       semanticKey(source.committedKey) !== semanticKey(receipt.cleanKey)
     ) {
       retire();
       return false;
     }
+    if (matchingContinuity) {
+      preservedBy = continuity!;
+      if (cleanup && source.fresh && continuity!.status() === 'verified') {
+        preservedBy = null;
+        consumedBy = null;
+      } else if (!source.fresh || continuity!.status() === 'pending')
+        return false;
+    } else if (preservedBy) {
+      retire();
+      return false;
+    }
+    if (!source.fresh) return false;
     return true;
   };
   return {
@@ -76,19 +116,27 @@ export function createNativeTaskHandoff() {
       }
       // Only a new accepted exact server/navigation binding can replace a
       // retired receipt. Reverification or a cached render cannot revive it.
-      const url = new URL(source.cleanKey, location.origin);
-      const eligible =
+      let eligible =
         acceptedPrimary &&
         source.fresh &&
         source.visible &&
-        source.committedKey === source.cleanKey &&
-        !url.searchParams.has('task') &&
-        validReturn(url);
+        source.committedKey === source.cleanKey;
+      if (eligible) {
+        try {
+          const url = new URL(source.cleanKey, location.origin);
+          eligible = !url.searchParams.has('task') && validReturn(url);
+        } catch {
+          // An opaque document or malformed key supplies no task capability.
+          eligible = false;
+        }
+      }
       if (!candidate || !sameBinding(candidate, source)) {
         retire();
         if (!eligible) return;
         candidate = { ...source };
         receipt = null;
+        preservedBy = null;
+        consumedBy = null;
         retired = false;
       } else if (retired) return;
       if (
@@ -145,6 +193,13 @@ export function createNativeTaskHandoff() {
       } catch {
         retire();
         return null;
+      }
+      if (preservedBy?.kind === 'task') {
+        if (!preservedBy.complete(routeKey(url.pathname, url.searchParams))) {
+          retire();
+          return null;
+        }
+        consumedBy = preservedBy.identity;
       }
       if (!current(source) || location.href !== url.href) {
         retire();

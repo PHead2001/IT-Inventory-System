@@ -17,6 +17,7 @@ import {
   subscribeAssignmentInvalidation,
   revokePrivatePresentation,
 } from '@/features/scan/assign-batch';
+import type { PrivacyTaskQueryContinuity } from './privacy-task-query';
 const serverCleanupRevision = () => 0;
 export const useAuthoritativeCleanupRevision = () =>
   useSyncExternalStore(
@@ -45,6 +46,7 @@ export const PrivacyReadinessContext = createContext<{
   cleanupRevision?: number;
   revocationRevision?: number;
   verifiedEpoch?: number;
+  taskQuery?: PrivacyTaskQueryContinuity;
   navigation?: {
     bind: (provider: symbol) => () => void;
     prepare: (href: string, provider: symbol) => void;

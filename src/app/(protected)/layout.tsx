@@ -68,11 +68,12 @@ export default async function ApplicationLayout({
                         Skip to content
                       </a>
                       <header className="experience-header">
-                        <div className="experience-header-inner max-sm:flex-wrap">
+                        <div className="experience-header-inner">
                           <ProtectedPrivacyContent>
                             <Link
                               href="/dashboard"
                               className="experience-brand"
+                              aria-label="IT Inventory overview"
                             >
                               <span className="experience-brand-mark">
                                 <Boxes

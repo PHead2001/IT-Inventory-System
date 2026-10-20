@@ -113,6 +113,7 @@ export function CommandButtons() {
       <Button
         type="button"
         variant="outline"
+        className="max-sm:w-11 max-sm:px-0"
         data-command-launcher="true"
         disabled={!available}
         aria-describedby={available ? undefined : statusId}
@@ -125,13 +126,20 @@ export function CommandButtons() {
           <LoaderCircle size={18} aria-hidden="true" />
         )}
         <span className="hidden sm:inline">Search</span>
-        {context?.enabled && (
-          <kbd className="hidden text-xs lg:inline">Ctrl/⌘ K</kbd>
-        )}
+        <kbd
+          aria-hidden="true"
+          className={
+            'hidden w-[4.5rem] shrink-0 text-center text-xs lg:inline-block' +
+            (context?.enabled ? '' : ' invisible')
+          }
+        >
+          Ctrl/⌘ K
+        </kbd>
       </Button>
       <Button
         type="button"
         variant="outline"
+        className="max-sm:w-11 max-sm:px-0"
         disabled={!available}
         aria-describedby={available ? undefined : statusId}
         onClick={(event) => context?.open('help', event.currentTarget)}

@@ -40,6 +40,31 @@ afterEach(() => {
   vi.restoreAllMocks();
   history.replaceState(null, '', '/');
 });
+it.each([false, true])(
+  'an opaque document cannot mint a receipt or throw when accepted=%s',
+  (acceptedPrimary) => {
+    history.replaceState({}, '', path);
+    const handoff = createNativeTaskHandoff();
+    const initial = source();
+    vi.stubGlobal('location', { origin: 'null' });
+    const apply = vi.fn();
+    try {
+      expect(() => handoff.observe(initial, acceptedPrimary)).not.toThrow();
+      expect(handoff.consume(initial, path, 'asset_move', apply)).toBeNull();
+      expect(apply).not.toHaveBeenCalled();
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  },
+);
+it('rejects a malformed accepted route without minting a receipt', () => {
+  const handoff = createNativeTaskHandoff();
+  const initial = source({ cleanKey: 'http://[', committedKey: 'http://[' });
+  const apply = vi.fn();
+  expect(() => handoff.observe(initial, true)).not.toThrow();
+  expect(handoff.consume(initial, path, 'asset_move', apply)).toBeNull();
+  expect(apply).not.toHaveBeenCalled();
+});
 it('does not admit a registration, stale router snapshot, task URL, or retired cached receipt', () => {
   for (const reason of ['unaccepted', 'stale', 'task', 'retired']) {
     history.replaceState({}, '', path);

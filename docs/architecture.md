@@ -345,6 +345,16 @@ password mutation. Auth entry and the protected shell read the current generatio
 before mounting private restoration consumers, and recheck on entry/reactivation.
 Readiness is bound to pathname, full query, known server generation and the
 explicit action revision. Reactivation immediately marks verification pending.
+The controller separately attests a validated same-record Move task/return-scope
+query change for preservation of an already accepted native task receipt. Its
+first changed-key render carries the exact pending operation before descendant
+layout effects. The original protected binding, generation, server/configuration
+revisions, cleanup/revocation/callback epochs and request sequence remain fixed.
+It grants no readiness, restoration or navigation authority; only the exact fresh
+verification may authorize one existing receipt's consumption. A successful
+consumption alone may bind the exact task-removal cleanup leg. Generic rechecks,
+failure, uncertainty, supersession or changed owners/security retire the receipt
+permanently. See [command handoff](command-palette.md) for its receipt boundaries.
 The protected controller always renders the opaque server route slot without
 an ancestor Suspense or accepted-content gate. Each async protected server page
 completes its existing authorization, reads, validation, `notFound()` and

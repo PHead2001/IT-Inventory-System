@@ -277,6 +277,14 @@ slot while access is checking; its polite checking status stays outside header
 flow. Component coverage verifies that slot and the asset/quantity sequence of
 two accepted task consumptions followed by native same-record task re-entry.
 This does not certify real Next/browser ordering or zero layout shift.
+Real PrivacyController integration now exercises the first changed-key pending
+attestation, held success with no early task, exact consumption cleanup and later
+deliberate reentry. Negative cases retain initial raw-URL denial, generic refresh,
+failure/recovery, binding/server/configuration changes, root/content/anchor changes,
+hidden roots, business work, navigation, cleanup/revocation/assignment retirement,
+A/B/A supersession with late success and malformed or semantic query changes.
+These focused controller tests do not replace native Next ordering, browser
+geometry or independent review of the changed preservation boundary.
 The native re-entry, first inventory-row viewport and cold-title browser checks
 emit bounded failure-only geometry; cold-title failures also report at most
 eight layout-shift entries with four fixed-identity sources each. All shifts
