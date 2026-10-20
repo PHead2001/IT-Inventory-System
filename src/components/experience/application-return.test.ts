@@ -25,7 +25,17 @@ afterEach(() => {
   Reflect.deleteProperty(window, 'navigation');
 });
 
-function fixture() {
+function fixture(
+  scope = '/inventory?q=cable&type=quantity',
+  forwardReturn = scope + '#inventory-row-2',
+) {
+  const returned = scope + '#inventory-row-2';
+  const list = new URL(scope, location.origin);
+  const canonicalScope = routeKey(list.pathname, list.searchParams);
+  const target = titleTarget(record, returned, holding, canonicalScope)!;
+  const detail =
+    '/inventory/quantity/cable?' +
+    new URLSearchParams({ returnTo: forwardReturn });
   history.replaceState(null, '', scope);
   const navigation = new EventTarget();
   Object.defineProperty(window, 'navigation', {
@@ -89,7 +99,7 @@ function fixture() {
               domain: 'storage',
               id: '00000000-0000-4000-8000-000000000001',
             },
-            scope,
+            canonicalScope,
           )!
         : target;
       unregisterSources.push(controller.registerSource(source, link));
@@ -148,12 +158,91 @@ function fixture() {
     navigateForward,
     back,
     event,
+    detail,
+    returned,
     permission: () => permission!,
     deny: () => {
       permission = null;
     },
   };
 }
+
+it.each([false, true])(
+  'retains an unsorted complete return query through an accepted forward and application Back (native round trip: %s)',
+  async (nativeRoundTrip) => {
+    const f = fixture('/inventory?q=cable&type=quantity&status=all');
+    f.navigateForward();
+    if (nativeRoundTrip) {
+      f.event(f.returned, 'traverse');
+      history.replaceState(null, '', f.returned);
+      window.dispatchEvent(new PopStateEvent('popstate'));
+      f.reveal();
+      await Promise.resolve();
+      expect(f.scroll).not.toHaveBeenCalled();
+      f.event(f.detail, 'traverse');
+      f.withdraw();
+      history.replaceState(null, '', f.detail);
+      window.dispatchEvent(new PopStateEvent('popstate'));
+    }
+    f.back();
+    f.reveal();
+    expect(f.scroll).not.toHaveBeenCalled();
+    await Promise.resolve();
+    expect(f.scroll).toHaveBeenCalledExactlyOnceWith({
+      behavior: 'instant',
+      block: 'start',
+      inline: 'nearest',
+    });
+    expect(f.scroll.mock.instances[0]).toBe(
+      document.getElementById('inventory-row-2'),
+    );
+    expect(document.activeElement).toBe(document.body);
+    expect(location.pathname + location.search + location.hash).toBe(
+      f.returned,
+    );
+    f.controller.reconcile();
+    await Promise.resolve();
+    expect(f.scroll).toHaveBeenCalledTimes(1);
+  },
+);
+
+it('accepts equivalent validated query order without changing the accepted source URL', async () => {
+  const f = fixture(
+    '/inventory?q=cable&type=quantity&status=all',
+    '/inventory?status=all&type=quantity&q=cable#inventory-row-2',
+  );
+  f.navigateForward();
+  f.back();
+  f.reveal();
+  await Promise.resolve();
+  expect(f.scroll).toHaveBeenCalledTimes(1);
+  expect(location.pathname + location.search + location.hash).toBe(f.returned);
+});
+
+it.each([
+  '/inventory?q=other&type=quantity&status=all#inventory-row-2',
+  '/inventory?q=cable&type=asset&status=all#inventory-row-2',
+  '/inventory?q=cable&type=quantity&status=active#inventory-row-2',
+  '/inventory?q=cable&type=quantity&status=all#inventory-row-1',
+  '/history?type=quantity#inventory-row-2',
+  '//other.invalid/inventory?q=cable&type=quantity&status=all#inventory-row-2',
+  'https://other.invalid/inventory?q=cable&type=quantity&status=all#inventory-row-2',
+  '/inventory?q=%zz&type=quantity&status=all#inventory-row-2',
+  '/inventory\\?q=cable&type=quantity&status=all#inventory-row-2',
+])(
+  'does not retain a mismatched or unsafe forward return origin: %s',
+  async (forwardReturn) => {
+    const f = fixture(
+      '/inventory?q=cable&type=quantity&status=all',
+      forwardReturn,
+    );
+    f.navigateForward();
+    f.back();
+    f.reveal();
+    await Promise.resolve();
+    expect(f.scroll).not.toHaveBeenCalled();
+  },
+);
 
 it('replays the accepted Back anchor once after a Reduced fallback reveals its real primary, leaving focus unchanged', async () => {
   const f = fixture();
