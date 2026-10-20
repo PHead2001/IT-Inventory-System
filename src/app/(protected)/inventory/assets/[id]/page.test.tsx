@@ -126,11 +126,15 @@ it('renders one authoritative asset timeline without duplicating custody or merg
 });
 vi.mock('server-only', () => ({}));
 
-it('places staff tasks before the optional storage preview even for site custody', async () => {
+it('places staff tasks before supporting asset details and the optional storage preview even for site custody', async () => {
   memberState.role = 'staff';
   render(await AssetPage({ params: Promise.resolve({ id: 'asset' }) }));
   const tasks = screen.getByRole('region', { name: 'Record tasks' });
   const preview = screen.getByRole('region', { name: 'Storage preview' });
+  const details = screen.getByRole('heading', { name: 'Asset details' });
+  expect(
+    tasks.compareDocumentPosition(details) & Node.DOCUMENT_POSITION_FOLLOWING,
+  ).toBeTruthy();
   expect(
     tasks.compareDocumentPosition(preview) & Node.DOCUMENT_POSITION_FOLLOWING,
   ).toBeTruthy();

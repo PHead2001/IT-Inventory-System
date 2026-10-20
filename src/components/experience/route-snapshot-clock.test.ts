@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { routeContentMotion } from './route-content-motion';
 import { sharedTitleMotion } from './shared-title-motion';
+import { createAuxiliaryRouteCapture } from './auxiliary-route-capture';
 
 type Effect = {
   startTime: number | null;
@@ -83,7 +84,11 @@ beforeEach(() => {
         }
       : {
           getPropertyValue: (name: string) =>
-            name === '--motion-route' ? '200ms' : 'ease',
+            name === '--motion-route'
+              ? '200ms'
+              : name === '--ease-workspace'
+                ? 'ease'
+                : '',
         },
   );
   vi.stubGlobal(
@@ -127,6 +132,97 @@ it.each(['body-first', 'title-first'])(
     ).toEqual(Array(6).fill(200));
     expect(native[6].startTime).toBe(2000);
     expect(skip).not.toHaveBeenCalled();
+  },
+);
+
+it.each(['old', 'new'])(
+  'aligns a single-sided %s auxiliary fade with the actual controller and React ready callbacks',
+  async (side) => {
+    const controller = createAuxiliaryRouteCapture();
+    const root = document.createElement('main'),
+      header = document.createElement('header');
+    root.append(header);
+    document.body.append(root);
+    header.getBoundingClientRect = () =>
+      ({
+        x: 0,
+        y: 0,
+        top: 0,
+        left: 0,
+        right: 100,
+        bottom: 40,
+        width: 100,
+        height: 40,
+      }) as DOMRect;
+    const auxiliary = effect(`::view-transition-${side}(${body}-header)`, 166);
+    native.push(auxiliary);
+    let ready!: () => void;
+    const transition = {
+      ready: new Promise<void>((resolve) => {
+        ready = resolve;
+      }),
+      updateCallbackDone: Promise.resolve(),
+      finished: new Promise<void>(() => {}),
+      skipTransition: skip,
+    } as unknown as ViewTransition;
+    const original = document.startViewTransition;
+    document.startViewTransition = () => transition;
+    Object.defineProperty(document, 'activeViewTransition', {
+      configurable: true,
+      value: transition,
+    });
+    const detach = controller.attach(document);
+    try {
+      if (side === 'old')
+        controller.register({
+          root: header,
+          routeKey: '/source',
+          region: 'header',
+          source: Symbol(),
+          current: () => true,
+        });
+      controller.arm({
+        token: {},
+        base: body,
+        sourceKey: '/source',
+        destinationKey: '/destination',
+        sourceRoot: root,
+        handoff: () => undefined,
+        admitted: () => true,
+        current: () => true,
+        participate: () => true,
+      });
+      const handle = document.startViewTransition();
+      if (side === 'new')
+        controller.register({
+          root: header,
+          routeKey: '/destination',
+          region: 'header',
+          source: Symbol(),
+          current: () => true,
+        });
+      void handle.ready.then(() => {
+        routeContentMotion({ name: body }, () => true);
+        sharedTitleMotion({ name: title }, () => true);
+      });
+      clock = 400;
+      ready();
+      await Promise.resolve();
+      await Promise.resolve();
+      expect(replacements).toHaveLength(4);
+      expect(
+        [...replacements, native[1], native[2], auxiliary].map(
+          (a) => a.startTime,
+        ),
+      ).toEqual(Array(7).fill(400));
+      expect(native[6].startTime).toBe(2000);
+      expect(skip).not.toHaveBeenCalled();
+    } finally {
+      controller.withdraw();
+      detach();
+      document.startViewTransition = original;
+      root.remove();
+    }
   },
 );
 

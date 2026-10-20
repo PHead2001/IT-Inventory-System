@@ -73,7 +73,7 @@ beforeEach(() => {
   });
 });
 it.each([false, true])(
-  'keeps an unmodeled logical candidate and available overview; explicit modeled replacement: %s',
+  'keeps an unmodeled logical candidate without a fabricated map; explicit modeled replacement: %s',
   async (replace) => {
     const user = userEvent.setup(),
       use = vi.fn();
@@ -94,10 +94,13 @@ it.each([false, true])(
         onClose={vi.fn()}
       />,
     );
-    expect(screen.getByRole('region', { name: 'Location map' })).toBeVisible();
-    expect(scene.props?.selectedCode).toBeNull();
-    expect(scene.props?.focusRequest.code).toBeNull();
-    expect(scene.props?.canFocusSelected).toBe(false);
+    expect(
+      screen.getByText(
+        'This location has no modeled map. Use its recorded location below.',
+      ),
+    ).toBeVisible();
+    expect(screen.queryByRole('region', { name: 'Location map' })).toBeNull();
+    expect(scene.props).toBeNull();
     expect(
       screen.getByText(unmodeled.breadcrumb, { selector: 'p[role="status"]' }),
     ).toBeVisible();
@@ -117,6 +120,49 @@ it.each([false, true])(
     );
   },
 );
+it('replaces a failed map with the unmodeled alternative while keeping keyboard selection and confirmation', async () => {
+  const user = userEvent.setup(),
+    use = vi.fn();
+  const unmodeled = {
+    ...drawer,
+    id: 'unmodeled',
+    code: 'UNMODELED',
+    name: 'Unmodeled destination',
+    breadcrumb: 'Unmodeled destination',
+    parentId: null,
+  };
+  render(
+    <LocationMapPicker
+      locations={[root, drawer, unmodeled]}
+      initialValue={drawer.id}
+      disabled={false}
+      onUse={use}
+      onClose={vi.fn()}
+    />,
+  );
+  act(() => scene.props!.onFailure('Actual scene failed'));
+  expect(screen.getByText(/Map unavailable/)).toBeVisible();
+  const browser = screen.getByRole('combobox', {
+    name: 'Choose location in browser',
+  });
+  browser.focus();
+  await user.keyboard('{Enter}');
+  const search = screen.getByRole('combobox', { name: 'Search locations' });
+  expect(search).toHaveFocus();
+  await user.type(search, unmodeled.code);
+  await user.keyboard('{ArrowDown}{Enter}');
+  expect(browser).toHaveTextContent(unmodeled.code);
+  expect(
+    screen.getByText(
+      'This location has no modeled map. Use its recorded location below.',
+    ),
+  ).toBeVisible();
+  expect(screen.queryByText(/Map unavailable/)).toBeNull();
+  expect(document.querySelector('canvas')).toBeNull();
+  expect(use).not.toHaveBeenCalled();
+  await user.click(screen.getByRole('button', { name: 'Use location' }));
+  expect(use).toHaveBeenCalledExactlyOnceWith(unmodeled.code);
+});
 it.each(['actor', 'backend', 'generation'])(
   'blocks a captured production RoomScene selection through the original picker after committed %s A/B/A',
   (field) => {

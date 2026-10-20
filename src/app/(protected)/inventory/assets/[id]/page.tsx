@@ -162,21 +162,6 @@ export default async function AssetPage({
               </dl>
             </section>
           </InventoryCaptureRegion>
-          <InventoryCaptureRegion region="body">
-            <section className={panel + ' my-5'}>
-              <h2 className="font-semibold">Asset details</h2>
-              <div className="mt-2">
-                <RecordDescription description={asset.description} />
-              </div>
-              <div className="mt-2 text-slate-400">
-                <RecordTextDisclosure
-                  text={`Manufacturer: ${asset.manufacturer || 'Not set'} · Model: ${asset.model || 'Not set'}`}
-                  label="manufacturer and model"
-                  lines={1}
-                />
-              </div>
-            </section>
-          </InventoryCaptureRegion>
           {member.role === 'staff' && (
             <DetailTasks
               key={member.user_id + ':' + asset.id}
@@ -199,6 +184,21 @@ export default async function AssetPage({
               returnSuggestionError={returnSuggestion === null}
             />
           )}
+          <InventoryCaptureRegion region="body">
+            <section className={panel + ' my-5'}>
+              <h2 className="font-semibold">Asset details</h2>
+              <div className="mt-2">
+                <RecordDescription description={asset.description} />
+              </div>
+              <div className="mt-2 text-slate-400">
+                <RecordTextDisclosure
+                  text={`Manufacturer: ${asset.manufacturer || 'Not set'} · Model: ${asset.model || 'Not set'}`}
+                  label="manufacturer and model"
+                  lines={1}
+                />
+              </div>
+            </section>
+          </InventoryCaptureRegion>
           <DetailRoomPreview
             locations={locations}
             choices={

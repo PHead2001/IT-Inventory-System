@@ -31,7 +31,7 @@ function AuxiliaryCaptureRegion({
   region,
   children,
 }: {
-  region: Exclude<InventoryCaptureRegionId, 'body'>;
+  region: InventoryCaptureRegionId;
   children: ReactElement;
 }) {
   const registry = useContext(AuxiliaryRouteCaptureContext)!;
@@ -92,7 +92,11 @@ function AuxiliaryCaptureRegion({
   );
   useLayoutEffect(() => (root.current ? register(root.current) : undefined));
   // Existing Slot composes the authored child's ref/cleanup without a DOM host.
-  return <Slot ref={bind}>{children}</Slot>;
+  return (
+    <Slot ref={bind} data-route-capture-region={region}>
+      {children}
+    </Slot>
+  );
 }
 
 /** One conventional DOM root only. Maps and their cold slots must be siblings. */
@@ -106,7 +110,7 @@ export function InventoryCaptureRegion({
   const capability = useContext(InventoryCaptureRegionsContext);
   const auxiliary = useContext(AuxiliaryRouteCaptureContext);
   if (!capability) return children;
-  if (auxiliary && region !== 'body')
+  if (auxiliary)
     return (
       <AuxiliaryCaptureRegion region={region}>
         {children}

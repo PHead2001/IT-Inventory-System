@@ -186,21 +186,6 @@ export default async function QuantityPage({
               )}
             </section>
           </InventoryCaptureRegion>
-          <InventoryCaptureRegion region="body">
-            <section className={panel + ' my-5'}>
-              <h2 className="font-semibold">Item details</h2>
-              <div className="mt-2">
-                <RecordDescription description={item.description} />
-              </div>
-              <div className="mt-2 text-slate-400">
-                <RecordTextDisclosure
-                  text={`Manufacturer: ${item.manufacturer || 'Not set'} · Model: ${item.model || 'Not set'}`}
-                  label="manufacturer and model"
-                  lines={1}
-                />
-              </div>
-            </section>
-          </InventoryCaptureRegion>
           {member.role === 'staff' && (
             <DetailTasks
               key={member.user_id + ':' + item.id}
@@ -217,6 +202,21 @@ export default async function QuantityPage({
               forms={forms}
             />
           )}
+          <InventoryCaptureRegion region="body">
+            <section className={panel + ' my-5'}>
+              <h2 className="font-semibold">Item details</h2>
+              <div className="mt-2">
+                <RecordDescription description={item.description} />
+              </div>
+              <div className="mt-2 text-slate-400">
+                <RecordTextDisclosure
+                  text={`Manufacturer: ${item.manufacturer || 'Not set'} · Model: ${item.model || 'Not set'}`}
+                  label="manufacturer and model"
+                  lines={1}
+                />
+              </div>
+            </section>
+          </InventoryCaptureRegion>
           <DetailRoomPreview
             locations={locations}
             choices={balances

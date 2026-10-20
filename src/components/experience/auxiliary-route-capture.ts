@@ -1,12 +1,13 @@
 import { observeTransitionCapture } from '@/components/forms/transition-capture';
 import { hasBlockingPresentationAncestor } from '@/components/forms/transition-capture-boundary';
 import { routeContentMotion } from './route-content-motion';
+import { registerRouteSnapshotClock } from './route-snapshot-clock';
 import type { InventoryCaptureRegionId } from './inventory-capture-regions';
 
 export type AuxiliaryParticipant = {
   root: HTMLElement;
   routeKey: string;
-  region: Exclude<InventoryCaptureRegionId, 'body'>;
+  region: InventoryCaptureRegionId;
   source: symbol;
   current(): boolean;
 };
@@ -153,7 +154,10 @@ export function createAuxiliaryRouteCapture() {
       return;
     }
     const claim = {
-      name: capture.base + '-' + participant.region,
+      name:
+        participant.region === 'body'
+          ? capture.base
+          : capture.base + '-' + participant.region,
       routeKey: participant.routeKey,
       previous: root.style.viewTransitionName,
       previousClass: root.style.getPropertyValue('view-transition-class'),
@@ -296,6 +300,29 @@ export function createAuxiliaryRouteCapture() {
                         () => withdraw(capture.token),
                       );
                       if (cleanup) capture.cleanups.push(cleanup);
+                    } else {
+                      // A header/task can exist on only one side. Its native
+                      // fade still belongs to the same presentation clock as
+                      // the shared title and paired body replacements.
+                      try {
+                        capture.cleanups.push(
+                          registerRouteSnapshotClock(
+                            animations.filter((animation) =>
+                              ['group', 'old', 'new'].some(
+                                (side) =>
+                                  (animation.effect as KeyframeEffect | null)
+                                    ?.pseudoElement ===
+                                  `::view-transition-${side}(${name})`,
+                              ),
+                            ),
+                            capture.current,
+                            () => withdraw(capture.token),
+                          ),
+                        );
+                      } catch {
+                        withdraw(capture.token);
+                        return;
+                      }
                     }
                     if (active === capture) capture.participate(name);
                   }

@@ -143,8 +143,12 @@ inline map picker. The existing native map dialog portal and task/grid ownership
 are unchanged. The closed region inventory bounds capture names before lazy
 chunks load; DOM discovery never grants capture capability.
 
-React owns the title and body captures. Other regions register their authored DOM
-refs with one provider-owned auxiliary CSS participant controller. It observes
+React owns the shared title. Conventional body and supporting regions register
+their authored DOM refs with one provider-owned CSS participant controller;
+unmanaged callers retain the React body fallback. This prevents a visible
+incoming body being omitted when its outgoing counterpart was offscreen under
+a disabled ancestor. The authored body and React fallback never own the same
+root together. The controller observes
 before-native/returned-handle hooks inside the existing capture observer, without
 wrapping React's update callback or changing the native arguments, receiver,
 return value or exception. Naming requires the exact accepted approval, provider,
@@ -160,7 +164,11 @@ The body keeps `${intent.name}-content`; other regions use that exact name plus
 an explicit region suffix while the matching title shares `intent.name`. Shared
 and unmatched enter/exit regions crossfade concurrently with the title in one
 native capture, including either inner-primary/outer-pathname commit order. The
-accepted pair suppresses the outer generic fade. One exact-approval completion
+shared document clock includes paired replacements and single-sided native fades.
+Every visible authored region fades on its actual old/new side; an offscreen
+counterpart needs no fabricated bitmap. A visible incoming body still fades when
+the outgoing viewport contains only the record header.
+The accepted pair suppresses the outer generic fade. One exact-approval completion
 receipt accepts actual auxiliary effects in its returned-handle ready reaction
 and React 19.3's synchronous native capture callbacks in the following reaction,
 then seals its participant names in a microtask and waits for all their effects.
@@ -177,6 +185,10 @@ A duplicate or late callback cannot acquire another lease. A capture without an
 actual body region retires its unused title approval and reveals instantly.
 Ordinary unpaired routes retain their generic arrival. No readiness or request
 state is granted by presentation boundaries.
+
+Record tasks appear immediately after the complete header. Descriptions and
+manufacturer/model disclosures remain fully available after the task workspace,
+so supporting metadata does not push task access beyond the first phone screen.
 
 Each outgoing React region inherits the accepted page's existing source and
 acquires a single-use lease from its committed immutable exit descriptor. The

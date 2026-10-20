@@ -11,7 +11,10 @@ import type { createRouteReadiness } from './route-readiness';
 import { RouteContentIdentityContext } from './route-content-identity';
 import { afterTransitionCapture } from '@/components/forms/transition-capture';
 import { PairedInventoryContent } from './paired-inventory-content';
-import { InventoryCaptureRegionsContext } from './inventory-capture-region';
+import {
+  InventoryCaptureGroup,
+  InventoryCaptureRegionsContext,
+} from './inventory-capture-region';
 import { AuxiliaryRouteCaptureContext } from './auxiliary-route-context';
 import { RoutePresentationSourceContext } from './route-presentation-source';
 
@@ -100,11 +103,21 @@ export function RouteReady({
   return (
     <RouteContentIdentityContext value={identity}>
       <div ref={root} data-route-ready="true" style={{ display: 'contents' }}>
-        {capture === 'regions' ? (
+        {capture === 'regions' ||
+        (auxiliary && (pairedInventory || conventionalPrimary)) ? (
           <InventoryCaptureRegionsContext
             value={{ enabled: ready, pairedInventory, conventionalPrimary }}
           >
-            {children}
+            {capture === 'regions' ? (
+              children
+            ) : (
+              <InventoryCaptureGroup
+                region="body"
+                className="experience-paired-inventory-content"
+              >
+                {children}
+              </InventoryCaptureGroup>
+            )}
           </InventoryCaptureRegionsContext>
         ) : pairedInventory || conventionalPrimary ? (
           <PairedInventoryContent

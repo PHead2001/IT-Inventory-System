@@ -199,13 +199,9 @@ export default function LocationMapPicker({
       </p>
       <EmbeddedRoom
         locations={locations}
-        // Logical candidates remain valid in the browser even without geometry.
-        // In that case show the available room without inventing a map focus.
-        code={
-          modeled.some((location) => location.code === candidate)
-            ? candidate
-            : null
-        }
+        // Preserve the logical candidate so an unmodeled selection can show
+        // its truthful alternative, including after a previous map failure.
+        code={candidate}
         permittedCodes={modeled.map((location) => location.code)}
         onSelect={(code) => {
           if (

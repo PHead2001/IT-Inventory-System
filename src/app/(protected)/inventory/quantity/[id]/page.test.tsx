@@ -85,12 +85,16 @@ it('keeps a quantity correction distinct from custody movement in the record his
 });
 vi.mock('server-only', () => ({}));
 
-it('places staff tasks before the optional storage preview', async () => {
+it('places staff tasks before supporting item details and the optional storage preview', async () => {
   mocks.role = 'staff';
   mocks.assignments.mockResolvedValue([]);
   render(await QuantityPage({ params: Promise.resolve({ id: 'item' }) }));
   const tasks = screen.getByRole('region', { name: 'Record tasks' });
   const preview = screen.getByRole('region', { name: 'Storage preview' });
+  const details = screen.getByRole('heading', { name: 'Item details' });
+  expect(
+    tasks.compareDocumentPosition(details) & Node.DOCUMENT_POSITION_FOLLOWING,
+  ).toBeTruthy();
   expect(
     tasks.compareDocumentPosition(preview) & Node.DOCUMENT_POSITION_FOLLOWING,
   ).toBeTruthy();

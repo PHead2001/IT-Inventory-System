@@ -1479,3 +1479,33 @@ widths in Full/Reduced motion; report its execution separately from unit coverag
 Focused resolver/parser/chooser/assignment and tag-advisory regressions cover exact spelling, Unicode lengths, legal duplicates, cross-namespace collisions, typed-prefix isolation, unknowns, errors, overflow and retained cancellation/privacy guards. `supabase/tests/serial_scan.test.sql` adds transactional fixtures for stable invoker/empty-search-path grants, active viewer/staff reads, nonmember/inactive/anonymous denial, exact case/whitespace lookup, 200 supplementary Unicode characters, deterministic first21 results, truthful site/retired context and nonmutating reads. The migration and provisional generated-type addition require canonical clean-database execution and `db:types:check`; they have not been validated against local PostgreSQL here because its Docker daemon is unavailable.
 
 `tests/e2e/audit-four-identifier-guidance.spec.ts` retains owned new fixtures for duplicate serials, serial/tag/SKU collisions, tag blur guidance and a synthetic camera QR frame. Scan and tag-blur cases are defined at 1280/390 px with Full/Reduced motion. A separate 390 px Reduced-motion Scan-and-assign journey enters a duplicate serial through the real input, requires a named/contextual chooser, deliberately selects the intended asset, checks the review's immutable record link and storage source, then cancels with **Skip inspection / review**. Caller-scoped reads compare both assets, their versions and their inventory/assignment events before choice, after inspection and after cancellation to prove that no assignment was made. These are durable test definitions; browser/hosted execution and physical-camera testing remain pending. SQL timeout configuration likewise requires effective REST hoisting and elapsed-time proof before it establishes any request-time bound. This is iteration evidence, not final PR certification.
+
+## Visible regional captures and CI repair coverage
+
+The regional native fixture now imports the actual RouteMotionProvider,
+PageArrival, RouteReady and InventoryCaptureRegion/Slot path with the production
+presentation lifetime and CSS registry. It explicitly arms a controlled fixture
+transition; only external Next routing hooks and Auth subscription use adapters.
+It proves native capture traversal, not full Link/RSC/Auth navigation. The prior
+unmatched React header remains a negative witness of the renderer limitation.
+All five header enter/exit cases and actual authored body paired, incoming-only
+and outgoing-only viewport cases passed in Chromium, together with that negative
+witness (nine tests, one worker, 512 MiB heap, no application server/database).
+
+The actual CI 390 by 480 Back capture had a header ending below y606 and its
+first body starting at y626. The source body was offscreen; the visible incoming
+list body lacked a snapshot name. The body now uses the same authored capture
+registration as other regions. Browser acceptance checks each visible authored
+root's exact name, old/new opacity endpoints and overlap with the shared title;
+a regression rejects title/header-only evidence when the incoming body is visible.
+Desktop captures with visible bodies on both sides still require the paired body
+crossfade, and the 200 ms effects/250 ms presentation bound is unchanged.
+
+Controller/shared-clock tests cover single-sided fades sharing the title/body
+clock, ownership expiry and unsupported-clock withdrawal. Picker regressions
+cover graphics failure followed by keyboard selection of an unmodeled logical
+candidate and explicit confirmation. Page-order regressions keep Tasks before
+supporting metadata while retaining all metadata and preview content. The full
+application Back/anchor journey, phone geometry, actual context loss with the
+retained quantity draft, complete validation and exact-SHA CI remain integration
+gates; the focused native fixture does not certify them.

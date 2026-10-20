@@ -129,6 +129,9 @@ vi.mock('@/features/configuration/actions', () => ({
 // Intent/callback lifetime only; captured geometry has its own independent suite.
 vi.mock('./shared-title-motion', () => ({ sharedTitleMotion: vi.fn() }));
 vi.mock('./route-content-motion', () => ({ routeContentMotion: vi.fn() }));
+vi.mock('./route-snapshot-clock', () => ({
+  registerRouteSnapshotClock: vi.fn(() => vi.fn()),
+}));
 vi.mock('@/features/labels/queue-model', () => ({
   clearLabelQueueSession: vi.fn(),
 }));
@@ -382,7 +385,7 @@ it('generic snapshot completion before a late inner primary preserves its exact 
 });
 
 it.each(['inner-first', 'outer-first'])(
-  'pairs primary body and title in one capture with %s commits',
+  'unmanaged React fallback pairs primary body and title in one capture with %s commits',
   async (order) => {
     let primaryKey = '/inventory';
     let motion!: ReturnType<typeof useRouteMotion>;
@@ -408,6 +411,9 @@ it.each(['inner-first', 'outer-first'])(
             </RouteReady>
           </PageArrival>
         </>,
+        'staff',
+        'route-fixture',
+        true,
       );
     const page = render(fixture());
     fireEvent.click(screen.getByRole('link', { name: 'Cable row 2' }));
@@ -904,6 +910,7 @@ const view = (
   children: ReactNode,
   actorId = 'staff',
   generation = 'route-fixture',
+  unmanagedBody = false,
 ) => (
   <PrivacyReadinessContext
     value={{
@@ -916,7 +923,13 @@ const view = (
   >
     <RouteMotionProvider key={actorId} actorId={actorId}>
       <Probe />
-      {children}
+      {unmanagedBody ? (
+        <AuxiliaryRouteCaptureContext value={null}>
+          {children}
+        </AuxiliaryRouteCaptureContext>
+      ) : (
+        children
+      )}
     </RouteMotionProvider>
   </PrivacyReadinessContext>
 );
@@ -2420,6 +2433,9 @@ it('native retirement keeps real destination readiness and a fresh app Back titl
           </RouteReady>
         </PageArrival>
       </>,
+      'staff',
+      'route-fixture',
+      true,
     );
   try {
     window.history.replaceState(null, '', '/inventory');
@@ -3686,7 +3702,7 @@ it('shares the measured record heading while disclosure keeps one stable accessi
 });
 
 for (const order of ['inner-first', 'outer-first'] as const) {
-  it(`captures the same exact generic primary arrival across ${order} without a late outer stage`, async () => {
+  it(`unmanaged React fallback captures the same exact generic primary arrival across ${order} without a late outer stage`, async () => {
     vi.spyOn(HTMLElement.prototype, 'getClientRects').mockReturnValue([
       { width: 30, height: 20 },
     ] as unknown as DOMRectList);
@@ -3723,6 +3739,9 @@ for (const order of ['inner-first', 'outer-first'] as const) {
             </RouteReady>
           </PageArrival>
         </>,
+        'staff',
+        'route-fixture',
+        true,
       );
     const page = render(fixture());
     const draft = screen.getByRole('textbox');
@@ -3848,9 +3867,10 @@ it.each(['inner-first', 'outer-first'] as const)(
     expect(armAuxiliary.mock.calls[0][0].admitted()).toBe(true);
     const original = motion.intent!,
       approval = motion.titleArrival!;
-    const source = runtime.boundaries.findLast(
-      (boundary) => boundary.name === original.name + '-content',
+    const source = document.querySelector<HTMLElement>(
+      '[data-route-capture-region="body"]',
     )!;
+    expect(source.style.viewTransitionName).toBe(original.name + '-content');
     expect(approval.sourceKey).toBe(sourceKey);
     expect(motion.arrivalEnabled).toBe(false);
     if (order === 'outer-first') {
@@ -3904,7 +3924,6 @@ it.each(['inner-first', 'outer-first'] as const)(
     try {
       await act(async () => {
         void native.handle.ready.then(() => {
-          source.onShare!({ name: original.name + '-content' });
           title.onShare!({ name: original.name });
         });
         native.update();
@@ -4081,9 +4100,10 @@ it.each(['history', 'location'] as const)(
     const oldTitle = runtime.boundaries.findLast(
       (boundary) => boundary.name === original.name,
     )!;
-    const oldBody = runtime.boundaries.findLast(
-      (boundary) => boundary.name === original.name + '-content',
+    const oldBody = document.querySelector<HTMLElement>(
+      '[data-route-capture-region="body"]',
     )!;
+    expect(oldBody.style.viewTransitionName).toBe(original.name + '-content');
     const link = screen.getByRole('link', {
       name:
         kind === 'history' ? 'Paired source' : 'View Shelf 1A location details',
@@ -4123,7 +4143,6 @@ it.each(['history', 'location'] as const)(
       await act(async () => {
         void native.handle.ready.then(() => {
           oldTitle.onShare!({ name: original.name });
-          oldBody.onShare!({ name: original.name + '-content' });
         });
         native.update();
         native.ready();

@@ -4,6 +4,8 @@ import { armNativeReady, type NativeReadyEvidence } from './native-ready';
 import {
   routePresentationTiming,
   pairedBodyCrossfade,
+  visibleRouteContentFades,
+  type RouteVisibleCapture,
   type RouteEffectTiming,
 } from './route-presentation-timing';
 import { documentRecordRoute } from '../../src/lib/document-route';
@@ -78,6 +80,7 @@ type Proof = {
     old: Capture[];
     next: Capture[];
     layout: { old: RegionLayout[]; next: RegionLayout[] };
+    content: { old: RouteVisibleCapture[]; next: RouteVisibleCapture[] };
     ready: boolean;
     finished: boolean;
     completionMs?: number;
@@ -243,6 +246,22 @@ async function observeMotion(page: Page, unsupported = false) {
         return;
       }
       const native = document.startViewTransition.bind(document);
+      const captureContent = (): RouteVisibleCapture[] =>
+        Array.from(
+          document.querySelectorAll<HTMLElement>('[data-route-capture-region]'),
+        ).map((element) => {
+          const { x, y, width, height } = element.getBoundingClientRect();
+          return {
+            name: getComputedStyle(element).viewTransitionName,
+            region: element.dataset.routeCaptureRegion!,
+            bounds: { x, y, width, height },
+            viewport: { width: innerWidth, height: innerHeight },
+            hidden:
+              !!element.closest('[hidden], [aria-hidden="true"]') ||
+              getComputedStyle(element).display === 'none',
+            canvas: !!element.querySelector('canvas'),
+          };
+        });
       const tracked = new WeakMap<Animation, RouteEffectTiming>();
       const pause = Animation.prototype.pause;
       Animation.prototype.pause = function () {
@@ -277,6 +296,7 @@ async function observeMotion(page: Page, unsupported = false) {
           old: capture(),
           next: [],
           layout: { old: captureLayout(), next: [] },
+          content: { old: captureContent(), next: [] },
           ready: false,
           finished: false,
           effects: [],
@@ -291,6 +311,7 @@ async function observeMotion(page: Page, unsupported = false) {
           await update?.();
           entry.next = capture();
           entry.layout.next = captureLayout();
+          entry.content.next = captureContent();
         };
         const transition = native(
           typeof options === 'function'
@@ -749,6 +770,7 @@ async function completedTitlePair(
             viewport,
           })),
         layout: entry.layout,
+        content: entry.content,
         effects: entry.effects.slice(0, 24),
       })),
     });
@@ -767,9 +789,27 @@ async function completedTitlePair(
     (old) =>
       old.name.startsWith('inventory-title-') && !old.name.includes('-content'),
   )!.name;
-  expect(pairedBodyCrossfade(observed.transitions, titleName), diagnostic).toBe(
-    true,
+  const coverage = visibleRouteContentFades(paired[0], titleName);
+  expect(coverage.checked, diagnostic).toBeGreaterThan(0);
+  expect(coverage.missing, diagnostic).toEqual([]);
+  const bodyVisibleOnBothSides = (['old', 'next'] as const).every((side) =>
+    paired[0].content[side].some(
+      ({ region, hidden, bounds: b, viewport: v }) =>
+        region === 'body' &&
+        !hidden &&
+        b.width > 0 &&
+        b.height > 0 &&
+        b.y < v.height &&
+        b.y + b.height > 0 &&
+        b.x < v.width &&
+        b.x + b.width > 0,
+    ),
   );
+  if (bodyVisibleOnBothSides)
+    expect(
+      pairedBodyCrossfade(observed.transitions, titleName),
+      diagnostic,
+    ).toBe(true);
   return observed;
 }
 

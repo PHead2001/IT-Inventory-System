@@ -295,7 +295,7 @@ async function page(kind: 'asset' | 'quantity' | 'location') {
 }
 
 it.each(['asset', 'quantity'] as const)(
-  '%s pairs the real compact details immediately after the hero, before tasks and maps',
+  '%s places tasks after the complete hero and preserves captured details before maps',
   async (kind) => {
     render(await page(kind));
     const header = document.querySelector(
@@ -310,7 +310,9 @@ it.each(['asset', 'quantity'] as const)(
     const details = screen.getByRole('heading', {
       name: kind === 'asset' ? 'Asset details' : 'Item details',
     });
-    expect(header.nextElementSibling).toBe(body);
+    const tasks = screen.getByRole('region', { name: 'Record tasks' });
+    expect(header.nextElementSibling).toBe(tasks);
+    expect(tasks.nextElementSibling).toBe(body);
     expect(body).toContainElement(details);
     expect(body).toHaveTextContent(state.description);
     expect(body).toHaveTextContent('Manufacturer');
@@ -318,10 +320,9 @@ it.each(['asset', 'quantity'] as const)(
     expect(
       screen.queryByRole('button', { name: 'Show full description' }),
     ).toBeNull();
-    const tasks = screen.getByRole('region', { name: 'Record tasks' });
     const preview = screen.getByRole('region', { name: 'Storage preview' });
     expect(
-      body.compareDocumentPosition(tasks) & Node.DOCUMENT_POSITION_FOLLOWING,
+      tasks.compareDocumentPosition(body) & Node.DOCUMENT_POSITION_FOLLOWING,
     ).toBeTruthy();
     expect(
       body.compareDocumentPosition(preview) & Node.DOCUMENT_POSITION_FOLLOWING,

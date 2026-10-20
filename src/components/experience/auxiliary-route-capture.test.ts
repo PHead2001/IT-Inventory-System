@@ -6,8 +6,12 @@ import {
 import { createRouteCaptureCompletion } from './route-capture-completion';
 import { createRoutePresentationLifetime } from './route-presentation-lifetime';
 import { routeContentMotion } from './route-content-motion';
+import { registerRouteSnapshotClock } from './route-snapshot-clock';
 
 vi.mock('./route-content-motion', () => ({ routeContentMotion: vi.fn() }));
+vi.mock('./route-snapshot-clock', () => ({
+  registerRouteSnapshotClock: vi.fn(() => vi.fn()),
+}));
 const flush = async () => {
   for (let n = 0; n < 6; n++) await Promise.resolve();
 };
@@ -161,27 +165,36 @@ it('restores names and releases the pinned source lease while preserving an orig
   expect(release).toHaveBeenCalledOnce();
 });
 
-it('pins the outgoing name before native capture, keeps it through delayed commit/updateCallbackDone, and clears only after an incoming ref or ready', async () => {
-  const old = participant('/source');
-  const unregister = controller.register(old);
-  arm();
-  expect(old.root.style.viewTransitionName).toBe('');
-  const native = document.startViewTransition();
-  expect(native).toBe(handles[0].value);
-  expect(old.root.style.viewTransitionName).toBe('route-owned-header');
-  unregister(); // Ref cleanup cannot release the captured name or source lease.
-  handles[0].update.resolve();
-  await flush();
-  expect(old.root.style.viewTransitionName).toBe('route-owned-header');
-  const next = participant('/destination');
-  controller.register(next);
-  expect(old.root.style.viewTransitionName).toBe('');
-  expect(next.root.style.viewTransitionName).toBe('route-owned-header');
-  handles[0].ready.resolve();
-  await flush();
-  expect(next.root.style.viewTransitionName).toBe('');
-  expect(next.root.style.getPropertyValue('view-transition-class')).toBe('');
-});
+it.each(['header', 'body'] as const)(
+  'pins one %s name before native capture, keeps it through delayed commit/updateCallbackDone, and clears only after an incoming ref or ready',
+  async (region) => {
+    const name = region === 'body' ? 'route-owned' : 'route-owned-header';
+    const old = participant('/source', region);
+    const unregister = controller.register(old);
+    arm();
+    expect(old.root.style.viewTransitionName).toBe('');
+    const native = document.startViewTransition();
+    expect(native).toBe(handles[0].value);
+    expect(old.root.style.viewTransitionName).toBe(name);
+    unregister(); // Ref cleanup cannot release the captured name or source lease.
+    handles[0].update.resolve();
+    await flush();
+    expect(old.root.style.viewTransitionName).toBe(name);
+    const next = participant('/destination', region);
+    controller.register(next);
+    expect(old.root.style.viewTransitionName).toBe('');
+    expect(next.root.style.viewTransitionName).toBe(name);
+    expect(
+      [old, next].filter(
+        (entry) => entry.root.style.viewTransitionName === name,
+      ),
+    ).toHaveLength(1);
+    handles[0].ready.resolve();
+    await flush();
+    expect(next.root.style.viewTransitionName).toBe('');
+    expect(next.root.style.getPropertyValue('view-transition-class')).toBe('');
+  },
+);
 
 it('never assigns offscreen/hidden/canvas ancestors and refuses capture-time visible duplicates', () => {
   const offscreen = participant(
@@ -237,6 +250,11 @@ it('an auxiliary-only visible capture enters the actual-name receipt before seal
   handles[0].ready.resolve();
   await flush();
   expect(participate).toHaveBeenCalledWith('route-owned-header');
+  expect(registerRouteSnapshotClock).toHaveBeenCalledWith(
+    effects,
+    expect.any(Function),
+    expect.any(Function),
+  );
   expect(receipts.available(approval)).toBe(false);
   expect(missing).not.toHaveBeenCalled();
   expect(complete).not.toHaveBeenCalled();
@@ -287,6 +305,20 @@ it('returned-handle ready registration joins React callbacks before receipt seal
   await flush();
   expect(complete).toHaveBeenCalledOnce();
   expect(missing).not.toHaveBeenCalled();
+});
+
+it('withdraws a single-sided snapshot when its presentation clock cannot register', async () => {
+  controller.register(participant('/source'));
+  arm();
+  document.startViewTransition();
+  effects = [effect('route-owned-header', 'old')];
+  vi.mocked(registerRouteSnapshotClock).mockImplementationOnce(() => {
+    throw new Error('Unsupported native clock');
+  });
+  handles[0].ready.resolve();
+  await flush();
+  expect(handles[0].value.skipTransition).toHaveBeenCalledOnce();
+  expect(participate).not.toHaveBeenCalled();
 });
 
 it.each(['finished', 'rejected', 'withdrawn'] as const)(
