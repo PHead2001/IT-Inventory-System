@@ -1068,6 +1068,10 @@ beforeEach(() => {
     writable: true,
     value: vi.fn(),
   });
+  Object.defineProperty(document, 'activeViewTransition', {
+    configurable: true,
+    value: null,
+  });
   document.documentElement.dataset.motion = 'full';
   localStorage.removeItem('it-inventory-reduce-motion');
 });
@@ -1078,6 +1082,7 @@ afterEach(() => {
   Reflect.deleteProperty(window, 'navigation');
   vi.unstubAllGlobals();
   delete (document as Partial<Document>).startViewTransition;
+  Reflect.deleteProperty(document, 'activeViewTransition');
   localStorage.removeItem('it-inventory-reduce-motion');
 });
 
@@ -3353,19 +3358,22 @@ it('local reduction cancels in-flight pseudo-element animations and disables lat
   delete (document as Partial<Document>).getAnimations;
 });
 
-it('unsupported browsers preserve ordinary links instantly', () => {
-  delete (document as Partial<Document>).startViewTransition;
-  render(view(<List />));
-  expect(screen.getByText('instant')).toBeVisible();
-  fireEvent.click(screen.getByRole('link', { name: 'Cable row 2' }));
-  expect(screen.getByRole('link', { name: 'Cable row 2' })).toHaveAttribute(
-    'href',
-    detailPath,
-  );
-  expect(screen.getByRole('link', { name: 'Cable row 2' })).not.toHaveAttribute(
-    'data-test-transition-name',
-  );
-});
+it.each(['startViewTransition', 'activeViewTransition'])(
+  'browsers without %s preserve ordinary links instantly',
+  (capability) => {
+    Reflect.deleteProperty(document, capability);
+    render(view(<List />));
+    expect(screen.getByText('instant')).toBeVisible();
+    fireEvent.click(screen.getByRole('link', { name: 'Cable row 2' }));
+    expect(screen.getByRole('link', { name: 'Cable row 2' })).toHaveAttribute(
+      'href',
+      detailPath,
+    );
+    expect(
+      screen.getByRole('link', { name: 'Cable row 2' }),
+    ).not.toHaveAttribute('data-test-transition-name');
+  },
+);
 
 it('finishes streaming intents, keeps only a valid exact app Back origin, and never rearms invalidated state', () => {
   const state = createRouteMotionState();

@@ -560,6 +560,10 @@ beforeEach(() => {
     writable: true,
     value: vi.fn(),
   });
+  Object.defineProperty(document, 'activeViewTransition', {
+    configurable: true,
+    value: null,
+  });
   vi.spyOn(HTMLElement.prototype, 'getClientRects').mockReturnValue([
     { width: 30, height: 20 },
   ] as unknown as DOMRectList);
@@ -569,6 +573,7 @@ afterEach(() => {
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
   Reflect.deleteProperty(document, 'startViewTransition');
+  Reflect.deleteProperty(document, 'activeViewTransition');
   history.replaceState(null, '', '/');
 });
 
@@ -1075,7 +1080,12 @@ it('provider retirement resolves only its owned gate and late Auth callbacks can
   expect(screen.queryByRole('heading')).toBeNull();
 });
 
-it.each(['reduced', 'unsupported', 'unpaired'] as const)(
+it.each([
+  'reduced',
+  'unsupported',
+  'unsupported clock identity',
+  'unpaired',
+] as const)(
   'shows an ordinary skeleton for %s navigation without allocating a paired wait',
   async (mode) => {
     const work = deferred();
@@ -1089,6 +1099,8 @@ it.each(['reduced', 'unsupported', 'unpaired'] as const)(
       });
     } else if (mode === 'unsupported')
       Reflect.deleteProperty(document, 'startViewTransition');
+    else if (mode === 'unsupported clock identity')
+      Reflect.deleteProperty(document, 'activeViewTransition');
     if (mode === 'unpaired') {
       act(() => {
         pending.navigation?.(detail);

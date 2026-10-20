@@ -518,3 +518,24 @@ and authored-harness checks, not browser execution or full canonical typecheck.
 All 76 rows and dispositions remain unchanged. Exact merged-SHA CI/review,
 hosted populated native/WebGL proof, broader motion/theme acceptance and the
 existing database/integrated-staging prerequisites remain pending.
+
+## PR54 title-identity and native-capability review repairs
+
+The local review repair based on `9f170ef4` treats a React-omitted captured title
+transform as identity, independently of the destination translation. Existing
+omitted dimension fallback remains; explicit null/invalid transforms still skip
+the snapshot. Shared route presentation and paired loading now use the same
+capability gate, requiring `activeViewTransition` support as well as the native
+start API and route-content selectors. Idle `null` remains supported; absent
+capability preserves ordinary instant links and loading without a paired wait.
+
+Five focused cases failed before the fixes and passed afterward. The complete
+affected source batch passed **257 tests across 11 suites**, using a 512 MiB Node
+heap and one worker, including strict installed-DOM geometry/clock types,
+privacy recovery, native traversal, application-return and observer regressions.
+Supported-browser fixtures now expose the idle capability explicitly; finishing
+a mocked transition restores `null` instead of pretending the API disappeared.
+These are local source checks, not new browser or exact-final-SHA proof. Earlier
+hosted evidence remains scoped to `9f170ef4`. All 76 acceptance rows and statuses,
+broader visual/theme/hosted requirements and remaining certification gates stay
+unchanged.
