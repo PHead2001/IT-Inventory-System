@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen } from '@testing-library/react';
 import { beforeEach, expect, it, vi } from 'vitest';
 import { DetailTasks } from './detail-tasks';
 import { createAuxiliaryRouteCapture } from '@/components/experience/auxiliary-route-capture';
@@ -7,6 +7,7 @@ import { InventoryCaptureRegionsContext } from '@/components/experience/inventor
 import { RouteContentIdentityContext } from '@/components/experience/route-content-identity';
 import { RoutePresentationSourceContext } from '@/components/experience/route-presentation-source';
 import type { MetadataForm } from '@/features/metadata/contracts';
+import { holdTransitionCapture } from '../../../../tests/helpers/transition-capture';
 
 const actions = vi.hoisted(() => ({ submit: vi.fn() }));
 vi.mock('next/navigation', () => ({ useRouter: () => ({ refresh: vi.fn() }) }));
@@ -90,7 +91,7 @@ it.each([
   },
 ] as const)(
   'registers the real nested $region form inside a stable DOM capture root',
-  ({ region, launch, formName }) => {
+  async ({ region, launch, formName }) => {
     const registry = createAuxiliaryRouteCapture();
     const register = vi.spyOn(registry, 'register');
     const source = Symbol();
@@ -156,6 +157,39 @@ it.each([
         ? screen.getByRole('textbox', { name: 'Name' })
         : screen.getByRole('textbox', { name: 'Reason (required)' });
     fireEvent.change(input, { target: { value: 'Retained task draft' } });
+    const heading = screen.getByRole('heading', { name: launch, exact: true });
+    const headingRoot = heading.parentElement;
+    const capture = holdTransitionCapture();
+    const nativeFocus = heading.focus.bind(heading);
+    const inertAttempts: boolean[] = [];
+    const focus = vi.spyOn(heading, 'focus').mockImplementation(() => {
+      const inert = !!heading.closest('[inert]');
+      inertAttempts.push(inert);
+      if (!inert) nativeFocus();
+    });
+    try {
+      fireEvent.click(screen.getByRole('button', { name: 'Close task' }));
+      fireEvent.click(
+        screen.getByRole('button', { name: 'Stay with this task' }),
+      );
+      expect(screen.queryByRole('alertdialog')).toBeNull();
+      expect(focus).not.toHaveBeenCalled();
+      expect(heading.parentElement).toBe(headingRoot);
+      expect(headingRoot).toHaveAttribute(
+        'data-route-capture-region',
+        'task-heading',
+      );
+      expect(actualForm.parentElement).toBe(root);
+      await act(capture.release);
+      expect(heading).toHaveFocus();
+      expect(inertAttempts).toEqual([false]);
+      expect(screen.getByRole('form', { name: formName })).toBe(actualForm);
+      expect(input).toHaveValue('Retained task draft');
+    } finally {
+      await act(capture.release);
+      capture.dispose();
+      focus.mockRestore();
+    }
     page.rerender(fixture(false));
     expect(participant!.current()).toBe(false);
     expect(screen.getByRole('form', { name: formName })).toBe(actualForm);
