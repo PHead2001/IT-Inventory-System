@@ -14,10 +14,15 @@ if (Test-Path -LiteralPath $resultPath) { throw 'Probe result already exists.' }
 $args = @('-o', 'BatchMode=yes', '-o', 'ConnectTimeout=5', '-o', 'ServerAliveInterval=15', '-o', 'ServerAliveCountMax=2',
     '-o', 'StrictHostKeyChecking=accept-new', '-o', "UserKnownHostsFile=$InstancePath\known_hosts", '-i', "$InstancePath\id_ed25519")
 $success = $false
-$listener = [Net.Sockets.TcpListener]::new([ipaddress]::Parse('172.30.240.1'), 49581)
+$gateway = [ipaddress]::Parse('172.30.240.1')
+$listener = [Net.Sockets.TcpListener]::new($gateway, 0)
 try {
     $listener.Start()
-    $code = Invoke-RunnerNative 'ssh.exe' ($args + @('runner@172.30.240.2', 'timeout 4 bash -c "echo probe >/dev/tcp/172.30.240.1/49581" >/dev/null 2>&1; test $? -ne 0')) -TimeoutSeconds 12
+    $endpoint = $listener.LocalEndpoint
+    if ($endpoint -isnot [Net.IPEndPoint] -or -not $endpoint.Address.Equals($gateway) -or $endpoint.Port -lt 1 -or $endpoint.Port -gt 65535) { throw 'Isolation listener endpoint readback differs.' }
+    $port = $endpoint.Port
+    $command = 'timeout 4 bash -c "echo probe >/dev/tcp/{0}/{1}" >/dev/null 2>&1; test $? -ne 0' -f $gateway.ToString(), $port
+    $code = Invoke-RunnerNative 'ssh.exe' ($args + @('runner@172.30.240.2', $command)) -TimeoutSeconds 12
     if ($code -eq 0 -and -not $listener.Pending()) {
         $success = (Invoke-RunnerNative 'ssh.exe' ($args + @('runner@172.30.240.2', 'curl --head --fail --silent --show-error --max-time 10 https://api.github.com >/dev/null')) -TimeoutSeconds 12) -eq 0
     }
