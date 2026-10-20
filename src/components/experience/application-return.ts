@@ -235,8 +235,9 @@ export function createApplicationReturn(
         if (
           destination.origin === location.origin &&
           destination.pathname === source.detailPath &&
-          recordDetailReturnPath(destination.searchParams.get('returnTo')) ===
-            returnHref(source) &&
+          exact(
+            recordDetailReturnPath(destination.searchParams.get('returnTo')),
+          ) === returnHref(source) &&
           visibleSource(source)
         )
           origin = structuredClone(source);
