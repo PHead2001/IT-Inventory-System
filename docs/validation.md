@@ -126,7 +126,22 @@ POST route and TaskWorkspace. Real-provider tests distinguish same-binding
 privacy pause/resume from revocation or binding drift, accepted-navigation serial
 supersession, native history/terminal/unmount retirement, authoritative primary
 focus and the explicit consumed-task handoff. Focus/readiness observers must not
-settle another owner's pending work. The additive database search requires the
+settle another owner's pending work. The launcher keeps an authored 18 px glyph
+slot while access is checking; its polite checking status stays outside header
+flow. Component coverage verifies that slot and the asset/quantity sequence of
+two accepted task consumptions followed by native same-record task re-entry.
+This does not certify real Next/browser ordering or zero layout shift.
+The native re-entry, first inventory-row viewport and cold-title browser checks
+emit bounded failure-only geometry; cold-title failures also report at most
+eight layout-shift entries with four fixed-identity sources each. All shifts
+still contribute to the unchanged zero-CLS assertions. Diagnostics omit DOM
+text, raw URLs, arbitrary attributes and history/auth state, and rethrow the
+original assertion. CI run `39328708840` at `608c0e4b` failed seven browser cases;
+artifact upload hit the storage quota. The header status is a source-confirmed
+layout contributor, not a proven explanation of those CLS failures. Native
+timing, access-denial snapshot readiness, actual Next task re-entry and viewport
+placement remain browser acceptance gaps until rerun on the integrated candidate.
+The additive database search requires the
 full canonical database gate, including pgTAP authorization/lifecycle/ranking
 fixtures and canonical type regeneration. Under the default planner and caller
 RLS, all nine exact deployed full-projection fuzzy arms cover selective, absent,

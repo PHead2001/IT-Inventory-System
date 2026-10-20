@@ -1,5 +1,6 @@
 import { expect, test } from '@playwright/test';
 import fixture from '../fixtures/auth.json' with { type: 'json' };
+import { withFailureGeometry } from './failure-geometry';
 import {
   acceptanceFixtures,
   acceptanceLogin,
@@ -139,9 +140,11 @@ test('palette Move opens the established review task and consumes its intent onc
         url.pathname + url.search + url.hash,
       );
     });
-    await expect(
-      tasks.getByRole('heading', { name: 'Move asset', exact: true }),
-    ).toBeFocused();
+    await withFailureGeometry(page, 'native-task-reentry', async () => {
+      await expect(
+        tasks.getByRole('heading', { name: 'Move asset', exact: true }),
+      ).toBeFocused();
+    });
     await expect(page).not.toHaveURL(/task=/);
     expect(new URL(page.url()).searchParams.get('returnTo')).toBe('/inventory');
     expect(new URL(page.url()).hash).toBe('#tasks');

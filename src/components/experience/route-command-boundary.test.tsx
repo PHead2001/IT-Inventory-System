@@ -974,6 +974,59 @@ it.each(['asset', 'quantity'] as const)(
   },
 );
 
+it.each(['asset', 'quantity'] as const)(
+  'admits a native %s task after two accepted application task consumptions on the retained task-bearing server anchor',
+  async (kind) => {
+    const path =
+      '/inventory/' + (kind === 'asset' ? 'assets' : 'quantity') + '/record';
+    const task = kind + '_move';
+    const anchor = path + '?task=' + task;
+    runtime.pathname = path;
+    runtime.query = '';
+    history.replaceState({}, '', path);
+    const view = render(<NativeTaskPrimary kind={kind} workspace />);
+    for (let repeat = 0; repeat < 2; repeat++) {
+      accept(anchor);
+      runtime.query = 'task=' + task;
+      history.replaceState({}, '', anchor);
+      view.rerender(
+        <NativeTaskPrimary kind={kind} workspace anchor={anchor} />,
+      );
+      await act(async () => {});
+      expect(
+        screen.getByRole('heading', {
+          name: kind === 'asset' ? 'Move asset' : 'Move stock',
+        }),
+      ).toHaveFocus();
+      expect(location.search).toBe('');
+      runtime.query = '';
+      view.rerender(
+        <NativeTaskPrimary kind={kind} workspace anchor={anchor} />,
+      );
+      await act(async () => {});
+      await act(async () =>
+        screen.getByRole('button', { name: 'Close task' }).click(),
+      );
+    }
+    runtime.query = 'returnTo=%2Finventory&task=' + task;
+    history.replaceState(
+      { user: 'retained' },
+      '',
+      path + '?' + runtime.query + '#tasks',
+    );
+    view.rerender(<NativeTaskPrimary kind={kind} workspace anchor={anchor} />);
+    await act(async () => {});
+    expect(
+      screen.getByRole('heading', {
+        name: kind === 'asset' ? 'Move asset' : 'Move stock',
+      }),
+    ).toHaveFocus();
+    expect(location.search).toBe('?returnTo=%2Finventory');
+    expect(location.hash).toBe('#tasks');
+    expect(history.state).toEqual({ user: 'retained' });
+  },
+);
+
 async function acceptedBusyNativePrimary() {
   const path = '/inventory/assets/record';
   runtime.pathname = path;

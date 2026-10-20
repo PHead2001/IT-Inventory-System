@@ -4,6 +4,7 @@ import { expect, test, type Page, type TestInfo } from '@playwright/test';
 import fixture from '../fixtures/auth.json' with { type: 'json' };
 import { setLocalReducedMotion } from './motion-settings';
 import { writeFileSync } from 'node:fs';
+import { withFailureGeometry } from './failure-geometry';
 
 async function signIn(page: Page) {
   await page.goto('/login');
@@ -419,7 +420,9 @@ test('representative shell and auth surfaces render at desktop and phone sizes w
       .first();
     // Retain the unfiltered acceptance check as well as the deterministic case.
     await page.setViewportSize({ width: 502, height: 757 });
-    await expect(firstName).toBeInViewport();
+    await withFailureGeometry(page, 'inventory-first-row', async () => {
+      await expect(firstName).toBeInViewport();
+    });
     await page.screenshot({
       path: testInfo.outputPath('inventory-phone-502-global-viewport.png'),
     });

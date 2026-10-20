@@ -29,6 +29,7 @@ import {
 import { motion } from 'motion/react';
 import {
   Search,
+  LoaderCircle,
   Keyboard,
   X,
   Package,
@@ -118,7 +119,11 @@ export function CommandButtons() {
         onClick={(event) => context?.open('palette', event.currentTarget)}
         aria-label="Search and commands"
       >
-        <Search size={18} aria-hidden="true" />
+        {available ? (
+          <Search size={18} aria-hidden="true" />
+        ) : (
+          <LoaderCircle size={18} aria-hidden="true" />
+        )}
         <span className="hidden sm:inline">Search</span>
         {context?.enabled && (
           <kbd className="hidden text-xs lg:inline">Ctrl/⌘ K</kbd>
@@ -135,7 +140,7 @@ export function CommandButtons() {
         <Keyboard size={18} aria-hidden="true" />
       </Button>
       {!available && (
-        <span id={statusId} role="status" className="experience-muted text-xs">
+        <span id={statusId} role="status" className="sr-only">
           Checking access.{' '}
           <span className="sr-only">
             Search and help are temporarily unavailable.

@@ -838,6 +838,24 @@ it.each(['privacy', 'assignment'] as const)(
     expect(launcher).not.toHaveFocus();
   },
 );
+it('keeps checking and ready launchers at the same authored glyph size without adding status text to header flow', async () => {
+  const view = render(<Workspace fresh={false} />);
+  const search = screen.getByRole('button', { name: 'Search and commands' });
+  const checking = search.querySelector('svg')!;
+  expect(checking).toHaveAttribute('width', '18');
+  expect(checking).toHaveAttribute('height', '18');
+  expect(checking).toHaveAttribute('aria-hidden', 'true');
+  expect(checking).toHaveClass('lucide-loader-circle');
+  expect(screen.getByRole('status')).toHaveClass('sr-only');
+  view.rerender(<Workspace />);
+  await act(async () => {});
+  const ready = search.querySelector('svg')!;
+  expect(ready).toHaveAttribute('width', checking.getAttribute('width'));
+  expect(ready).toHaveAttribute('height', checking.getAttribute('height'));
+  expect(ready).toHaveClass('lucide-search');
+  expect(search).toBeEnabled();
+  expect(screen.queryByRole('status')).toBeNull();
+});
 it('disables Search and Help until fresh authority returns without queuing an opening or changing a draft', async () => {
   const view = render(<Workspace fresh={false} />);
   const draft = screen.getByLabelText('Retained draft');
