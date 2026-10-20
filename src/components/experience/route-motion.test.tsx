@@ -1087,8 +1087,8 @@ afterEach(() => {
   localStorage.removeItem('it-inventory-reduce-motion');
 });
 
-it.each(['reduced', 'full'] as const)(
-  '%s application Back replays its row anchor after a consumed fallback hash without changing BODY focus',
+it.each(['reduced', 'unsupported', 'full'] as const)(
+  '%s application Back restores after the router ancestor scroll commit without changing BODY focus',
   async (mode) => {
     const scope = '/inventory?q=cable&type=quantity';
     const returned = scope + '#inventory-row-2';
@@ -1097,58 +1097,74 @@ it.each(['reduced', 'full'] as const)(
     const previous = location.href;
     const originalScroll = HTMLElement.prototype.scrollIntoView;
     const native = mode === 'full' ? auxiliaryNativeFixture() : null;
-    const scroll = vi.fn();
+    let scrollY = 0;
+    const scroll = vi.fn(() => {
+      scrollY = 234;
+    });
     HTMLElement.prototype.scrollIntoView = scroll;
     const geometry = vi
       .spyOn(HTMLElement.prototype, 'getClientRects')
       .mockReturnValue([{ width: 300, height: 200 }] as unknown as DOMRectList);
     if (mode === 'reduced')
       localStorage.setItem('it-inventory-reduce-motion', 'true');
+    else if (mode === 'unsupported')
+      Reflect.deleteProperty(document, 'activeViewTransition');
     let phase: 'list' | 'detail' | 'fallback' = 'list';
+    let returning = false;
+    function RouterScrollCommit({ children }: { children: ReactNode }) {
+      // Next's layout-router scroll handler is an ancestor layout effect (or
+      // componentDidUpdate). React runs it after the primary's child effects.
+      useLayoutEffect(() => {
+        if (returning && phase === 'list') scrollY = 0;
+      });
+      return children;
+    }
     const fixture = () =>
       view(
-        phase === 'fallback' ? (
-          <p role="status">Loading results</p>
-        ) : (
-          <RouteReady
-            actorId="staff"
-            routeKey={
-              phase === 'list'
-                ? scope
-                : routeKey(
-                    detailPath,
-                    new URL(destination, location.origin).searchParams,
-                  )
-            }
-            contentIdentity={phase}
-          >
-            {phase === 'list' ? (
-              <ul>
-                <li id="inventory-row-2">
-                  <InventoryRecordLink
-                    record={record}
-                    holding={initiatingHolding}
-                    returnTo={returned}
-                    href={destination}
-                  >
-                    Original result
-                  </InventoryRecordLink>
-                </li>
-              </ul>
-            ) : (
-              <InventoryBackLink record={record} href={returned}>
-                Back to results
-              </InventoryBackLink>
-            )}
-          </RouteReady>
-        ),
+        <RouterScrollCommit>
+          {phase === 'fallback' ? (
+            <p role="status">Loading results</p>
+          ) : (
+            <RouteReady
+              actorId="staff"
+              routeKey={
+                phase === 'list'
+                  ? scope
+                  : routeKey(
+                      detailPath,
+                      new URL(destination, location.origin).searchParams,
+                    )
+              }
+              contentIdentity={phase}
+            >
+              {phase === 'list' ? (
+                <ul>
+                  <li id="inventory-row-2">
+                    <InventoryRecordLink
+                      record={record}
+                      holding={initiatingHolding}
+                      returnTo={returned}
+                      href={destination}
+                    >
+                      Original result
+                    </InventoryRecordLink>
+                  </li>
+                </ul>
+              ) : (
+                <InventoryBackLink record={record} href={returned}>
+                  Back to results
+                </InventoryBackLink>
+              )}
+            </RouteReady>
+          )}
+        </RouterScrollCommit>,
       );
     try {
       history.replaceState(null, '', scope);
       runtime.query = 'q=cable&type=quantity';
       const page = render(fixture());
       expect(
-        screen.getByText(mode === 'reduced' ? 'instant' : 'enabled'),
+        screen.getByText(mode === 'full' ? 'enabled' : 'instant'),
       ).toBeVisible();
       fireEvent.click(screen.getByRole('link', { name: 'Original result' }));
       history.replaceState(null, '', destination);
@@ -1168,6 +1184,7 @@ it.each(['reduced', 'full'] as const)(
       page.rerender(fixture());
       expect(scroll).not.toHaveBeenCalled();
       expect(document.activeElement).toBe(document.body);
+      returning = true;
       phase = 'list';
       page.rerender(fixture());
       if (native) {
@@ -1180,6 +1197,10 @@ it.each(['reduced', 'full'] as const)(
           native.finished();
         });
       }
+      await act(async () => {
+        await Promise.resolve();
+      });
+      expect(scrollY).toBe(234);
       expect(scroll).toHaveBeenCalledExactlyOnceWith({
         behavior: 'instant',
         block: 'start',
@@ -1189,6 +1210,7 @@ it.each(['reduced', 'full'] as const)(
         document.getElementById('inventory-row-2'),
       );
       expect(document.activeElement).toBe(document.body);
+      returning = false;
       page.rerender(fixture());
       expect(scroll).toHaveBeenCalledTimes(1);
     } finally {
