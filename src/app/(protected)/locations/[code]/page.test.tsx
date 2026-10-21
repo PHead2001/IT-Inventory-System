@@ -86,15 +86,12 @@ it('retains the validated browser origin through status, pagination and child de
   // The child card and all 25 descendant holdings share an accessible
   // location name. Only the child card retains the browser return scope.
   const childName = 'IT Office / General Storage / Unsorted (ITO-GENERAL)';
-  expect(
-    screen.getAllByRole('link', { name: childName, exact: true }),
-  ).toHaveLength(26);
+  expect(screen.getAllByRole('link', { name: childName })).toHaveLength(26);
   const childSection = screen
-    .getByRole('heading', { name: 'Child locations', exact: true })
+    .getByRole('heading', { name: 'Child locations' })
     .closest('section')!;
   const childLink = within(childSection).getByRole('link', {
     name: childName,
-    exact: true,
   });
   const navigation = [
     screen.getByRole('link', { name: 'Active only' }),
