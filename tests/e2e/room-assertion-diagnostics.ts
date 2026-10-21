@@ -1,5 +1,5 @@
 import type { Locator, Page } from '@playwright/test';
-import room from '../../data/rooms/it-closet.json';
+import room from '../../data/rooms/it-closet.json' with { type: 'json' };
 
 const identities = new Set<string>([
   'hover-tooltip',
