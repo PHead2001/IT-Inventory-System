@@ -15,6 +15,11 @@ import {
   type RoomLayoutWitnessStage,
   type RoomPointerAttempt,
 } from './room-layout-diagnostics';
+import { roomFailureMetadata } from './room-failure-metadata';
+import {
+  uncoveredRoomClickWitnesses,
+  roomClickOutsideRest,
+} from './room-click-witness';
 import {
   observeRoomScene,
   captureRoomWitness,
@@ -517,6 +522,14 @@ test.afterEach(async ({}, testInfo) => {
   const page = roomPageByTest.get(testInfo);
   roomProgressByTest.delete(testInfo);
   roomPageByTest.delete(testInfo);
+  if (testInfo.status !== testInfo.expectedStatus)
+    console.info(
+      'ROOM_FAILURE_ERROR ' +
+        JSON.stringify({
+          ...roomFailureMetadata(testInfo),
+          progress: progress ?? null,
+        }),
+    );
   if (!progress || !page || testInfo.status === testInfo.expectedStatus) return;
 
   let timer: ReturnType<typeof setTimeout> | undefined;
@@ -631,9 +644,30 @@ test('scene effects retain actual surface ownership and stop drawing after settl
   const beforeCamera = await captureRoomEffects(page);
   await page.getByRole('button', { name: 'Zoom in', exact: true }).click();
   await settledLabels(page);
+  const more = page.getByRole('button', {
+    name: 'More map controls',
+    exact: true,
+  });
+  markRoomProgress(testInfo, {
+    journey: 'effects',
+    stage: 'open item-count controls',
+    code: 'ITC-RED',
+  });
+  await more.click();
+  markRoomProgress(testInfo, {
+    journey: 'effects',
+    stage: 'toggle item counts',
+    code: 'ITC-RED',
+  });
   await page
     .getByRole('button', { name: 'Show item counts', exact: true })
     .click();
+  await more.click();
+  markRoomProgress(testInfo, {
+    journey: 'effects',
+    stage: 'settle item-count labels',
+    code: 'ITC-RED',
+  });
   await settledLabels(page);
   expect((await captureRoomEffects(page)).contactCaptures).toBe(
     beforeCamera.contactCaptures,
@@ -857,14 +891,17 @@ test('spatial reveal endpoints retain actual picking and labels across oblique, 
       for (const [id, offset] of Object.entries(presentation.offsets))
         if (id !== expected.id) near(offset, [0, 0, 0]);
       const snapshot = await captureRoomWitness(page);
-      const witnesses = await uncoveredRoomWitnesses(
-        page,
-        roomVisibilityWitnesses(snapshot),
-      );
-      const points = roomVisibilityWitnesses(snapshot).get(code) ?? [];
+      const physical = roomVisibilityWitnesses(snapshot);
+      const points = physical.get(code) ?? [];
       // This assertion records camera poses with a physically exposed selected face.
       if (!points.length) continue;
       exercised.add(code);
+      const witnesses = await uncoveredRoomClickWitnesses(
+        page,
+        snapshot,
+        await captureRoomSelectionWitness(page),
+        physical,
+      );
       markRoomProgress(testInfo, {
         journey: 'spatial-reveal',
         stage: 'verify label and complete pointer pick',
@@ -891,21 +928,19 @@ test('spatial reveal endpoints retain actual picking and labels across oblique, 
           `[data-room-label-code="${code}"][data-label-suppressed="false"]`,
         ),
       ).toBeVisible();
-      const first = witnesses.get(code);
+      const first = witnesses.get(code)?.[0];
       expect(first, `uncovered selected face at ${pose}: ${code}`).toBeTruthy();
-      let point = first!;
-      for (const candidate of points) {
-        if (await pointerRayIntersectsBinding(page, candidate, code)) continue;
-        if (
-          await page.evaluate(
-            ({ x, y }) => document.elementFromPoint(x, y)?.tagName === 'CANVAS',
-            candidate,
-          )
-        ) {
-          outsideRest.add(code);
-          point = candidate;
-          break;
-        }
+      let point = first!.client;
+      const resting = bindingBounds.find(
+        (binding) => binding.code === code && binding.primary,
+      );
+      expect(resting, `primary room geometry for ${code}`).toBeTruthy();
+      for (const candidate of witnesses.get(code) ?? []) {
+        if (!roomClickOutsideRest(snapshot, candidate, resting!.bounds))
+          continue;
+        outsideRest.add(code);
+        point = candidate.client;
+        break;
       }
       await page.mouse.move(point.x, point.y);
       await expect(canvas).toHaveAttribute('data-hover-visible-code', code);
