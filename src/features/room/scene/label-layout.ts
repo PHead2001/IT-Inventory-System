@@ -151,10 +151,10 @@ function preferredLayout(
     );
   const ordered = [...labels].sort(
     (a, b) =>
-      Number(b.focused) - Number(a.focused) ||
-      Number(b.hovered) - Number(a.hovered) ||
+      Number(b.focused ?? false) - Number(a.focused ?? false) ||
+      Number(b.hovered ?? false) - Number(a.hovered ?? false) ||
       Number(b.selected) - Number(a.selected) ||
-      Number(b.mandatory) - Number(a.mandatory) ||
+      Number(b.mandatory ?? false) - Number(a.mandatory ?? false) ||
       (b.priority ?? Number(b.selected) * 3) -
         (a.priority ?? Number(a.selected) * 3) ||
       (a.locationCode ?? a.id).localeCompare(b.locationCode ?? b.id) ||
@@ -829,10 +829,10 @@ export function layoutLabelsDetailed(
   checkpoint();
   const ordered = [...labels].sort(
     (a, b) =>
-      Number(b.focused) - Number(a.focused) ||
-      Number(b.hovered) - Number(a.hovered) ||
+      Number(b.focused ?? false) - Number(a.focused ?? false) ||
+      Number(b.hovered ?? false) - Number(a.hovered ?? false) ||
       Number(b.selected) - Number(a.selected) ||
-      Number(b.mandatory) - Number(a.mandatory) ||
+      Number(b.mandatory ?? false) - Number(a.mandatory ?? false) ||
       (b.priority ?? Number(b.selected) * 3) -
         (a.priority ?? Number(a.selected) * 3) ||
       logicalKey(a).localeCompare(logicalKey(b)) ||

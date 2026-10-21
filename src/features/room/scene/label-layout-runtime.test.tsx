@@ -71,6 +71,58 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 describe('unified room label registry', () => {
+  it('keeps the selected mandatory anchor while retaining focused and occluded-anchor tooltip fallback', () => {
+    const surface = document.createElement('div'),
+      host = document.createElement('div'),
+      canvas = document.createElement('canvas');
+    surface.dataset.roomSurface = 'true';
+    host.append(canvas);
+    surface.append(host);
+    document.body.append(surface);
+    vi.spyOn(canvas, 'getBoundingClientRect').mockReturnValue(viewport);
+    const anchored = label(host),
+      tooltip = label(surface);
+    let exposed = true;
+    const registry = createRoomLabelRegistry(vi.fn());
+    const cleanup = registry.connect(canvas);
+    registry.register('hover-tooltip', tooltip.element, tooltip.leader, {
+      priority: 4,
+      locationCode: 'ITC-RACK',
+    });
+    registry.register('server-rack', anchored.element, anchored.leader, {
+      priority: 4,
+      mandatory: true,
+      locationCode: 'ITC-RACK',
+      isVisible: () => exposed,
+    });
+    const assertOwner = (owner: typeof anchored, hidden: typeof anchored) => {
+      expect(owner.element.dataset.labelSuppressed).toBe('false');
+      expect(owner.element).not.toHaveAttribute('aria-hidden');
+      expect(owner.element.tabIndex).toBe(0);
+      expect(hidden.element.dataset.labelSuppressed).toBe('true');
+      expect(hidden.element).toHaveAttribute('aria-hidden', 'true');
+      expect(hidden.element.tabIndex).toBe(-1);
+    };
+    flush();
+    assertOwner(anchored, tooltip);
+    exposed = false;
+    registry.schedule();
+    flush();
+    assertOwner(tooltip, anchored);
+    // Focus only the live fallback, then restore the anchored action. Its
+    // recovery must preserve that existing keyboard interaction until blur.
+    tooltip.element.focus();
+    exposed = true;
+    registry.schedule();
+    flush();
+    assertOwner(tooltip, anchored);
+    expect(tooltip.element).toHaveFocus();
+    tooltip.element.blur();
+    registry.schedule();
+    flush();
+    assertOwner(anchored, tooltip);
+    cleanup();
+  });
   it('refreshes cached scene exposure after viewport movement and overlay placement without camera motion', () => {
     const surface = document.createElement('div'),
       host = document.createElement('div'),
