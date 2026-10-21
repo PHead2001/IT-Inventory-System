@@ -15,10 +15,15 @@ import {
   type RoomLayoutWitnessStage,
   type RoomPointerAttempt,
 } from './room-layout-diagnostics';
-import { roomFailureMetadata } from './room-failure-metadata';
+import {
+  roomFailureMetadata,
+  roomOccupancyFailureProjection,
+  type RoomAssertionId,
+} from './room-failure-metadata';
 import {
   uncoveredRoomClickWitnesses,
   roomClickOutsideRest,
+  type RoomClickDiagnostics,
 } from './room-click-witness';
 import {
   observeRoomScene,
@@ -395,6 +400,9 @@ type RoomProgress = {
   stage: string;
   pose?: string;
   code?: string;
+  assertion?: RoomAssertionId;
+  occupancyExpected?: RoomOccupancy[string];
+  clickWitness?: RoomClickDiagnostics;
 };
 const roomProgressByTest = new WeakMap<TestInfo, RoomProgress>();
 const roomPageByTest = new WeakMap<TestInfo, Page>();
@@ -402,14 +410,18 @@ const roomPageByTest = new WeakMap<TestInfo, Page>();
 function markRoomProgress(testInfo: TestInfo, progress: RoomProgress) {
   roomProgressByTest.set(testInfo, progress);
 }
+function markRoomAssertion(testInfo: TestInfo, assertion: RoomAssertionId) {
+  const progress = roomProgressByTest.get(testInfo);
+  if (progress) progress.assertion = assertion;
+}
 
 function trackRoomPage(testInfo: TestInfo, page: Page) {
   roomPageByTest.set(testInfo, page);
 }
 
-async function roomFailureMetrics(page: Page) {
+async function roomFailureMetrics(page: Page, progress: RoomProgress) {
   return page
-    .evaluate(() => {
+    .evaluate((code) => {
       const canvas = document.querySelector<HTMLCanvasElement>(
         '[data-room-surface] canvas',
       );
@@ -443,7 +455,50 @@ async function roomFailureMetrics(page: Page) {
           return null;
         }
       };
+      const labels = code
+        ? [
+            ...document.querySelectorAll<HTMLElement>('[data-room-label-code]'),
+          ].filter((element) => element.dataset.roomLabelCode === code)
+        : [];
+      let quality: Record<string, unknown> = {};
+      try {
+        quality = JSON.parse(
+          canvas?.dataset.effectsQualityEvidence ?? '{}',
+        ) as Record<string, unknown>;
+      } catch {
+        /* unavailable */
+      }
       return {
+        labelObservation: {
+          code: code ?? '',
+          labelCount: labels.length,
+          labels: labels.slice(0, 4).map((element) => ({
+            aria: element.getAttribute('aria-label')?.slice(0, 512) ?? null,
+            badge:
+              element
+                .querySelector('[class*="countBadge"]')
+                ?.textContent?.slice(0, 128) ?? null,
+            suppressed: element.dataset.labelSuppressed ?? null,
+            compact: element.dataset.labelCompact ?? null,
+            exposed: element.dataset.roomExposed ?? null,
+          })),
+        },
+        browser: {
+          name: /HeadlessChrome|Chrome\//.test(navigator.userAgent)
+            ? 'chromium'
+            : 'other',
+          devicePixelRatio: decimal(window.devicePixelRatio),
+          rendererPixelRatio: decimal(state?.gl.getPixelRatio() ?? NaN),
+          reducedMotion: matchMedia('(prefers-reduced-motion: reduce)').matches,
+        },
+        quality: {
+          disabled:
+            typeof quality.disabled === 'boolean' ? quality.disabled : null,
+          pending: integer(Number(quality.pending ?? NaN)),
+          windows: integer(Number(quality.windows ?? NaN)),
+          badWindows: integer(Number(quality.badWindows ?? NaN)),
+          lastP95: decimal(Number(quality.lastP95 ?? NaN)),
+        },
         canvas: canvas !== null,
         viewport: {
           width: integer(window.innerWidth),
@@ -513,7 +568,14 @@ async function roomFailureMetrics(page: Page) {
           mode: token(canvas?.dataset.orbitMode, ['guided', 'free']),
         },
       };
-    })
+    }, progress.code)
+    .then(({ labelObservation, ...metrics }) => ({
+      ...metrics,
+      occupancy: roomOccupancyFailureProjection({
+        ...labelObservation,
+        expected: progress.occupancyExpected,
+      }),
+    }))
     .catch(() => ({ available: false }));
 }
 
@@ -526,15 +588,23 @@ test.afterEach(async ({}, testInfo) => {
     console.info(
       'ROOM_FAILURE_ERROR ' +
         JSON.stringify({
-          ...roomFailureMetadata(testInfo),
-          progress: progress ?? null,
+          ...roomFailureMetadata(testInfo, progress?.assertion),
+          progress: progress
+            ? {
+                journey: progress.journey,
+                stage: progress.stage,
+                pose: progress.pose,
+                code: progress.code,
+                assertion: progress.assertion,
+              }
+            : null,
         }),
     );
   if (!progress || !page || testInfo.status === testInfo.expectedStatus) return;
 
   let timer: ReturnType<typeof setTimeout> | undefined;
   const metrics = await Promise.race([
-    roomFailureMetrics(page),
+    roomFailureMetrics(page, progress),
     new Promise<{ available: false; timedOut: true }>((resolve) => {
       timer = setTimeout(
         () => resolve({ available: false, timedOut: true }),
@@ -543,13 +613,15 @@ test.afterEach(async ({}, testInfo) => {
     }),
   ]);
   if (timer) clearTimeout(timer);
-  const failure = { ...progress, metrics };
+  const safeProgress = { ...progress };
+  delete safeProgress.occupancyExpected;
+  const failure = { ...safeProgress, metrics };
   const serialized = JSON.stringify(failure);
   const log =
     serialized.length <= 4_096
       ? serialized
       : JSON.stringify({
-          ...progress,
+          ...safeProgress,
           metrics: { available: false, sizeBound: true },
         });
   console.info('ROOM_FAILURE_CONTEXT ' + log);
@@ -804,10 +876,17 @@ async function keyboardRoomLocation(page: Page, code: string) {
   await target.focus();
   await target.press('Enter');
 }
-async function settledReveal(page: Page, code: string) {
+async function settledReveal(
+  page: Page,
+  code: string,
+  assertion?: (id: RoomAssertionId) => void,
+) {
   const canvas = page.locator('[data-room-surface] canvas');
+  assertion?.('reveal-open-code');
   await expect(canvas).toHaveAttribute('data-spatial-open-code', code);
+  assertion?.('reveal-phase');
   await expect(canvas).toHaveAttribute('data-spatial-phase', 'settled');
+  assertion?.('reveal-label-layout');
   await settledLabels(page);
 }
 test('spatial reveal endpoints retain actual picking and labels across oblique, overhead, underside and panned views', async ({
@@ -815,6 +894,7 @@ test('spatial reveal endpoints retain actual picking and labels across oblique, 
 }, testInfo) => {
   test.setTimeout(180_000);
   trackRoomPage(testInfo, page);
+  const assertion = (id: RoomAssertionId) => markRoomAssertion(testInfo, id);
   markRoomProgress(testInfo, {
     journey: 'spatial-reveal',
     stage: 'room setup',
@@ -885,11 +965,15 @@ test('spatial reveal endpoints retain actual picking and labels across oblique, 
         pose,
         code,
       });
-      await settledReveal(page, code);
+      await settledReveal(page, code, assertion);
       const presentation = await captureRoomReveal(page);
+      assertion('selected-offset');
       near(presentation.offsets[expected.id], expected.offset);
       for (const [id, offset] of Object.entries(presentation.offsets))
-        if (id !== expected.id) near(offset, [0, 0, 0]);
+        if (id !== expected.id) {
+          assertion('unselected-offset');
+          near(offset, [0, 0, 0]);
+        }
       const snapshot = await captureRoomWitness(page);
       const physical = roomVisibilityWitnesses(snapshot);
       const points = physical.get(code) ?? [];
@@ -901,17 +985,29 @@ test('spatial reveal endpoints retain actual picking and labels across oblique, 
         snapshot,
         await captureRoomSelectionWitness(page),
         physical,
+        {
+          code,
+          report: (diagnostics) => {
+            const progress = roomProgressByTest.get(testInfo);
+            if (progress) progress.clickWitness = diagnostics;
+          },
+        },
       );
+      const clickWitness = roomProgressByTest.get(testInfo)?.clickWitness;
       markRoomProgress(testInfo, {
         journey: 'spatial-reveal',
         stage: 'verify label and complete pointer pick',
         pose,
         code,
+        occupancyExpected: countSnapshot?.[code],
+        clickWitness,
       });
+      assertion('occupancy-snapshot');
       expect(
         countSnapshot?.[code],
         `actual scoped occupancy snapshot for ${code}`,
       ).toBeTruthy();
+      assertion('occupancy-label');
       await expect(
         viewer.locator(`[data-room-label-code="${code}"]`),
       ).toHaveAttribute(
@@ -923,17 +1019,20 @@ test('spatial reveal endpoints retain actual picking and labels across oblique, 
           ),
         ),
       );
+      assertion('label-visible');
       await expect(
         viewer.locator(
           `[data-room-label-code="${code}"][data-label-suppressed="false"]`,
         ),
       ).toBeVisible();
       const first = witnesses.get(code)?.[0];
+      assertion('click-witness');
       expect(first, `uncovered selected face at ${pose}: ${code}`).toBeTruthy();
       let point = first!.client;
       const resting = bindingBounds.find(
         (binding) => binding.code === code && binding.primary,
       );
+      assertion('primary-binding');
       expect(resting, `primary room geometry for ${code}`).toBeTruthy();
       for (const candidate of witnesses.get(code) ?? []) {
         if (!roomClickOutsideRest(snapshot, candidate, resting!.bounds))
@@ -943,15 +1042,18 @@ test('spatial reveal endpoints retain actual picking and labels across oblique, 
         break;
       }
       await page.mouse.move(point.x, point.y);
+      assertion('hover-owner');
       await expect(canvas).toHaveAttribute('data-hover-visible-code', code);
       const beforePick = await canvas.getAttribute('data-spatial-request');
       await page.mouse.click(point.x, point.y);
+      assertion('selected-code');
       await expect(viewer).toHaveAttribute('data-selected-code', code);
+      assertion('pick-request');
       await expect(canvas).not.toHaveAttribute(
         'data-spatial-request',
         beforePick!,
       );
-      await settledReveal(page, code);
+      await settledReveal(page, code, assertion);
       await testInfo.attach(`reveal-${pose}-${code}`, {
         body: await viewer.screenshot(),
         contentType: 'image/png',
@@ -964,9 +1066,14 @@ test('spatial reveal endpoints retain actual picking and labels across oblique, 
       code: 'ITC-L',
     });
     await keyboardRoomLocation(page, 'ITC-L');
-    await settledReveal(page, 'ITC-L');
-    for (const offset of Object.values((await captureRoomReveal(page)).offsets))
+    await settledReveal(page, 'ITC-L', assertion);
+    for (const offset of Object.values(
+      (await captureRoomReveal(page)).offsets,
+    )) {
+      assertion('aggregate-offset');
       near(offset, [0, 0, 0]);
+    }
+    assertion('aggregate-count-badge');
     expect(
       await viewer
         .locator('[data-room-label-code="ITC-L"] [class*="countBadge"]')
@@ -979,14 +1086,17 @@ test('spatial reveal endpoints retain actual picking and labels across oblique, 
     pose: 'panned',
     code: 'ITC-L',
   });
+  assertion('drawer-outside-rest');
   expect(
     outsideRest.has('ITC-D01') || outsideRest.has('ITC-D07'),
     'a moved drawer face outside resting bindings remains selectable',
   ).toBe(true);
+  assertion('presentation-coverage');
   expect(
     [...exercised].sort(),
     'every modeled presentation kind gets actual pointer proof in an exposed pose',
   ).toEqual(Object.keys(expectations).sort());
+  assertion('container-outside-rest');
   expect(
     [...outsideRest].some((code) => /RED|BLACK|CLEAR/.test(code)),
     'a moved container face outside resting bindings remains selectable',
