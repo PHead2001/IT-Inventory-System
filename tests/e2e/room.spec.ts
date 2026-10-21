@@ -17,6 +17,11 @@ import {
 } from './room-layout-diagnostics';
 import { roomFailureMetadata } from './room-failure-metadata';
 import {
+  captureRoomAssertionState,
+  observeRoomFitDispatch,
+  reportRoomAssertionFailure,
+} from './room-assertion-diagnostics';
+import {
   uncoveredRoomClickWitnesses,
   roomClickOutsideRest,
 } from './room-click-witness';
@@ -391,7 +396,12 @@ async function ready(page: Page) {
 }
 
 type RoomProgress = {
-  journey: 'effects' | 'spatial-reveal';
+  journey:
+    | 'effects'
+    | 'spatial-reveal'
+    | 'spatial-interruption'
+    | 'room-labels'
+    | 'drawer-labels';
   stage: string;
   pose?: string;
   code?: string;
@@ -820,6 +830,7 @@ test('spatial reveal endpoints retain actual picking and labels across oblique, 
     stage: 'room setup',
   });
   await observeRoomScene(page);
+  await enableRoomLayoutDiagnostics(page);
   await page.setViewportSize({ width: 1280, height: 1100 });
   await page.emulateMedia({ reducedMotion: 'no-preference' });
   await login(page);
@@ -923,11 +934,19 @@ test('spatial reveal endpoints retain actual picking and labels across oblique, 
           ),
         ),
       );
-      await expect(
-        viewer.locator(
-          `[data-room-label-code="${code}"][data-label-suppressed="false"]`,
-        ),
-      ).toBeVisible();
+      try {
+        await expect(
+          viewer.locator(
+            `[data-room-label-code="${code}"][data-label-suppressed="false"]`,
+          ),
+        ).toBeVisible();
+      } catch (error) {
+        if (code === 'ITC-RACK')
+          reportRoomAssertionFailure('selected-rack-label', code, {
+            state: await captureRoomAssertionState(page, code),
+          });
+        throw error;
+      }
       const first = witnesses.get(code)?.[0];
       expect(first, `uncovered selected face at ${pose}: ${code}`).toBeTruthy();
       let point = first!.client;
@@ -1056,8 +1075,13 @@ test('opened drawer, container and shelf retain their resting selection footprin
 
 test('spatial interruption, reduced motion, stationary hover and moving down/up cannot revive a stale target', async ({
   page,
-}) => {
+}, testInfo) => {
   test.setTimeout(90_000);
+  trackRoomPage(testInfo, page);
+  markRoomProgress(testInfo, {
+    journey: 'spatial-interruption',
+    stage: 'room setup',
+  });
   await observeRoomScene(page);
   await page.setViewportSize({ width: 1280, height: 1100 });
   await page.emulateMedia({ reducedMotion: 'no-preference' });
@@ -1065,15 +1089,38 @@ test('spatial interruption, reduced motion, stationary hover and moving down/up 
   await page.goto('/room?space=it-closet');
   const viewer = await ready(page),
     canvas = viewer.locator('canvas');
+  const fit = page.getByRole('button', { name: 'Fit room', exact: true });
+  await observeRoomFitDispatch(fit);
   await keyboardRoomLocation(page, 'ITC-D01');
   await expect(canvas).toHaveAttribute('data-spatial-phase', 'flying');
-  await page.getByRole('button', { name: 'Fit room', exact: true }).click();
+  markRoomProgress(testInfo, {
+    journey: 'spatial-interruption',
+    stage: 'Fit room interrupts flight',
+    code: 'ITC-D01',
+  });
+  await fit.click();
   const held = await camera(page);
+  const afterClick = await captureRoomAssertionState(page, 'ITC-D01', false);
   // Deliberate negative deadline window: old 750ms flight plus 400ms opening.
   await page.waitForTimeout(1300);
-  near((await camera(page)).position, held.position);
-  await expect(canvas).toHaveAttribute('data-spatial-open-code', '');
+  const afterHold = await captureRoomAssertionState(page, 'ITC-D01', false);
+  try {
+    near((await camera(page)).position, held.position);
+    await expect(canvas).toHaveAttribute('data-spatial-open-code', '');
+  } catch (error) {
+    reportRoomAssertionFailure('fit-interruption', 'ITC-D01', {
+      afterClick,
+      afterHold,
+      failure: await captureRoomAssertionState(page, 'ITC-D01', false),
+    });
+    throw error;
+  }
   await expect(canvas).toHaveAttribute('data-spatial-phase', 'cancelled');
+  markRoomProgress(testInfo, {
+    journey: 'spatial-interruption',
+    stage: 'reduced motion and stale pointer target',
+    code: 'ITC-D07',
+  });
   await keyboardRoomLocation(page, 'ITC-D07');
   await expect(canvas).toHaveAttribute('data-spatial-phase', 'flying');
   await page.emulateMedia({ reducedMotion: 'reduce' });
@@ -1769,11 +1816,18 @@ test('room labels appear on real mesh hover and Show labels restores keyboard bu
   page,
 }, testInfo) => {
   test.setTimeout(60_000);
+  trackRoomPage(testInfo, page);
+  markRoomProgress(testInfo, { journey: 'room-labels', stage: 'room setup' });
+  await enableRoomLayoutDiagnostics(page);
   await page.setViewportSize({ width: 1280, height: 1100 });
   await login(page);
   await page.goto('/room');
   const viewer = await ready(page);
   await setRoomLabels(page, false);
+  markRoomProgress(testInfo, {
+    journey: 'room-labels',
+    stage: 'real mesh hover',
+  });
   for (const code of ['ITC-RACK', 'ITC-D01']) {
     const label = viewer.locator(`[data-location-code="${code}"]`);
     await expect(label).toHaveCount(0);
@@ -1802,12 +1856,24 @@ test('room labels appear on real mesh hover and Show labels restores keyboard bu
       await expect(button).toHaveAttribute('tabindex', '-1');
   }
   await setRoomLabels(page, false);
+  markRoomProgress(testInfo, {
+    journey: 'room-labels',
+    stage: 'selected rack label after labels off',
+    code: 'ITC-RACK',
+  });
   await expect(
     viewer.locator('button[data-location-code]:not([data-hover-tooltip])'),
   ).toHaveCount(1);
-  await expect(
-    viewer.locator('[data-room-label-code="ITC-RACK"]'),
-  ).toBeVisible();
+  try {
+    await expect(
+      viewer.locator('[data-room-label-code="ITC-RACK"]'),
+    ).toBeVisible();
+  } catch (error) {
+    reportRoomAssertionFailure('rack-labels-off', 'ITC-RACK', {
+      state: await captureRoomAssertionState(page, 'ITC-RACK'),
+    });
+    throw error;
+  }
 });
 
 test('Free Orbit labels follow exposed storage under actual pointer movement from oblique, top, bottom and panned views', async ({
@@ -2054,8 +2120,10 @@ test('real WebGL room raycasting selects shelf and drawer inventory', async ({
 
 test('visible drawer labels remain distinct and clickable across desktop and phone orbit views', async ({
   page,
-}) => {
+}, testInfo) => {
   test.setTimeout(60_000);
+  trackRoomPage(testInfo, page);
+  markRoomProgress(testInfo, { journey: 'drawer-labels', stage: 'room setup' });
   await login(page);
   for (const viewport of [
     { width: 1280, height: 1100 },
@@ -2088,6 +2156,11 @@ test('visible drawer labels remain distinct and clickable across desktop and pho
       await toolbar.getByRole('button', { name: 'Fit room' }).click();
       await settledLabels(page);
       for (const code of ['ITC-D01', 'ITC-D04']) {
+        markRoomProgress(testInfo, {
+          journey: 'drawer-labels',
+          stage: `drawer label at ${viewport.width}px side ${side}`,
+          code,
+        });
         const label = viewer.locator(`[data-location-code="${code}"]`).first();
         if ((await label.getAttribute('data-label-suppressed')) === 'true') {
           await expect(label).toHaveAttribute('aria-hidden', 'true');
@@ -2106,16 +2179,27 @@ test('visible drawer labels remain distinct and clickable across desktop and pho
         }
         await label.scrollIntoViewIfNeeded({ timeout: 3000 });
         await settledLabels(page);
-        expect(
-          await label.evaluate((element) => {
-            const text = element.firstChild;
-            if (!text) return 0;
-            const range = document.createRange();
-            range.selectNodeContents(text);
-            return range.getClientRects().length;
-          }),
-          'ordinary drawer names remain readable on one line',
-        ).toBe(1);
+        const firstChildRectCount = await label.evaluate((element) => {
+          const text = element.firstChild;
+          if (!text) return 0;
+          const range = document.createRange();
+          range.selectNodeContents(text);
+          return range.getClientRects().length;
+        });
+        try {
+          expect(
+            firstChildRectCount,
+            'ordinary drawer names remain readable on one line',
+          ).toBe(1);
+        } catch (error) {
+          reportRoomAssertionFailure('drawer-name-lines', code, {
+            viewport,
+            side,
+            firstChildRectCount,
+            state: await captureRoomAssertionState(page, code, false),
+          });
+          throw error;
+        }
         const box = await label.boundingBox();
         expect(box, `visible label bounds for ${code}`).toBeTruthy();
         const point = {
