@@ -295,10 +295,18 @@ test('owned local groups retain the 32-expansion boundary and distinguish duplic
     const child = duplicateRows.data!.find(
       (row) => row.parent_id === groups[0].id,
     )!;
-    const childLink = page.getByRole('link', {
-      name: `${child.breadcrumb} (${child.code})`,
-      exact: true,
-    });
+    const childLink = page
+      .locator('section')
+      .filter({
+        has: page.getByRole('heading', {
+          name: 'Child locations',
+          exact: true,
+        }),
+      })
+      .getByRole('link', {
+        name: `${child.breadcrumb} (${child.code})`,
+        exact: true,
+      });
     const childURL = new URL(
       (await childLink.getAttribute('href'))!,
       page.url(),
@@ -467,10 +475,20 @@ test('actual location status, pagination, child and recovery links retain one va
       );
       await parentDetails.click();
       await expect(page).toHaveURL(parentURL.href);
-      const childDetails = page.getByRole('link', {
-        name: `${childBreadcrumb} (${child.code})`,
-        exact: true,
-      });
+      // Descendant inventory rows also link to this location. Traverse the
+      // child navigation card, whose URL retains the browser return scope.
+      const childDetails = page
+        .locator('section')
+        .filter({
+          has: page.getByRole('heading', {
+            name: 'Child locations',
+            exact: true,
+          }),
+        })
+        .getByRole('link', {
+          name: `${childBreadcrumb} (${child.code})`,
+          exact: true,
+        });
       const childURL = new URL(
         (await childDetails.getAttribute('href'))!,
         page.url(),
