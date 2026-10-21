@@ -1,5 +1,5 @@
 import { readFileSync, writeFileSync } from 'node:fs';
-import { expect, test, type Page } from '@playwright/test';
+import { expect, test, type Page, type TestInfo } from '@playwright/test';
 import { createClient } from '@supabase/supabase-js';
 import { Box3, Matrix4, Ray, Vector3 } from 'three';
 import fixture from '../fixtures/auth.json' with { type: 'json' };
@@ -385,10 +385,177 @@ async function ready(page: Page) {
   return viewer;
 }
 
+type RoomProgress = {
+  journey: 'effects' | 'spatial-reveal';
+  stage: string;
+  pose?: string;
+  code?: string;
+};
+const roomProgressByTest = new WeakMap<TestInfo, RoomProgress>();
+const roomPageByTest = new WeakMap<TestInfo, Page>();
+
+function markRoomProgress(testInfo: TestInfo, progress: RoomProgress) {
+  roomProgressByTest.set(testInfo, progress);
+}
+
+function trackRoomPage(testInfo: TestInfo, page: Page) {
+  roomPageByTest.set(testInfo, page);
+}
+
+async function roomFailureMetrics(page: Page) {
+  return page
+    .evaluate(() => {
+      const canvas = document.querySelector<HTMLCanvasElement>(
+        '[data-room-surface] canvas',
+      );
+      const state = [...(window.__roomWitnessStores ?? [])]
+        .map((store) => store.getState())
+        .find((candidate) => candidate.gl.domElement === canvas);
+      const integer = (value: number) =>
+        Number.isFinite(value)
+          ? Math.max(0, Math.min(1_000_000, Math.trunc(value)))
+          : null;
+      const decimal = (value: number) =>
+        Number.isFinite(value)
+          ? Math.max(
+              -100_000,
+              Math.min(100_000, Math.round(value * 1000) / 1000),
+            )
+          : null;
+      const token = (value: string | undefined, allowed: string[]) =>
+        value && allowed.includes(value) ? value : 'other';
+      const vector = (value: string | undefined) => {
+        try {
+          const parsed: unknown = JSON.parse(value ?? '');
+          return Array.isArray(parsed) &&
+            parsed.length === 3 &&
+            parsed.every(
+              (part) => typeof part === 'number' && Number.isFinite(part),
+            )
+            ? parsed.map((part) => decimal(part)!)
+            : null;
+        } catch {
+          return null;
+        }
+      };
+      return {
+        canvas: canvas !== null,
+        viewport: {
+          width: integer(window.innerWidth),
+          height: integer(window.innerHeight),
+        },
+        spatialPhase: token(canvas?.dataset.spatialPhase, [
+          'settled',
+          'flying',
+          'revealing',
+          'cancelled',
+          'idle',
+        ]),
+        contactStatus: token(canvas?.dataset.contactStatus, [
+          'cached',
+          'off',
+          'moving',
+          'failed',
+          'allocation-failed',
+          'capture-failed',
+        ]),
+        bloomStatus: token(canvas?.dataset.bloomStatus, [
+          'active',
+          'unselected',
+          'loading',
+          'quality-off',
+          'failed',
+          'import-or-allocation',
+          'overlay-allocation',
+          'sustained-frame-time',
+          'shader-program',
+          'unsupported-material-workaround',
+          'incomplete-framebuffer',
+          'framebuffer-allocation',
+          'composer-render',
+          'screen-render',
+        ]),
+        bloomFailure: token(canvas?.dataset.bloomStatus, [
+          'import-or-allocation',
+          'overlay-allocation',
+          'sustained-frame-time',
+          'shader-program',
+          'unsupported-material-workaround',
+          'incomplete-framebuffer',
+          'framebuffer-allocation',
+          'composer-render',
+          'screen-render',
+        ]),
+        contactCaptures: integer(Number(canvas?.dataset.contactCaptures ?? 0)),
+        paletteRevision: integer(Number(canvas?.dataset.paletteRevision ?? 0)),
+        sceneFrames: integer(Number(canvas?.dataset.sceneEffectFrames ?? 0)),
+        composerFrames: integer(Number(canvas?.dataset.composerFrames ?? 0)),
+        drawFrame: integer(state?.gl.info.render.frame ?? 0),
+        geometries: integer(state?.gl.info.memory.geometries ?? 0),
+        textures: integer(state?.gl.info.memory.textures ?? 0),
+        programs: integer(state?.gl.info.programs?.length ?? 0),
+        labelLayoutPending: token(canvas?.dataset.labelLayoutPending, [
+          'true',
+          'false',
+        ]),
+        labelLayoutRevision: integer(
+          Number(canvas?.dataset.labelLayoutRevision ?? 0),
+        ),
+        cameraPose: {
+          position: vector(canvas?.dataset.cameraPosition),
+          target: vector(canvas?.dataset.cameraTarget),
+          zoom: decimal(Number(canvas?.dataset.cameraZoom ?? 0)),
+          mode: token(canvas?.dataset.orbitMode, ['guided', 'free']),
+        },
+      };
+    })
+    .catch(() => ({ available: false }));
+}
+
+test.afterEach(async ({}, testInfo) => {
+  const progress = roomProgressByTest.get(testInfo);
+  const page = roomPageByTest.get(testInfo);
+  roomProgressByTest.delete(testInfo);
+  roomPageByTest.delete(testInfo);
+  if (!progress || !page || testInfo.status === testInfo.expectedStatus) return;
+
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const metrics = await Promise.race([
+    roomFailureMetrics(page),
+    new Promise<{ available: false; timedOut: true }>((resolve) => {
+      timer = setTimeout(
+        () => resolve({ available: false, timedOut: true }),
+        1_000,
+      );
+    }),
+  ]);
+  if (timer) clearTimeout(timer);
+  const failure = { ...progress, metrics };
+  const serialized = JSON.stringify(failure);
+  const log =
+    serialized.length <= 4_096
+      ? serialized
+      : JSON.stringify({
+          ...progress,
+          metrics: { available: false, sizeBound: true },
+        });
+  console.info('ROOM_FAILURE_CONTEXT ' + log);
+  try {
+    await testInfo.attach('room-failure-context', {
+      body: serialized,
+      contentType: 'application/json',
+    });
+  } catch {
+    console.info('ROOM_FAILURE_ATTACHMENT_UNAVAILABLE');
+  }
+});
+
 test('scene effects retain actual surface ownership and stop drawing after settled selection and palette changes', async ({
   page,
 }, testInfo) => {
   test.setTimeout(120_000);
+  trackRoomPage(testInfo, page);
+  markRoomProgress(testInfo, { journey: 'effects', stage: 'room setup' });
   await observeRoomScene(page);
   await page.setViewportSize({ width: 1280, height: 1100 });
   await page.emulateMedia({ reducedMotion: 'no-preference' });
@@ -396,11 +563,20 @@ test('scene effects retain actual surface ownership and stop drawing after settl
   await page.goto('/room?space=it-closet');
   await ready(page);
   const canvas = page.locator('[data-room-surface] canvas');
+  markRoomProgress(testInfo, {
+    journey: 'effects',
+    stage: 'initial contact cache and effect snapshot',
+  });
   await expect(canvas).toHaveAttribute('data-contact-status', 'cached');
   const initial = await captureRoomEffects(page);
   expect(initial.bloomStatus).toBe('unselected');
   await canvas.evaluate((element) => {
     element.dataset.effectsIdentityWitness = 'original';
+  });
+  markRoomProgress(testInfo, {
+    journey: 'effects',
+    stage: 'select and settle ITC-RED',
+    code: 'ITC-RED',
   });
   await keyboardRoomLocation(page, 'ITC-RED');
   await settledReveal(page, 'ITC-RED');
@@ -410,6 +586,11 @@ test('scene effects retain actual surface ownership and stop drawing after settl
   expect(opened.bloomCodes).toEqual(['ITC-RED']);
   expect(opened.bloomMeshes).toBeGreaterThan(1);
   expect(opened.contactCaptures).toBe(initial.contactCaptures + 1);
+  markRoomProgress(testInfo, {
+    journey: 'effects',
+    stage: 'witness and hover ITC-RED surface',
+    code: 'ITC-RED',
+  });
   const targets = await uncoveredRoomWitnesses(
     page,
     roomVisibilityWitnesses(await captureRoomWitness(page)),
@@ -433,6 +614,11 @@ test('scene effects retain actual surface ownership and stop drawing after settl
     'data-hover-visible-code',
     visibleOwner ?? '',
   );
+  markRoomProgress(testInfo, {
+    journey: 'effects',
+    stage: 'clear hover and settle camera/count changes',
+    code: 'ITC-RED',
+  });
   await page.mouse.move(0, 0);
   await expect
     .poll(async () =>
@@ -452,6 +638,11 @@ test('scene effects retain actual surface ownership and stop drawing after settl
   expect((await captureRoomEffects(page)).contactCaptures).toBe(
     beforeCamera.contactCaptures,
   );
+  markRoomProgress(testInfo, {
+    journey: 'effects',
+    stage: 'change palette and wait for revision',
+    code: 'ITC-RED',
+  });
   const originalStyle = await page.locator('html').getAttribute('style');
   // This exercises live token lifecycle, not acceptance of the forthcoming Light theme tuning.
   await page.locator('html').evaluate((root) => {
@@ -462,11 +653,21 @@ test('scene effects retain actual surface ownership and stop drawing after settl
     .poll(async () => (await captureRoomEffects(page)).paletteRevision)
     .toBeGreaterThan(beforeCamera.paletteRevision);
   await expect(canvas).toHaveAttribute('data-contact-status', 'cached');
+  markRoomProgress(testInfo, {
+    journey: 'effects',
+    stage: 'reduced-motion selection ITC-D07',
+    code: 'ITC-D07',
+  });
   await page.emulateMedia({ reducedMotion: 'reduce' });
   await keyboardRoomLocation(page, 'ITC-D07');
   await settledReveal(page, 'ITC-D07');
   await expect(canvas).toHaveAttribute('data-bloom-status', 'active');
   expect((await captureRoomEffects(page)).bloomCodes).toEqual(['ITC-D07']);
+  markRoomProgress(testInfo, {
+    journey: 'effects',
+    stage: 'aggregate selection and effect capture',
+    code: 'ITC-L',
+  });
   await keyboardRoomLocation(page, 'ITC-L');
   await settledReveal(page, 'ITC-L');
   await expect(canvas).toHaveAttribute('data-bloom-status', 'active');
@@ -477,6 +678,11 @@ test('scene effects retain actual surface ownership and stop drawing after settl
       /^ITC-(S[12][ABC]|D0[1-6])$/.test(code),
     ),
   ).toBe(true);
+  markRoomProgress(testInfo, {
+    journey: 'effects',
+    stage: 'restore palette and verify settled idle window',
+    code: 'ITC-L',
+  });
   await page.locator('html').evaluate((root, style) => {
     if (style === null) root.removeAttribute('style');
     else root.setAttribute('style', style);
@@ -574,6 +780,11 @@ test('spatial reveal endpoints retain actual picking and labels across oblique, 
   page,
 }, testInfo) => {
   test.setTimeout(180_000);
+  trackRoomPage(testInfo, page);
+  markRoomProgress(testInfo, {
+    journey: 'spatial-reveal',
+    stage: 'room setup',
+  });
   await observeRoomScene(page);
   await page.setViewportSize({ width: 1280, height: 1100 });
   await page.emulateMedia({ reducedMotion: 'no-preference' });
@@ -595,6 +806,11 @@ test('spatial reveal endpoints retain actual picking and labels across oblique, 
     'ITC-RACK': { id: 'server-rack', offset: [0, 0, 0] },
   };
   for (const pose of ['oblique', 'overhead', 'underside', 'panned'] as const) {
+    markRoomProgress(testInfo, {
+      journey: 'spatial-reveal',
+      stage: 'set camera pose',
+      pose,
+    });
     if (pose !== 'oblique') {
       await page
         .getByRole('button', { name: 'More map controls', exact: true })
@@ -613,6 +829,12 @@ test('spatial reveal endpoints retain actual picking and labels across oblique, 
         .click();
     }
     for (const [code, expected] of Object.entries(expectations)) {
+      markRoomProgress(testInfo, {
+        journey: 'spatial-reveal',
+        stage: 'select target and receive occupancy',
+        pose,
+        code,
+      });
       const firstCounts = !countSnapshot
         ? page.waitForResponse(
             (response) =>
@@ -623,6 +845,12 @@ test('spatial reveal endpoints retain actual picking and labels across oblique, 
       if (firstCounts)
         countSnapshot = (await (await firstCounts).json())
           .counts as RoomOccupancy;
+      markRoomProgress(testInfo, {
+        journey: 'spatial-reveal',
+        stage: 'settle reveal and inspect presentation',
+        pose,
+        code,
+      });
       await settledReveal(page, code);
       const presentation = await captureRoomReveal(page);
       near(presentation.offsets[expected.id], expected.offset);
@@ -637,6 +865,12 @@ test('spatial reveal endpoints retain actual picking and labels across oblique, 
       // This assertion records camera poses with a physically exposed selected face.
       if (!points.length) continue;
       exercised.add(code);
+      markRoomProgress(testInfo, {
+        journey: 'spatial-reveal',
+        stage: 'verify label and complete pointer pick',
+        pose,
+        code,
+      });
       expect(
         countSnapshot?.[code],
         `actual scoped occupancy snapshot for ${code}`,
@@ -688,6 +922,12 @@ test('spatial reveal endpoints retain actual picking and labels across oblique, 
         contentType: 'image/png',
       });
     }
+    markRoomProgress(testInfo, {
+      journey: 'spatial-reveal',
+      stage: 'select aggregate location and verify resting offsets',
+      pose,
+      code: 'ITC-L',
+    });
     await keyboardRoomLocation(page, 'ITC-L');
     await settledReveal(page, 'ITC-L');
     for (const offset of Object.values((await captureRoomReveal(page)).offsets))
@@ -698,6 +938,12 @@ test('spatial reveal endpoints retain actual picking and labels across oblique, 
         .count(),
     ).toBe(0);
   }
+  markRoomProgress(testInfo, {
+    journey: 'spatial-reveal',
+    stage: 'verify cross-pose selection coverage',
+    pose: 'panned',
+    code: 'ITC-L',
+  });
   expect(
     outsideRest.has('ITC-D01') || outsideRest.has('ITC-D07'),
     'a moved drawer face outside resting bindings remains selectable',
