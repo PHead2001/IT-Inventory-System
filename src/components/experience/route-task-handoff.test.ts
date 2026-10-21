@@ -2,6 +2,10 @@ import { afterEach, expect, it, vi } from 'vitest';
 import { createNativeTaskHandoff, type TaskSource } from './route-task-handoff';
 import { routeKey } from './route-key';
 import { replaceAppHistoryUrl } from '@/lib/navigation/history';
+import {
+  controllerTaskContinuity,
+  type PrivacyTaskQueryContinuity,
+} from '@/components/auth/privacy-task-query';
 const path = '/inventory/assets/a3010000-0000-4000-8000-0000000000ab';
 const key = () =>
   routeKey(location.pathname, new URLSearchParams(location.search));
@@ -57,6 +61,84 @@ it.each([false, true])(
     }
   },
 );
+
+it.each([
+  'success',
+  'busy-before',
+  'busy-after',
+  'epoch',
+  'root',
+  'actor',
+  'content',
+  'anchor',
+  'navigation',
+  'security',
+  'hidden',
+  'not-fresh',
+  'forged',
+  'wrong-token',
+  'retired-binding',
+  'wrong-url',
+] as const)('ordinary receipt transfer checks %s', (reason) => {
+  const taskKey = path + '?task=asset_move';
+  history.replaceState({}, '', taskKey);
+  const handoff = createNativeTaskHandoff();
+  const before = source({ serverAnchor: taskKey, cleanKey: taskKey });
+  const after = { ...before };
+  if (reason === 'busy-before') before.idle = false;
+  if (reason === 'busy-after') after.idle = false;
+  if (reason === 'epoch') after.pendingEpoch++;
+  if (reason === 'root') after.root = document.createElement('div');
+  if (reason === 'actor') after.actorId = 'replacement';
+  if (reason === 'content') after.contentIdentity = 'replacement';
+  if (reason === 'anchor') after.serverAnchor = path;
+  if (reason === 'navigation') after.navigationIdentity++;
+  if (reason === 'security') after.securityRevision = 'replacement';
+  if (reason === 'hidden') after.visible = false;
+  if (reason === 'not-fresh') after.fresh = false;
+  if (reason === 'retired-binding') {
+    history.replaceState({}, '', path);
+    handoff.observe({ ...before, cleanKey: path, committedKey: path }, true);
+    handoff.retire();
+  }
+  const token = controllerTaskContinuity({
+    identity: Symbol(),
+    parent: null,
+    kind: 'task',
+    sourceKey: taskKey,
+    destinationKey: reason === 'wrong-token' ? path : taskKey,
+    securityRevision: before.securityRevision,
+    status: () => 'consumed',
+    current: () => true,
+    consumptionReady: () => true,
+    complete: () => false,
+  });
+  history.replaceState({}, '', reason === 'wrong-url' ? taskKey : path);
+  expect(
+    handoff.transfer(
+      before,
+      after,
+      {
+        sourceKey: taskKey,
+        destinationKey: path,
+      },
+      reason === 'forged' ? { ...token } : token,
+    ),
+  ).toBe(reason === 'success');
+  if (reason === 'retired-binding') {
+    expect(
+      handoff.transfer(
+        { ...before, navigationIdentity: 2 },
+        {
+          ...after,
+          navigationIdentity: 2,
+        },
+        { sourceKey: taskKey, destinationKey: path },
+        token,
+      ),
+    ).toBe(true);
+  }
+});
 it('rejects a malformed accepted route without minting a receipt', () => {
   const handoff = createNativeTaskHandoff();
   const initial = source({ cleanKey: 'http://[', committedKey: 'http://[' });
@@ -332,3 +414,30 @@ it('initial unverified renders cannot create or poison a candidate before the fi
     handoff.consume(source(), path, 'asset_move', replaceAppHistoryUrl),
   ).not.toBeNull();
 });
+
+it.each([false, true])(
+  'consumption-only authority cannot mint a receipt from a narrowed primary accepted=%s',
+  (acceptedPrimary) => {
+    history.replaceState({}, '', path);
+    const handoff = createNativeTaskHandoff();
+    const continuity: PrivacyTaskQueryContinuity = {
+      identity: Symbol(),
+      parent: null,
+      kind: 'task',
+      sourceKey: path,
+      destinationKey: path,
+      securityRevision: 'security-1',
+      status: () => 'verified',
+      current: () => true,
+      consumptionReady: () => true,
+      complete: () => true,
+    };
+    handoff.observe(source({ fresh: false, continuity }), acceptedPrimary);
+    task();
+    const apply = vi.fn();
+    expect(
+      handoff.consume(source({ continuity }), path, 'asset_move', apply),
+    ).toBeNull();
+    expect(apply).not.toHaveBeenCalled();
+  },
+);

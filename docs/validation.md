@@ -285,6 +285,21 @@ hidden roots, business work, navigation, cleanup/revocation/assignment retiremen
 A/B/A supersession with late success and malformed or semantic query changes.
 These focused controller tests do not replace native Next ordering, browser
 geometry or independent review of the changed preservation boundary.
+The explicit server-route gate regressions cover asset and quantity tasks with
+mounted query consumers. They hold first-render verification, require committed
+consumption authority, exercise consumption/cleanup/reentry, and keep ordinary
+content admission and new restoration bootstrap blocked. Revocation, replacement
+owners, generic rechecks and superseded late replies cannot consume the held
+receipt. Separate receipt tests reject minting from consumption-only authority.
+The exact retained task-bearing server gate also covers two ordinary application
+consumptions followed by native entry for both record types. Ordinary transfer
+tests cover live callback revocation during readiness notification, busy work,
+changed pending epochs, unsuccessful consumption, forged/mismatched controller
+tokens and retired binding refusal, including admission of a genuinely new
+navigation binding. The pre-consumption controller capture remains inert until
+the successful handoff and its live post-call checks complete.
+These working-tree checks still require native browser rerun and independent
+review before exact-SHA acceptance.
 The native re-entry, first inventory-row viewport and cold-title browser checks
 emit bounded failure-only geometry; cold-title failures also report at most
 eight layout-shift entries with four fixed-identity sources each. All shifts

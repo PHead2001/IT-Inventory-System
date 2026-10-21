@@ -138,6 +138,26 @@ uncertainty, supersession, changed owners, hidden roots, business work and
 security invalidation permanently retire the receipt. A raw URL cannot issue
 or revive one, and the attestation never grants ordinary navigation authority.
 
+Successful record pages retain an explicit server-route privacy gate. A native
+task query can leave that gate's general readiness false even after its exact
+controller verification succeeds. The existing receipt may consult the live
+`consumptionReady` proof for task consumption and its matching cleanup only.
+That proof requires the successful controller state to commit; an operation's
+verified status alone is insufficient. Receipt creation still requires a fresh
+accepted primary. General content admission, restoration readiness and storage
+bootstrap remain governed by the original explicit route gate. Cleanup is
+reobserved after the controller's layout commit so later deliberate entry can
+reuse only the original, still-valid receipt.
+
+A successful ordinary task consumption may explicitly transfer its existing
+fresh, visible, idle primary authority to that native receipt. The controller
+captures an inert, one-shot lifetime before consumption; only actual success and
+unchanged live ownership, security and pending epoch may complete it at the exact
+clean URL. The resulting consumed controller token links the existing cleanup
+check. Failed consumption, busy work, synchronous notification-time invalidation,
+forged tokens and retired same-binding receipts cannot create that transfer.
+Only a legitimately new accepted navigation binding may replace retirement.
+
 ## Caller-authorized bounded search
 
 The additive command_palette_search_v1(text,text,text) RPC is SECURITY INVOKER with

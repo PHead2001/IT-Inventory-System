@@ -1,6 +1,10 @@
 import { recordDetailReturnPath } from '@/features/inventory/detail-return';
 import { canonicalRecordPath, routeKey } from './route-key';
 import type { PrivacyTaskQueryContinuity } from '@/components/auth/privacy-task-query';
+import {
+  isControllerTaskContinuity,
+  taskQueryDestination,
+} from '@/components/auth/privacy-task-query';
 
 export type TaskSource = {
   root: HTMLElement;
@@ -73,6 +77,8 @@ export function createNativeTaskHandoff() {
           (continuity.sourceKey === receipt.cleanKey ||
             (preservedBy?.identity === continuity.identity &&
               consumedBy === continuity.identity))));
+    const consumptionFresh =
+      source.fresh || (matchingContinuity && continuity!.consumptionReady());
     if (
       preservedBy &&
       ((!preservedBy.current() && !cleanup) ||
@@ -95,20 +101,61 @@ export function createNativeTaskHandoff() {
     }
     if (matchingContinuity) {
       preservedBy = continuity!;
-      if (cleanup && source.fresh && continuity!.status() === 'verified') {
+      if (cleanup && consumptionFresh && continuity!.status() === 'verified') {
         preservedBy = null;
         consumedBy = null;
-      } else if (!source.fresh || continuity!.status() === 'pending')
+      } else if (!consumptionFresh || continuity!.status() === 'pending')
         return false;
     } else if (preservedBy) {
       retire();
       return false;
     }
-    if (!source.fresh) return false;
+    if (!consumptionFresh) return false;
     return true;
   };
   return {
     retire,
+    transfer(
+      before: TaskSource,
+      after: TaskSource,
+      handoff: { sourceKey: string; destinationKey: string },
+      continuity: PrivacyTaskQueryContinuity,
+    ) {
+      if (
+        !before.fresh ||
+        !after.fresh ||
+        !before.visible ||
+        !after.visible ||
+        !before.idle ||
+        !after.idle ||
+        !sameBinding(before, after) ||
+        before.securityRevision !== after.securityRevision ||
+        before.pendingEpoch !== after.pendingEpoch ||
+        before.committedKey !== handoff.sourceKey ||
+        before.cleanKey !== handoff.sourceKey ||
+        after.committedKey !== before.committedKey ||
+        (candidate && sameBinding(candidate, before) && retired) ||
+        !isControllerTaskContinuity(continuity) ||
+        continuity.kind !== 'task' ||
+        continuity.status() !== 'consumed' ||
+        !continuity.current() ||
+        !continuity.consumptionReady() ||
+        continuity.sourceKey !== handoff.sourceKey ||
+        continuity.destinationKey !== handoff.sourceKey ||
+        continuity.securityRevision !== before.securityRevision ||
+        taskQueryDestination(handoff.destinationKey, handoff.sourceKey) !==
+          handoff.destinationKey ||
+        routeKey(location.pathname, new URLSearchParams(location.search)) !==
+          handoff.destinationKey
+      )
+        return false;
+      candidate = { ...before };
+      receipt = { ...before, cleanKey: handoff.destinationKey };
+      preservedBy = continuity;
+      consumedBy = continuity.identity;
+      retired = false;
+      return true;
+    },
     observe(source: TaskSource, acceptedPrimary: boolean) {
       if (receipt && sameBinding(receipt, source)) {
         current(source);

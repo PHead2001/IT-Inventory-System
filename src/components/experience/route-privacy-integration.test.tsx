@@ -12,10 +12,14 @@ import {
   useInsertionEffect,
   useLayoutEffect,
 } from 'react';
+import { useSearchParams } from 'next/navigation';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { ProtectedPrivacyBoundary } from '@/components/auth/auth-privacy';
 import { ProtectedPrivacyContent } from '@/components/auth/privacy-content';
-import { PrivacyReadinessContext } from '@/components/auth/privacy-readiness';
+import {
+  PrivacyReadinessContext,
+  PrivateRestorationGate,
+} from '@/components/auth/privacy-readiness';
 import {
   assignmentEpoch,
   readPrivacyRevocationRevision,
@@ -230,6 +234,7 @@ afterEach(() => {
 const nativeId = 'a3010000-0000-4000-8000-0000000000ab';
 const nativePath = '/inventory/assets/' + nativeId;
 type NativeOptions = {
+  kind?: 'asset' | 'quantity';
   owner?: typeof binding;
   revision?: number;
   serverGeneration?: LogoutPrivacyGeneration;
@@ -237,28 +242,74 @@ type NativeOptions = {
   content?: string;
   anchor?: string;
   hidden?: boolean;
+  contentRouteKey?: string;
+  incomingText?: string;
 };
 let taskPrivacy: React.ContextType<typeof PrivacyReadinessContext>;
 let taskPrivacyEvents: Array<{
   ready: boolean;
   status: string | undefined;
   current: boolean;
+  consumptionReady: boolean;
+}> = [];
+let taskPublicationEvents: Array<{
+  status: string | undefined;
+  consumptionReady: boolean;
 }> = [];
 function TaskPrivacyProbe() {
   const privacy = useContext(PrivacyReadinessContext);
+  useInsertionEffect(() => {
+    taskPublicationEvents.push({
+      status: privacy.taskQuery?.status(),
+      consumptionReady: privacy.taskQuery?.consumptionReady() === true,
+    });
+  });
   useLayoutEffect(() => {
     taskPrivacy = privacy;
     taskPrivacyEvents.push({
       ready: privacy.ready,
       status: privacy.taskQuery?.status(),
       current: privacy.taskQuery?.current() === true,
+      consumptionReady: privacy.taskQuery?.consumptionReady() === true,
     });
   });
   return (
     <output data-testid="task-private-ready">{String(privacy.ready)}</output>
   );
 }
+function NativeTaskWorkspace({ kind }: { kind: 'asset' | 'quantity' }) {
+  // Model DetailTasks' mounted query consumer rather than passing a query prop
+  // through the server node that AcceptedPrivacyContent intentionally retains.
+  const query = useSearchParams();
+  const privacy = useContext(PrivacyReadinessContext);
+  return (
+    <>
+      <output data-testid="task-primary-ready">{String(privacy.ready)}</output>
+      <TaskWorkspace
+        choices={[
+          {
+            id: kind + '_move',
+            label: kind === 'asset' ? 'Move asset' : 'Move stock',
+          },
+        ]}
+        context="Owned asset"
+        recordIdentity={kind + ':' + nativeId}
+        taskIntent={query.get('task') ?? undefined}
+      >
+        {() => <p>Move form</p>}
+      </TaskWorkspace>
+      {query.has('task') && (
+        <PrivateRestorationGate scope="new-native-task-restoration">
+          <p>Fresh task storage bootstrap</p>
+        </PrivateRestorationGate>
+      )}
+    </>
+  );
+}
 function nativeTaskTree(options: NativeOptions = {}) {
+  const kind = options.kind ?? 'asset';
+  const path =
+    '/inventory/' + (kind === 'asset' ? 'assets' : 'quantity') + '/' + nativeId;
   return (
     <ProtectedPrivacyBoundary
       serverGeneration={options.serverGeneration ?? { status: 'absent' }}
@@ -268,27 +319,19 @@ function nativeTaskTree(options: NativeOptions = {}) {
       <RouteMotionProvider actorId="staff">
         <Controls />
         <TaskPrivacyProbe />
-        <ProtectedPrivacyContent>
+        <ProtectedPrivacyContent routeKey={options.contentRouteKey}>
           <div hidden={options.hidden}>
             <RouteReady
               actorId="staff"
-              routeKey={options.anchor ?? nativePath}
+              routeKey={options.anchor ?? path}
               contentIdentity={options.content ?? 'record'}
               conventionalPrimary
               key={options.primaryKey ?? 'original'}
             >
               <main>
                 <h1>Owned asset</h1>
-                <TaskWorkspace
-                  choices={[{ id: 'asset_move', label: 'Move asset' }]}
-                  context="Owned asset"
-                  recordIdentity={'asset:' + nativeId}
-                  taskIntent={
-                    new URLSearchParams(runtime.query).get('task') ?? undefined
-                  }
-                >
-                  {() => <p>Move form</p>}
-                </TaskWorkspace>
+                <p>{options.incomingText ?? 'Original primary content'}</p>
+                <NativeTaskWorkspace kind={kind} />
               </main>
             </RouteReady>
           </div>
@@ -297,15 +340,19 @@ function nativeTaskTree(options: NativeOptions = {}) {
     </ProtectedPrivacyBoundary>
   );
 }
-async function admittedNativeTask(query = '') {
-  runtime.pathname = nativePath;
+async function admittedNativeTask(query = '', options: NativeOptions = {}) {
+  runtime.pathname =
+    options.kind === 'quantity'
+      ? '/inventory/quantity/' + nativeId
+      : nativePath;
   runtime.query = query;
   taskPrivacyEvents = [];
-  history.replaceState(null, '', nativePath + (query ? '?' + query : ''));
+  taskPublicationEvents = [];
+  history.replaceState(null, '', runtime.pathname + (query ? '?' + query : ''));
   vi.spyOn(HTMLElement.prototype, 'getClientRects').mockReturnValue([
     {},
   ] as unknown as DOMRectList);
-  const view = render(nativeTaskTree());
+  const view = render(nativeTaskTree(options));
   await waitFor(() => expect(taskPrivacy.ready).toBe(true));
   return view;
 }
@@ -315,7 +362,7 @@ function nativeQuery(
   options?: NativeOptions,
 ) {
   runtime.query = query;
-  history.replaceState({}, '', nativePath + (query ? '?' + query : ''));
+  history.replaceState({}, '', runtime.pathname + (query ? '?' + query : ''));
   view.rerender(nativeTaskTree(options));
 }
 async function freshNativeTask() {
@@ -343,6 +390,7 @@ it('holds a native task closed through its exact privacy check, consumes once, a
     ready: false,
     status: 'pending',
     current: true,
+    consumptionReady: false,
   });
   expect(taskPrivacy.verifiedEpoch).toBeUndefined();
   expect(taskPrivacy.taskQuery?.securityRevision).toBe(acceptedSecurity);
@@ -369,6 +417,233 @@ it('holds a native task closed through its exact privacy check, consumes once, a
   await screen.findByRole('heading', { name: 'Move asset' });
   expect(location.search).toBe('?returnTo=%2Finventory');
 });
+
+it.each(['asset', 'quantity'] as const)(
+  'consumes and reenters a verified native %s task beneath its explicit server-primary gate without admitting content or storage',
+  async (kind) => {
+    const path =
+      '/inventory/' +
+      (kind === 'asset' ? 'assets' : 'quantity') +
+      '/' +
+      nativeId;
+    const options: NativeOptions = { kind, contentRouteKey: path };
+    const view = await admittedNativeTask('', options);
+    const heading = kind === 'asset' ? 'Move asset' : 'Move stock';
+    const taskQuery = 'returnTo=%2Finventory&task=' + kind + '_move';
+    for (let repeat = 0; repeat < 2; repeat++) {
+      const check = deferred<LogoutPrivacyGeneration>();
+      runtime.read.mockReturnValueOnce(check.promise);
+      const first = taskPrivacyEvents.length;
+      nativeQuery(view, taskQuery, {
+        ...options,
+        incomingText: 'Unaccepted incoming primary',
+      });
+      await waitFor(() => expect(taskPrivacy.ready).toBe(false));
+      expect(taskPrivacyEvents[first]).toEqual({
+        ready: false,
+        status: 'pending',
+        current: true,
+        consumptionReady: false,
+      });
+      expect(taskPrivacy.taskQuery?.consumptionReady()).toBe(false);
+      expect(screen.queryByRole('heading', { name: heading })).toBeNull();
+      await act(async () => {
+        check.resolve({ status: 'absent' });
+        await check.promise;
+      });
+      await freshNativeTask();
+      expect(taskPrivacy.taskQuery?.status(), 'repeat ' + repeat).toBe(
+        'consumed',
+      );
+      expect(taskPrivacy.taskQuery?.consumptionReady()).toBe(true);
+      expect(taskPublicationEvents).toContainEqual({
+        status: 'verified',
+        consumptionReady: false,
+      });
+      expect(screen.getByTestId('task-primary-ready')).toHaveTextContent(
+        'false',
+      );
+      expect(taskPrivacy.navigation?.admission(path).ready).toBe(false);
+      expect(screen.queryByText('Fresh task storage bootstrap')).toBeNull();
+      expect(screen.queryByText('Unaccepted incoming primary')).toBeNull();
+      expect(screen.getByRole('heading', { name: heading })).toHaveFocus();
+      expect(location.search).toBe('?returnTo=%2Finventory');
+      const cleanup = deferred<LogoutPrivacyGeneration>();
+      runtime.read.mockReturnValueOnce(cleanup.promise);
+      nativeQuery(view, 'returnTo=%2Finventory', options);
+      await waitFor(() => expect(taskPrivacy.ready).toBe(false));
+      expect(taskPrivacy.taskQuery?.kind).toBe('cleanup');
+      expect(taskPrivacy.taskQuery?.consumptionReady()).toBe(false);
+      fireEvent.click(screen.getByRole('button', { name: 'Close task' }));
+      await act(async () => {
+        cleanup.resolve({ status: 'absent' });
+        await cleanup.promise;
+      });
+      await freshNativeTask();
+      expect(taskPrivacy.taskQuery?.consumptionReady()).toBe(true);
+      expect(screen.queryByRole('heading', { name: heading })).toBeNull();
+      expect(screen.getByTestId('task-primary-ready')).toHaveTextContent(
+        'false',
+      );
+    }
+  },
+);
+
+it.each(
+  (['asset', 'quantity'] as const).flatMap((kind) =>
+    (['revocation', 'owner', 'late', 'generic-recheck'] as const).map(
+      (reason) => ({
+        kind,
+        reason,
+      }),
+    ),
+  ),
+)(
+  'rejects $kind receipt consumption through the explicit gate after $reason',
+  async ({ kind, reason }) => {
+    const path =
+      '/inventory/' +
+      (kind === 'asset' ? 'assets' : 'quantity') +
+      '/' +
+      nativeId;
+    const options: NativeOptions = { kind, contentRouteKey: path };
+    const view = await admittedNativeTask('', options);
+    const check = deferred<LogoutPrivacyGeneration>();
+    runtime.read.mockReturnValueOnce(check.promise);
+    nativeQuery(view, 'returnTo=%2Finventory&task=' + kind + '_move', options);
+    await waitFor(() => expect(taskPrivacy.ready).toBe(false));
+    const held = taskPrivacy.taskQuery!;
+    expect(held.consumptionReady()).toBe(false);
+    if (reason === 'revocation') act(() => revokePrivatePresentation());
+    if (reason === 'owner') {
+      view.rerender(
+        nativeTaskTree({
+          ...options,
+          owner: { ...binding, actorId: 'replacement' },
+        }),
+      );
+    }
+    if (reason === 'late') {
+      nativeQuery(view, '', options);
+      await freshNativeTask();
+    }
+    if (reason === 'generic-recheck')
+      act(() => window.dispatchEvent(new Event('focus')));
+    expect(held.consumptionReady()).toBe(false);
+    await act(async () => {
+      check.resolve({ status: 'absent' });
+      await check.promise;
+    });
+    expect(held.consumptionReady()).toBe(false);
+    expect(
+      screen.queryByRole('heading', { name: /Move asset|Move stock/ }),
+    ).toBeNull();
+    expect(screen.queryByText('Fresh task storage bootstrap')).toBeNull();
+    if (reason !== 'late') expect(location.search).toContain('task=');
+  },
+);
+
+it.each(['asset', 'quantity'] as const)(
+  'retains native %s task consumption after two application entries on the explicit task-bearing server gate',
+  async (kind) => {
+    const path =
+      '/inventory/' +
+      (kind === 'asset' ? 'assets' : 'quantity') +
+      '/' +
+      nativeId;
+    const task = kind + '_move';
+    const anchor = path + '?task=' + task;
+    const options: NativeOptions = { kind, anchor, contentRouteKey: anchor };
+    const view = await admittedNativeTask('task=' + task, options);
+    const originalConsume = controls.readiness.consumeTask;
+    const ordinarySnapshots: Array<{ idle: boolean; pending: boolean }> = [];
+    vi.spyOn(controls.readiness, 'consumeTask').mockImplementation(
+      (...args) => {
+        const before = {
+          idle: controls.readiness.nativeTaskIdle(),
+          pending: controls.scope.state.snapshot().pending,
+        };
+        const handoff = originalConsume(...args);
+        if (handoff) ordinarySnapshots.push(before);
+        return handoff;
+      },
+    );
+    const heading = kind === 'asset' ? 'Move asset' : 'Move stock';
+    for (let repeat = 0; repeat < 2; repeat++) {
+      if (repeat) {
+        act(() => controls.scope.navigation?.(anchor));
+        nativeQuery(view, 'task=' + task, options);
+      }
+      await screen.findByRole('heading', { name: heading });
+      expect(location.search).toBe('');
+      nativeQuery(view, '', options);
+      await freshNativeTask();
+      fireEvent.click(screen.getByRole('button', { name: 'Close task' }));
+    }
+    expect(ordinarySnapshots).toEqual([{ idle: true, pending: false }]);
+    nativeQuery(view, 'returnTo=%2Finventory&task=' + task, options);
+    await freshNativeTask();
+    expect(screen.getByRole('heading', { name: heading })).toHaveFocus();
+    expect(location.search).toBe('?returnTo=%2Finventory');
+  },
+);
+
+it.each(['notify-revocation', 'busy', 'changed-epoch', 'no-success'] as const)(
+  'declines ordinary receipt transfer on %s while retaining the ordinary result',
+  async (reason) => {
+    const anchor = nativePath + '?task=asset_move';
+    const options: NativeOptions = { anchor, contentRouteKey: anchor };
+    const view = await admittedNativeTask('task=asset_move', options);
+    nativeQuery(view, '', options);
+    await freshNativeTask();
+    fireEvent.click(screen.getByRole('button', { name: 'Close task' }));
+    let finish: (() => void) | undefined;
+    if (reason === 'notify-revocation') {
+      let sawTaskSource = false;
+      const stop = controls.readiness.subscribePrimary(() => {
+        if (location.search) {
+          sawTaskSource = true;
+          return;
+        }
+        if (!sawTaskSource) return;
+        stop();
+        revokePrivatePresentation();
+      });
+    } else {
+      const original = controls.readiness.consumeTask;
+      vi.spyOn(controls.readiness, 'consumeTask').mockImplementation(
+        (...args) => {
+          if (reason === 'no-success') return null;
+          const result = original(...args);
+          if (result && reason === 'busy')
+            finish = controls.scope.state.register();
+          if (result && reason === 'changed-epoch')
+            controls.scope.state.cancel();
+          return result;
+        },
+      );
+    }
+    act(() => controls.scope.navigation?.(anchor));
+    nativeQuery(view, 'task=asset_move', options);
+    await freshNativeTask();
+    if (reason === 'no-success') {
+      expect(screen.queryByRole('heading', { name: 'Move asset' })).toBeNull();
+      expect(location.search).toBe('?task=asset_move');
+    } else {
+      expect(screen.getByRole('heading', { name: 'Move asset' })).toBeVisible();
+      expect(location.search).toBe('');
+    }
+    if (finish) act(finish);
+    nativeQuery(view, '', options);
+    await freshNativeTask();
+    if (reason !== 'no-success')
+      fireEvent.click(screen.getByRole('button', { name: 'Close task' }));
+    nativeQuery(view, 'returnTo=%2Finventory&task=asset_move', options);
+    await freshNativeTask();
+    expect(screen.queryByRole('heading', { name: 'Move asset' })).toBeNull();
+    expect(location.search).toContain('task=asset_move');
+  },
+);
 
 it('an initial raw task URL has no native receipt to preserve', async () => {
   await admittedNativeTask('task=asset_move');

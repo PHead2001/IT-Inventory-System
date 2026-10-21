@@ -272,6 +272,12 @@ export function RouteReady({
   useInsertionEffect(() => {
     authority.current = privacy;
   }, [privacy]);
+  useEffect(() => {
+    // The controller commits its successful proof in its ancestor layout effect.
+    // Reobserve afterwards so cleanup can release only its matching receipt
+    // before a later deliberate task entry, without granting page readiness.
+    if (authority.current.taskQuery?.consumptionReady()) observeTaskSource();
+  });
   const auxiliary = useContext(AuxiliaryRouteCaptureContext);
   const source = useContext(RoutePresentationSourceContext);
   useLayoutEffect(() => {
@@ -354,18 +360,45 @@ export function RouteReady({
           !source.isConnected ||
           source.closest('[hidden], [inert]') ||
           source.getClientRects().length === 0 ||
-          getComputedStyle(source).visibility === 'hidden' ||
-          !freshPresentationGrant(authority.current)
+          getComputedStyle(source).visibility === 'hidden'
         )
           return false;
+        const before = taskSource();
+        const capture =
+          before?.fresh && before.visible && before.idle
+            ? authority.current.navigation?.captureTaskConsumption?.(effective)
+            : null;
+        const ordinary = freshPresentationGrant(authority.current)
+          ? readiness?.consumeTask(
+              root.current,
+              effective,
+              recordPath,
+              task,
+              replaceAppHistoryUrl,
+            )
+          : null;
+        if (ordinary && before && capture) {
+          const after = taskSource();
+          if (
+            after &&
+            before.root === after.root &&
+            before.actorId === after.actorId &&
+            before.contentIdentity === after.contentIdentity &&
+            before.serverAnchor === after.serverAnchor &&
+            before.navigationIdentity === after.navigationIdentity &&
+            before.securityRevision === after.securityRevision &&
+            before.pendingEpoch === after.pendingEpoch &&
+            after.fresh &&
+            after.visible &&
+            after.idle
+          ) {
+            const continuity = capture(ordinary.destinationKey);
+            if (continuity)
+              nativeTask.transfer(before, after, ordinary, continuity);
+          }
+        }
         const handoff =
-          readiness?.consumeTask(
-            root.current,
-            effective,
-            recordPath,
-            task,
-            replaceAppHistoryUrl,
-          ) ??
+          ordinary ??
           readiness?.consumeNativeTask(root.current, effective, () => {
             const source = taskSource();
             return source

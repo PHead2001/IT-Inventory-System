@@ -14,8 +14,18 @@ export type PrivacyTaskQueryContinuity = Readonly<{
   securityRevision: string;
   status: () => 'pending' | 'verified' | 'consumed' | 'retired';
   current: () => boolean;
+  /** Live controller proof for an existing task receipt; never content admission. */
+  consumptionReady: () => boolean;
   complete: (cleanKey: string) => boolean;
 }>;
+
+const controllerContinuities = new WeakSet<PrivacyTaskQueryContinuity>();
+export function controllerTaskContinuity(value: PrivacyTaskQueryContinuity) {
+  controllerContinuities.add(value);
+  return value;
+}
+export const isControllerTaskContinuity = (value: PrivacyTaskQueryContinuity) =>
+  controllerContinuities.has(value);
 
 /** A task may add/change only its one valid return scope on the same record. */
 export function taskQueryDestination(source: string, destination: string) {

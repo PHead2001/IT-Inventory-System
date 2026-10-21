@@ -291,9 +291,76 @@ test('quantity recognition photo uploads, previews for viewers, replaces and rem
     });
     throw error;
   }
+  await browse.evaluate((button) => {
+    const observed = { click: false, trusted: false };
+    Object.defineProperty(button, '__browseClickObservation', {
+      value: observed,
+      configurable: true,
+    });
+    button.addEventListener(
+      'click',
+      (event) => {
+        observed.click = true;
+        observed.trusted = event.isTrusted;
+      },
+      { capture: true, once: true },
+    );
+  });
   const chooserEvent = page.waitForEvent('filechooser');
-  await page.keyboard.press('Enter');
-  const chooser = await chooserEvent;
+  let chooser: Awaited<typeof chooserEvent>;
+  try {
+    await page.keyboard.press('Enter');
+    chooser = await chooserEvent;
+  } catch (error) {
+    const diagnostics = await browse
+      .evaluate((button) => {
+        const ready = (element: Element) => ({
+          connected: element.isConnected,
+          hidden:
+            (element instanceof HTMLElement && element.hidden) ||
+            element.hasAttribute('hidden'),
+          inert:
+            (element instanceof HTMLElement && element.inert) ||
+            element.hasAttribute('inert'),
+          disabled: element.matches(':disabled'),
+        });
+        const active = document.activeElement;
+        const inputs = Array.from(
+          document.querySelectorAll<HTMLInputElement>('input[type="file"]'),
+        ).slice(0, 10);
+        const observed = (
+          button as HTMLButtonElement & {
+            __browseClickObservation?: { click: boolean; trusted: boolean };
+          }
+        ).__browseClickObservation;
+        return {
+          button: {
+            ...ready(button),
+            focused: active === button,
+          },
+          activeElement: {
+            tag: active?.tagName ?? null,
+            isButton: active === button,
+            isFileInput:
+              active instanceof HTMLInputElement && active.type === 'file',
+          },
+          fileInputs: {
+            count: document.querySelectorAll('input[type="file"]').length,
+            readiness: inputs.map((input) => ({
+              ...ready(input),
+              focused: active === input,
+            })),
+          },
+          click: observed ?? { click: false, trusted: false },
+        };
+      })
+      .catch(() => ({ unavailable: true }));
+    await testInfo.attach('browse-chooser-admission', {
+      body: JSON.stringify(diagnostics),
+      contentType: 'application/json',
+    });
+    throw error;
+  }
   await chooser.setFiles({
     name: 'browse.png',
     mimeType: 'image/png',

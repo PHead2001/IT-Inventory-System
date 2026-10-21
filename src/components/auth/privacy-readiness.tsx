@@ -51,6 +51,10 @@ export const PrivacyReadinessContext = createContext<{
     bind: (provider: symbol) => () => void;
     prepare: (href: string, provider: symbol) => void;
     retire: (provider: symbol) => void;
+    /** Inert until an actual ordinary task consumption succeeds. */
+    captureTaskConsumption?: (
+      sourceKey: string,
+    ) => ((cleanKey: string) => PrivacyTaskQueryContinuity | null) | null;
     admission: (routeKey: string) => {
       ready: boolean;
       wait?: Promise<void>;

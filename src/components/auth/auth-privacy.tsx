@@ -26,6 +26,7 @@ import {
 } from './privacy-navigation-ticket';
 import {
   taskQueryDestination,
+  controllerTaskContinuity,
   type PrivacyTaskQueryContinuity,
 } from './privacy-task-query';
 import {
@@ -802,6 +803,15 @@ function PrivacyController({
   useEffect(() => {
     const unchangedNavigation = committedNavigation.current === key.navigation;
     committedNavigation.current = key.navigation;
+    // Installing a completed ordinary handoff is not another verification.
+    // The subsequent clean-key render owns its distinct parent-linked check.
+    if (
+      unchangedNavigation &&
+      proposedTaskOperation?.status() === 'consumed' &&
+      taskOperationCurrent(proposedTaskOperation) &&
+      matchingKey(stateRef.current.key, key)
+    )
+      return;
     const ticket = tickets.snapshot();
     if (
       ticket &&
@@ -817,7 +827,15 @@ function PrivacyController({
     queueMicrotask(() => {
       if (mounted.current) void retry(key, undefined, proposedTaskOperation);
     });
-  }, [retry, key, tickets, ticketCurrent, setState, proposedTaskOperation]);
+  }, [
+    retry,
+    key,
+    tickets,
+    ticketCurrent,
+    setState,
+    proposedTaskOperation,
+    taskOperationCurrent,
+  ]);
   useEffect(() => {
     // Cleanup owns its callback invalidation even when storage remains blocked.
     // Retry only for a new external signal, not our own unsuccessful cleanup.
@@ -868,42 +886,70 @@ function PrivacyController({
     state.acceptedCallbackRevision === callbackRevision &&
     (!protectedRoute || acceptedVisible);
   const visible = protectedRoute ? acceptedVisible : ready;
-  const taskQuery = useMemo<PrivacyTaskQueryContinuity | undefined>(() => {
-    const operation = proposedTaskOperation;
-    if (!operation) return undefined;
-    const capture = operation.capture;
-    return {
-      identity: operation.identity,
-      parent: operation.parent,
-      kind: operation.kind,
-      sourceKey: capture.sourceKey,
-      destinationKey: capture.destinationKey,
-      securityRevision: capture.securityRevision,
-      status: () =>
-        operation.status() === 'prepared'
-          ? 'pending'
-          : (operation.status() as
-              'pending' | 'verified' | 'consumed' | 'retired'),
-      current: () => taskOperationCurrent(operation),
-      complete: (cleanKey: string) => {
-        if (
-          operation.kind !== 'task' ||
-          operation.status() !== 'verified' ||
-          !taskOperationCurrent(operation) ||
-          !stateRef.current.ready ||
-          stateRef.current.checking ||
-          stateRef.current.uncertain ||
-          stateRef.current.key?.navigation !== capture.destinationKey ||
-          cleanKey !== capture.cleanKey ||
-          routeKey(location.pathname, new URLSearchParams(location.search)) !==
-            cleanKey
-        )
-          return false;
-        operation.setStatus('consumed');
-        return true;
-      },
-    };
-  }, [proposedTaskOperation, taskOperationCurrent]);
+  const taskContinuity = useCallback(
+    (operation: TaskQueryOperation): PrivacyTaskQueryContinuity => {
+      const capture = operation.capture;
+      return {
+        identity: operation.identity,
+        parent: operation.parent,
+        kind: operation.kind,
+        sourceKey: capture.sourceKey,
+        destinationKey: capture.destinationKey,
+        securityRevision: capture.securityRevision,
+        status: () =>
+          operation.status() === 'prepared'
+            ? 'pending'
+            : (operation.status() as
+                'pending' | 'verified' | 'consumed' | 'retired'),
+        current: () => taskOperationCurrent(operation),
+        consumptionReady: () => {
+          const committed = stateRef.current;
+          // Status is marked before React publishes successful verification. Only
+          // the committed controller state may release an existing task receipt.
+          return (
+            (operation.status() === 'verified' ||
+              operation.status() === 'consumed') &&
+            taskOperationCurrent(operation) &&
+            committed.ready &&
+            !committed.checking &&
+            !committed.uncertain &&
+            committed.key?.navigation === capture.destinationKey &&
+            committed.key.bindingRevision === capture.binding &&
+            committed.key.serverRevision === capture.serverRevision &&
+            committed.key.revision === capture.revision &&
+            committed.acceptedRevocation === capture.revocation &&
+            committed.acceptedCallbackRevision === capture.callbacks &&
+            committed.acceptedServerRevision === capture.serverRevision
+          );
+        },
+        complete: (cleanKey: string) => {
+          if (
+            operation.kind !== 'task' ||
+            operation.status() !== 'verified' ||
+            !taskOperationCurrent(operation) ||
+            !stateRef.current.ready ||
+            stateRef.current.checking ||
+            stateRef.current.uncertain ||
+            stateRef.current.key?.navigation !== capture.destinationKey ||
+            cleanKey !== capture.cleanKey ||
+            routeKey(
+              location.pathname,
+              new URLSearchParams(location.search),
+            ) !== cleanKey
+          )
+            return false;
+          operation.setStatus('consumed');
+          return true;
+        },
+      };
+    },
+    [taskOperationCurrent],
+  );
+  const taskQuery = useMemo(
+    () =>
+      proposedTaskOperation ? taskContinuity(proposedTaskOperation) : undefined,
+    [proposedTaskOperation, taskContinuity],
+  );
   useLayoutEffect(() => {
     titles.accept(
       protectedRoute &&
@@ -989,6 +1035,84 @@ function PrivacyController({
               void retry(target, ticket);
             },
             retire: retireTarget,
+            captureTaskConsumption: (sourceKey: string) => {
+              const accepted = stateRef.current;
+              const configured = { ...configuration.current };
+              const sequence = request.current;
+              const epoch = readPrivacyRevocationRevision();
+              const callbacks = assignmentEpoch();
+              const cleanup = readAuthoritativeCleanupRevision();
+              const current = () =>
+                mounted.current &&
+                document.visibilityState !== 'hidden' &&
+                stateRef.current === accepted &&
+                accepted.ready &&
+                !accepted.checking &&
+                !accepted.uncertain &&
+                accepted.key?.navigation === sourceKey &&
+                configuration.current.navigation === sourceKey &&
+                configuration.current.bindingMatches &&
+                configuration.current.bindingRevision ===
+                  configured.bindingRevision &&
+                configuration.current.serverRevision ===
+                  configured.serverRevision &&
+                configuration.current.revision === configured.revision &&
+                accepted.key.bindingRevision === configured.bindingRevision &&
+                accepted.key.serverRevision === configured.serverRevision &&
+                accepted.key.revision === configured.revision &&
+                accepted.acceptedRevocation === epoch &&
+                accepted.acceptedCallbackRevision === callbacks &&
+                accepted.sequence === sequence &&
+                request.current === sequence &&
+                readPrivacyRevocationRevision() === epoch &&
+                assignmentEpoch() === callbacks &&
+                readAuthoritativeCleanupRevision() === cleanup;
+              if (!current()) return null;
+              let used = false;
+              return (cleanKey: string) => {
+                if (used) return null;
+                used = true;
+                if (
+                  !current() ||
+                  taskQueryDestination(cleanKey, sourceKey) !== cleanKey ||
+                  routeKey(
+                    location.pathname,
+                    new URLSearchParams(location.search),
+                  ) !== cleanKey
+                )
+                  return null;
+                const operation = taskQueryOperation(
+                  Object.freeze({
+                    sourceKey,
+                    destinationKey: sourceKey,
+                    cleanKey,
+                    binding: configured.bindingRevision,
+                    serverRevision: configured.serverRevision,
+                    revision: configured.revision,
+                    generation: accepted.generation,
+                    revocation: epoch,
+                    callbacks,
+                    cleanup,
+                    request: sequence,
+                    securityRevision: JSON.stringify([
+                      accepted.generation,
+                      cleanup,
+                      epoch,
+                      callbacks,
+                      callbacks,
+                      cleanup,
+                    ]),
+                  }),
+                  null,
+                  'task',
+                );
+                operation.setStatus('consumed');
+                taskOperation.current?.setStatus('retired');
+                taskOperation.current = operation;
+                setTaskSlot({ key: accepted.key!, operation });
+                return controllerTaskContinuity(taskContinuity(operation));
+              };
+            },
             admission: (destination: string) => {
               const ticket = state.navigationTicket;
               if (
@@ -1036,6 +1160,7 @@ function PrivacyController({
       state.uncertain,
       state.navigationTicket,
       taskQuery,
+      taskContinuity,
     ],
   );
   // Protected cleanup is fixed below: removing status must not displace an
