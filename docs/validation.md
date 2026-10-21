@@ -84,6 +84,22 @@ for visual review when the journeys actually execute.
 | W13   | Full and Reduced journeys inspect actual rendered drawer/container/shelf reveal-group transforms, visible selected count text against the uncached occupancy response with the optional overlay off, screenshots, and reversal to resting transforms after Clear selection.                                                                                                                                                                                                           |
 | W14   | Actual installed renderer and controlled browser clock prove Full flight before reveal, newer selection retirement, toolbar input cancellation and Reduced complete endpoints. The existing trusted-pointer interruption journey in `room.spec.ts` retains its interaction assertions and now waits through the complete 750/400 ms sequence.                                                                                                                                         |
 
+Native Chromium click coordinates floor client positions and round local offsets
+independently
+([client coordinates](https://raw.githubusercontent.com/chromium/chromium/main/third_party/blink/renderer/core/events/mouse_event.h),
+[local offsets](https://raw.githubusercontent.com/chromium/chromium/main/third_party/blink/renderer/core/events/mouse_event.cc)).
+The reveal journey therefore retains its fractional physical-visibility oracle,
+then certifies each integer client click against both the client ray and the
+rounded-offset R3F ray, requiring the current canvas rectangle and event
+dimensions to match the captured frame. Both rays must retain
+the intended physical and independent selection owner and remain DOM-uncovered.
+Both must also miss the canonical resting volume before counting an outside-rest
+pick. Unsupported transformed, zoomed, bordered or padded canvases fail
+explicitly; an exposed code without a certified click fails rather than being
+skipped. Original hover, selection, new spatial request and pose-coverage
+assertions remain. Focused helper checks establish this coordinate contract;
+full-suite and all-pose browser acceptance remain separate requirements.
+
 These journeys are authored, not executed browser acceptance. Typechecking,
 scoped lint/format and Playwright discovery establish source validity only.
 Committed-renderer observations do not certify overlap during renderer

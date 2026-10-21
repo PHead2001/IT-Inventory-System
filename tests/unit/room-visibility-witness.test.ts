@@ -25,10 +25,16 @@ import {
   type WitnessSnapshot,
   type WitnessTriangle,
 } from '../e2e/room-visibility-witness';
+import {
+  roomClickWitnesses,
+  uncoveredRoomClickWitnesses,
+  roomClickOutsideRest,
+} from '../e2e/room-click-witness';
 afterEach(() => {
   document.body.replaceChildren();
   Reflect.deleteProperty(window, '__roomWitnessStores');
   vi.restoreAllMocks();
+  vi.unstubAllGlobals();
 });
 function capture(
   material: MeshBasicMaterial | MeshBasicMaterial[],
@@ -224,6 +230,278 @@ it('rejects a physical drawer point owned by a nearer selection proxy and retain
     if (prior) Object.defineProperty(document, 'elementFromPoint', prior);
     else Reflect.deleteProperty(document, 'elementFromPoint');
   }
+});
+
+it('rejects a fractional visible patch whose floored native click misses, retaining a valid integer candidate', () => {
+  const scene = snapshot(plane('DRAWER', -0.997, 1, 0));
+  const fractional = { x: 100.6, y: 200.4 };
+  expect(roomRayWitnessAt(scene, fractional).code).toBe('DRAWER');
+  expect(roomRayWitnessAt(scene, { x: 100, y: 200 }).code).toBeNull();
+  const visible = roomVisibilityWitnesses(scene);
+  expect(visible.has('DRAWER')).toBe(true);
+  const candidates = new Map([
+    ['DRAWER', [fractional, { x: 101.9, y: 200.4 }]],
+  ]);
+  expect(
+    roomClickWitnesses(scene, scene, candidates, {
+      left: 0,
+      top: 0,
+      width: 400,
+      height: 400,
+    }).get('DRAWER'),
+  ).toEqual([{ client: { x: 101, y: 200 }, dispatch: { x: 101, y: 200 } }]);
+  expect(roomVisibilityWitnesses(scene)).toEqual(visible);
+});
+
+it.each([null, 'OTHER'])(
+  'rejects a floored click covered by an opaque %s owner',
+  (blocker) => {
+    const scene = snapshot([
+      ...plane('DRAWER', -1, 1, 0),
+      ...plane(blocker, -0.005, 0.005, 1),
+    ]);
+    const point = { x: 200.8, y: 200.2 };
+    expect(roomRayWitnessAt(scene, point).code).toBe('DRAWER');
+    expect(
+      roomClickWitnesses(scene, scene, new Map([['DRAWER', [point]]]), {
+        left: 0,
+        top: 0,
+        width: 400,
+        height: 400,
+      }).size,
+    ).toBe(0);
+  },
+);
+
+it('rejects a physical click when a nearer selection proxy owns its dispatch ray', () => {
+  const physical = snapshot(plane('DRAWER', -1, 1, 0));
+  const selection = {
+    ...physical,
+    triangles: [...physical.triangles, ...plane('PROXY', -0.005, 0.005, 1)],
+  };
+  expect(
+    roomClickWitnesses(
+      physical,
+      selection,
+      new Map([['DRAWER', [{ x: 200.8, y: 200.2 }]]]),
+      { left: 0, top: 0, width: 400, height: 400 },
+    ).size,
+  ).toBe(0);
+  expect(
+    roomClickWitnesses(
+      physical,
+      selection,
+      new Map([
+        [
+          'DRAWER',
+          [
+            { x: 200.8, y: 200.2 },
+            { x: 250.8, y: 200.2 },
+          ],
+        ],
+      ]),
+      { left: 0, top: 0, width: 400, height: 400 },
+    ).get('DRAWER'),
+  ).toEqual([{ client: { x: 250, y: 200 }, dispatch: { x: 250, y: 200 } }]);
+});
+
+it('checks the independently rounded R3F offset ray at a fractional canvas origin', () => {
+  const physical = snapshot(plane('DRAWER', -1, 1, 0));
+  physical.frame = { x: 0.4, y: 0.25, width: 400, height: 400 };
+  const point = { x: 200.8, y: 200.8 };
+  const selection = {
+    ...physical,
+    triangles: [...physical.triangles, ...plane('PROXY', -0.001, 0.001, 1)],
+  };
+  expect(roomRayWitnessAt(selection, { x: 200, y: 200 }).code).toBe('DRAWER');
+  expect(roomRayWitnessAt(selection, { x: 200.4, y: 200.25 }).code).toBe(
+    'PROXY',
+  );
+  expect(
+    roomClickWitnesses(physical, selection, new Map([['DRAWER', [point]]]), {
+      left: 0.4,
+      top: 0.25,
+      width: 400,
+      height: 400,
+    }).size,
+  ).toBe(0);
+  expect(
+    roomClickWitnesses(physical, physical, new Map([['DRAWER', [point]]]), {
+      left: 0.4,
+      top: 0.25,
+      width: 400,
+      height: 400,
+    }).get('DRAWER'),
+  ).toEqual([
+    { client: { x: 200, y: 200 }, dispatch: { x: 200.4, y: 200.25 } },
+  ]);
+});
+
+it('floors absolute negative clients and rejects invalid or out-of-canvas frames', () => {
+  const scene = snapshot(plane('DRAWER', -1, 1, 0));
+  scene.frame = { x: -200, y: -200, width: 400, height: 400 };
+  expect(
+    roomClickWitnesses(
+      scene,
+      scene,
+      new Map([['DRAWER', [{ x: -0.2, y: -0.2 }]]]),
+      { left: -200, top: -200, width: 400, height: 400 },
+    ).get('DRAWER')?.[0].client,
+  ).toEqual({ x: -1, y: -1 });
+  expect(() =>
+    roomClickWitnesses(scene, scene, new Map(), {
+      left: -200,
+      top: -200,
+      width: 0,
+      height: 400,
+    }),
+  ).toThrow('coordinate frame');
+  expect(() =>
+    roomClickWitnesses(scene, scene, new Map(), {
+      left: -200,
+      top: -200,
+      width: 399,
+      height: 400,
+    }),
+  ).toThrow('coordinate frame');
+  expect(() =>
+    roomClickWitnesses(scene, scene, new Map(), {
+      left: -200,
+      top: -200,
+      width: 400,
+      height: 401,
+    }),
+  ).toThrow('coordinate frame');
+  expect(
+    roomClickWitnesses(
+      scene,
+      scene,
+      new Map([['DRAWER', [{ x: -201, y: 0 }]]]),
+      { left: -200, top: -200, width: 400, height: 400 },
+    ).size,
+  ).toBe(0);
+});
+
+it('requires native DOM coverage at both client and dispatch points and rejects unsupported canvas geometry', async () => {
+  const scene = await capture(new MeshBasicMaterial());
+  scene.frame.y = 0.25;
+  const canvas = document.querySelector('canvas')!,
+    label = document.createElement('button');
+  vi.mocked(canvas.getBoundingClientRect).mockReturnValue(
+    new DOMRect(0, 0.25, 375, 400),
+  );
+  const state = [...window.__roomWitnessStores!][0].getState();
+  Reflect.set(
+    window,
+    '__roomWitnessStores',
+    new Set([
+      { getState: () => ({ ...state, size: { width: 375, height: 400 } }) },
+    ]),
+  );
+  let border = '0px',
+    transform = 'none',
+    translate = 'none',
+    zoom = '1',
+    padding = '0px';
+  vi.stubGlobal('getComputedStyle', () => ({
+    transform,
+    translate,
+    rotate: 'none',
+    scale: 'none',
+    perspective: 'none',
+    zoom,
+    borderLeftWidth: border,
+    borderRightWidth: '0px',
+    borderTopWidth: '0px',
+    borderBottomWidth: '0px',
+    paddingLeft: padding,
+    paddingRight: '0px',
+    paddingTop: '0px',
+    paddingBottom: '0px',
+  }));
+  Object.defineProperty(document, 'elementFromPoint', {
+    configurable: true,
+    value: (_x: number, y: number) => (y === 200.25 ? label : canvas),
+  });
+  const page = {
+    evaluate: async (fn: (arg: unknown) => unknown, arg: unknown) => fn(arg),
+  } as unknown as Page;
+  const candidates = new Map([['DRAWER', [{ x: 187.8, y: 200.2 }]]]);
+  expect(
+    (await uncoveredRoomClickWitnesses(page, scene, scene, candidates)).size,
+  ).toBe(0);
+  Object.defineProperty(document, 'elementFromPoint', {
+    configurable: true,
+    value: () => canvas,
+  });
+  expect(
+    (await uncoveredRoomClickWitnesses(page, scene, scene, candidates)).get(
+      'DRAWER',
+    )?.[0].client,
+  ).toEqual({ x: 187, y: 200 });
+  vi.mocked(canvas.getBoundingClientRect).mockReturnValue(
+    new DOMRect(0, 0.25, 374, 400),
+  );
+  await expect(
+    uncoveredRoomClickWitnesses(page, scene, scene, candidates),
+  ).rejects.toThrow('coordinate frame');
+  vi.mocked(canvas.getBoundingClientRect).mockReturnValue(
+    new DOMRect(0, 0.25, 375, 400),
+  );
+  border = '1px';
+  await expect(
+    uncoveredRoomClickWitnesses(page, scene, scene, candidates),
+  ).rejects.toThrow('Bordered or padded');
+  border = '0px';
+  transform = 'matrix(1,0,0,1,0,0)';
+  await expect(
+    uncoveredRoomClickWitnesses(page, scene, scene, candidates),
+  ).rejects.toThrow('Transformed');
+  transform = 'none';
+  translate = '1px';
+  await expect(
+    uncoveredRoomClickWitnesses(page, scene, scene, candidates),
+  ).rejects.toThrow('Transformed');
+  translate = 'none';
+  zoom = '2';
+  await expect(
+    uncoveredRoomClickWitnesses(page, scene, scene, candidates),
+  ).rejects.toThrow('Transformed');
+  zoom = '1';
+  padding = '1px';
+  await expect(
+    uncoveredRoomClickWitnesses(page, scene, scene, candidates),
+  ).rejects.toThrow('Bordered or padded');
+  Reflect.deleteProperty(document, 'elementFromPoint');
+});
+
+it('certifies outside-rest only when both client and offset rays miss the canonical resting volume', () => {
+  const scene = snapshot(plane('DRAWER', -1, 1, 0));
+  const bounds = {
+    min: [-0.1, -0.1, -0.1] as [number, number, number],
+    max: [0.1, 0.1, 0.1] as [number, number, number],
+  };
+  expect(
+    roomClickOutsideRest(
+      scene,
+      { client: { x: 250, y: 200 }, dispatch: { x: 200, y: 200 } },
+      bounds,
+    ),
+  ).toBe(false);
+  expect(
+    roomClickOutsideRest(
+      scene,
+      { client: { x: 200, y: 200 }, dispatch: { x: 250, y: 200 } },
+      bounds,
+    ),
+  ).toBe(false);
+  expect(
+    roomClickOutsideRest(
+      scene,
+      { client: { x: 250, y: 200 }, dispatch: { x: 251, y: 200 } },
+      bounds,
+    ),
+  ).toBe(true);
 });
 it('diagnostic rays independently distinguish target, opaque foreground and the actual shifted pointer', () => {
   const scene = snapshot([
