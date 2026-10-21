@@ -295,10 +295,18 @@ test('owned local groups retain the 32-expansion boundary and distinguish duplic
     const child = duplicateRows.data!.find(
       (row) => row.parent_id === groups[0].id,
     )!;
-    const childLink = page.getByRole('link', {
-      name: `${child.breadcrumb} (${child.code})`,
-      exact: true,
-    });
+    const childLink = page
+      .locator('section')
+      .filter({
+        has: page.getByRole('heading', {
+          name: 'Child locations',
+          exact: true,
+        }),
+      })
+      .getByRole('link', {
+        name: `${child.breadcrumb} (${child.code})`,
+        exact: true,
+      });
     const childURL = new URL(
       (await childLink.getAttribute('href'))!,
       page.url(),
@@ -371,6 +379,252 @@ test('owned local groups retain the 32-expansion boundary and distinguish duplic
         .order('code');
       expect(unchanged.error).toBeNull();
       expect(unchanged.data).toEqual(canonicalSnapshot);
+    }
+  }
+});
+
+test('actual location status, pagination, child and recovery links retain one validated browser return', async ({
+  page,
+}, info) => {
+  test.setTimeout(180_000);
+  const owned = await acceptanceFixtures();
+  const names = Array.from(
+    { length: 26 },
+    (_, index) =>
+      `Fictional pagination ${owned.suffix} ${String(index + 1).padStart(2, '0')}`,
+  );
+  try {
+    const parent = await owned.ownedLocation(
+      `Fictional pagination parent ${owned.suffix}`,
+      'ITO',
+      'storage_group',
+    );
+    const child = await owned.ownedLocation(
+      `Fictional pagination child ${owned.suffix}`,
+      parent.code,
+    );
+    for (const name of names) await owned.asset(name, child.id);
+    const stored = await owned.caller
+      .from('serialized_assets')
+      .select('id,name,location_id,status')
+      .in('id', [...owned.assets]);
+    expect(stored.error).toBeNull();
+    expect(stored.data).toHaveLength(26);
+    expect(stored.data!.map((row) => row.name).sort()).toEqual(
+      [...names].sort(),
+    );
+    expect(
+      stored.data!.every(
+        (row) => row.location_id === child.id && row.status === 'active',
+      ),
+    ).toBe(true);
+    const ancestry = await owned.caller
+      .from('inventory_locations')
+      .select('id,code,breadcrumb')
+      .in('id', [parent.id, child.id]);
+    expect(ancestry.error).toBeNull();
+    expect(ancestry.data).toHaveLength(2);
+    const parentBreadcrumb = ancestry.data!.find(
+      (row) => row.id === parent.id,
+    )!.breadcrumb;
+    const childBreadcrumb = ancestry.data!.find(
+      (row) => row.id === child.id,
+    )!.breadcrumb;
+    await acceptanceLogin(page);
+
+    for (const width of [1280, 390]) {
+      await page.setViewportSize({ width, height: 900 });
+      await page.emulateMedia({
+        reducedMotion: width === 390 ? 'reduce' : 'no-preference',
+      });
+      const browserQuery = new URLSearchParams({ q: parent.name });
+      browserQuery.append('expanded', 'ITO');
+      if (width === 390) browserQuery.set('level', 'ITO');
+      await page.goto('/locations?' + browserQuery);
+      const browser = page.getByRole('navigation', {
+        name: 'Location browser',
+        exact: true,
+      });
+      await browser
+        .getByRole('button', {
+          name: `${parentBreadcrumb} ${parent.code}`,
+          exact: true,
+        })
+        .click();
+      await expect
+        .poll(() => new URL(page.url()).searchParams.get('selected'))
+        .toBe(parent.code);
+      const parentDetails = browser.getByRole('link', {
+        name: `View ${parentBreadcrumb} location details`,
+        exact: true,
+      });
+      const parentURL = new URL(
+        (await parentDetails.getAttribute('href'))!,
+        page.url(),
+      );
+      const returnTo = parentURL.searchParams.get('returnTo')!;
+      const browserReturn = new URL(returnTo, page.url());
+      expect(browserReturn.pathname).toBe('/locations');
+      expect(browserReturn.searchParams.get('q')).toBe(parent.name);
+      expect(browserReturn.searchParams.get('selected')).toBe(parent.code);
+      expect(browserReturn.searchParams.getAll('expanded')).toEqual(['ITO']);
+      if (width === 390)
+        expect(browserReturn.searchParams.get('level')).toBe('ITO');
+      expect(browserReturn.hash).toBe(
+        `#location-row-${width === 390 ? 'mobile-level' : 'desktop-tree'}-${parent.id}`,
+      );
+      await parentDetails.click();
+      await expect(page).toHaveURL(parentURL.href);
+      // Descendant inventory rows also link to this location. Traverse the
+      // child navigation card, whose URL retains the browser return scope.
+      const childDetails = page
+        .locator('section')
+        .filter({
+          has: page.getByRole('heading', {
+            name: 'Child locations',
+            exact: true,
+          }),
+        })
+        .getByRole('link', {
+          name: `${childBreadcrumb} (${child.code})`,
+          exact: true,
+        });
+      const childURL = new URL(
+        (await childDetails.getAttribute('href'))!,
+        page.url(),
+      );
+      expect(childURL.pathname).toBe('/locations/' + child.code);
+      expect(childURL.searchParams.get('returnTo')).toBe(returnTo);
+      await childDetails.click();
+      await expect(page).toHaveURL(childURL.href);
+      const statuses = page.getByRole('navigation', {
+        name: 'Location inventory views',
+        exact: true,
+      });
+      const all = statuses.getByRole('link', {
+        name: 'All statuses',
+        exact: true,
+      });
+      const allURL = new URL((await all.getAttribute('href'))!, page.url());
+      expect(allURL.searchParams.get('status')).toBe('all');
+      expect(allURL.searchParams.get('returnTo')).toBe(returnTo);
+      await all.click();
+      await expect(page).toHaveURL(allURL.href);
+      await expect(all).toHaveAttribute('aria-current', 'page');
+      await expect(
+        page.getByText('26 matching rows', { exact: true }),
+      ).toBeVisible();
+      const rows = page.getByRole('link', {
+        name: new RegExp(`^Fictional pagination ${owned.suffix} \\d{2}$`),
+      });
+      await expect(rows).toHaveCount(25);
+      const firstPage = (await rows.allTextContents()).map((name) =>
+        name.trim(),
+      );
+      const next = page
+        .getByRole('navigation', { name: 'Pagination', exact: true })
+        .getByRole('link', { name: 'Next', exact: true });
+      await expect(next).toBeVisible();
+      const nextURL = new URL((await next.getAttribute('href'))!, page.url());
+      expect(nextURL.pathname).toBe(childURL.pathname);
+      expect(nextURL.searchParams.get('page')).toBe('2');
+      expect(nextURL.searchParams.get('status')).toBe('all');
+      expect(nextURL.searchParams.get('returnTo')).toBe(returnTo);
+      await next.click();
+      await expect(page).toHaveURL(nextURL.href);
+      await expect(rows).toHaveCount(1);
+      const secondPage = (await rows.allTextContents()).map((name) =>
+        name.trim(),
+      );
+      expect([...firstPage, ...secondPage].sort()).toEqual([...names].sort());
+      await expect(
+        page
+          .getByRole('navigation', { name: 'Pagination', exact: true })
+          .getByRole('link', { name: 'Next', exact: true }),
+      ).toHaveCount(0);
+
+      const recoveryURL = new URL(page.url());
+      recoveryURL.searchParams.set('page', '999999');
+      await page.goto(recoveryURL.href);
+      await expect
+        .poll(() => new URL(page.url()).searchParams.get('page'))
+        .toBe('2');
+      const recovered = new URL(page.url());
+      expect(recovered.pathname).toBe(childURL.pathname);
+      expect(recovered.searchParams.get('status')).toBe('all');
+      expect(recovered.searchParams.get('returnTo')).toBe(returnTo);
+      await expect(rows).toHaveCount(1);
+      await expect(rows).toHaveText(secondPage);
+      const back = page.getByRole('link', {
+        name: 'All locations',
+        exact: true,
+      });
+      await expect(back).toHaveAttribute('href', returnTo);
+      await back.click();
+      await expect(page).toHaveURL(browserReturn.href);
+      await expect(
+        browser.getByRole('searchbox', {
+          name: 'Browse locations',
+          exact: true,
+        }),
+      ).toHaveValue(parent.name);
+      await expect(
+        page.getByRole('region', { name: 'Selected location', exact: true }),
+      ).toContainText(parent.code);
+      await page.screenshot({
+        path: info.outputPath(`pagination-child-recovery-return-${width}.png`),
+      });
+      await info.attach(`actual-location-pagination-${width}`, {
+        body: JSON.stringify({
+          width,
+          pageSizes: [firstPage.length, secondPage.length],
+          completeOwnedRows: 26,
+          childReturnPreserved: true,
+          statusReturnPreserved: true,
+          paginationReturnPreserved: true,
+          recoveryReturnPreserved: true,
+          browserReturnRestored: true,
+        }),
+        contentType: 'application/json',
+      });
+    }
+  } finally {
+    let cleanupSucceeded = false;
+    try {
+      await owned.cleanup();
+      cleanupSucceeded = true;
+    } finally {
+      await info.attach('owned-pagination-cleanup', {
+        body: JSON.stringify({
+          cleanupSucceeded,
+          assetCount: owned.assets.size,
+          locationCount: owned.locations.size,
+          retained: 'Owned assets retired; owned nodes inactive/non-holding',
+        }),
+        contentType: 'application/json',
+      });
+    }
+    if (owned.assets.size) {
+      const retained = await owned.admin
+        .from('serialized_assets')
+        .select('id,status')
+        .in('id', [...owned.assets]);
+      expect(retained.error).toBeNull();
+      expect(retained.data).toHaveLength(owned.assets.size);
+      expect(retained.data!.every((row) => row.status === 'retired')).toBe(
+        true,
+      );
+    }
+    if (owned.locations.size) {
+      const retained = await owned.admin
+        .from('locations')
+        .select('id,active,can_hold_inventory')
+        .in('id', [...owned.locations]);
+      expect(retained.error).toBeNull();
+      expect(retained.data).toHaveLength(owned.locations.size);
+      expect(
+        retained.data!.every((row) => !row.active && !row.can_hold_inventory),
+      ).toBe(true);
     }
   }
 });

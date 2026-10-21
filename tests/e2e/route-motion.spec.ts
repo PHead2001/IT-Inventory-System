@@ -3313,3 +3313,93 @@ for (const width of [1280, 390]) {
     }
   });
 }
+
+test('held real Flight preserves earlier observers for unclaimed prefetches before and after claiming navigation', async ({
+  page,
+}, info) => {
+  test.setTimeout(30_000);
+  await auditLogin(page);
+  const origin = new URL(page.url()).origin;
+  const headers = ['next-router-prefetch', 'next-router-segment-prefetch'];
+  const observed: string[] = [];
+  const observer: Parameters<Page['route']>[1] = async (route) => {
+    const request = route.request();
+    const url = new URL(request.url());
+    const header = headers.find((name) => request.headers()[name]);
+    if (
+      url.origin === origin &&
+      url.pathname === '/history' &&
+      url.search === '?type=quantity' &&
+      request.method() === 'GET' &&
+      request.headers().rsc === '1' &&
+      header
+    ) {
+      observed.push(header);
+      await route.abort('aborted');
+    } else await route.fallback();
+  };
+  // Register first: Playwright dispatches the newer canonical hold before this
+  // observer. Only fallback can pass its unclaimed requests through to us.
+  await page.route('**/*', observer);
+  let held: Awaited<ReturnType<typeof holdRouteWork>> | undefined;
+  const prefetchProbe = async (header: string) => {
+    // Explicit browser transport probes, not a claim that ordinary app links
+    // prefetch. The existing production-link no-prefetch assertion stays intact.
+    const outcome = await page.evaluate(async (header) => {
+      try {
+        await fetch('/history?type=quantity', {
+          headers: { RSC: '1', [header]: '1' },
+          credentials: 'same-origin',
+          cache: 'no-store',
+        });
+        return 'delivered';
+      } catch {
+        return 'rejected';
+      }
+    }, header);
+    expect(outcome).toBe('rejected');
+  };
+  try {
+    held = await holdRouteWork(page, '/history');
+    let arrived = false;
+    void held.arrival.then(
+      () => {
+        arrived = true;
+      },
+      () => {},
+    );
+    for (const header of headers) await prefetchProbe(header);
+    expect(observed).toEqual(headers);
+    expect(arrived).toBe(false);
+    await expect(
+      page.getByRole('heading', { name: 'Inventory', exact: true }),
+    ).toBeVisible();
+    await (await navigationLink(page, 'History')).click({ noWaitAfter: true });
+    await held.arrival;
+    expect(arrived).toBe(true);
+    for (const header of headers) await prefetchProbe(header);
+    expect(observed).toEqual([...headers, ...headers]);
+    held.release();
+    await held.delivery;
+    await expect(
+      page.getByRole('heading', { name: 'Inventory history', exact: true }),
+    ).toBeVisible();
+    expect(new URL(page.url()).pathname).toBe('/history');
+    await info.attach('actual-held-route-observer-chain', {
+      body: JSON.stringify({
+        transportProbes: observed,
+        observedBeforeClaim: 2,
+        observedAfterClaim: 2,
+        realNavigationDelivered: true,
+        syntheticResponse: false,
+      }),
+      contentType: 'application/json',
+    });
+  } finally {
+    try {
+      await held?.dispose();
+    } finally {
+      await page.unroute('**/*', observer);
+    }
+  }
+});

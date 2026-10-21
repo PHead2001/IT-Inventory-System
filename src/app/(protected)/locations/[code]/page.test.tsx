@@ -45,7 +45,33 @@ const scopedOrigin =
   '/locations?q=Office&selected=ITO&level=&expanded=ITO#location-row-selected-panel-00000000-0000-4000-8000-000000000001';
 
 it('retains the validated browser origin through status, pagination and child detail navigation while export keeps inventory filters', async () => {
-  m.inventory.mockResolvedValue({ rows: [], total: 75, page: 2, pageSize: 25 });
+  m.inventory.mockResolvedValue({
+    rows: Array.from({ length: 25 }, (_, index) => ({
+      kind: 'asset',
+      id: `asset-${index}`,
+      name: `Descendant asset ${index + 1}`,
+      categoryName: 'Equipment',
+      status: 'active',
+      location: {
+        ...location,
+        id: 'child',
+        code: 'ITO-GENERAL',
+        name: 'General Storage / Unsorted',
+        breadcrumb: 'IT Office / General Storage / Unsorted',
+        parentId: 'root',
+        can_hold_inventory: true,
+      },
+      quantity: null,
+      assetTag: null,
+      serialNumber: null,
+      recordedTotal: null,
+      reorderThreshold: null,
+      stockState: null,
+    })),
+    total: 75,
+    page: 2,
+    pageSize: 25,
+  });
   render(
     await Page({
       params: Promise.resolve({ code: 'ITO' }),
@@ -57,12 +83,22 @@ it('retains the validated browser origin through status, pagination and child de
       }),
     }),
   );
+  // The child card and all 25 descendant holdings share an accessible
+  // location name. Only the child card retains the browser return scope.
+  const childName = 'IT Office / General Storage / Unsorted (ITO-GENERAL)';
+  expect(screen.getAllByRole('link', { name: childName })).toHaveLength(26);
+  const childSection = screen
+    .getByRole('heading', { name: 'Child locations' })
+    .closest('section')!;
+  const childLink = within(childSection).getByRole('link', {
+    name: childName,
+  });
   const navigation = [
     screen.getByRole('link', { name: 'Active only' }),
     screen.getByRole('link', { name: 'All statuses' }),
     screen.getByRole('link', { name: 'Previous' }),
     screen.getByRole('link', { name: 'Next' }),
-    screen.getByRole('link', { name: /IT Office \/ General Storage/ }),
+    childLink,
   ];
   for (const link of navigation) {
     const target = new URL(
