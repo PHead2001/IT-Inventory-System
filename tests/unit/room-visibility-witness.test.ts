@@ -20,6 +20,8 @@ import {
   roomVisibilityWitnessReport,
   roomRayWitnessAt,
   captureRoomWitness,
+  uncoveredRoomWitnesses,
+  roomWitnessCodeAtPoint,
   type WitnessSnapshot,
   type WitnessTriangle,
 } from '../e2e/room-visibility-witness';
@@ -184,6 +186,45 @@ function snapshot(
     masks: [],
   };
 }
+it('rejects a physical drawer point owned by a nearer selection proxy and retains an uncovered alternate for that same drawer', async () => {
+  const physical = snapshot(plane('ITC-D02', -1, 1, 0));
+  const selection = {
+    ...physical,
+    triangles: [...physical.triangles, ...plane('ITC-D01', -1, 0, 1)],
+  };
+  const stolen = { x: 150, y: 200 };
+  const covered = { x: 275, y: 200 };
+  const alternate = { x: 250, y: 200 };
+  expect(roomWitnessCodeAtPoint(physical, stolen)).toBe('ITC-D02');
+  expect(roomWitnessCodeAtPoint(selection, stolen)).toBe('ITC-D01');
+  expect(roomWitnessCodeAtPoint(selection, alternate)).toBe('ITC-D02');
+  const surface = document.createElement('div');
+  surface.dataset.roomSurface = 'true';
+  const canvas = document.createElement('canvas');
+  surface.append(canvas);
+  document.body.append(surface);
+  const prior = Object.getOwnPropertyDescriptor(document, 'elementFromPoint');
+  Object.defineProperty(document, 'elementFromPoint', {
+    configurable: true,
+    value: (x: number) => (x === covered.x ? surface : canvas),
+  });
+  const page = {
+    evaluate: async (callback: (points: unknown) => unknown, points: unknown) =>
+      callback(points),
+  } as unknown as Page;
+  const candidates = new Map([['ITC-D02', [stolen, covered, alternate]]]);
+  try {
+    expect(await uncoveredRoomWitnesses(page, candidates)).toEqual(
+      new Map([['ITC-D02', stolen]]),
+    );
+    expect(await uncoveredRoomWitnesses(page, candidates, selection)).toEqual(
+      new Map([['ITC-D02', alternate]]),
+    );
+  } finally {
+    if (prior) Object.defineProperty(document, 'elementFromPoint', prior);
+    else Reflect.deleteProperty(document, 'elementFromPoint');
+  }
+});
 it('diagnostic rays independently distinguish target, opaque foreground and the actual shifted pointer', () => {
   const scene = snapshot([
     ...plane('DRAWER', -1, 1, 0),

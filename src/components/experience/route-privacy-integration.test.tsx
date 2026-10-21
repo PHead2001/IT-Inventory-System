@@ -645,6 +645,35 @@ it.each(['notify-revocation', 'busy', 'changed-epoch', 'no-success'] as const)(
   },
 );
 
+it('rejects native reentry that supersedes pending ordinary cleanup, including its late success', async () => {
+  const anchor = nativePath + '?task=asset_move';
+  const options: NativeOptions = { anchor, contentRouteKey: anchor };
+  const view = await admittedNativeTask('task=asset_move', options);
+  await screen.findByRole('heading', { name: 'Move asset' });
+  nativeQuery(view, '', options);
+  await freshNativeTask();
+  fireEvent.click(screen.getByRole('button', { name: 'Close task' }));
+  act(() => controls.scope.navigation?.(anchor));
+  nativeQuery(view, 'task=asset_move', options);
+  await screen.findByRole('heading', { name: 'Move asset' });
+  expect(location.search).toBe('');
+  const cleanup = deferred<LogoutPrivacyGeneration>();
+  runtime.read.mockReturnValueOnce(cleanup.promise);
+  nativeQuery(view, '', options);
+  await waitFor(() => expect(taskPrivacy.ready).toBe(false));
+  expect(taskPrivacy.taskQuery?.kind).toBe('cleanup');
+  fireEvent.click(screen.getByRole('button', { name: 'Close task' }));
+  nativeQuery(view, 'returnTo=%2Finventory&task=asset_move', options);
+  await freshNativeTask();
+  expect(screen.queryByRole('heading', { name: 'Move asset' })).toBeNull();
+  await act(async () => {
+    cleanup.resolve({ status: 'absent' });
+    await cleanup.promise;
+  });
+  expect(location.search).toBe('?returnTo=%2Finventory&task=asset_move');
+  expect(screen.queryByRole('heading', { name: 'Move asset' })).toBeNull();
+});
+
 it('an initial raw task URL has no native receipt to preserve', async () => {
   await admittedNativeTask('task=asset_move');
   expect(taskPrivacy.taskQuery).toBeUndefined();

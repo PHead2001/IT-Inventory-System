@@ -751,6 +751,7 @@ export function roomRayWitnessAt(
 export async function uncoveredRoomWitnesses(
   page: Page,
   witnesses: Map<string, { x: number; y: number }[]>,
+  selectionSnapshot?: WitnessSnapshot,
 ) {
   const samples = [...witnesses].flatMap(([code, points]) =>
     points.map((point) => ({ code, ...point })),
@@ -765,7 +766,11 @@ export async function uncoveredRoomWitnesses(
   }, samples);
   const result = new Map<string, { x: number; y: number }>();
   for (const point of uncovered)
-    if (!result.has(point.code))
+    if (
+      !result.has(point.code) &&
+      (!selectionSnapshot ||
+        roomWitnessCodeAtPoint(selectionSnapshot, point) === point.code)
+    )
       result.set(point.code, { x: point.x, y: point.y });
   return result;
 }

@@ -298,6 +298,17 @@ changed pending epochs, unsuccessful consumption, forged/mismatched controller
 tokens and retired binding refusal, including admission of a genuinely new
 navigation binding. The pre-consumption controller capture remains inert until
 the successful handoff and its live post-call checks complete.
+A held-cleanup regression proves that premature native query supersession stays
+rejected even after the old verification succeeds. The browser's deliberate native
+entry observes exact task-to-clean browser navigation and holds a subsequently
+observed genuine privacy-generation response before requiring the visible Search
+and commands launcher to be disabled. Only delivery of that unchanged response
+and the launcher's subsequent enabled state permit native entry. URL removal or
+an already-enabled stale DOM alone cannot establish fresh authority. Because the
+app sends no-referrer, the helper uses observed navigation/request order and
+fails closed if that order is unavailable; it never selects by Referer. Existing
+failure geometry retains the launcher's disabled state without exposing
+controller internals.
 These working-tree checks still require native browser rerun and independent
 review before exact-SHA acceptance.
 The native re-entry, first inventory-row viewport and cold-title browser checks

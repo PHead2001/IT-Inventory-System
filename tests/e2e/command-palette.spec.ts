@@ -1,6 +1,7 @@
 import { expect, test } from '@playwright/test';
 import fixture from '../fixtures/auth.json' with { type: 'json' };
 import { withFailureGeometry } from './failure-geometry';
+import { holdTaskCleanupRead } from './held-task-cleanup';
 import {
   acceptanceFixtures,
   acceptanceLogin,
@@ -86,6 +87,7 @@ test('palette Move opens the established review task and consumes its intent onc
   page,
 }) => {
   const owned = await acceptanceFixtures();
+  let cleanup: Awaited<ReturnType<typeof holdTaskCleanupRead>> | undefined;
   try {
     const id = await owned.asset(
       'Palette equipment ' + owned.suffix,
@@ -114,6 +116,10 @@ test('palette Move opens the established review task and consumes its intent onc
     await page.getByRole('button', { name: 'Search and commands' }).click();
     await page.getByRole('option', { name: /Move asset or stock/ }).click();
     await page.getByRole('combobox').fill('Palette equipment ' + owned.suffix);
+    cleanup = await holdTaskCleanupRead(
+      page,
+      new URL('/inventory/assets/' + id, page.url()).href,
+    );
     await page
       .getByRole('option', {
         name: new RegExp('Palette equipment ' + owned.suffix),
@@ -123,9 +129,20 @@ test('palette Move opens the established review task and consumes its intent onc
       tasks.getByRole('heading', { name: 'Move asset', exact: true }),
     ).toBeFocused();
     await expect(page).not.toHaveURL(/task=/);
+    await cleanup.arrival;
+    await expect(
+      page.getByRole('button', { name: 'Search and commands' }),
+    ).toBeDisabled();
     await tasks.getByRole('button', { name: 'Close task' }).click();
     // The supported native history wrapper must retain app state/query/hash
     // while synchronizing another absent-to-present task transition.
+    // The actual cleanup response is held before this assertion, so a stale
+    // pre-cleanup enabled launcher cannot satisfy the next readiness check.
+    cleanup.release();
+    await cleanup.delivery;
+    await expect(
+      page.getByRole('button', { name: 'Search and commands' }),
+    ).toBeEnabled();
     await page.evaluate(() => {
       const state = { ...window.history.state, paletteUserState: 'retained' };
       delete state.__NA;
@@ -163,8 +180,18 @@ test('palette Move opens the established review task and consumes its intent onc
       .single();
     expect(version.error).toBeNull();
     expect(version.data!.version).toBe(1);
+  } catch (error) {
+    console.error(
+      'bounded-task-cleanup',
+      cleanup?.diagnostic() ?? { phase: 'not-installed' },
+    );
+    throw error;
   } finally {
-    await owned.cleanup();
+    try {
+      await cleanup?.dispose();
+    } finally {
+      await owned.cleanup();
+    }
   }
 });
 for (const reducedMotion of ['no-preference', 'reduce'] as const) {

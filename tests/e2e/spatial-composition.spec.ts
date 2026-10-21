@@ -18,6 +18,7 @@ import { installRoomDrawObservation } from './room-draw-observation';
 import { chooseRevealWitness } from './spatial-witness-choice';
 import {
   captureRoomWitness,
+  captureRoomSelectionWitness,
   roomVisibilityWitnesses,
   uncoveredRoomWitnesses,
 } from './room-visibility-witness';
@@ -593,7 +594,15 @@ test('W14 actual Full flight precedes reveal, newer selection retires it, and Re
   await expect(canvas).toHaveAttribute('data-spatial-open-code', '');
   const witness = await captureRoomWitness(page);
   const physicalWitnesses = roomVisibilityWitnesses(witness);
-  const exposed = await uncoveredRoomWitnesses(page, physicalWitnesses);
+  // A physically visible face can lie behind a different resting selection
+  // volume. Retain physical/DOM visibility and require the same selection owner
+  // at each point before choosing the real interrupted-flight click.
+  const selectionWitness = await captureRoomSelectionWitness(page);
+  const exposed = await uncoveredRoomWitnesses(
+    page,
+    physicalWitnesses,
+    selectionWitness,
+  );
   const replacement = chooseRevealWitness(
     bindings
       .filter((binding) => binding.primary)
@@ -625,6 +634,7 @@ test('W14 actual Full flight precedes reveal, newer selection retires it, and Re
           .sort(),
         physicalCodes: [...physicalWitnesses.keys()].sort(),
         uncoveredCodes: [...exposed.keys()].sort(),
+        selectionOwnershipChecked: true,
       }),
       contentType: 'application/json',
     });
