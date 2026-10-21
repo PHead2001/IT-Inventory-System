@@ -28,6 +28,78 @@ const label = (
 });
 
 describe('scene label placement', () => {
+  it.each(['focused', 'hovered', 'mandatory'] as const)(
+    'treats omitted %s as false when choosing one same-code action',
+    (flag) => {
+      for (const inactive of [undefined, false]) {
+        const active = {
+          ...label('z-active', 30, 30),
+          locationCode: 'ITC-RACK',
+          [flag]: true,
+        };
+        const other = {
+          ...label('a-inactive', 80, 30),
+          locationCode: 'ITC-RACK',
+          [flag]: inactive,
+        };
+        const result = layoutLabelsDetailed([other, active], viewport);
+        expect(result.status).toBe('complete');
+        expect(
+          result.placements
+            .filter((entry) => entry.visible)
+            .map((entry) => entry.id),
+        ).toEqual(['z-active']);
+      }
+    },
+  );
+  it('keeps the mandatory selected anchor ahead of its same-code tooltip', () => {
+    // Sanitized exact hosted rack failure: both rectangles fit without overlap,
+    // but an omitted optional mandatory flag must compare as false, not NaN.
+    const rack: LabelRect = {
+      id: 'server-rack',
+      locationCode: 'ITC-RACK',
+      selected: true,
+      priority: 4,
+      mandatory: true,
+      focused: false,
+      hovered: false,
+      left: 483.65625,
+      top: 614.318359375,
+      width: 200.6875,
+      height: 48,
+    };
+    const tooltip: LabelRect = {
+      id: 'hover-tooltip',
+      locationCode: 'ITC-RACK',
+      selected: true,
+      priority: 4,
+      focused: false,
+      hovered: false,
+      left: 596,
+      top: 702,
+      width: 92.375,
+      height: 44,
+      previous: { dx: 0, dy: 0, compact: false },
+    };
+    const view = {
+      left: 286,
+      top: 463.859375,
+      right: 882,
+      bottom: 1011.859375,
+    };
+    for (const mandatory of [undefined, false]) {
+      for (const input of [
+        [rack, { ...tooltip, mandatory }],
+        [{ ...tooltip, mandatory }, rack],
+      ]) {
+        const result = layoutLabelsDetailed(input, view);
+        expect(result.status).toBe('complete');
+        expect(result.placements.filter((entry) => entry.visible)).toEqual([
+          { id: 'server-rack', visible: true, dx: 0, dy: 0 },
+        ]);
+      }
+    }
+  });
   function assertPacking(
     input: LabelRect[],
     placements: LabelPlacement[],
