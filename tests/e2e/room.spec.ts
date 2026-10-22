@@ -1,5 +1,11 @@
 import { readFileSync, writeFileSync } from 'node:fs';
-import { expect, test, type Page, type TestInfo } from '@playwright/test';
+import {
+  expect,
+  test,
+  type Page,
+  type Response,
+  type TestInfo,
+} from '@playwright/test';
 import { createClient } from '@supabase/supabase-js';
 import { Box3, Matrix4, Ray, Vector3 } from 'three';
 import fixture from '../fixtures/auth.json' with { type: 'json' };
@@ -8,6 +14,7 @@ import { buildRoomBindings } from '../../src/features/room/bindings';
 import { roomSchema } from '../../src/features/room/schema';
 import type { RoomOccupancy } from '../../src/features/room/occupancy-contract';
 import { occupancyText } from '../../src/features/room/occupancy-contract';
+import { roomSelectionOccupancy } from './room-occupancy-snapshot';
 import { measureRoomTarget, roomTargetMeetsMinimum } from './room-target-size';
 import {
   enableRoomLayoutDiagnostics,
@@ -899,6 +906,38 @@ test('spatial reveal endpoints retain actual picking and labels across oblique, 
     journey: 'spatial-reveal',
     stage: 'room setup',
   });
+  const occupancyResponses = new Map<
+    string,
+    Promise<{ requestUrl: string; response: unknown } | null>
+  >();
+  let occupancyCaptureOverflow = false;
+  const captureOccupancy = (response: Response) => {
+    const url = new URL(response.url());
+    if (
+      !response.ok() ||
+      url.origin !== new URL(page.url()).origin ||
+      url.pathname !== '/api/room/occupancy' ||
+      url.searchParams.get('space') !== 'it-closet'
+    )
+      return;
+    const generation = url.searchParams.get('generation');
+    if (!generation) return;
+    if (occupancyResponses.size >= 128) {
+      occupancyCaptureOverflow = true;
+      return;
+    }
+    occupancyResponses.set(
+      generation,
+      response
+        .json()
+        .then((payload: unknown) => ({
+          requestUrl: response.request().url(),
+          response: payload,
+        }))
+        .catch(() => null),
+    );
+  };
+  page.on('response', captureOccupancy);
   await observeRoomScene(page);
   await page.setViewportSize({ width: 1280, height: 1100 });
   await page.emulateMedia({ reducedMotion: 'no-preference' });
@@ -909,7 +948,7 @@ test('spatial reveal endpoints retain actual picking and labels across oblique, 
   await chooseMapMode(page, 'Free Orbit');
   const outsideRest = new Set<string>();
   const exercised = new Set<string>();
-  let countSnapshot: RoomOccupancy | null = null;
+  let occupancyGeneration: string | null = null;
   const expectations: Record<string, { id: string; offset: number[] }> = {
     'ITC-D01': { id: 'drawer-1', offset: [5.6, 0, 0] },
     'ITC-D07': { id: 'drawer-7', offset: [-5.6, 0, 0] },
@@ -949,16 +988,8 @@ test('spatial reveal endpoints retain actual picking and labels across oblique, 
         pose,
         code,
       });
-      const firstCounts = !countSnapshot
-        ? page.waitForResponse(
-            (response) =>
-              response.url().includes('/api/room/occupancy?') && response.ok(),
-          )
-        : null;
       await keyboardRoomLocation(page, code);
-      if (firstCounts)
-        countSnapshot = (await (await firstCounts).json())
-          .counts as RoomOccupancy;
+      await expect(viewer).toHaveAttribute('data-selected-code', code);
       markRoomProgress(testInfo, {
         journey: 'spatial-reveal',
         stage: 'settle reveal and inspect presentation',
@@ -994,17 +1025,57 @@ test('spatial reveal endpoints retain actual picking and labels across oblique, 
         },
       );
       const clickWitness = roomProgressByTest.get(testInfo)?.clickWitness;
+      // A focus/pageshow recheck can issue a valid unrelated same-space request.
+      // Use only the successful generation adopted by this selected render.
+      let acceptedGeneration: string | null = null;
+      await expect
+        .poll(async () => {
+          const accepted = await viewer.evaluate((host) => ({
+            code: host.dataset.selectedCode,
+            status: host.dataset.occupancyStatus,
+            generation: host.dataset.occupancyGeneration,
+          }));
+          acceptedGeneration =
+            accepted.code === code &&
+            accepted.status === 'ready' &&
+            accepted.generation &&
+            accepted.generation !== occupancyGeneration
+              ? accepted.generation
+              : null;
+          return acceptedGeneration;
+        })
+        .toMatch(/^[0-9a-f-]{36}$/);
+      expect(
+        occupancyCaptureOverflow,
+        'bounded occupancy response capture',
+      ).toBe(false);
+      const adoptedResponse = occupancyResponses.get(acceptedGeneration!);
+      expect(
+        adoptedResponse,
+        'response for the adopted render generation',
+      ).toBeDefined();
+      const adopted = await adoptedResponse!;
+      expect(adopted, 'readable adopted occupancy response').not.toBeNull();
+      const occupancy = roomSelectionOccupancy({
+        ...adopted!,
+        origin: new URL(page.url()).origin,
+        spaceId: 'it-closet',
+        code,
+        acceptedGeneration: acceptedGeneration!,
+        previousGeneration: occupancyGeneration,
+      });
+      occupancyGeneration = occupancy.generation;
       markRoomProgress(testInfo, {
         journey: 'spatial-reveal',
         stage: 'verify label and complete pointer pick',
         pose,
         code,
-        occupancyExpected: countSnapshot?.[code],
+        occupancyExpected: occupancy.counts,
         clickWitness,
       });
       assertion('occupancy-snapshot');
       expect(
-        countSnapshot?.[code],
+        occupancy.counts,
         `actual scoped occupancy snapshot for ${code}`,
       ).toBeTruthy();
       assertion('occupancy-label');
@@ -1013,11 +1084,16 @@ test('spatial reveal endpoints retain actual picking and labels across oblique, 
       ).toHaveAttribute(
         'aria-label',
         new RegExp(
-          occupancyText(countSnapshot![code], true).replace(
+          occupancyText(occupancy.counts, true).replace(
             /[.*+?^${}()|[\]\\]/g,
             '\\$&',
           ),
         ),
+      );
+      await expect(viewer).toHaveAttribute('data-occupancy-status', 'ready');
+      await expect(viewer).toHaveAttribute(
+        'data-occupancy-generation',
+        occupancy.generation,
       );
       assertion('label-visible');
       await expect(
@@ -1168,6 +1244,7 @@ test('spatial interruption, reduced motion, stationary hover and moving down/up 
   page,
 }) => {
   test.setTimeout(90_000);
+  await page.clock.install();
   await observeRoomScene(page);
   await page.setViewportSize({ width: 1280, height: 1100 });
   await page.emulateMedia({ reducedMotion: 'no-preference' });
@@ -1175,15 +1252,27 @@ test('spatial interruption, reduced motion, stationary hover and moving down/up 
   await page.goto('/room?space=it-closet');
   const viewer = await ready(page),
     canvas = viewer.locator('canvas');
+  // Input delivery can exceed the whole 750 ms flight under CI load. Keep
+  // trusted toolbar input, but prove that Fit is accepted during the flight.
+  await page.clock.pauseAt(await page.evaluate(() => Date.now() + 10_000));
   await keyboardRoomLocation(page, 'ITC-D01');
+  await expect
+    .poll(async () => {
+      const request = await canvas.getAttribute('data-spatial-request');
+      return request ? (JSON.parse(request) as { code: string }).code : null;
+    })
+    .toBe('ITC-D01');
+  await page.clock.runFor(100);
   await expect(canvas).toHaveAttribute('data-spatial-phase', 'flying');
   await page.getByRole('button', { name: 'Fit room', exact: true }).click();
+  await expect(canvas).toHaveAttribute('data-spatial-phase', 'cancelled');
   const held = await camera(page);
   // Deliberate negative deadline window: old 750ms flight plus 400ms opening.
-  await page.waitForTimeout(1300);
+  await page.clock.runFor(1300);
   near((await camera(page)).position, held.position);
   await expect(canvas).toHaveAttribute('data-spatial-open-code', '');
   await expect(canvas).toHaveAttribute('data-spatial-phase', 'cancelled');
+  await page.clock.resume();
   await keyboardRoomLocation(page, 'ITC-D07');
   await expect(canvas).toHaveAttribute('data-spatial-phase', 'flying');
   await page.emulateMedia({ reducedMotion: 'reduce' });

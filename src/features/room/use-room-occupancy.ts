@@ -104,6 +104,10 @@ export function useRoomOccupancy(
       : null;
   return {
     counts: enabled ? current?.counts : undefined,
+    // Diagnostic identity for successful counts adopted by this render. An
+    // in-flight attempt, retired key or failed response is never accepted.
+    acceptedGeneration:
+      enabled && current?.counts && !current.error ? current.generation : null,
     status: !enabled
       ? 'off'
       : !current
