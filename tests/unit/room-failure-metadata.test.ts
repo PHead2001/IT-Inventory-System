@@ -1,7 +1,86 @@
 import { describe, expect, it } from 'vitest';
-import { roomFailureMetadata } from '../e2e/room-failure-metadata';
+import {
+  roomFailureMetadata,
+  roomOccupancyFailureProjection,
+} from '../e2e/room-failure-metadata';
 
 describe('room failure metadata', () => {
+  it('retains an explicit assertion checkpoint for serialized Playwright errors without guessing a matcher', () => {
+    const info = {
+      status: 'failed' as const,
+      retry: 0,
+      errors: [{ message: 'private expected/received' }],
+    };
+    expect(roomFailureMetadata(info, 'occupancy-label')).toMatchObject({
+      activeAssertion: 'occupancy-label',
+      records: [{ kind: 'other', matcher: null }],
+    });
+    expect(roomFailureMetadata(info, 'private assertion')).toMatchObject({
+      activeAssertion: null,
+    });
+  });
+
+  it('projects only fixed fixture label identity and bounded numeric occupancy fields', () => {
+    const output = roomOccupancyFailureProjection({
+      code: 'ITC-RED',
+      expected: {
+        quantity_product_count: '2',
+        quantity_unit_count: '9007199254740993',
+        asset_count: '0',
+        private: 'secret',
+      },
+      labelCount: 1,
+      labels: [
+        {
+          aria: 'Select Red Container (ITC-RED); 2 products / 9,007,199,254,740,993 units / 0 assets at this location',
+          badge: ' · 2 products / 9,007,199,254,740,993 units / 0 assets',
+          suppressed: 'true',
+          compact: 'false',
+          exposed: 'true',
+        },
+      ],
+    });
+    expect(output.expected.quantity_unit_count).toBe('9007199254740993');
+    expect(output.labels[0]).toEqual({
+      fixedFixtureLabel: 'Red Container',
+      ariaOccupancy: output.expected,
+      badgeOccupancy: output.expected,
+      suppressed: 'true',
+      compact: 'false',
+      exposed: 'true',
+    });
+    expect(JSON.stringify(output)).not.toMatch(/private|secret/);
+  });
+
+  it('bounds label records and rejects arbitrary DOM text, invalid counts and unknown fixed identities', () => {
+    const output = roomOccupancyFailureProjection({
+      code: 'private location',
+      expected: {
+        quantity_product_count: '-1',
+        quantity_unit_count: '1'.repeat(20),
+        asset_count: 'secret',
+      },
+      labelCount: 999999,
+      labels: Array.from({ length: 8 }, () => ({
+        aria: 'Select private name; secret',
+        badge: 'secret inventory',
+        suppressed: 'secret',
+        compact: null,
+        exposed: null,
+      })),
+    });
+    expect(output).toMatchObject({
+      expected: {
+        quantity_product_count: null,
+        quantity_unit_count: null,
+        asset_count: null,
+      },
+      labelCount: 10000,
+      omitted: 4,
+    });
+    expect(output.labels).toHaveLength(4);
+    expect(JSON.stringify(output)).not.toMatch(/private|secret|inventory/);
+  });
   it('retains only the first owned stack location and an actual allowlisted matcher', () => {
     const error = {
       message: 'private inventory value, URL, expected and received DOM',

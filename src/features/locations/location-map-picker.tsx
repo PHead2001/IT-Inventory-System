@@ -107,6 +107,9 @@ export default function LocationMapPicker({
       buildRoomBindings(room).some((binding) => binding.code === location.code)
     );
   });
+  const candidateIsModeled = modeled.some(
+    (location) => location.code === candidate,
+  );
   const dialog = useRef<HTMLDialogElement>(null);
   const closeRef = useRef(onClose);
   const closeDialog = () => {
@@ -199,9 +202,9 @@ export default function LocationMapPicker({
       </p>
       <EmbeddedRoom
         locations={locations}
-        // Preserve the logical candidate so an unmodeled selection can show
-        // its truthful alternative, including after a previous map failure.
-        code={candidate}
+        // An overview offers eligible modeled alternatives without inventing a
+        // selected binding or changing the staged logical destination.
+        code={candidateIsModeled || modeled.length === 0 ? candidate : null}
         permittedCodes={modeled.map((location) => location.code)}
         onSelect={(code) => {
           if (
@@ -214,6 +217,12 @@ export default function LocationMapPicker({
         selectionAllowed={() => current() && !disabled}
         priority={2}
       />
+      {selected && !candidateIsModeled && modeled.length > 0 && (
+        <p role="status" className="my-3 text-sm">
+          This location is not shown on the map. You can keep it or choose a
+          modeled location.
+        </p>
+      )}
       <div className="my-4">
         <LocationPicker
           locations={locations}

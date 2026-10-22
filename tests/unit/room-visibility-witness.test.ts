@@ -29,6 +29,7 @@ import {
   roomClickWitnesses,
   uncoveredRoomClickWitnesses,
   roomClickOutsideRest,
+  type RoomClickDiagnostics,
 } from '../e2e/room-click-witness';
 afterEach(() => {
   document.body.replaceChildren();
@@ -305,6 +306,58 @@ it('rejects a physical click when a nearer selection proxy owns its dispatch ray
   ).toEqual([{ client: { x: 250, y: 200 }, dispatch: { x: 250, y: 200 } }]);
 });
 
+it('reports the actual normalization and first rejecting ray without changing candidates or trusting blocker text', () => {
+  const physical = snapshot(plane('DRAWER', -1, 1, 0));
+  const selection = {
+    ...physical,
+    triangles: [
+      ...physical.triangles,
+      ...plane('private inventory blocker', -0.005, 0.005, 1),
+    ],
+  };
+  const candidates = new Map([
+    [
+      'DRAWER',
+      [
+        { x: -1, y: 200 },
+        { x: 200.8, y: 200.2 },
+        { x: 200.9, y: 200.3 },
+        { x: 250.5, y: 200.2 },
+      ],
+    ],
+  ]);
+  const frame = { left: 0, top: 0, width: 400, height: 400 };
+  const reports: RoomClickDiagnostics[] = [];
+  const baseline = roomClickWitnesses(physical, selection, candidates, frame);
+  expect(
+    roomClickWitnesses(physical, selection, candidates, frame, {
+      code: 'DRAWER',
+      report: (value) => reports.push(value),
+    }),
+  ).toEqual(baseline);
+  expect(reports).toEqual([
+    {
+      candidates: 4,
+      outsideFrame: 1,
+      duplicateClients: 1,
+      normalized: 2,
+      dualRayAccepted: 1,
+      domAccepted: null,
+      rejected: { 'client-selection': 1 },
+      blockers: { 'other-location': 1 },
+    },
+  ]);
+  expect(JSON.stringify(reports)).not.toMatch(/private|inventory/);
+  expect(
+    roomClickWitnesses(physical, selection, candidates, frame, {
+      code: 'DRAWER',
+      report: () => {
+        throw new Error('sink failed');
+      },
+    }),
+  ).toEqual(baseline);
+});
+
 it('checks the independently rounded R3F offset ray at a fractional canvas origin', () => {
   const physical = snapshot(plane('DRAWER', -1, 1, 0));
   physical.frame = { x: 0.4, y: 0.25, width: 400, height: 400 };
@@ -427,9 +480,29 @@ it('requires native DOM coverage at both client and dispatch points and rejects 
     evaluate: async (fn: (arg: unknown) => unknown, arg: unknown) => fn(arg),
   } as unknown as Page;
   const candidates = new Map([['DRAWER', [{ x: 187.8, y: 200.2 }]]]);
+  label.dataset.roomLabelCode = 'private inventory';
+  const reports: RoomClickDiagnostics[] = [];
   expect(
-    (await uncoveredRoomClickWitnesses(page, scene, scene, candidates)).size,
+    (
+      await uncoveredRoomClickWitnesses(page, scene, scene, candidates, {
+        code: 'DRAWER',
+        report: (value) => reports.push(value),
+      })
+    ).size,
   ).toBe(0);
+  expect(reports).toHaveLength(2);
+  expect(reports[0]).toMatchObject({
+    candidates: 1,
+    normalized: 1,
+    dualRayAccepted: 1,
+    domAccepted: null,
+  });
+  expect(reports[1]).toMatchObject({
+    domAccepted: 0,
+    rejected: { 'client-dom': 0, 'dispatch-dom': 1 },
+    blockers: { 'room-label': 1 },
+  });
+  expect(JSON.stringify(reports)).not.toMatch(/private|inventory/);
   Object.defineProperty(document, 'elementFromPoint', {
     configurable: true,
     value: () => canvas,
@@ -438,6 +511,16 @@ it('requires native DOM coverage at both client and dispatch points and rejects 
     (await uncoveredRoomClickWitnesses(page, scene, scene, candidates)).get(
       'DRAWER',
     )?.[0].client,
+  ).toEqual({ x: 187, y: 200 });
+  expect(
+    (
+      await uncoveredRoomClickWitnesses(page, scene, scene, candidates, {
+        code: 'DRAWER',
+        report: () => {
+          throw new Error('sink failed');
+        },
+      })
+    ).get('DRAWER')?.[0].client,
   ).toEqual({ x: 187, y: 200 });
   vi.mocked(canvas.getBoundingClientRect).mockReturnValue(
     new DOMRect(0, 0.25, 374, 400),

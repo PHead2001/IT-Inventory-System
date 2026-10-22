@@ -73,7 +73,7 @@ beforeEach(() => {
   });
 });
 it.each([false, true])(
-  'keeps an unmodeled logical candidate without a fabricated map; explicit modeled replacement: %s',
+  'keeps an unmodeled logical candidate beside an unselected modeled overview; explicit modeled replacement: %s',
   async (replace) => {
     const user = userEvent.setup(),
       use = vi.fn();
@@ -96,11 +96,17 @@ it.each([false, true])(
     );
     expect(
       screen.getByText(
-        'This location has no modeled map. Use its recorded location below.',
+        'This location is not shown on the map. You can keep it or choose a modeled location.',
       ),
     ).toBeVisible();
-    expect(screen.queryByRole('region', { name: 'Location map' })).toBeNull();
-    expect(scene.props).toBeNull();
+    expect(screen.getByRole('region', { name: 'Location map' })).toBeVisible();
+    expect(scene.props?.selectedCode).toBeNull();
+    expect(scene.props?.focusRequest.code).toBeNull();
+    expect(scene.props?.canFocusSelected).toBe(false);
+    expect(scene.props?.permittedCodes).toEqual([drawer.code]);
+    expect(
+      screen.getByRole('combobox', { name: 'Choose location in browser' }),
+    ).toHaveTextContent(unmodeled.code);
     expect(
       screen.getByText(unmodeled.breadcrumb, { selector: 'p[role="status"]' }),
     ).toBeVisible();
@@ -120,53 +126,154 @@ it.each([false, true])(
     );
   },
 );
-it('replaces a failed map with the unmodeled alternative while keeping keyboard selection and confirmation', async () => {
+it.each([false, true])(
+  'keeps a failed overview retryable when keyboard selection stages an unmodeled destination; explicit retry: %s',
+  async (retry) => {
+    const user = userEvent.setup(),
+      use = vi.fn();
+    const unmodeled = {
+      ...drawer,
+      id: 'unmodeled',
+      code: 'UNMODELED',
+      name: 'Unmodeled destination',
+      breadcrumb: 'Unmodeled destination',
+      parentId: null,
+    };
+    render(
+      <LocationMapPicker
+        locations={[root, drawer, unmodeled]}
+        initialValue={drawer.id}
+        disabled={false}
+        onUse={use}
+        onClose={vi.fn()}
+      />,
+    );
+    act(() => scene.props!.onFailure('Actual scene failed'));
+    expect(screen.getByText(/Map unavailable/)).toBeVisible();
+    const browser = screen.getByRole('combobox', {
+      name: 'Choose location in browser',
+    });
+    browser.focus();
+    await user.keyboard('{Enter}');
+    const search = screen.getByRole('combobox', { name: 'Search locations' });
+    expect(search).toHaveFocus();
+    await user.type(search, unmodeled.code);
+    await user.keyboard('{ArrowDown}{Enter}');
+    expect(browser).toHaveTextContent(unmodeled.code);
+    expect(
+      screen.getByText(
+        'This location is not shown on the map. You can keep it or choose a modeled location.',
+      ),
+    ).toBeVisible();
+    expect(screen.getByText(/Map unavailable/)).toBeVisible();
+    expect(document.querySelector('canvas')).toBeNull();
+    expect(use).not.toHaveBeenCalled();
+    expect(screen.getByRole('button', { name: 'Retry map' })).toBeVisible();
+    if (retry) {
+      await user.click(screen.getByRole('button', { name: 'Retry map' }));
+      expect(screen.queryByText(/Map unavailable/)).toBeNull();
+      expect(document.querySelector('canvas')).not.toBeNull();
+      expect(scene.props?.selectedCode).toBeNull();
+      expect(scene.props?.focusRequest.code).toBeNull();
+    }
+    expect(browser).toHaveTextContent(unmodeled.code);
+    expect(use).not.toHaveBeenCalled();
+    await user.click(screen.getByRole('button', { name: 'Use location' }));
+    expect(use).toHaveBeenCalledExactlyOnceWith(unmodeled.code);
+  },
+);
+
+it('stages only an explicit eligible map selection from the unmodeled overview', async () => {
   const user = userEvent.setup(),
     use = vi.fn();
   const unmodeled = {
     ...drawer,
     id: 'unmodeled',
     code: 'UNMODELED',
-    name: 'Unmodeled destination',
-    breadcrumb: 'Unmodeled destination',
+    name: 'Unmodeled',
+    breadcrumb: 'Unmodeled',
     parentId: null,
   };
+  const excluded = { ...other, id: 'excluded' };
   render(
     <LocationMapPicker
-      locations={[root, drawer, unmodeled]}
-      initialValue={drawer.id}
+      locations={[root, drawer, excluded, unmodeled]}
+      excludeIds={[excluded.id]}
+      initialValue={unmodeled.id}
       disabled={false}
       onUse={use}
       onClose={vi.fn()}
     />,
   );
-  act(() => scene.props!.onFailure('Actual scene failed'));
-  expect(screen.getByText(/Map unavailable/)).toBeVisible();
-  const browser = screen.getByRole('combobox', {
-    name: 'Choose location in browser',
-  });
-  browser.focus();
-  await user.keyboard('{Enter}');
-  const search = screen.getByRole('combobox', { name: 'Search locations' });
-  expect(search).toHaveFocus();
-  await user.type(search, unmodeled.code);
-  await user.keyboard('{ArrowDown}{Enter}');
-  expect(browser).toHaveTextContent(unmodeled.code);
+  expect(scene.props?.selectedCode).toBeNull();
+  act(() => scene.props!.onSelect(root.code));
+  act(() => scene.props!.onSelect(excluded.code));
   expect(
-    screen.getByText(
-      'This location has no modeled map. Use its recorded location below.',
-    ),
-  ).toBeVisible();
-  expect(screen.queryByText(/Map unavailable/)).toBeNull();
-  expect(document.querySelector('canvas')).toBeNull();
+    screen.getByRole('combobox', { name: 'Choose location in browser' }),
+  ).toHaveTextContent(unmodeled.code);
+  expect(scene.props?.selectedCode).toBeNull();
+  act(() => scene.props!.onSelect(drawer.code));
+  expect(scene.props?.selectedCode).toBe(drawer.code);
+  expect(scene.props?.focusRequest.code).toBe(drawer.code);
   expect(use).not.toHaveBeenCalled();
   await user.click(screen.getByRole('button', { name: 'Use location' }));
-  expect(use).toHaveBeenCalledExactlyOnceWith(unmodeled.code);
+  expect(use).toHaveBeenCalledExactlyOnceWith(drawer.code);
 });
+
+it.each(['absent', 'inactive', 'excluded'] as const)(
+  'keeps the conventional unmodeled destination when eligible modeled alternatives are %s',
+  async (availability) => {
+    const user = userEvent.setup(),
+      use = vi.fn();
+    const unmodeled = {
+      ...drawer,
+      id: 'unmodeled',
+      code: 'UNMODELED',
+      name: 'Unmodeled',
+      breadcrumb: 'Unmodeled',
+      parentId: null,
+    };
+    const locations =
+      availability === 'absent'
+        ? [unmodeled]
+        : [root, { ...drawer, active: availability !== 'inactive' }, unmodeled];
+    render(
+      <LocationMapPicker
+        locations={locations}
+        excludeIds={availability === 'excluded' ? [drawer.id] : []}
+        initialValue={unmodeled.id}
+        disabled={false}
+        onUse={use}
+        onClose={vi.fn()}
+      />,
+    );
+    expect(
+      screen.getByText(
+        'This location has no modeled map. Use its recorded location below.',
+      ),
+    ).toBeVisible();
+    expect(screen.queryByRole('region', { name: 'Location map' })).toBeNull();
+    expect(scene.props).toBeNull();
+    expect(
+      screen.getByRole('combobox', { name: 'Choose location in browser' }),
+    ).toHaveTextContent(unmodeled.code);
+    expect(use).not.toHaveBeenCalled();
+    await user.click(screen.getByRole('button', { name: 'Use location' }));
+    expect(use).toHaveBeenCalledExactlyOnceWith(unmodeled.code);
+  },
+);
 it.each(['actor', 'backend', 'generation'])(
   'blocks a captured production RoomScene selection through the original picker after committed %s A/B/A',
   (field) => {
     const use = vi.fn();
+    const unmodeled = {
+      ...drawer,
+      id: 'unmodeled',
+      code: 'UNMODELED',
+      name: 'Unmodeled',
+      breadcrumb: 'Unmodeled',
+      parentId: null,
+    };
     const ui = (identity = 'a', ready = true) => (
       <PrivacyReadinessContext
         value={{
@@ -188,8 +295,8 @@ it.each(['actor', 'backend', 'generation'])(
           }
         >
           <LocationMapPicker
-            locations={[root, drawer, other]}
-            initialValue=""
+            locations={[root, drawer, other, unmodeled]}
+            initialValue={unmodeled.id}
             disabled={false}
             onUse={use}
             onClose={vi.fn()}

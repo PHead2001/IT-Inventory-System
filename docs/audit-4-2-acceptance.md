@@ -594,6 +594,23 @@ fresh remote review and native populated hosted/WebGL proof remain pending.
 All 76 acceptance rows and their existing statuses and broader prerequisites
 remain unchanged.
 
+The current picker contract retains an eligible unmodeled code and UUID in the
+conventional field and confirmation. When eligible modeled destinations exist,
+healthy graphics show their room overview with no selected code or focus target;
+a notice explains that the staged destination is not shown on the map. Only an
+explicit eligible map or tree choice replaces that destination, and **Use
+location** remains required. A graphics failure stays in its text fallback when
+the staged destination changes; **Retry map** explicitly requests another
+attempt. Without eligible modeled destinations, the unmodeled notice and
+conventional picker remain. Detail previews for unmodeled locations stay text-only.
+The focused picker, privacy, embedded-room, detail-preview, map-model and toolbar
+batch passed **80 tests across nine suites**, with one worker and a 512 MiB Node
+heap. Scoped zero-warning lint, formatting and diff checks passed. This mocked
+scene/component evidence does not establish actual WebGL rendering or visual
+acceptance; exact-final-candidate browser/WebGL and complete certification remain
+pending. The earlier 113-test checkpoint above is historical and does not certify
+these changes.
+
 ## PR54 shared-clock and native-window repair checkpoint, 2026-10-19
 
 The working-tree repair based on `aeda97f6` gives all three body replacement
