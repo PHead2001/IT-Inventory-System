@@ -1424,10 +1424,24 @@ test('spatial interruption, reduced motion, stationary hover and moving down/up 
   await page.goto('/room?space=it-closet');
   const viewer = await ready(page),
     canvas = viewer.locator('canvas');
+  const selectWhilePaused = async (code: string) => {
+    const previous = await canvas.getAttribute('data-spatial-request');
+    await keyboardRoomLocation(page, code);
+    await expect(canvas).not.toHaveAttribute(
+      'data-spatial-request',
+      previous ?? '',
+    );
+    await expect
+      .poll(async () => {
+        const raw = await canvas.getAttribute('data-spatial-request');
+        return raw ? (JSON.parse(raw) as { code: string }).code : null;
+      })
+      .toBe(code);
+  };
   // Input delivery can exceed the whole 750 ms flight under CI load. Keep
   // trusted toolbar input, but prove that Fit is accepted during the flight.
   await page.clock.pauseAt(await page.evaluate(() => Date.now() + 10_000));
-  await keyboardRoomLocation(page, 'ITC-D01');
+  await selectWhilePaused('ITC-D01');
   await expect
     .poll(async () => {
       const request = await canvas.getAttribute('data-spatial-request');
@@ -1444,14 +1458,20 @@ test('spatial interruption, reduced motion, stationary hover and moving down/up 
   near((await camera(page)).position, held.position);
   await expect(canvas).toHaveAttribute('data-spatial-open-code', '');
   await expect(canvas).toHaveAttribute('data-spatial-phase', 'cancelled');
-  await page.clock.resume();
-  await keyboardRoomLocation(page, 'ITC-D07');
+  await selectWhilePaused('ITC-D07');
+  await page.clock.runFor(16);
   await expect(canvas).toHaveAttribute('data-spatial-phase', 'flying');
   await page.emulateMedia({ reducedMotion: 'reduce' });
+  await page.clock.runFor(32);
+  await page.clock.resume();
   await settledReveal(page, 'ITC-D07');
   near((await captureRoomReveal(page)).offsets['drawer-7'], [-5.6, 0, 0]);
   await page.emulateMedia({ reducedMotion: 'no-preference' });
-  await keyboardRoomLocation(page, 'ITC-RED');
+  // Trusted input and visibility inspection may outlast the 400 ms phase under
+  // load. Hold time before selection, then advance the actual RAF-driven flight.
+  await page.clock.pauseAt(await page.evaluate(() => Date.now() + 10_000));
+  await selectWhilePaused('ITC-RED');
+  await page.clock.runFor(800);
   await expect(canvas).toHaveAttribute('data-spatial-phase', 'revealing');
   const snapshot = await captureRoomWitness(page);
   const point = (
@@ -1463,6 +1483,8 @@ test('spatial interruption, reduced motion, stationary hover and moving down/up 
   ).toBeTruthy();
   await page.mouse.move(point!.x, point!.y);
   await page.mouse.down();
+  await page.clock.runFor(450);
+  await page.clock.resume();
   await settledReveal(page, 'ITC-RED');
   const endpoint = await captureRoomWitness(page);
   if (
@@ -1478,15 +1500,23 @@ test('spatial interruption, reduced motion, stationary hover and moving down/up 
   await page.mouse.up();
   await expect(viewer).toHaveAttribute('data-selected-code', 'ITC-RED');
   await settledReveal(page, 'ITC-RED');
-  await keyboardRoomLocation(page, 'ITC-BLACK');
+  await page.clock.pauseAt(await page.evaluate(() => Date.now() + 10_000));
+  await selectWhilePaused('ITC-BLACK');
+  await page.clock.runFor(800);
   await expect(canvas).toHaveAttribute('data-spatial-phase', 'revealing');
   await page.getByRole('button', { name: 'Zoom in', exact: true }).click();
+  await page.clock.runFor(32);
+  await page.clock.resume();
   await settledReveal(page, 'ITC-BLACK');
   near((await captureRoomReveal(page)).offsets['black-container'], [-4, 0, 0]);
-  await keyboardRoomLocation(page, 'ITC-D01');
+  await page.clock.pauseAt(await page.evaluate(() => Date.now() + 10_000));
+  await selectWhilePaused('ITC-D01');
+  await page.clock.runFor(16);
   await expect(canvas).toHaveAttribute('data-spatial-phase', 'flying');
-  await keyboardRoomLocation(page, 'ITC-D07');
-  await keyboardRoomLocation(page, 'ITC-D01');
+  await selectWhilePaused('ITC-D07');
+  await selectWhilePaused('ITC-D01');
+  await page.clock.runFor(1200);
+  await page.clock.resume();
   await settledReveal(page, 'ITC-D01');
   await expect(canvas).toHaveAttribute('data-spatial-open-code', 'ITC-D01');
   near((await captureRoomReveal(page)).offsets['drawer-7'], [0, 0, 0]);

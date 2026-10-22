@@ -78,7 +78,7 @@ After migration changes, run the local database gate and regenerate types. tests
 
 ## Interactive room iteration
 
-Use `/room` after local sign-in. Geometry lives in the validated Git JSON, with no database running needed for schema tests. Reuse local Supabase while iterating on visuals; no reset is needed for materials, camera or labels. Use `npm run test:e2e -- tests/e2e/room.spec.ts` for the real browser surface. See [room navigation](../room-navigation.md) for selection, coordinate and fallback contracts.
+Use `/room` after local sign-in. Geometry lives in the validated Git JSON, with no database running needed for schema tests. Reuse local Supabase while iterating on visuals; no reset is needed for materials, camera or labels. Use `npm run test:e2e -- tests/e2e/00-room.spec.ts` for the real browser surface. See [room navigation](../room-navigation.md) for selection, coordinate and fallback contracts.
 
 ## Labels, scanning and stock iteration
 

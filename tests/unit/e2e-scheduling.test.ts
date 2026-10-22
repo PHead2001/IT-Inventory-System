@@ -133,15 +133,26 @@ describe('browser scheduling', () => {
     expect(scheduled.map((entry) => entry.key).sort()).toEqual(
       baseline.map((entry) => entry.key).sort(),
     );
+    const parallelFiles = [
+      ...new Set(
+        scheduled
+          .filter((entry) => entry.project === 'chromium-parallel')
+          .map((entry) => entry.file),
+      ),
+    ];
+    expect(parallelFiles[0]).toBe('00-room.spec.ts');
+    expect(parallelFiles).toEqual(
+      [...parallelFiles].sort((a, b) => a.localeCompare(b)),
+    );
     const reviewed = new Set<string>(parallelSpecs);
     for (const entry of scheduled)
       expect(entry.project).toBe(
         reviewed.has(entry.file) ? 'chromium-parallel' : 'chromium-exclusive',
       );
-    const focused = discover(false, ['tests/e2e/room.spec.ts']);
+    const focused = discover(false, ['tests/e2e/00-room.spec.ts']);
     expect(focused.map((entry) => entry.key).sort()).toEqual(
       baseline
-        .filter((entry) => entry.file === 'room.spec.ts')
+        .filter((entry) => entry.file === '00-room.spec.ts')
         .map((entry) => entry.key)
         .sort(),
     );

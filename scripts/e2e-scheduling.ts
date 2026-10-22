@@ -3,7 +3,11 @@
 // Files absent from this allowlist run exclusively, including future specs.
 // experience-visual reads the first global inventory/category/site records: it must
 // finish before another spec can archive, retire, rename, or remove its selection.
+// The pinned Playwright collector sorts files lexically and dispatches file groups
+// in that order. Start the long room journey first to avoid a lone late worker;
+// file-level sequencing and the existing two-worker ceiling remain unchanged.
 export const parallelSpecs = [
+  '00-room.spec.ts',
   'creation-recovery.spec.ts',
   'experience-completion.spec.ts',
   'experience-designer-acceptance.spec.ts',
@@ -15,7 +19,6 @@ export const parallelSpecs = [
   'metadata.spec.ts',
   'navigation-performance.spec.ts',
   'navigation-workflow.spec.ts',
-  'room.spec.ts',
   'scope-accessibility-forms.spec.ts',
   'scope-accessibility.spec.ts',
   'telemetry.spec.ts',
