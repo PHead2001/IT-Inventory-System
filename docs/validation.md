@@ -2,6 +2,33 @@
 
 ## Spatial composition source slice
 
+### Occupancy snapshots and flight interruption witnesses
+
+The multi-pose room journey compares each selected label with the authoritative
+response whose successful generation the selected committed render adopted.
+The hook publishes only that accepted generation; loading, failed, disabled and
+retired-key states publish none. The viewer's read-only status/generation witness
+shares the render that publishes the selected code and scene counts. A bounded
+128-response map lets the test match that exact generation, including when
+focus/pageshow/visibility refreshes issue unrelated same-space requests. Its oracle
+checks request origin, path, space and accepted generation against the response
+identity and selected code, retaining exact product/unit/asset triples. It cannot reuse the
+first pose's snapshot while parallel owned fixtures change aggregate stock at a
+shared physical location. Helper regressions reject reused or mismatched request
+generations, unadopted valid request/response pairs, scopes, origins, absent codes
+and invalid counts. Hook/workspace regressions prove that an old accepted
+generation cannot remain visible across a selection-key transition.
+
+The Fit interruption case installs the browser clock before navigation, delivers
+the actual toolbar command while the acknowledged drawer request is explicitly
+100 ms into its 750 ms flight, and requires cancellation before advancing another
+1,300 ms. Camera stability, no opened target and permanent cancellation remain
+required; real time resumes for the remaining Reduced/Full, hover and pointer
+checks. CameraRig coverage exercises both Fit and Recenter past the old deadline.
+These changes repair stale-oracle and elapsed-input race vulnerabilities in the
+tests; unavailable failure telemetry does not establish a product defect. Actual
+browser execution and exact-final-SHA certification remain separate evidence.
+
 ### Review repairs: reveal contract and waiting maps
 
 Node-schema regressions reject both zero and nonzero group reveal metadata at

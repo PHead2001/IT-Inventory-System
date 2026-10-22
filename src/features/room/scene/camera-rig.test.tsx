@@ -756,12 +756,16 @@ function spatialHarness() {
     onPassiveDrag: vi.fn(),
     revealController: reveal,
   };
-  const ui = (request: FocusRequest, commandId = 0) => (
+  const ui = (
+    request: FocusRequest,
+    commandId = 0,
+    commandKind: 'recenter' | 'fit' = 'recenter',
+  ) => (
     <LabelLayoutProvider registry={registry}>
       <CameraRig
         {...props}
         focusRequest={request}
-        command={{ id: commandId, kind: 'recenter' }}
+        command={{ id: commandId, kind: commandKind }}
       />
     </LabelLayoutProvider>
   );
@@ -890,30 +894,33 @@ it.each([null, 'MISSING'])(
     expect(reveal.getSnapshot().openCode).toBeNull();
   },
 );
-it('a command during flight cancels queued opening past the old deadline', () => {
-  let now = 0;
-  vi.spyOn(performance, 'now').mockImplementation(() => now);
-  const { ui, reveal, complete, cancel } = spatialHarness(),
-    request = spatialRequest('ITC-D07', 1);
-  const view = render(ui(request));
-  act(() => mocks.frame!());
-  act(() => mocks.frame!());
-  now = 100;
-  act(() => mocks.frame!());
-  view.rerender(ui(request, 1));
-  const held = camera.position.toArray();
-  now = 2000;
-  act(() => mocks.frame!());
-  expect(camera.position.toArray()).toEqual(held);
-  expect(complete).not.toHaveBeenCalled();
-  expect(cancel).toHaveBeenCalledWith(
-    expect.objectContaining({ code: 'ITC-D07', generation: 1 }),
-  );
-  expect(reveal.getSnapshot()).toMatchObject({
-    phase: 'cancelled',
-    openCode: null,
-  });
-});
+it.each(['recenter', 'fit'] as const)(
+  'a %s command during flight cancels queued opening past the old deadline',
+  (command) => {
+    let now = 0;
+    vi.spyOn(performance, 'now').mockImplementation(() => now);
+    const { ui, reveal, complete, cancel } = spatialHarness(),
+      request = spatialRequest('ITC-D07', 1);
+    const view = render(ui(request));
+    act(() => mocks.frame!());
+    act(() => mocks.frame!());
+    now = 100;
+    act(() => mocks.frame!());
+    view.rerender(ui(request, 1, command));
+    const held = camera.position.toArray();
+    now = 2000;
+    act(() => mocks.frame!());
+    expect(camera.position.toArray()).toEqual(held);
+    expect(complete).not.toHaveBeenCalled();
+    expect(cancel).toHaveBeenCalledWith(
+      expect.objectContaining({ code: 'ITC-D07', generation: 1 }),
+    );
+    expect(reveal.getSnapshot()).toMatchObject({
+      phase: 'cancelled',
+      openCode: null,
+    });
+  },
+);
 it('camera completion carries the immutable current generation and only then reveals', () => {
   let now = 0;
   vi.spyOn(performance, 'now').mockImplementation(() => now);

@@ -1553,6 +1553,86 @@ it('announces deferred occupancy outside busy geometry and replaces it with fail
     screen.queryByText('private occupancy detail'),
   ).not.toBeInTheDocument();
 });
+it('binds the occupancy witness to the same committed selection and hides the old generation while the next read is pending', async () => {
+  const requests: { url: string; resolve: (value: unknown) => void }[] = [];
+  vi.stubGlobal(
+    'fetch',
+    vi.fn((url: string) => {
+      if (url.startsWith('/api/room/occupancy?'))
+        return new Promise((resolve) => requests.push({ url, resolve }));
+      const code = new URL(url, location.origin).searchParams.get('location')!;
+      return Promise.resolve(response('Current stock', code));
+    }),
+  );
+  const user = userEvent.setup();
+  render(
+    <SpacesWorkspace
+      backend="https://backend.example"
+      locations={locations}
+      userId="test-user"
+      initialSpace={spaces[0]}
+      initialCode="ITC-D01"
+    />,
+  );
+  const viewer = screen.getByTestId('room-viewer');
+  expect(viewer).toHaveAttribute('data-selected-code', 'ITC-D01');
+  expect(viewer).toHaveAttribute('data-occupancy-status', 'loading');
+  expect(viewer).toHaveAttribute('data-occupancy-generation', '');
+  const finish = async (index: number) => {
+    const generation = new URL(
+      requests[index].url,
+      location.origin,
+    ).searchParams.get('generation');
+    await act(async () =>
+      requests[index].resolve({
+        ok: true,
+        headers: new Headers({ 'content-type': 'application/json' }),
+        json: async () => ({
+          identity: {
+            userId: 'test-user',
+            environment: location.origin,
+            backend: 'https://backend.example',
+            generation,
+            spaceId: 'it-closet',
+            filter: 'type=all;status=active',
+          },
+          counts: {
+            'ITC-D01': {
+              quantity_product_count: '1',
+              quantity_unit_count: '31',
+              asset_count: '0',
+            },
+            'ITC-S1A': {
+              quantity_product_count: '2',
+              quantity_unit_count: '44',
+              asset_count: '3',
+            },
+          },
+        }),
+      }),
+    );
+    return generation!;
+  };
+  const first = await finish(0);
+  expect(viewer).toHaveAttribute('data-occupancy-status', 'ready');
+  expect(viewer).toHaveAttribute('data-occupancy-generation', first);
+  await user.click(
+    screen.getByRole('button', { name: 'Choose shelf 1A in scene' }),
+  );
+  expect(viewer).toHaveAttribute('data-selected-code', 'ITC-S1A');
+  expect(viewer).toHaveAttribute('data-occupancy-status', 'loading');
+  expect(viewer).toHaveAttribute('data-occupancy-generation', '');
+  expect(screen.getByTestId('scene-selection')).toHaveAttribute(
+    'data-counts',
+    'null',
+  );
+  const next = await finish(1);
+  expect(next).not.toBe(first);
+  expect(viewer).toHaveAttribute('data-selected-code', 'ITC-S1A');
+  expect(viewer).toHaveAttribute('data-occupancy-status', 'ready');
+  expect(viewer).toHaveAttribute('data-occupancy-generation', next);
+});
+
 it('loads selected reveal counts with the optional overlay off and refreshes both snapshots on return', async () => {
   const user = userEvent.setup();
   const fetcher = vi.fn().mockImplementation((url: string) => {

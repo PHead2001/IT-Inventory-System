@@ -645,6 +645,8 @@ export function SpacesWorkspace({
             <div
               data-testid="room-viewer"
               data-selected-code={selection.code ?? ''}
+              data-occupancy-status={occupancy.status}
+              data-occupancy-generation={occupancy.acceptedGeneration ?? ''}
               data-focused-code={shownFocusCompletion.code ?? ''}
               data-focus-count={shownFocusCompletion.count}
               data-camera-view={
