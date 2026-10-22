@@ -126,6 +126,50 @@ it.each([false, true])(
     );
   },
 );
+it('keeps the same available overview unselected when keyboard selection stages an unmodeled destination without committing it', async () => {
+  const user = userEvent.setup(),
+    use = vi.fn();
+  const unmodeled = {
+    ...drawer,
+    id: 'unmodeled',
+    code: 'UNMODELED',
+    name: 'Unmodeled destination',
+    breadcrumb: 'Unmodeled destination',
+    parentId: null,
+  };
+  render(
+    <LocationMapPicker
+      locations={[root, drawer, unmodeled]}
+      initialValue={drawer.id}
+      disabled={false}
+      onUse={use}
+      onClose={vi.fn()}
+    />,
+  );
+  const canvas = document.querySelector('canvas');
+  expect(canvas).not.toBeNull();
+  expect(scene.props?.selectedCode).toBe(drawer.code);
+  const browser = screen.getByRole('combobox', {
+    name: 'Choose location in browser',
+  });
+  browser.focus();
+  await user.keyboard('{Enter}');
+  const search = screen.getByRole('combobox', { name: 'Search locations' });
+  await user.type(search, unmodeled.code);
+  await user.keyboard('{ArrowDown}{Enter}');
+  expect(browser).toHaveTextContent(unmodeled.code);
+  expect(document.querySelector('canvas')).toBe(canvas);
+  expect(scene.props?.selectedCode).toBeNull();
+  expect(scene.props?.focusRequest.code).toBeNull();
+  expect(scene.props?.canFocusSelected).toBe(false);
+  expect(
+    screen.getByText(/This location is not shown on the map/),
+  ).toBeVisible();
+  expect(use).not.toHaveBeenCalled();
+  await user.click(screen.getByRole('button', { name: 'Use location' }));
+  expect(use).toHaveBeenCalledExactlyOnceWith(unmodeled.code);
+});
+
 it.each([false, true])(
   'keeps a failed overview retryable when keyboard selection stages an unmodeled destination; explicit retry: %s',
   async (retry) => {

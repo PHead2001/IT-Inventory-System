@@ -242,11 +242,49 @@ test('A302 graphics failure and unmodeled destination keep the real keyboard tre
     await acceptanceLogin(page);
     await page.goto('/inventory/quantity/' + item);
     const form = await receiveForm(page);
+    await chooseLocation(form, 'Receive at', 'ITC-S1A');
     await form.getByRole('button', { name: 'Pick on map' }).click();
     const dialog = page.getByRole('dialog', {
       name: 'Pick a storage location',
     });
     const canvas = await sceneReady(dialog);
+    const value = form.getByRole('combobox', {
+      name: 'Receive at',
+      exact: true,
+    });
+    const browser = dialog.getByRole('combobox', {
+      name: 'Choose location in browser',
+      exact: true,
+    });
+    const chooseCandidate = async (code: string) => {
+      await browser.focus();
+      await browser.press('Enter');
+      const search = dialog.getByRole('combobox', {
+        name: 'Search locations',
+      });
+      await expect(search).toBeFocused();
+      await search.fill(code);
+      await search.press('ArrowDown');
+      await search.press('Enter');
+      await expect(browser).toContainText(code);
+    };
+    const unmodeledNotice = dialog.getByText(
+      'This location is not shown on the map. You can keep it or choose a modeled location.',
+    );
+    const failureNotice = dialog.getByText(
+      'Map unavailable. The recorded location and location browser remain available.',
+    );
+    await expect(value).toContainText('ITC-S1A');
+    await chooseCandidate(unmodeled.code);
+    await expect(unmodeledNotice).toBeVisible();
+    await sceneReady(dialog);
+    // An available overview does not invent a selected geometry/focus target
+    // for the staged logical destination or commit it to the parent form.
+    await expect(canvas).toHaveAttribute('data-spatial-open-code', '');
+    await expect(
+      dialog.getByRole('button', { name: 'Center selected', exact: true }),
+    ).toBeDisabled();
+    await expect(value).toContainText('ITC-S1A');
     // Browser's actual context-loss event exercises the production failure path.
     await canvas.evaluate((element) => {
       if (!(element instanceof HTMLCanvasElement))
@@ -258,37 +296,66 @@ test('A302 graphics failure and unmodeled destination keep the real keyboard tre
         throw new Error('Browser cannot exercise actual context loss');
       extension.loseContext();
     });
-    await expect(
-      dialog.getByText(
-        'Map unavailable. The recorded location and location browser remain available.',
-      ),
-    ).toBeVisible();
-    const browser = dialog.getByRole('combobox', {
-      name: 'Choose location in browser',
-      exact: true,
-    });
-    await browser.focus();
-    await browser.press('Enter');
-    const search = dialog.getByRole('combobox', { name: 'Search locations' });
-    await expect(search).toBeFocused();
-    await search.fill(unmodeled.code);
-    await search.press('ArrowDown');
-    await search.press('Enter');
-    await expect(browser).toContainText(unmodeled.code);
-    await expect(
-      dialog.getByText(
-        'This location has no modeled map. Use its recorded location below.',
-      ),
-    ).toBeVisible();
+    await expect(failureNotice).toBeVisible();
+    await chooseCandidate('ITC-D01');
+    await expect(unmodeledNotice).toHaveCount(0);
+    await expect(failureNotice).toBeVisible();
     await expect(dialog.locator('canvas')).toHaveCount(0);
-    await dialog.getByRole('button', { name: 'Use location' }).click();
+    await chooseCandidate(unmodeled.code);
+    await expect(unmodeledNotice).toBeVisible();
+    await expect(failureNotice).toBeVisible();
+    await expect(dialog.locator('canvas')).toHaveCount(0);
+    // Changing a staged destination cannot silently retry failed graphics.
+    await dialog
+      .getByRole('button', { name: 'Retry map', exact: true })
+      .click();
+    const retried = await sceneReady(dialog);
+    await expect(failureNotice).toHaveCount(0);
+    await expect(unmodeledNotice).toBeVisible();
+    await expect(browser).toContainText(unmodeled.code);
+    await expect(retried).toHaveAttribute('data-spatial-open-code', '');
     await expect(
-      form.getByRole('combobox', { name: 'Receive at', exact: true }),
-    ).toContainText(unmodeled.code);
+      dialog.getByRole('button', { name: 'Center selected', exact: true }),
+    ).toBeDisabled();
+    await expect(value).toContainText('ITC-S1A');
+    await dialog.getByRole('button', { name: 'Use location' }).click();
+    await expect(value).toContainText(unmodeled.code);
     await expect(form.getByLabel('Quantity to receive')).toHaveValue('3');
+    await expect(form.getByLabel('Reason (required)')).toHaveValue(
+      'Keep this unsubmitted map draft',
+    );
     await expect(
       form.getByRole('region', { name: 'Review changes' }),
     ).toHaveCount(0);
+    const before = await owned.caller
+      .from('quantity_items')
+      .select('version')
+      .eq('id', item)
+      .single();
+    expect(before.error).toBeNull();
+    expect(before.data!.version).toBe(1);
+    await form
+      .getByRole('button', { name: 'Review receive stock', exact: true })
+      .click();
+    await form
+      .getByRole('button', { name: 'Confirm receive stock', exact: true })
+      .click();
+    await expect(
+      page
+        .getByRole('region', { name: 'Record tasks' })
+        .getByRole('button', { name: 'Done', exact: true }),
+    ).toBeVisible();
+    const received = await owned.caller
+      .from('stock_balances')
+      .select('location_id,quantity')
+      .eq('item_id', item)
+      .eq('location_id', unmodeled.id)
+      .single();
+    expect(received.error).toBeNull();
+    expect(received.data).toEqual({
+      location_id: unmodeled.id,
+      quantity: 3,
+    });
   } finally {
     await owned.cleanup();
   }
