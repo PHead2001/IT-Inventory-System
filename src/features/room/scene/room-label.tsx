@@ -7,6 +7,7 @@ import {
   type LocationOccupancy,
 } from '../occupancy-contract';
 import { useRoomLabelLayout } from './label-layout-runtime';
+import type { LabelArea } from './label-layout';
 import styles from '../room-visual.module.css';
 
 export function RoomLabel({
@@ -17,6 +18,7 @@ export function RoomLabel({
   selected = false,
   occupancy,
   isVisible,
+  pickReservation,
   onSelect,
 }: {
   id: string;
@@ -26,6 +28,7 @@ export function RoomLabel({
   selected?: boolean;
   occupancy?: LocationOccupancy;
   isVisible?: () => boolean;
+  pickReservation?: () => LabelArea | null;
   onSelect?: (code: string) => void;
 }) {
   const element = useRef<HTMLButtonElement & HTMLSpanElement>(null);
@@ -54,6 +57,7 @@ export function RoomLabel({
       pointer: () => pointer.current,
       readableSummary: `${label}${code ? ` (${code})` : ''}${counts ? ` · ${counts}` : ''}`,
       isVisible,
+      pickReservation,
     });
   }, [
     register,
@@ -69,6 +73,7 @@ export function RoomLabel({
     focused,
     hovered,
     isVisible,
+    pickReservation,
   ]);
   const content = (
     <span data-room-label-full="true" className={styles.labelFull}>

@@ -132,6 +132,93 @@ describe('scene label placement', () => {
         ).toBe(true);
     }
   }
+  it.each(['focused', 'hovered'] as const)(
+    'does not pin or expand a %s action across any physical pick reservation',
+    (inspection) => {
+      const input: LabelRect[] = [
+        {
+          ...label('selected', 100, 100, true),
+          width: 200,
+          height: 48,
+          mandatory: true,
+          previous: { dx: 0, dy: 0, compact: false },
+          [inspection]: true,
+          preferFull: true,
+        },
+        {
+          ...label('neighbor', 100, 200),
+          width: 200,
+          height: 48,
+          mandatory: true,
+          compact: { width: 44, height: 44 },
+          hovered: true,
+          preferFull: true,
+        },
+      ];
+      const bounds = { left: 0, top: 0, right: 500, bottom: 400 },
+        reserved = [
+          { left: 194, top: 118, right: 206, bottom: 130 },
+          { left: 194, top: 218, right: 206, bottom: 230 },
+        ];
+      const result = layoutLabelsDetailed(input, bounds, reserved, {}, () => 0);
+      expect(result.status).toBe('complete');
+      expect(result.placements.every((entry) => entry.visible)).toBe(true);
+      expect(
+        result.placements.find((entry) => entry.id === 'selected'),
+      ).not.toMatchObject({ dx: 0, dy: 0 });
+      assertPacking(input, result.placements, bounds, reserved);
+    },
+  );
+  it('packs all 28 mandatory targets with paired physical reservations and UI masks inside the unchanged 128-input cap', () => {
+    const input: LabelRect[] = Array.from({ length: 28 }, (_, index) => ({
+      ...label(
+        'target-' + index,
+        50 + (index % 4) * 300,
+        90 + Math.floor(index / 4) * 130,
+        index === 0,
+      ),
+      width: 200,
+      height: 48,
+      mandatory: true,
+      locationCode: 'ITC-T' + index,
+      compact: { width: 44, height: 44 },
+    }));
+    const reserved = input.map((entry) => ({
+      left: entry.left + 94,
+      top: entry.top + 18,
+      right: entry.left + 106,
+      bottom: entry.top + 30,
+    }));
+    reserved.push(
+      { left: 0, top: 0, right: 1280, bottom: 44 },
+      { left: 1210, top: 44, right: 1280, bottom: 1100 },
+    );
+    const bounds = { left: 0, top: 0, right: 1280, bottom: 1100 };
+    expect(input.length + reserved.length).toBeLessThanOrEqual(
+      LABEL_PACKING_BUDGET.maxInputs,
+    );
+    const result = layoutLabelsDetailed(input, bounds, reserved, {}, () => 0);
+    expect(result.status).toBe('complete');
+    expect(result.placements.every((entry) => entry.visible)).toBe(true);
+    expect(result.placements[0].compact ?? false).toBe(false);
+    expect(result.stats.operations).toBeLessThanOrEqual(
+      LABEL_PACKING_BUDGET.maxOperations,
+    );
+    assertPacking(input, result.placements, bounds, reserved);
+    const oversized = Array.from(
+      { length: LABEL_PACKING_BUDGET.maxInputs - input.length + 1 },
+      (_, index) => ({ left: index, top: 0, right: index + 1, bottom: 1 }),
+    );
+    const rejected = layoutLabelsDetailed(
+      input,
+      bounds,
+      oversized,
+      {},
+      () => 0,
+    );
+    expect(rejected.status).toBe('budget-exhausted');
+    expect(rejected.placements).toEqual([]);
+  });
   it('finds an off-rail 44px pocket adjacent to reserved edges', () => {
     const input = [
       { ...label('pocket', 300, 300), width: 44, height: 44, mandatory: true },
