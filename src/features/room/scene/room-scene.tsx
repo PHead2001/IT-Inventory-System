@@ -953,6 +953,7 @@ export function CameraRig({
     room: RoomDefinition;
     token?: FocusToken;
   } | null>(null);
+  const restoredFocusToken = useRef<FocusToken | null>(null);
   const lastAzimuth = useRef<number | null>(null);
   const unwrappedAzimuth = useRef(0);
   const manualStart = useRef<{
@@ -1200,6 +1201,7 @@ export function CameraRig({
       animation.current = null;
       manualStart.current = null;
       lastFocusRequest.current = null;
+      restoredFocusToken.current = null;
       ready.current = false;
       renderedOnce.current = false;
     }
@@ -1220,19 +1222,9 @@ export function CameraRig({
           controls.current.minZoom,
           controls.current.maxZoom,
         );
-        if (!focusOnRestore) {
-          lastFocusRequest.current = {
-            ...focusRequest,
-            room,
-            token: requestToken,
-          };
-          revealController.begin(
-            requestToken,
-            !!findFocusBinding(focusBindings, requestToken.code),
-            performance.now(),
-          );
-          revealController.finishFlight(requestToken, performance.now(), true);
-        }
+        // Keep the restored pose, but let the normal current-request path
+        // publish completion after this resource has actually rendered.
+        if (!focusOnRestore) restoredFocusToken.current = requestToken;
       }
       camera.updateProjectionMatrix();
     }
@@ -1326,7 +1318,12 @@ export function CameraRig({
     // Clear first, even when the next request is unbound or has no selection.
     animation.current = null;
     const binding = findFocusBinding(focusBindings, focusRequest.code);
-    if (focusRequest.code && !sceneCommitted) return;
+    if (
+      (focusRequest.code ||
+        sameFocusToken(restoredFocusToken.current, requestToken)) &&
+      !sceneCommitted
+    )
+      return;
     lastFocusRequest.current = { ...focusRequest, room, token: requestToken };
     if (focusRequest.code || focusRequest.requestId > 0)
       initialFrame.current.manual();
@@ -1335,7 +1332,11 @@ export function CameraRig({
       return;
     }
     if (focusRequest.code && !revealController.valid(requestToken)) return;
-    if (!focusRequest.code || focusRequest.preserveView) {
+    if (
+      !focusRequest.code ||
+      focusRequest.preserveView ||
+      sameFocusToken(restoredFocusToken.current, requestToken)
+    ) {
       revealController.finishFlight(requestToken, performance.now(), true);
       onFocusComplete(focusRequest.code, requestToken);
       invalidate();

@@ -127,10 +127,12 @@ function restorationHarness() {
     mounted,
     selected,
     pan = false,
+    focus,
   }: {
     mounted: boolean;
     selected: boolean;
     pan?: boolean;
+    focus?: { request: FocusRequest; onRestore: boolean };
   }) {
     snapshot = useRoomCameraSnapshot(
       'closet',
@@ -145,11 +147,13 @@ function restorationHarness() {
           initialView={snapshot.view}
           initialViewReady={snapshot.ready}
           onViewChange={snapshot.write}
-          focusRequest={{
-            code: selected ? 'ITC-S1A' : null,
-            requestId: selected ? 1 : 0,
-          }}
-          focusOnRestore={selected}
+          focusRequest={
+            focus?.request ?? {
+              code: selected ? 'ITC-S1A' : null,
+              requestId: selected ? 1 : 0,
+            }
+          }
+          focusOnRestore={focus?.onRestore ?? selected}
           onFocusComplete={complete}
           onReady={onReady}
           onFailure={vi.fn()}
@@ -176,6 +180,7 @@ function restorationHarness() {
       routeMounted = true,
       pan = false,
       activity: 'visible' | 'hidden' = 'visible',
+      focus?: { request: FocusRequest; onRestore: boolean },
     ) => (
       <PrivacyReadinessContext
         value={{
@@ -192,7 +197,12 @@ function restorationHarness() {
         >
           <Activity mode={activity}>
             {routeMounted && (
-              <Scene mounted={mounted} selected={selected} pan={pan} />
+              <Scene
+                mounted={mounted}
+                selected={selected}
+                pan={pan}
+                focus={focus}
+              />
             )}
           </Activity>
         </RoomCameraSnapshotProvider>
@@ -370,6 +380,135 @@ it.each([false, true])(
     expect(control.target.toArray()).toEqual(panned!.target);
     expect(rig.snapshot().view).toEqual(panned);
     act(() => expect(departedWrite(savedPose)).toBe(false));
+  },
+);
+it.each([
+  { reduced: false, preserveView: true },
+  { reduced: true, preserveView: true },
+  { reduced: false, preserveView: undefined },
+  { reduced: true, preserveView: undefined },
+])(
+  'settles a selected history restore only after rendering without moving its saved pan (reduced=$reduced, preserveView=$preserveView)',
+  ({ reduced, preserveView }) => {
+    mocks.reduced = reduced;
+    let now = 0;
+    vi.spyOn(performance, 'now').mockImplementation(() => now);
+    size.width = 390;
+    size.height = 400;
+    const rig = restorationHarness();
+    const view = render(rig.ui(true, true));
+    view.rerender(rig.ui(true, true, false, 'generation', true, true));
+    const displaced = rig.snapshot().view!;
+    view.rerender(rig.ui(true, false));
+    rig.complete.mockClear();
+    rig.onReady.mockClear();
+    camera.position.set(200, 250, 350);
+    control.target.set(0, 0, 0);
+    const restoredRequest: FocusRequest = {
+      code: 'ITC-S1A',
+      scope: 'actor|environment|closet',
+      generation: 2,
+      requestId: 2,
+      preserveView,
+    };
+    const restored = () =>
+      rig.ui(true, true, true, 'generation', true, false, 'visible', {
+        request: restoredRequest,
+        onRestore: false,
+      });
+    view.rerender(restored());
+    expect(camera.position.toArray()).toEqual(displaced.position);
+    expect(control.target.toArray()).toEqual(displaced.target);
+    expect(rig.complete).not.toHaveBeenCalled();
+    act(() => mocks.frame!());
+    expect(rig.complete).not.toHaveBeenCalled();
+    act(() => mocks.frame!());
+    expect(rig.onReady).toHaveBeenCalledOnce();
+    expect(rig.complete).toHaveBeenCalledExactlyOnceWith(
+      'ITC-S1A',
+      expect.objectContaining({ generation: 2, requestId: 2 }),
+    );
+    now = 1000;
+    act(() => mocks.frame!());
+    view.rerender(restored());
+    expect(rig.complete).toHaveBeenCalledTimes(1);
+    expect(rig.snapshot().view).toEqual(displaced);
+    view.rerender(
+      rig.ui(true, true, true, 'generation', true, false, 'visible', {
+        request: { ...restoredRequest, requestId: 3, preserveView: false },
+        onRestore: true,
+      }),
+    );
+    if (!reduced) {
+      expect(rig.complete).toHaveBeenCalledTimes(1);
+      expect(control.target.toArray()).toEqual(displaced.target);
+      now = 1751;
+      act(() => mocks.frame!());
+    }
+    expect(rig.complete).toHaveBeenCalledTimes(2);
+    expect(rig.complete).toHaveBeenLastCalledWith(
+      'ITC-S1A',
+      expect.objectContaining({ requestId: 3 }),
+    );
+    expect(control.target.toArray()).not.toEqual(displaced.target);
+  },
+);
+it.each([
+  { reduced: false, action: 'replacement' },
+  { reduced: true, action: 'replacement' },
+  { reduced: false, action: 'missing' },
+  { reduced: true, action: 'missing' },
+  { reduced: false, action: 'interrupt' },
+  { reduced: true, action: 'interrupt' },
+])(
+  'rejects the pending restored selection after $action before rendering (reduced=$reduced)',
+  ({ reduced, action }) => {
+    mocks.reduced = reduced;
+    let now = 0;
+    vi.spyOn(performance, 'now').mockImplementation(() => now);
+    size.width = 390;
+    size.height = 400;
+    const rig = restorationHarness();
+    const view = render(rig.ui(true, false));
+    act(() => expect(rig.snapshot().write(savedPose)).toBe(true));
+    const request: FocusRequest = {
+      code: 'ITC-S1A',
+      scope: 'actor|environment|closet',
+      generation: 2,
+      requestId: 2,
+      preserveView: true,
+    };
+    const restore = (next = request) =>
+      rig.ui(true, true, true, 'generation', true, false, 'visible', {
+        request: next,
+        onRestore: false,
+      });
+    view.rerender(restore());
+    expect(rig.complete).not.toHaveBeenCalled();
+    if (action === 'interrupt') act(() => mocks.orbit!.onStart());
+    else
+      view.rerender(
+        restore({
+          ...request,
+          generation: 3,
+          requestId: 3,
+          code: action === 'replacement' ? 'ITC-D07' : 'MISSING',
+        }),
+      );
+    expect(rig.complete).not.toHaveBeenCalled();
+    act(() => mocks.frame!());
+    act(() => mocks.frame!());
+    now = 2000;
+    act(() => mocks.frame!());
+    if (action === 'interrupt') expect(rig.complete).not.toHaveBeenCalled();
+    else
+      expect(rig.complete).toHaveBeenCalledExactlyOnceWith(
+        action === 'replacement' ? 'ITC-D07' : null,
+        expect.objectContaining({ generation: 3, requestId: 3 }),
+      );
+    expect(camera.position.toArray()).toEqual(savedPose.position);
+    expect(control.target.toArray()).toEqual(savedPose.target);
+    expect(camera.zoom).toBe(savedPose.zoom);
   },
 );
 it.each([false, true])(

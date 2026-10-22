@@ -85,7 +85,7 @@ describe('room failure metadata', () => {
     const error = {
       message: 'private inventory value, URL, expected and received DOM',
       stack:
-        'Error: private\n    at helper (/host/private/tests/e2e/helper.ts:2:3)\n    at test (/host/private/tests/e2e/room.spec.ts:911:28)\n    at later (/host/private/tests/e2e/room.spec.ts:919:9)',
+        'Error: private\n    at helper (/host/private/tests/e2e/helper.ts:2:3)\n    at test (/host/private/tests/e2e/00-room.spec.ts:911:28)\n    at later (/host/private/tests/e2e/00-room.spec.ts:919:9)',
       matcherResult: { name: 'toHaveAttribute', actual: 'private' },
     };
     expect(
@@ -99,7 +99,7 @@ describe('room failure metadata', () => {
           kind: 'assertion',
           matcher: 'toHaveAttribute',
           location: {
-            file: 'tests/e2e/room.spec.ts',
+            file: 'tests/e2e/00-room.spec.ts',
             line: 911,
             column: 28,
           },
@@ -112,7 +112,7 @@ describe('room failure metadata', () => {
     const error = {
       message: 'Error: expect(private).toHaveAttribute(secret)',
       stack:
-        'private tests/e2e/room.spec.ts:911:28\n    at /host/private/app.ts:4:5',
+        'private tests/e2e/00-room.spec.ts:911:28\n    at /host/private/app.ts:4:5',
       value: 'secret token',
       errorContext: 'private DOM',
       cause: { message: 'private cause' },
@@ -138,7 +138,7 @@ describe('room failure metadata', () => {
       errors: Array.from({ length: 7 }, () => ({
         message: '\u001b[31mTest timeout of 120000ms exceeded.\u001b[39m',
         stack:
-          'Test timeout\n    at C:\\private\\tests\\e2e\\room.spec.ts:553:1',
+          'Test timeout\n    at C:\\private\\tests\\e2e\\00-room.spec.ts:553:1',
       })),
     });
     expect(output.omitted).toBe(3);
@@ -149,7 +149,7 @@ describe('room failure metadata', () => {
     expect(output.records[0]).toEqual({
       kind: 'test-timeout',
       matcher: null,
-      location: { file: 'tests/e2e/room.spec.ts', line: 553, column: 1 },
+      location: { file: 'tests/e2e/00-room.spec.ts', line: 553, column: 1 },
     });
   });
 

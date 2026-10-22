@@ -1,5 +1,31 @@
 # Validation
 
+## Browser scheduling and interruption diagnostics
+
+The room spec is named `00-room.spec.ts` to start its unchanged sequential file
+journeys early in the existing two-worker parallel phase. Pinned Playwright's
+collector sorts files lexically and dispatches those file groups in order. Shared
+fixtures retain the exclusive phase; focused runs retain one worker. Discovery
+regressions require identical test coverage in both modes and room-first ordering.
+This targets the observed late single-worker tail; it does not establish a measured
+end-to-end saving or a pass within the existing job deadline.
+
+Failed attempts publish bounded source coordinates immediately, before final
+reporting, so process cancellation and unavailable artifact uploads still leave
+an assertion-site pointer. Only this known test file's source coordinates are
+retained from at most three errors per attempt and twenty attempts. Test titles,
+assertion messages, expected/actual values, requests and attachments are excluded.
+The final report retains its existing bounded summary and omission count.
+
+The spatial interruption journey controls time only around transient flight/reveal
+input windows. It acknowledges the current request before advancing actual browser
+animation frames, delivers trusted pointer/toolbar input during the required phase,
+and resumes time before settled-label and idle-draw checks. It preserves the
+endpoint, cancellation, hover, selection and no-stale-target assertions. The source
+repair removes a timing vulnerability; unavailable historical assertion details do
+not establish it as the cause of the prior failure. Exact-candidate canonical
+browser execution and full certification are required separately.
+
 ## Spatial composition source slice
 
 ### Occupancy snapshots and flight interruption witnesses
@@ -109,7 +135,7 @@ for visual review when the journeys actually execute.
 | A302  | Actual modal/label staging; Cancel preserves destination, quantity and reason; Use location does not submit; explicit map and conventional Receive confirmations persist the same destination UUID; graphics preemption, detached prior canvas and resumed detail map; committed-context samples include detached contexts awaiting teardown. Actual browser context loss keeps the keyboard picker usable; an owned unmodeled destination preserves the draft and recorded location. |
 | A303  | Asset, quantity and location record readiness precedes optional graphics. Small initial viewport tests the near-region lazy boundary; phone-height captures follow. Multiple positive quantity holdings require explicit choice and changing it updates the actual compact scene. An owned unmodeled closet child keeps recorded context and Spaces links on all three surfaces without canvas/count reads.                                                                           |
 | W13   | Full and Reduced journeys inspect actual rendered drawer/container/shelf reveal-group transforms, visible selected count text against the uncached occupancy response with the optional overlay off, screenshots, and reversal to resting transforms after Clear selection.                                                                                                                                                                                                           |
-| W14   | Actual installed renderer and controlled browser clock prove Full flight before reveal, newer selection retirement, toolbar input cancellation and Reduced complete endpoints. The existing trusted-pointer interruption journey in `room.spec.ts` retains its interaction assertions and now waits through the complete 750/400 ms sequence.                                                                                                                                         |
+| W14   | Actual installed renderer and controlled browser clock prove Full flight before reveal, newer selection retirement, toolbar input cancellation and Reduced complete endpoints. The existing trusted-pointer interruption journey in `00-room.spec.ts` retains its interaction assertions and now waits through the complete 750/400 ms sequence.                                                                                                                                      |
 
 Native Chromium click coordinates floor client positions and round local offsets
 independently
@@ -876,7 +902,7 @@ The light `required` job repeats the complete evidence lookup, including fresh l
 
 The full `npm run test:e2e` runs exclusive files first with one worker, then the reviewed independent files with at most two workers. Tests within each file retain their order (`fullyParallel: false`). `scripts/e2e-scheduling.ts` is the explicit parallel allowlist; every unlisted or future spec defaults to the exclusive phase. Shared membership/session changes, singleton label defaults, signing-key expiry, Storage quotas and the custody fixtures used by visual inspection stay exclusive. `experience-visual.spec.ts` also stays exclusive: it selects the first global inventory, category and site records, which another test could archive, retire, rename or remove between navigation and inspection. A reader of mutable records owned by another spec needs exclusive scheduling or stable spec-owned fixtures before entering the parallel allowlist. Parallel mutable workflows target unique inventory/category/site identities and use separate browser contexts; they do not publish shared default-category forms. Stable seeded categories/locations may be read while all parallel writers leave those references unchanged. The default full gate retains one backend-specific build, server, user seed and signing-key lifecycle. No test results or backend builds are cached.
 
-Focused commands such as `npm run test:e2e -- tests/e2e/room.spec.ts` use the original single `chromium` project without dependency expansion. Any explicit Playwright arguments select this ordinary mode, including a full serial comparison with `npm run test:e2e -- --workers=1`. For discovery alone, `E2E_FULL_SUITE=1 npm run test:e2e:list` lists the scheduled partition; omit that environment flag for ordinary discovery. The scheduling regression checks compare the actual full discovered test identities in both modes, reject duplicates, verify project placement and preserve focused room selection. They run in `npm run test`.
+Focused commands such as `npm run test:e2e -- tests/e2e/00-room.spec.ts` use the original single `chromium` project without dependency expansion. Any explicit Playwright arguments select this ordinary mode, including a full serial comparison with `npm run test:e2e -- --workers=1`. For discovery alone, `E2E_FULL_SUITE=1 npm run test:e2e:list` lists the scheduled partition; omit that environment flag for ordinary discovery. The scheduling regression checks compare the actual full discovered test identities in both modes, reject duplicates, verify project placement and preserve focused room selection. They run in `npm run test`.
 
 Separately authenticated SDK fixture clients in parallel specs must end only their
 own session with `auth.signOut({ scope: 'local' })`. The installed Auth client
@@ -940,7 +966,7 @@ The opt-in archive-and-clear workflow also needs one-snapshot review, inactive-l
 
 ## Room proof
 
-See [room navigation](room-navigation.md#validation) for graphics-specific contracts. `npm run test:e2e -- tests/e2e/room.spec.ts` forwards focused Playwright arguments while retaining the local backend build. The default `npm run validate` still runs every test. Real WebGL rendering/raycast interaction and forced graphics failure supplement pure and component tests; visual inspection is required for proportions and label readability.
+See [room navigation](room-navigation.md#validation) for graphics-specific contracts. `npm run test:e2e -- tests/e2e/00-room.spec.ts` forwards focused Playwright arguments while retaining the local backend build. The default `npm run validate` still runs every test. Real WebGL rendering/raycast interaction and forced graphics failure supplement pure and component tests; visual inspection is required for proportions and label readability.
 
 PR5 picker proof includes component search, ordering, eligibility, unavailable
 values, keyboard behavior and form baselines, followed by browser create,

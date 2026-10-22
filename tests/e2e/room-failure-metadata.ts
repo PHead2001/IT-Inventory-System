@@ -133,7 +133,7 @@ function errorRecord(error: TestInfoError, timedOut: boolean) {
   const location = stack
     .split('\n')
     .map((line) =>
-      /^\s+at\s+.*[/\\]tests[/\\]e2e[/\\]room\.spec\.ts:(\d{1,6}):(\d{1,6})\)?\s*$/.exec(
+      /^\s+at\s+.*[/\\]tests[/\\]e2e[/\\]00-room\.spec\.ts:(\d{1,6}):(\d{1,6})\)?\s*$/.exec(
         line,
       ),
     )
@@ -155,7 +155,7 @@ function errorRecord(error: TestInfoError, timedOut: boolean) {
     location:
       location && Number(location[1]) > 0 && Number(location[2]) > 0
         ? {
-            file: 'tests/e2e/room.spec.ts',
+            file: 'tests/e2e/00-room.spec.ts',
             line: Number(location[1]),
             column: Number(location[2]),
           }
