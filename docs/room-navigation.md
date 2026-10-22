@@ -105,7 +105,14 @@ stable code and commits only after **Use location** resolves the latest eligible
 UUID using `pickerLocations`: active ancestor path, active/can-hold capability,
 source exclusions and the parent form's pending state. It never submits a task or
 moves inventory. Cancel, initialization failure and unmodeled locations retain
-the form draft and keyboard tree. Sites use their existing site picker, not map
+the form draft and keyboard tree. An eligible unmodeled candidate retains its
+logical code and UUID beside the available modeled overview, with no selected
+geometry or focus target and a notice explaining that it is not shown. A failed
+map stays failed when the staged destination changes; only **Retry map** requests
+another graphics attempt. **Use location** still explicitly commits the staged
+candidate to the form. Without modeled alternatives the picker remains text-only;
+unmodeled detail previews always retain their recorded text without a canvas.
+Sites use their existing site picker, not map
 destinations. Every mesh, label, hover and overflow action passes the same latest
 permitted-code and private-session guard.
 Initial verification defers modal opening; a successful same-owner recheck opens
