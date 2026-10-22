@@ -187,9 +187,11 @@ export function createRoomCameraStore(
     },
     retire,
     dispose() {
-      retire();
       closed = true;
+      // Provider insertion cleanup must invalidate ownership without scheduling
+      // updates in departing subscribers. Live retire() still notifies them.
       listeners.clear();
+      retire();
     },
   };
 }

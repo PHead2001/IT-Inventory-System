@@ -2,6 +2,7 @@ import { expect, it, vi } from 'vitest';
 import {
   cameraAuthorityKey,
   createRoomCameraStore,
+  emptyCameraSnapshot,
   type CameraAuthority,
 } from './camera-snapshot-store';
 import type { CameraView } from './camera-view';
@@ -20,6 +21,41 @@ const pose: CameraView = {
   mode: 'free',
 };
 const descriptor = () => Object.freeze({});
+
+it.each(['retire', 'dispose'] as const)(
+  '%s invalidates camera owners and snapshots, notifying subscribers only for live retirement',
+  (action) => {
+    const store = createRoomCameraStore(() => true);
+    store.authorize(authority, true, false);
+    const old = descriptor();
+    store.bind(old, 'geometry', cameraAuthorityKey(authority));
+    expect(store.write(old, pose)).toBe(true);
+    const observe = vi.fn(() => {
+      // Live retirement must publish the cleared state synchronously.
+      expect(store.snapshot('geometry')).toBe(emptyCameraSnapshot);
+      expect(store.snapshot('')).toBe(emptyCameraSnapshot);
+      expect(store.write(old, pose)).toBe(false);
+    });
+    const unsubscribe = store.subscribe('geometry', observe);
+    const observeAuthority = vi.fn();
+    const unsubscribeAuthority = store.subscribe('', observeAuthority);
+    store[action]();
+    expect(observe).toHaveBeenCalledTimes(action === 'retire' ? 1 : 0);
+    expect(observeAuthority).toHaveBeenCalledTimes(action === 'retire' ? 1 : 0);
+    expect(store.snapshot('geometry')).toBe(emptyCameraSnapshot);
+    expect(store.snapshot('')).toBe(emptyCameraSnapshot);
+    expect(store.write(old, pose)).toBe(false);
+    unsubscribe();
+    unsubscribeAuthority();
+    store.authorize(authority, true, false);
+    const next = descriptor();
+    store.bind(next, 'geometry', cameraAuthorityKey(authority));
+    expect(store.write(next, pose)).toBe(action === 'retire');
+    expect(store.write(old, pose)).toBe(false);
+    store.dispose();
+    expect(store.snapshot('')).toBe(emptyCameraSnapshot);
+  },
+);
 
 it('retains a cloned numeric pose after workspace owner retirement, while rejecting its cleanup write', () => {
   const store = createRoomCameraStore(() => true);

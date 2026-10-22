@@ -501,6 +501,156 @@ it('requires native DOM coverage at both client and dispatch points and rejects 
   Reflect.deleteProperty(document, 'elementFromPoint');
 });
 
+it('bounds safe DOM diagnostics without admitting same-target labels or changing physical click ownership', async () => {
+  const captured = await capture(new MeshBasicMaterial());
+  const scene = {
+    ...captured,
+    triangles: captured.triangles.map((face) => ({ ...face, code: 'ITC-D01' })),
+  };
+  const canvas = document.querySelector('canvas')!;
+  const state = [...window.__roomWitnessStores!][0].getState();
+  Reflect.set(
+    window,
+    '__roomWitnessStores',
+    new Set([
+      { getState: () => ({ ...state, size: { width: 375, height: 400 } }) },
+    ]),
+  );
+  const labels = [
+    'ITC-D01',
+    'ITC-D07',
+    'private inventory name',
+    'ITC-D01',
+    'ITC-RED',
+    'ITC-BLACK',
+  ].map((code, index) => {
+    const button = document.createElement('button');
+    button.dataset.roomLabelCode = code;
+    button.dataset.roomExposed = 'true';
+    button.dataset.labelSuppressed = 'false';
+    if (index === 2) button.setAttribute('role', 'private role');
+    if (index === 3) {
+      button.removeAttribute('data-room-label-code');
+      button.dataset.hoverTooltip = 'true';
+      button.dataset.locationCode = code;
+      button.disabled = true;
+      button.setAttribute('inert', '');
+      button.setAttribute('aria-hidden', 'true');
+    }
+    document.body.append(button);
+    vi.spyOn(button, 'getBoundingClientRect').mockReturnValue(
+      new DOMRect(180, 190, 44, 44),
+    );
+    return button;
+  });
+  let failObservation = false;
+  vi.stubGlobal('getComputedStyle', (element: Element) => {
+    if (labels.includes(element as HTMLButtonElement) && failObservation)
+      throw new Error('private diagnostic error');
+    return {
+      transform: 'none',
+      translate: 'none',
+      rotate: 'none',
+      scale: 'none',
+      perspective: 'none',
+      zoom: '1',
+      borderLeftWidth: '0px',
+      borderRightWidth: '0px',
+      borderTopWidth: '0px',
+      borderBottomWidth: '0px',
+      paddingLeft: '0px',
+      paddingRight: '0px',
+      paddingTop: '0px',
+      paddingBottom: '0px',
+      visibility: element === labels[3] ? 'hidden' : 'visible',
+      pointerEvents: element === labels[3] ? 'none' : 'auto',
+    };
+  });
+  Object.defineProperty(document, 'elementFromPoint', {
+    configurable: true,
+    value: (x: number) => labels[Math.floor(x) - 187],
+  });
+  const page = {
+    evaluate: async (fn: (arg: unknown) => unknown, arg: unknown) => fn(arg),
+  } as unknown as Page;
+  const candidates = new Map([
+    [
+      'ITC-D01',
+      Array.from({ length: 6 }, (_, index) => ({ x: 187 + index, y: 200 })),
+    ],
+  ]);
+  const reports: RoomClickDiagnostics[] = [];
+  expect(
+    (
+      await uncoveredRoomClickWitnesses(page, scene, scene, candidates, {
+        code: 'ITC-D01',
+        report: (value) => reports.push(value),
+      })
+    ).size,
+  ).toBe(0);
+  const final = reports.at(-1)!;
+  expect(final).toMatchObject({
+    dualRayAccepted: 6,
+    domAccepted: 0,
+    rejected: { 'client-dom': 6 },
+  });
+  expect(final.blockerSamples).toHaveLength(4);
+  expect(final.blockerSamples?.[0]).toMatchObject({
+    code: 'ITC-D01',
+    sameTarget: true,
+    role: 'button',
+    rect: { left: 180, top: 190, right: 224, bottom: 234 },
+    visibility: 'visible',
+    pointerEvents: 'auto',
+    exposed: 'true',
+    suppressed: 'false',
+    connected: true,
+    disabled: false,
+    inert: false,
+  });
+  expect(final.blockerSamples?.[1]).toMatchObject({
+    code: 'ITC-D07',
+    sameTarget: false,
+  });
+  expect(final.blockerSamples?.[2]).toMatchObject({
+    code: 'other-location',
+    sameTarget: false,
+    role: 'other',
+  });
+  expect(final.blockerSamples?.[3]).toMatchObject({
+    code: 'ITC-D01',
+    sameTarget: true,
+    visibility: 'hidden',
+    pointerEvents: 'none',
+    ariaHidden: 'true',
+    disabled: true,
+    inert: true,
+  });
+  expect(JSON.stringify(reports)).not.toMatch(/private|inventory/);
+  failObservation = true;
+  expect(
+    (
+      await uncoveredRoomClickWitnesses(page, scene, scene, candidates, {
+        code: 'ITC-D01',
+        report: () => {
+          throw Error('sink');
+        },
+      })
+    ).size,
+  ).toBe(0);
+  failObservation = false;
+  Object.defineProperty(document, 'elementFromPoint', {
+    configurable: true,
+    value: () => canvas,
+  });
+  expect(
+    (await uncoveredRoomClickWitnesses(page, scene, scene, candidates)).get(
+      'ITC-D01',
+    ),
+  ).toHaveLength(6);
+  Reflect.deleteProperty(document, 'elementFromPoint');
+});
+
 it('certifies outside-rest only when both client and offset rays miss the canonical resting volume', () => {
   const scene = snapshot(plane('DRAWER', -1, 1, 0));
   const bounds = {

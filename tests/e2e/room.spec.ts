@@ -586,6 +586,141 @@ async function roomFailureMetrics(page: Page, progress: RoomProgress) {
     .catch(() => ({ available: false }));
 }
 
+async function roomFailureSamples(page: Page, progress: RoomProgress) {
+  return page
+    .evaluate(async (code) => {
+      const canvas = document.querySelector<HTMLCanvasElement>(
+        '[data-room-surface] canvas',
+      );
+      const number = (value: number) =>
+        Number.isFinite(value)
+          ? Math.max(
+              -100_000,
+              Math.min(100_000, Math.round(value * 1000) / 1000),
+            )
+          : null;
+      const flag = (value: string | undefined) =>
+        value === 'true' || value === 'false' ? value : null;
+      const matrix = (value: string | undefined) => {
+        try {
+          const parsed: unknown = JSON.parse(value ?? '');
+          return Array.isArray(parsed) &&
+            parsed.length === 16 &&
+            parsed.every(
+              (entry) => typeof entry === 'number' && Number.isFinite(entry),
+            )
+            ? parsed
+            : null;
+        } catch {
+          return null;
+        }
+      };
+      const snapshot = () => {
+        const layout = window.__roomLabelLayoutSnapshot;
+        const visibility = window.__roomVisibilitySnapshot;
+        const state = [...(window.__roomWitnessStores ?? [])]
+          .map((store) => store.getState())
+          .find((candidate) => candidate.gl.domElement === canvas);
+        const offsets: {
+          id: string;
+          kind: 'hover' | 'reveal';
+          offset: (number | null)[];
+        }[] = [];
+        state?.scene.traverse((object) => {
+          // Fixed geometry identifiers only; never private label or inventory text.
+          const id: unknown =
+            object.userData.roomHoverVisualNode ??
+            object.userData.roomRevealNode;
+          if (
+            typeof id === 'string' &&
+            /^(?:drawer-(?:[1-9]|1[0-2])|(?:red|black|clear)-container|shelf-[1-4][abc]|server-rack)$/.test(
+              id,
+            ) &&
+            offsets.length < 64
+          )
+            offsets.push({
+              id,
+              kind: object.userData.roomHoverVisualNode ? 'hover' : 'reveal',
+              offset: object.position.toArray().map(number),
+            });
+        });
+        return {
+          at: Math.round(performance.now() * 1000) / 1000,
+          camera: {
+            view: matrix(canvas?.dataset.cameraViewMatrix),
+            projection: matrix(canvas?.dataset.cameraProjectionMatrix),
+          },
+          effects: {
+            sceneFrames: number(
+              Number(canvas?.dataset.sceneEffectFrames ?? NaN),
+            ),
+            composerFrames: number(
+              Number(canvas?.dataset.composerFrames ?? NaN),
+            ),
+            contactCaptures: number(
+              Number(canvas?.dataset.contactCaptures ?? NaN),
+            ),
+            contact: [
+              'cached',
+              'moving',
+              'off',
+              'failed',
+              'allocation-failed',
+              'capture-failed',
+            ].includes(canvas?.dataset.contactStatus ?? '')
+              ? canvas!.dataset.contactStatus
+              : 'other',
+            offsets,
+          },
+          labels: {
+            enabled: window.__roomLayoutDiagnosticsEnabled === true,
+            pending: flag(canvas?.dataset.labelLayoutPending),
+            revision: number(
+              Number(canvas?.dataset.labelLayoutRevision ?? NaN),
+            ),
+            transaction: layout?.transaction ?? null,
+            complete: layout?.complete ?? null,
+            settled: layout?.settled ?? null,
+            passCount: layout?.passes.length ?? null,
+            passes:
+              layout?.passes.slice(0, 4).map((pass) => ({
+                labels: pass.labels
+                  .filter(
+                    (label) =>
+                      label.locationCode === code ||
+                      label.id === 'hover-tooltip',
+                  )
+                  .slice(0, 4),
+                output: pass.output
+                  ?.filter((output) =>
+                    pass.labels.some(
+                      (label) =>
+                        label.id === output.id &&
+                        (label.locationCode === code ||
+                          label.id === 'hover-tooltip'),
+                    ),
+                  )
+                  .slice(0, 4),
+              })) ?? null,
+            visibilityRevision: visibility?.revision ?? null,
+            visibilityComplete: visibility?.complete ?? null,
+            visibility:
+              visibility?.entries
+                .filter((entry) => entry.code === code)
+                .slice(0, 1) ?? null,
+          },
+        };
+      };
+      const before = snapshot();
+      // Observation only: one browser frame, no time advance or render invalidation.
+      await new Promise<void>((resolve) =>
+        requestAnimationFrame(() => resolve()),
+      );
+      return { before, after: snapshot() };
+    }, progress.code)
+    .catch(() => ({ available: false }));
+}
+
 test.afterEach(async ({}, testInfo) => {
   const progress = roomProgressByTest.get(testInfo);
   const page = roomPageByTest.get(testInfo);
@@ -610,19 +745,55 @@ test.afterEach(async ({}, testInfo) => {
   if (!progress || !page || testInfo.status === testInfo.expectedStatus) return;
 
   let timer: ReturnType<typeof setTimeout> | undefined;
-  const metrics = await Promise.race([
-    roomFailureMetrics(page, progress),
-    new Promise<{ available: false; timedOut: true }>((resolve) => {
+  let completedMetrics: Awaited<ReturnType<typeof roomFailureMetrics>> | null =
+    null;
+  const captured = await Promise.race([
+    Promise.all([
+      roomFailureMetrics(page, progress).then((metrics) => {
+        completedMetrics = metrics;
+        return metrics;
+      }),
+      progress.journey === 'spatial-reveal'
+        ? roomFailureSamples(page, progress)
+        : null,
+    ]).then(([metrics, samples]) => ({ metrics, samples })),
+    new Promise<{
+      metrics:
+        | Awaited<ReturnType<typeof roomFailureMetrics>>
+        | { available: false; timedOut: true };
+      samples: null;
+    }>((resolve) => {
       timer = setTimeout(
-        () => resolve({ available: false, timedOut: true }),
+        () =>
+          resolve({
+            metrics: completedMetrics ?? { available: false, timedOut: true },
+            samples: null,
+          }),
         1_000,
       );
     }),
   ]);
   if (timer) clearTimeout(timer);
+  if (captured.samples) {
+    const samples = JSON.stringify(captured.samples);
+    console.info(
+      'ROOM_FAILURE_SAMPLES ' +
+        (samples.length <= 16_384
+          ? samples
+          : JSON.stringify({ available: false, sizeBound: true })),
+    );
+  }
   const safeProgress = { ...progress };
   delete safeProgress.occupancyExpected;
-  const failure = { ...safeProgress, metrics };
+  if (safeProgress.clickWitness?.blockerSamples) {
+    console.info(
+      'ROOM_DOM_BLOCKERS ' +
+        JSON.stringify(safeProgress.clickWitness.blockerSamples),
+    );
+    safeProgress.clickWitness = { ...safeProgress.clickWitness };
+    delete safeProgress.clickWitness.blockerSamples;
+  }
+  const failure = { ...safeProgress, metrics: captured.metrics };
   const serialized = JSON.stringify(failure);
   const log =
     serialized.length <= 4_096
@@ -901,6 +1072,7 @@ test('spatial reveal endpoints retain actual picking and labels across oblique, 
 }, testInfo) => {
   test.setTimeout(180_000);
   trackRoomPage(testInfo, page);
+  await enableRoomLayoutDiagnostics(page);
   const assertion = (id: RoomAssertionId) => markRoomAssertion(testInfo, id);
   markRoomProgress(testInfo, {
     journey: 'spatial-reveal',
