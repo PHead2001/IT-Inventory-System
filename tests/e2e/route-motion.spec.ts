@@ -1,4 +1,10 @@
-import { expect, test, type Page, type Request } from '@playwright/test';
+import {
+  expect,
+  test,
+  type Locator,
+  type Page,
+  type Request,
+} from '@playwright/test';
 import { withHeldQuantityPrimary } from './route-primary-delay';
 import {
   armNativeReady,
@@ -616,6 +622,25 @@ async function expectResultAnchor(page: Page, anchor: string) {
           Math.max(0, root.scrollHeight - innerHeight),
         );
         return Math.abs(window.scrollY - expected) <= 1;
+      }),
+    )
+    .toBe(true);
+}
+
+/** Inspect settled heading geometry without scrolling or focusing the page. */
+async function expectHeadingViewport(heading: Locator) {
+  await expect
+    .poll(() =>
+      heading.evaluate((element) => {
+        const rect = element.getBoundingClientRect();
+        const header =
+          document.querySelector<HTMLElement>('.experience-header');
+        const position = header && getComputedStyle(header).position;
+        const inset =
+          header && (position === 'sticky' || position === 'fixed')
+            ? Math.max(0, header.getBoundingClientRect().bottom)
+            : 0;
+        return rect.top >= inset - 1 && rect.bottom <= innerHeight + 1;
       }),
     )
     .toBe(true);
@@ -2307,6 +2332,7 @@ for (const mode of ['system-reduced', 'local-reduced'] as const) {
         'false',
       );
       const arrival = await instant();
+      await expectHeadingViewport(heading);
       await resetProof(page);
       await page.goBack();
       await results(scope);
@@ -2319,8 +2345,23 @@ for (const mode of ['system-reduced', 'local-reduced'] as const) {
       await expect(page).toHaveURL(destination.href);
       await expect(heading).toBeVisible();
       const nativeForward = await instant();
+      await expectHeadingViewport(heading);
       await resetProof(page);
       const applicationBack = await appBack();
+      // A fresh result document removes the prior client cache and carries the
+      // genuine return hash. Its ordinary second-row click must reveal the H1.
+      await page.reload();
+      await results(anchoredScope);
+      await row.click();
+      await expect(page).toHaveURL(destination.href);
+      await expect(heading).toBeVisible();
+      await expect(routeProgress(page)).toHaveAttribute(
+        'data-visible',
+        'false',
+      );
+      await instant();
+      await expectHeadingViewport(heading);
+      await appBack();
       // Observe the known detail's committed history entry while its genuine
       // response is held. Back restores the anchored list; late Flight delivery
       // must preserve it, and Forward restores detail without title motion.

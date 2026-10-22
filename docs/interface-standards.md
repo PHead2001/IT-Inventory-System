@@ -207,6 +207,20 @@ browser storage is written. Existing non-motion focus behavior is preserved;
 the application return repair never moves focus. Native Back/Forward continues
 to use its separate instant coordinator below.
 
+The same accepted inventory-title Link owner also repairs a fresh detail arrival
+whose heading remains outside the viewport after Next has consumed its initial
+scroll intent. This one-shot intent is independent of Full/Reduced motion and
+requires the exact accepted same-origin path and complete query, the original
+actor/privacy authority and the canonical visible primary with one visible H1.
+After the commit and any active capture release, it reveals only an offscreen
+heading, respecting a fixed/sticky header and the heading's scroll margin. Full
+motion retains its earlier pre-capture title reveal; an already visible heading
+does not move again. The existing abort, user-input, superseding navigation,
+native-traversal and authority-retirement cancellation rules apply. App Back
+keeps its unique result-anchor repair. Unpaired/plain detail links and links with
+a destination hash retain ordinary Next scroll handling; no global readiness
+notification, search update, refresh or native history restore creates this intent.
+
 Privacy checks can temporarily collapse the destination document and clamp the
 browser's restored scroll to zero. A provider-local scroll coordinator retains at
 most 50 finite, nonnegative offset checkpoints, bound to the browser history entry
