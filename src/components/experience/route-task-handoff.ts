@@ -53,8 +53,10 @@ export function createNativeTaskHandoff() {
   let retired = false;
   let preservedBy: PrivacyTaskQueryContinuity | null = null;
   let consumedBy: symbol | null = null;
+  let completedCleanup: PrivacyTaskQueryContinuity | null = null;
   const retire = () => {
     if (candidate) retired = true;
+    completedCleanup = null;
   };
   const current = (source: TaskSource) => {
     if (!receipt || retired) return false;
@@ -65,8 +67,8 @@ export function createNativeTaskHandoff() {
     const continuity = source.continuity;
     const cleanup =
       continuity?.kind === 'cleanup' &&
-      continuity.parent === consumedBy &&
-      consumedBy !== null &&
+      ((continuity.parent === consumedBy && consumedBy !== null) ||
+        continuity === completedCleanup) &&
       continuity.destinationKey === receipt.cleanKey;
     const matchingContinuity =
       continuity?.current() === true &&
@@ -79,6 +81,16 @@ export function createNativeTaskHandoff() {
               consumedBy === continuity.identity))));
     const consumptionFresh =
       source.fresh || (matchingContinuity && continuity!.consumptionReady());
+    if (
+      continuity === completedCleanup &&
+      completedCleanup !== null &&
+      (!matchingContinuity ||
+        completedCleanup.status() !== 'verified' ||
+        !completedCleanup.consumptionReady())
+    ) {
+      retire();
+      return false;
+    }
     if (
       preservedBy &&
       ((!preservedBy.current() && !cleanup) ||
@@ -101,11 +113,22 @@ export function createNativeTaskHandoff() {
     }
     if (matchingContinuity) {
       preservedBy = continuity!;
-      if (cleanup && consumptionFresh && continuity!.status() === 'verified') {
+      if (cleanup) {
+        if (
+          !continuity!.consumptionReady() ||
+          continuity!.status() !== 'verified'
+        )
+          return false;
+        // Layout/passive effects may observe the same cleanup repeatedly. Keep
+        // its exact live controller proof until a valid next task replaces it.
+        completedCleanup = continuity!;
         preservedBy = null;
         consumedBy = null;
-      } else if (!consumptionFresh || continuity!.status() === 'pending')
-        return false;
+      } else {
+        completedCleanup = null;
+        if (!consumptionFresh || continuity!.status() === 'pending')
+          return false;
+      }
     } else if (preservedBy) {
       retire();
       return false;
@@ -153,6 +176,7 @@ export function createNativeTaskHandoff() {
       receipt = { ...before, cleanKey: handoff.destinationKey };
       preservedBy = continuity;
       consumedBy = continuity.identity;
+      completedCleanup = null;
       retired = false;
       return true;
     },
@@ -184,6 +208,7 @@ export function createNativeTaskHandoff() {
         receipt = null;
         preservedBy = null;
         consumedBy = null;
+        completedCleanup = null;
         retired = false;
       } else if (retired) return;
       if (

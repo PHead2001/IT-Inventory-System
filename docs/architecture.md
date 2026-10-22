@@ -354,7 +354,12 @@ It grants no readiness, restoration or navigation authority; only the exact fres
 verification may authorize one existing receipt's consumption. A successful
 consumption alone may bind the exact task-removal cleanup leg. Generic rechecks,
 failure, uncertainty, supersession or changed owners/security retire the receipt
-permanently. See [command handoff](command-palette.md) for its receipt boundaries.
+permanently. Repeated observations of the same verified cleanup retain its exact
+live controller proof until the next valid task transition; they recheck the
+original source binding, security revision, pending epoch, visibility and idle
+state each time. Retirement clears that proof and cannot be undone by observing
+the old cleanup again. See [command handoff](command-palette.md) for its receipt
+boundaries.
 The protected controller always renders the opaque server route slot without
 an ancestor Suspense or accepted-content gate. Each async protected server page
 completes its existing authorization, reads, validation, `notFound()` and

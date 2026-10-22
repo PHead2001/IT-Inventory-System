@@ -441,3 +441,150 @@ it.each([false, true])(
     expect(apply).not.toHaveBeenCalled();
   },
 );
+
+function completedNativeCleanup(cleanupReady = true, cleanupFresh = false) {
+  const { handoff, accepted } = admitted();
+  let live = true;
+  let status: 'verified' | 'consumed' = 'verified';
+  task();
+  const taskKey = key();
+  const entry = controllerTaskContinuity({
+    identity: Symbol(),
+    parent: null,
+    kind: 'task',
+    sourceKey: path,
+    destinationKey: taskKey,
+    securityRevision: accepted.securityRevision,
+    status: () => status,
+    current: () => live,
+    consumptionReady: () => live,
+    complete: () => {
+      status = 'consumed';
+      return true;
+    },
+  });
+  expect(
+    handoff.consume(
+      source({ fresh: false, continuity: entry }),
+      path,
+      'asset_move',
+      replaceAppHistoryUrl,
+    ),
+  ).not.toBeNull();
+  live = false;
+  const proof = { current: true, ready: cleanupReady, verified: true };
+  const cleanup = controllerTaskContinuity({
+    ...entry,
+    identity: Symbol(),
+    parent: entry.identity,
+    kind: 'cleanup',
+    sourceKey: taskKey,
+    destinationKey: path,
+    status: () => (proof.verified ? 'verified' : 'retired'),
+    current: () => proof.current,
+    consumptionReady: () => proof.ready,
+    complete: () => false,
+  });
+  const cleaned = source({ fresh: cleanupFresh, continuity: cleanup });
+  handoff.observe(cleaned, false);
+  return { handoff, cleaned, cleanup, proof };
+}
+
+it.each([false, true])(
+  'reobserves the exact verified cleanup idempotently across controller commit with fresh=%s before consuming the next task',
+  (fresh) => {
+    const { handoff, cleaned, cleanup, proof } = completedNativeCleanup(
+      false,
+      fresh,
+    );
+    // A verified render can precede the controller's committed release proof.
+    handoff.observe(cleaned, false);
+    proof.ready = true;
+    // RouteReady observes in layout, passive effects and subsequent rerenders.
+    for (let repeat = 0; repeat < 3; repeat++) handoff.observe(cleaned, false);
+    task();
+    const next = controllerTaskContinuity({
+      ...cleanup,
+      identity: Symbol(),
+      parent: null,
+      kind: 'task',
+      sourceKey: path,
+      destinationKey: key(),
+      complete: () => true,
+    });
+    expect(
+      handoff.consume(
+        source({ fresh: false, continuity: next }),
+        path,
+        'asset_move',
+        replaceAppHistoryUrl,
+      ),
+    ).not.toBeNull();
+  },
+);
+
+it.each([
+  'retire',
+  'root',
+  'actor',
+  'content',
+  'anchor',
+  'navigation',
+  'security',
+  'epoch',
+  'hidden',
+  'busy',
+  'route',
+  'missing',
+  'copied',
+  'stale',
+  'not-ready',
+  'retired',
+] as const)(
+  'completed cleanup cannot resurrect the receipt after %s invalidation',
+  (reason) => {
+    const { handoff, cleaned, cleanup, proof } = completedNativeCleanup();
+    handoff.observe(cleaned, false);
+    const changes: Record<string, Partial<TaskSource>> = {
+      root: { root: document.createElement('div') },
+      actor: { actorId: 'other' },
+      content: { contentIdentity: 'other' },
+      anchor: { serverAnchor: '/history' },
+      navigation: { navigationIdentity: 2 },
+      security: { fresh: true, securityRevision: 'security-2' },
+      epoch: { pendingEpoch: 2 },
+      hidden: { visible: false },
+      busy: { idle: false },
+      route: { committedKey: path + '?changed=true' },
+      missing: { continuity: undefined },
+      copied: { continuity: { ...cleanup } },
+    };
+    if (reason === 'stale') proof.current = false;
+    if (reason === 'not-ready') proof.ready = false;
+    if (reason === 'retired') proof.verified = false;
+    if (reason === 'retire') handoff.retire();
+    else handoff.observe({ ...cleaned, ...changes[reason] }, false);
+    proof.current = proof.ready = proof.verified = true;
+    handoff.observe(cleaned, true);
+    task();
+    const next = controllerTaskContinuity({
+      ...cleanup,
+      identity: Symbol(),
+      parent: null,
+      kind: 'task',
+      sourceKey: path,
+      destinationKey: key(),
+      complete: () => true,
+    });
+    const apply = vi.fn();
+    expect(
+      handoff.consume(
+        source({ fresh: false, continuity: next }),
+        path,
+        'asset_move',
+        apply,
+      ),
+    ).toBeNull();
+    expect(apply).not.toHaveBeenCalled();
+  },
+);

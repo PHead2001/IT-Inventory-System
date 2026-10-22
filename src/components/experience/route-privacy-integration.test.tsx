@@ -8,9 +8,11 @@ import {
 } from '@testing-library/react';
 import {
   Suspense,
+  cloneElement,
   useContext,
   useInsertionEffect,
   useLayoutEffect,
+  useReducer,
 } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
@@ -306,6 +308,16 @@ function NativeTaskWorkspace({ kind }: { kind: 'asset' | 'quantity' }) {
     </>
   );
 }
+let reobserveNativePrimary: () => void;
+function NativePrimaryRerender({ children }: { children: React.ReactElement }) {
+  const [, rerender] = useReducer((value: number) => value + 1, 0);
+  useLayoutEffect(() => {
+    reobserveNativePrimary = rerender;
+  });
+  // Keep the mounted server-primary identity while exercising both real
+  // RouteReady observation effects after controller verification has committed.
+  return cloneElement(children);
+}
 function nativeTaskTree(options: NativeOptions = {}) {
   const kind = options.kind ?? 'asset';
   const path =
@@ -321,19 +333,21 @@ function nativeTaskTree(options: NativeOptions = {}) {
         <TaskPrivacyProbe />
         <ProtectedPrivacyContent routeKey={options.contentRouteKey}>
           <div hidden={options.hidden}>
-            <RouteReady
-              actorId="staff"
-              routeKey={options.anchor ?? path}
-              contentIdentity={options.content ?? 'record'}
-              conventionalPrimary
-              key={options.primaryKey ?? 'original'}
-            >
-              <main>
-                <h1>Owned asset</h1>
-                <p>{options.incomingText ?? 'Original primary content'}</p>
-                <NativeTaskWorkspace kind={kind} />
-              </main>
-            </RouteReady>
+            <NativePrimaryRerender>
+              <RouteReady
+                actorId="staff"
+                routeKey={options.anchor ?? path}
+                contentIdentity={options.content ?? 'record'}
+                conventionalPrimary
+                key={options.primaryKey ?? 'original'}
+              >
+                <main>
+                  <h1>Owned asset</h1>
+                  <p>{options.incomingText ?? 'Original primary content'}</p>
+                  <NativeTaskWorkspace kind={kind} />
+                </main>
+              </RouteReady>
+            </NativePrimaryRerender>
           </div>
         </ProtectedPrivacyContent>
       </RouteMotionProvider>
@@ -419,7 +433,7 @@ it('holds a native task closed through its exact privacy check, consumes once, a
 });
 
 it.each(['asset', 'quantity'] as const)(
-  'consumes and reenters a verified native %s task beneath its explicit server-primary gate without admitting content or storage',
+  'consumes and reenters a verified native %s task after repeated real RouteReady cleanup observations without admitting content or storage',
   async (kind) => {
     const path =
       '/inventory/' +
@@ -481,6 +495,13 @@ it.each(['asset', 'quantity'] as const)(
       });
       await freshNativeTask();
       expect(taskPrivacy.taskQuery?.consumptionReady()).toBe(true);
+      const completedCleanup = taskPrivacy.taskQuery;
+      for (let observation = 0; observation < 3; observation++) {
+        act(() => reobserveNativePrimary());
+        expect(taskPrivacy.taskQuery).toBe(completedCleanup);
+        expect(completedCleanup?.current()).toBe(true);
+        expect(completedCleanup?.status()).toBe('verified');
+      }
       expect(screen.queryByRole('heading', { name: heading })).toBeNull();
       expect(screen.getByTestId('task-primary-ready')).toHaveTextContent(
         'false',
