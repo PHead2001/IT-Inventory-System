@@ -71,6 +71,112 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 describe('unified room label registry', () => {
+  it('physical pick reservation keeps its own label off the current exposed mesh point', () => {
+    const host = document.createElement('div'),
+      canvas = document.createElement('canvas');
+    host.append(canvas);
+    document.body.append(host);
+    vi.spyOn(canvas, 'getBoundingClientRect').mockReturnValue(viewport);
+    const item = label(host),
+      reservation = { left: 66.5, top: 33, right: 78.5, bottom: 45 };
+    const registry = createRoomLabelRegistry(vi.fn(), undefined, undefined, {
+      clock: () => 0,
+    });
+    const cleanup = registry.connect(canvas);
+    registry.register('self', item.element, item.leader, {
+      priority: 4,
+      mandatory: true,
+      locationCode: 'ITC-RED',
+      pickReservation: () => reservation,
+    });
+    item.element.focus();
+    flush();
+    expect(item.element.dataset.labelSuppressed).toBe('false');
+    expect(item.element).toHaveFocus();
+    const actual = item.element.getBoundingClientRect();
+    expect(
+      actual.right + 3 <= reservation.left ||
+        actual.left >= reservation.right + 3 ||
+        actual.bottom + 3 <= reservation.top ||
+        actual.top >= reservation.bottom + 3,
+    ).toBe(true);
+    cleanup();
+  });
+  it('physical pick reservation survives same-code action dedup and remains shared by tooltip labels', () => {
+    const host = document.createElement('div'),
+      canvas = document.createElement('canvas');
+    host.append(canvas);
+    document.body.append(host);
+    vi.spyOn(canvas, 'getBoundingClientRect').mockReturnValue(viewport);
+    const anchor = label(host),
+      tooltip = label(host),
+      reservation = { left: 66.5, top: 33, right: 78.5, bottom: 45 };
+    const registry = createRoomLabelRegistry(vi.fn(), undefined, undefined, {
+      clock: () => 0,
+    });
+    const cleanup = registry.connect(canvas);
+    registry.register('anchor', anchor.element, anchor.leader, {
+      priority: 4,
+      locationCode: 'ITC-RED',
+      pickReservation: () => reservation,
+    });
+    registry.register('tooltip', tooltip.element, tooltip.leader, {
+      priority: 4,
+      locationCode: 'ITC-RED',
+    });
+    tooltip.element.focus();
+    const packing = vi.spyOn(placement, 'layoutLabelsDetailed');
+    flush();
+    expect(tooltip.element.dataset.labelSuppressed).toBe('false');
+    expect(anchor.element.dataset.labelSuppressed).toBe('true');
+    expect(packing.mock.calls[0][2]).toContainEqual(reservation);
+    const actual = tooltip.element.getBoundingClientRect();
+    expect(
+      actual.right + 3 <= reservation.left ||
+        actual.left >= reservation.right + 3 ||
+        actual.bottom + 3 <= reservation.top ||
+        actual.top >= reservation.bottom + 3,
+    ).toBe(true);
+    cleanup();
+  });
+  it('physical pick reservation refreshes failed measurements on movement and removes hidden anchors', () => {
+    const host = document.createElement('div'),
+      canvas = document.createElement('canvas');
+    host.append(canvas);
+    document.body.append(host);
+    vi.spyOn(canvas, 'getBoundingClientRect').mockReturnValue(viewport);
+    const item = label(host);
+    let reservation = { left: 66, top: 33, right: 78, bottom: 45 },
+      exposed = true;
+    const registry = createRoomLabelRegistry(vi.fn(), undefined, undefined, {
+      clock: () => 0,
+      limits: { maxInputs: 0 },
+    });
+    const cleanup = registry.connect(canvas),
+      packing = vi.spyOn(placement, 'layoutLabelsDetailed');
+    registry.register('moving', item.element, item.leader, {
+      priority: 4,
+      mandatory: true,
+      locationCode: 'ITC-RED',
+      isVisible: () => exposed,
+      pickReservation: () => reservation,
+    });
+    flush();
+    expect(packing).toHaveBeenCalledOnce();
+    registry.schedule();
+    flush();
+    expect(packing).toHaveBeenCalledOnce();
+    reservation = { left: 106, top: 33, right: 118, bottom: 45 };
+    registry.schedule();
+    flush();
+    expect(packing).toHaveBeenCalledTimes(2);
+    expect(packing.mock.lastCall?.[2]).toContainEqual(reservation);
+    exposed = false;
+    registry.schedule();
+    flush();
+    expect(packing.mock.lastCall?.[2]).toEqual([]);
+    cleanup();
+  });
   it('keeps the selected mandatory anchor while retaining focused and occluded-anchor tooltip fallback', () => {
     const surface = document.createElement('div'),
       host = document.createElement('div'),

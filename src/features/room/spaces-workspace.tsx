@@ -37,7 +37,13 @@ import { LocationBrowser } from './location-browser';
 import { parseRoomLocation } from './navigation';
 import { useRoomOccupancy } from './use-room-occupancy';
 import { cameraViewKey, type CameraView } from './scene/camera-view';
-import { useRoomCameraSnapshot } from './scene/camera-snapshot-provider';
+import {
+  useRoomCameraSnapshot,
+  useRoomSceneAuthority,
+} from './scene/camera-snapshot-provider';
+import { cameraAuthorityKey } from './scene/camera-snapshot-store';
+import { usePrivacyReadiness } from '@/components/auth/privacy-readiness';
+import { freshPresentationGrant } from '@/components/experience/presentation-privacy';
 import {
   focusToken,
   sameFocusToken,
@@ -242,12 +248,25 @@ export function SpacesWorkspace({
     !!selected?.active &&
     !!selected.can_hold_inventory &&
     !scoped.some((location) => location.parentId === selected.id);
+  const privacy = usePrivacyReadiness();
+  const authority = useRoomSceneAuthority();
+  const countAuthority =
+    authority && authority.actorId === userId && authority.backend === backend
+      ? cameraAuthorityKey(authority)
+      : null;
   const occupancy = useRoomOccupancy(
-    (showCounts || selectedCountEligible) && visible && Boolean(room),
+    Boolean(
+      (showCounts || selectedCountEligible) &&
+      visible &&
+      room &&
+      countAuthority &&
+      freshPresentationGrant(privacy),
+    ),
     userId,
     selection.space.id,
-    attemptKey,
+    JSON.stringify([attemptKey, countAuthority]),
     backend,
+    privacy,
   );
   const highlightedCodes = useMemo(
     () => inventoryDescendantCodes(scoped, selection.code),

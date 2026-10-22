@@ -15,6 +15,28 @@ export type RoomClickFrame = {
   height: number;
 };
 export type RoomClickWitness = { client: Point; dispatch: Point };
+type DomBlocker = {
+  point: Point;
+  ray: 'client-dom' | 'dispatch-dom';
+  code: string | null;
+  sameTarget: boolean;
+  kind: string;
+  role: string;
+  rect: {
+    left: number | null;
+    top: number | null;
+    right: number | null;
+    bottom: number | null;
+  } | null;
+  visibility: string;
+  pointerEvents: string;
+  suppressed: string | null;
+  exposed: string | null;
+  ariaHidden: string | null;
+  disabled: boolean;
+  inert: boolean;
+  connected: boolean;
+};
 export type RoomClickDiagnostics = {
   candidates: number;
   outsideFrame: number;
@@ -34,6 +56,7 @@ export type RoomClickDiagnostics = {
     >
   >;
   blockers: Partial<Record<string, number>>;
+  blockerSamples?: DomBlocker[];
 };
 export type RoomClickObserver = {
   code: string;
@@ -306,6 +329,8 @@ export async function uncoveredRoomClickWitnesses(
       const canvas = document.querySelector('[data-room-surface] canvas');
       const rejected = { 'client-dom': 0, 'dispatch-dom': 0 };
       const blockers: Record<string, number> = {};
+      const blockerSamples: DomBlocker[] = [];
+      const sampled = new Set<Element | null>();
       const owns = (
         point: Point,
         code: string,
@@ -324,6 +349,91 @@ export async function uncoveredRoomClickWitnesses(
                   ? 'other-canvas'
                   : 'other-dom';
           blockers[blocker] = (blockers[blocker] ?? 0) + 1;
+          const action =
+            element?.closest<HTMLElement>(
+              '[data-room-label-code], [data-hover-tooltip]',
+            ) ?? element;
+          if (!sampled.has(action) && blockerSamples.length < 4) {
+            sampled.add(action);
+            // Observation cannot change click ownership, even if a DOM read fails.
+            try {
+              const rawCode =
+                action?.getAttribute('data-room-label-code') ??
+                action?.getAttribute('data-location-code') ??
+                null;
+              const safeCode =
+                rawCode === null
+                  ? null
+                  : /^ITC-(?:S[1-4][ABC]|D(?:0[1-9]|1[0-2])|RED|BLACK|CLEAR|RACK|L|R)$/.test(
+                        rawCode,
+                      )
+                    ? rawCode
+                    : 'other-location';
+              const style = action ? getComputedStyle(action) : null;
+              const bounds = action?.getBoundingClientRect();
+              const number = (value: number) =>
+                Number.isFinite(value)
+                  ? Math.max(
+                      -100_000,
+                      Math.min(100_000, Math.round(value * 1000) / 1000),
+                    )
+                  : null;
+              const flag = (name: string) => {
+                const value = action?.getAttribute(name);
+                return value === 'true' || value === 'false' ? value : null;
+              };
+              const role =
+                action?.getAttribute('role') ??
+                (action?.tagName === 'BUTTON'
+                  ? 'button'
+                  : action?.tagName === 'A'
+                    ? 'link'
+                    : 'other');
+              blockerSamples.push({
+                point: { x: number(point.x)!, y: number(point.y)! },
+                ray: reason,
+                code: safeCode,
+                sameTarget: rawCode !== null && rawCode === observedCode,
+                kind: blocker,
+                role: [
+                  'button',
+                  'link',
+                  'tooltip',
+                  'presentation',
+                  'none',
+                ].includes(role)
+                  ? role
+                  : 'other',
+                rect: bounds
+                  ? {
+                      left: number(bounds.left),
+                      top: number(bounds.top),
+                      right: number(bounds.right),
+                      bottom: number(bounds.bottom),
+                    }
+                  : null,
+                visibility: ['visible', 'hidden', 'collapse'].includes(
+                  style?.visibility ?? '',
+                )
+                  ? style!.visibility
+                  : 'other',
+                pointerEvents: ['auto', 'none'].includes(
+                  style?.pointerEvents ?? '',
+                )
+                  ? style!.pointerEvents
+                  : 'other',
+                suppressed: flag('data-label-suppressed'),
+                exposed: flag('data-room-exposed'),
+                ariaHidden: flag('aria-hidden'),
+                disabled:
+                  action instanceof HTMLButtonElement && action.disabled,
+                inert: !!action?.closest('[inert]'),
+                connected: action?.isConnected ?? false,
+              });
+            } catch {
+              /* diagnostic only */
+            }
+          }
         }
         return element === canvas;
       };
@@ -332,7 +442,7 @@ export async function uncoveredRoomClickWitnesses(
           owns(client, code, 'client-dom') &&
           owns(dispatch, code, 'dispatch-dom'),
       );
-      return { uncovered, rejected, blockers };
+      return { uncovered, rejected, blockers, blockerSamples };
     },
     { points: samples, observedCode: observer?.code ?? null },
   );
@@ -345,6 +455,8 @@ export async function uncoveredRoomClickWitnesses(
   diagnostics.domAccepted = result.get(observer?.code ?? '')?.length ?? 0;
   Object.assign(diagnostics.rejected, coverage.rejected);
   Object.assign(diagnostics.blockers, coverage.blockers);
+  if (observer && coverage.blockerSamples.length)
+    diagnostics.blockerSamples = coverage.blockerSamples;
   publish(observer, diagnostics);
   return result;
 }

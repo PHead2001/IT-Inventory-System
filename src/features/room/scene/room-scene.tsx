@@ -67,6 +67,7 @@ import type { EffectsQuality } from './scene-effects-state';
 import { useRoomEffectsQuality } from '@/components/experience/room-effects-preference';
 import { useSceneCurrent } from './scene-current';
 import { RoomLabel } from './room-label';
+import { labelPickReservation } from './label-pick-reservation';
 import {
   occupiedLocation,
   occupancyText,
@@ -345,13 +346,26 @@ function CameraFacingLabel({
   label: string;
   onSelect?: (code: string) => void;
 }) {
-  const { camera, invalidate } = useThree();
+  const { camera, invalidate, gl } = useThree();
   const visibility = useRoomVisibilityBatch();
   const registry = useRoomLabelRegistry();
   const exposed = useRef(false);
   const isVisible = useCallback(() => exposed.current, []);
   const origin = useRef<Group>(null);
   const anchor = useRef<Group>(null);
+  const physicalAnchor = useRef<Vector3 | null>(null);
+  const pickReservation = useCallback(
+    () =>
+      exposed.current && origin.current && physicalAnchor.current
+        ? labelPickReservation(
+            origin.current,
+            physicalAnchor.current,
+            camera,
+            gl.domElement.getBoundingClientRect(),
+          )
+        : null,
+    [camera, gl],
+  );
   const labelAnchor = node.interaction?.labelAnchor;
   useFrame(() => {
     if (!origin.current || !anchor.current) return;
@@ -366,9 +380,11 @@ function CameraFacingLabel({
     );
     exposed.current = result.status === 'visible';
     if (result.status !== 'visible') {
+      physicalAnchor.current = null;
       registry.hide(node.id);
       return;
     }
+    physicalAnchor.current = result.anchor.clone();
     const next = result.anchor.toArray();
     if (
       anchor.current.position.distanceToSquared(new Vector3(...next)) > 1e-6
@@ -396,6 +412,7 @@ function CameraFacingLabel({
             priority={prioritySelected ? 3 : hovered ? 2 : 1}
             occupancy={occupancy}
             isVisible={isVisible}
+            pickReservation={pickReservation}
             onSelect={onSelect}
           />
         </RoomLabelHtml>

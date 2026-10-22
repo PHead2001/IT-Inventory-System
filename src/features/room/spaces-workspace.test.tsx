@@ -1,4 +1,9 @@
-import { act, render, screen, waitFor } from '@testing-library/react';
+import {
+  act,
+  render as renderTree,
+  screen,
+  waitFor,
+} from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import type { LocationRef } from '../inventory/contracts-ui';
@@ -94,6 +99,30 @@ import {
   assignmentEpoch,
   readPrivacyRevocationRevision,
 } from '@/features/scan/assign-batch';
+
+// Production full-room reads require the protected layout's verified authority.
+function render(ui: Parameters<typeof renderTree>[0]) {
+  return renderTree(ui, {
+    wrapper: ({ children }) => (
+      <PrivacyReadinessContext
+        value={{
+          ready: true,
+          visible: true,
+          generation: 'workspace-test',
+          revocationRevision: readPrivacyRevocationRevision(),
+          verifiedEpoch: assignmentEpoch(),
+        }}
+      >
+        <RoomCameraSnapshotProvider
+          actorId="test-user"
+          backend="https://backend.example"
+        >
+          {children}
+        </RoomCameraSnapshotProvider>
+      </PrivacyReadinessContext>
+    ),
+  });
+}
 
 const locations: LocationRef[] = [
   {

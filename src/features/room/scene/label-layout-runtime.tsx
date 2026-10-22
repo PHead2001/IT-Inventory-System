@@ -6,6 +6,7 @@ import {
   LABEL_PACKING_BUDGET,
   type LabelPackingBudget,
   type LabelRect,
+  type LabelArea,
 } from './label-layout';
 import { createLabelLayoutDiagnostics } from './label-layout-diagnostics';
 
@@ -20,6 +21,7 @@ export type LabelOptions = {
   inspection?: 'focus' | 'hover' | null;
   pointer?: () => { x: number; y: number } | null;
   isVisible?: () => boolean;
+  pickReservation?: () => LabelArea | null;
 };
 // At Chromium device scale 1.5, translation alone changed measured widths by
 // up to 3/65536px. This comparison-only bound is 128 times smaller than a
@@ -214,7 +216,7 @@ export function createRoomLabelRegistry(
       }
       return labels;
     };
-    const reserved = Array.from(
+    const reserved: LabelArea[] = Array.from(
       host
         .closest('[data-room-surface]')
         ?.querySelectorAll<HTMLElement>('[data-room-obstruction]') ?? [],
@@ -224,6 +226,35 @@ export function createRoomLabelRegistry(
         charge();
         return element.getBoundingClientRect();
       });
+    // Collect every currently exposed physical anchor before logical-action
+    // deduplication. A tooltip winning the label slot must not cover its mesh.
+    // These masks belong only to DOM packing, never the visibility resolver.
+    for (const entry of entries.values()) {
+      if (!entry.options.pickReservation) continue;
+      if (!charge()) break;
+      if (
+        !sceneLabelVisible(entry.element, host) ||
+        entry.options.isVisible?.() === false
+      )
+        continue;
+      const area = entry.options.pickReservation();
+      if (
+        area &&
+        [area.left, area.top, area.right, area.bottom].every(Number.isFinite) &&
+        area.left < area.right &&
+        area.top < area.bottom &&
+        area.right > viewport.left &&
+        area.left < viewport.right &&
+        area.bottom > viewport.top &&
+        area.top < viewport.bottom
+      )
+        reserved.push({
+          left: area.left,
+          top: area.top,
+          right: area.right,
+          bottom: area.bottom,
+        });
+    }
     const measuredKey = (labels: LabelRect[]) =>
       JSON.stringify([
         {

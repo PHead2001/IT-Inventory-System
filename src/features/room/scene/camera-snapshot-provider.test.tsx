@@ -1,6 +1,6 @@
 import { act, fireEvent, render, screen } from '@testing-library/react';
 import { Activity, useContext, useLayoutEffect } from 'react';
-import { expect, it } from 'vitest';
+import { expect, it, vi } from 'vitest';
 import { PrivacyReadinessContext } from '@/components/auth/privacy-readiness';
 import {
   assignmentEpoch,
@@ -75,6 +75,51 @@ function fixture(
     </PrivacyReadinessContext>
   );
 }
+
+it('silently disposes a real provider on unmount without insertion-cleanup updates or writable departed callbacks', () => {
+  let write!: (view: CameraView) => boolean;
+  const page = render(
+    fixture(
+      <Probe
+        capture={(callback) => {
+          write = callback;
+        }}
+      />,
+    ),
+  );
+  const departedWrite = write;
+  act(() => {
+    expect(departedWrite(pose)).toBe(true);
+  });
+  const warnings: Array<{ message: string; stack: string | undefined }> = [];
+  const originalError = console.error;
+  // Observe only this real provider's unmount. Preserve the console output and
+  // attach the synchronous stack so a regression identifies its notifying store.
+  const observation = vi
+    .spyOn(console, 'error')
+    .mockImplementation((...args: unknown[]) => {
+      if (
+        args.some(
+          (value) =>
+            typeof value === 'string' &&
+            value.includes('useInsertionEffect must not schedule updates'),
+        )
+      ) {
+        warnings.push({
+          message: args.map(String).join(' '),
+          stack: new Error('Provider unmount warning').stack,
+        });
+      }
+      originalError(...args);
+    });
+  try {
+    page.unmount();
+    expect(departedWrite(pose)).toBe(false);
+    expect(warnings).toEqual([]);
+  } finally {
+    observation.mockRestore();
+  }
+});
 
 it('returns null and a no-op without a layout provider', () => {
   render(<Probe />);
