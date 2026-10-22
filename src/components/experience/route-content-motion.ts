@@ -32,6 +32,7 @@ export function routeContentMotion(
   instance: { name: string },
   valid: () => boolean,
   unsupported?: () => void,
+  pairedTitle = false,
 ) {
   // A stale callback must not cancel a newer navigation's snapshots.
   if (!valid()) return;
@@ -103,12 +104,16 @@ export function routeContentMotion(
       !valid()
     )
       throw new Error('Unsupported body snapshot geometry or timing');
-    const animate = (pseudoElement: string, frames: Keyframe[]) => {
+    const animate = (
+      pseudoElement: string,
+      frames: Keyframe[],
+      effectEasing = easing,
+    ) => {
       replacements.push(
         document.documentElement.animate(frames, {
           duration,
           delay: 0,
-          easing,
+          easing: effectEasing,
           fill: 'both',
           pseudoElement,
         }),
@@ -134,10 +139,29 @@ export function routeContentMotion(
     // The incoming replaced image follows its live intrinsic size. Its captured
     // group can outlive trailing content changes; forcing that earlier box onto
     // this image stretches the entire page until the snapshot is released.
-    animate(newImage, [
-      { transform: 'translateY(8px)', opacity: 0 },
-      { transform: 'translateY(0px)', opacity: 1 },
-    ]);
+    if (pairedTitle) {
+      animate(newImage, [
+        { transform: 'translateY(8px)' },
+        { transform: 'translateY(0px)' },
+      ]);
+      // A separate linear opacity effect maps its midpoint to elapsed time,
+      // independently of movement's ease-out. Both begin and end on the same
+      // existing clock: no delayed capture, content or interaction gate.
+      animate(
+        newImage,
+        [
+          { opacity: 0, offset: 0 },
+          { opacity: 0, offset: 0.5 },
+          { opacity: 1, offset: 1 },
+        ],
+        'linear',
+      );
+    } else {
+      animate(newImage, [
+        { transform: 'translateY(8px)', opacity: 0 },
+        { transform: 'translateY(0px)', opacity: 1 },
+      ]);
+    }
     const retireClock = registerRouteSnapshotClock(
       replacements,
       valid,

@@ -161,6 +161,16 @@ remain live. Native viewport/root snapshots are disabled. The **entire** `/room`
 ancestor content boundary opts out. Separate header, command, conventional inventory
 pane and location-browser boundaries animate without any canvas descendant.
 
+Only a body explicitly paired with a shared title phases its incoming opacity:
+it stays transparent for the first 100 ms and fades linearly over the remaining
+100 ms of that same 200 ms document-clock stage. Its 8 px movement, outgoing
+fade and title morph retain their existing ease-out. The opacity effect has no
+delay and finishes with the other effects; ordinary unpaired arrivals keep their
+existing crossfade. This reduces title/control interference, without promising
+that arbitrary travelling title rectangles never intersect other content. It
+changes no DOM visibility, focus, request, readiness or interactive availability;
+Reduced motion and native browser Back/Forward remain instant.
+
 Presentation begins suspended under the protected privacy controller. A verified
 original-binding grant must match the live revocation revision and assignment
 callback epoch before route motion, pending work or readiness can resume. An

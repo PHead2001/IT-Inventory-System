@@ -157,6 +157,7 @@ it('inherits the original source denial lease through body capture and releases 
     { name: 'inventory-title-proof-content' },
     expect.any(Function),
     expect.any(Function),
+    true,
   );
   expect(ticket.current()).toBe(true);
   expect(cleanup).toEqual(expect.any(Function));
@@ -235,6 +236,12 @@ it('rejects an old exact primary callback before acquiring the renewed source ex
     );
   });
   expect(handoff).toHaveBeenCalledTimes(1);
+  expect(routeContentMotion).toHaveBeenLastCalledWith(
+    { name: 'route-primary-next' },
+    expect.any(Function),
+    undefined,
+    false,
+  );
   unmount();
   handoff.mockRestore();
 });

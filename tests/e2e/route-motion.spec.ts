@@ -392,6 +392,7 @@ async function observeMotion(page: Page, unsupported = false) {
                 value.endTime = Number(timing.endTime);
                 value.activeDuration = Number(timing.activeDuration);
                 value.delay = Number(timing.delay);
+                value.easing = effect.getTiming().easing;
                 value.opacityFrames = effect
                   .getKeyframes()
                   .flatMap((frame) =>
@@ -399,6 +400,15 @@ async function observeMotion(page: Page, unsupported = false) {
                       typeof frame.opacity === 'number') &&
                     Number.isFinite(Number(frame.opacity))
                       ? [Number(frame.opacity)]
+                      : [],
+                  );
+                value.opacityOffsets = effect
+                  .getKeyframes()
+                  .flatMap((frame) =>
+                    (typeof frame.opacity === 'string' ||
+                      typeof frame.opacity === 'number') &&
+                    Number.isFinite(Number(frame.opacity))
+                      ? [frame.computedOffset]
                       : [],
                   );
                 value.documentTimeline =
@@ -724,6 +734,27 @@ async function completedTitlePair(
   expect(pairedBodyCrossfade(observed.transitions, titleName), diagnostic).toBe(
     true,
   );
+  const incomingOpacity = paired[0].effects.find(
+    (effect) =>
+      effect.pseudo === `::view-transition-new(${titleName}-content)` &&
+      effect.opacityFrames?.length === 3,
+  );
+  expect(incomingOpacity, diagnostic).toMatchObject({
+    opacityFrames: [0, 0, 1],
+    opacityOffsets: [0, 0.5, 1],
+    easing: 'linear',
+    delay: 0,
+    activeDuration: 200,
+    endTime: 200,
+  });
+  const titleGeometry = paired[0].effects.find(
+    (effect) => effect.pseudo === `::view-transition-group(${titleName})`,
+  );
+  expect(titleGeometry, diagnostic).toBeDefined();
+  expect(incomingOpacity!.startTime, diagnostic).toBe(titleGeometry!.startTime);
+  // The linear native effect maps 0.5 to 100ms elapsed, rather than applying
+  // the title's ease-out to that offset. Forward and app Back both use this
+  // check; it does not claim arbitrary travelling rectangles never intersect.
   return observed;
 }
 

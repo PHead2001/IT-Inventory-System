@@ -108,62 +108,76 @@ beforeEach(() => {
 });
 afterEach(() => vi.unstubAllGlobals());
 
-it.each(['body-first', 'title-first'])(
-  'aligns all title/body replacements and native title fades after synchronous %s registration',
-  async (order) => {
+it.each([
+  ['body-first', false],
+  ['title-first', false],
+  ['body-first', true],
+  ['title-first', true],
+] as const)(
+  'aligns all title/body replacements and native title fades after synchronous %s registration, phased body=%s',
+  async (order, paired) => {
     const callbacks = [
-      () => routeContentMotion({ name: body }, () => true),
+      () => routeContentMotion({ name: body }, () => true, undefined, paired),
       () => sharedTitleMotion({ name: title }, () => true),
     ];
     if (order === 'title-first') callbacks.reverse();
     callbacks[0]();
     clock = 166;
     callbacks[1]();
-    expect(replacements).toHaveLength(4);
+    expect(replacements).toHaveLength(paired ? 5 : 4);
     clock = 200;
     await Promise.resolve();
     expect(
       [...replacements, native[1], native[2]].map((a) => a.startTime),
-    ).toEqual(Array(6).fill(200));
+    ).toEqual(Array(paired ? 7 : 6).fill(200));
     expect(native[6].startTime).toBe(2000);
     expect(skip).not.toHaveBeenCalled();
   },
 );
 
-it('fails closed when the final shared clock is unavailable', async () => {
-  const unsupported = vi.fn();
-  routeContentMotion({ name: body }, () => true, unsupported);
-  sharedTitleMotion({ name: title }, () => true, unsupported);
-  clock = null;
-  await Promise.resolve();
-  expect(unsupported).toHaveBeenCalled();
-  replacements.forEach((a) => expect(a.cancel).toHaveBeenCalled());
-  expect(skip).toHaveBeenCalled();
-});
+it.each([false, true])(
+  'fails closed when the final shared clock is unavailable, phased body=%s',
+  async (paired) => {
+    const unsupported = vi.fn();
+    routeContentMotion({ name: body }, () => true, unsupported, paired);
+    sharedTitleMotion({ name: title }, () => true, unsupported);
+    clock = null;
+    await Promise.resolve();
+    expect(unsupported).toHaveBeenCalled();
+    replacements.forEach((a) => expect(a.cancel).toHaveBeenCalled());
+    expect(skip).toHaveBeenCalled();
+  },
+);
 
-it('never retimes or skips a replacement native transition before finalization', async () => {
-  routeContentMotion({ name: body }, () => true);
-  sharedTitleMotion({ name: title }, () => true);
-  const newerSkip = vi.fn();
-  Object.defineProperty(document, 'activeViewTransition', {
-    configurable: true,
-    value: { skipTransition: newerSkip },
-  });
-  clock = 400;
-  await Promise.resolve();
-  replacements.forEach((a) => expect(a.cancel).toHaveBeenCalled());
-  expect(newerSkip).not.toHaveBeenCalled();
-});
+it.each([false, true])(
+  'never retimes or skips a replacement native transition before finalization, phased body=%s',
+  async (paired) => {
+    routeContentMotion({ name: body }, () => true, undefined, paired);
+    sharedTitleMotion({ name: title }, () => true);
+    const newerSkip = vi.fn();
+    Object.defineProperty(document, 'activeViewTransition', {
+      configurable: true,
+      value: { skipTransition: newerSkip },
+    });
+    clock = 400;
+    await Promise.resolve();
+    replacements.forEach((a) => expect(a.cancel).toHaveBeenCalled());
+    expect(newerSkip).not.toHaveBeenCalled();
+  },
+);
 
-it('does not revive withdrawn effects when privacy ownership expires before finalization', async () => {
-  let valid = true;
-  routeContentMotion({ name: body }, () => valid);
-  sharedTitleMotion({ name: title }, () => valid);
-  valid = false;
-  await Promise.resolve();
-  replacements.forEach((a) => expect(a.cancel).toHaveBeenCalled());
-  expect(skip).toHaveBeenCalled();
-});
+it.each([false, true])(
+  'does not revive withdrawn effects when privacy ownership expires before finalization, phased body=%s',
+  async (paired) => {
+    let valid = true;
+    routeContentMotion({ name: body }, () => valid, undefined, paired);
+    sharedTitleMotion({ name: title }, () => valid);
+    valid = false;
+    await Promise.resolve();
+    replacements.forEach((a) => expect(a.cancel).toHaveBeenCalled());
+    expect(skip).toHaveBeenCalled();
+  },
+);
 
 it('ignores retired callback effects while aligning the remaining exact owner', async () => {
   const cleanup = routeContentMotion({ name: body }, () => true);

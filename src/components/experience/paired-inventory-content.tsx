@@ -66,6 +66,7 @@ export function PairedInventoryContent({
           instance,
           motion.validNow,
           matches ? motion.rejectTitleSnapshot : undefined,
+          !!matches,
         );
         if (matches) motion.finishPairedContentAfterSnapshot(instance);
         if (!cleanup && !finish) return;
