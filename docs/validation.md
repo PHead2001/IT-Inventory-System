@@ -1582,3 +1582,35 @@ supporting metadata while retaining all metadata and preview content. The full
 application Back/anchor journey, phone geometry, actual context loss with the
 retained quantity draft, complete validation and exact-SHA CI remain integration
 gates; the focused native fixture does not certify them.
+
+## Next 16.3.6 learned-route fragment correction
+
+Reloading an anchored results URL poisoned Next's learned route cache with the
+fragment. A later **Back to results** then appended the requested fragment again,
+producing `#inventory-row-2#inventory-row-2`. Hydration, server actions and PPR retry
+responses all write through `discoverKnownRoute`; the shared cache entry must
+exclude fragments while the document and router state retain their complete URL.
+
+`npm ci` automatically runs `scripts/patch-next-route-cache.mjs`. For pinned Next
+16.3.6 only, it removes the first literal `#` and following fragment from the local
+cache-insertion argument in both CJS and ESM `optimistic-routes.js`. Encoded `%23`,
+path and query bytes are preserved. Both whole-file original/corrected SHA256
+values and the package version are checked before writes; unknown bytes or a
+version change stop installation. The correction is idempotent and verifies each
+write. A filesystem failure can leave one corrected format; installation fails,
+and rerunning the correction safely finishes the other. The `prebuild` hook checks
+both corrected digests without writing, so skipped or incomplete installation
+cannot pass the normal production build. Dependency upgrades require reviewing or
+removing this temporary correction; see upstream Next issues/changes
+[#96714](https://github.com/vercel/next.js/issues/96714) and
+[#96737](https://github.com/vercel/next.js/pull/96737).
+
+`tests/unit/next-route-cache.test.mjs` executes the actual installed hydration,
+route-learning and cached navigation functions in both formats with storage and
+renderer/network adapters. It checks same/different/absent fragments, query and
+encoded `%23` preservation, and ordinary/pending cache writes. Guard regressions
+cover version/source drift, verify-only rejection, idempotence, interrupted writes
+and readback failure. These tests prove the dependency URL contract; the four
+existing Reduced-motion browser journeys remain unchanged and require execution
+on the final candidate. The runner image recipe still caches package tarballs
+with `--ignore-scripts`; actual PR jobs run fresh `npm ci` and apply the correction.
