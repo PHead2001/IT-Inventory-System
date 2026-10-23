@@ -201,6 +201,62 @@ it('starts every body replacement on one sampled document clock despite independ
   ]);
 });
 
+it.each(['forward', 'app Back'])(
+  'phases only paired-title destination opacity in elapsed time without delaying %s geometry or extending the shared stage',
+  async (direction) => {
+    if (direction === 'app Back') {
+      frames[0] = {
+        offset: 0,
+        width: '1180px',
+        height: '7622px',
+        transform: 'matrix(1, 0, 0, 1, 40, 151)',
+      };
+      destination = {
+        width: '1100px',
+        height: '1429px',
+        transform: 'matrix(1, 0, 0, 1, 20, -602)',
+      };
+    }
+    const cleanup = routeContentMotion({ name }, () => true, undefined, true);
+    const incoming = animate.mock.calls.filter(
+      ([, options]) => options.pseudoElement === newImage,
+    );
+    expect(incoming).toHaveLength(2);
+    const opacity = incoming.find(([keyframes]) =>
+      keyframes.some((frame: Keyframe) => frame.opacity !== undefined),
+    )!;
+    expect(opacity).toEqual([
+      [
+        { opacity: 0, offset: 0 },
+        { opacity: 0, offset: 0.5 },
+        { opacity: 1, offset: 1 },
+      ],
+      expect.objectContaining({
+        duration: 200,
+        delay: 0,
+        easing: 'linear',
+        fill: 'both',
+      }),
+    ]);
+    // Linear effect time makes the 0.5 offset exactly 100ms, independent of
+    // the workspace ease-out used for movement. No additional stage is queued.
+    expect(incoming.find(([keyframes]) => keyframes[0].transform)?.[0]).toEqual(
+      [{ transform: 'translateY(8px)' }, { transform: 'translateY(0px)' }],
+    );
+    expect(
+      animate.mock.calls[1][0].map((frame: Keyframe) => frame.opacity),
+    ).toEqual([1, 0]);
+    for (const [, options] of animate.mock.calls)
+      expect(options).toMatchObject({ duration: 200, delay: 0 });
+    await Promise.resolve();
+    expect(replacements.map((effect) => effect.startTime)).toEqual([
+      500, 500, 500, 500,
+    ]);
+    cleanup?.();
+    replacements.forEach(({ cancel }) => expect(cancel).toHaveBeenCalledOnce());
+  },
+);
+
 it.each([null, undefined, NaN, Infinity, { value: 500 }])(
   'retires all replacements if the document clock is unavailable or invalid: %s',
   async (value) => {
@@ -316,28 +372,35 @@ it.each(['200ms', '.2s', '2e-1s'])(
   },
 );
 
-it('older cleanup cancels only its three effects after another body replacement starts', () => {
-  const first = routeContentMotion({ name }, () => true);
-  const second = routeContentMotion({ name }, () => true);
-  first?.();
-  replacements
-    .slice(0, 3)
-    .forEach(({ cancel }) => expect(cancel).toHaveBeenCalledOnce());
-  replacements
-    .slice(3)
-    .forEach(({ cancel }) => expect(cancel).not.toHaveBeenCalled());
-  second?.();
-  replacements
-    .slice(3)
-    .forEach(({ cancel }) => expect(cancel).toHaveBeenCalledOnce());
-});
+it.each([false, true])(
+  'older cleanup cancels only its own effects after another body replacement starts, paired title=%s',
+  (paired) => {
+    const first = routeContentMotion({ name }, () => true, undefined, paired);
+    const count = replacements.length;
+    const second = routeContentMotion({ name }, () => true, undefined, paired);
+    first?.();
+    replacements
+      .slice(0, count)
+      .forEach(({ cancel }) => expect(cancel).toHaveBeenCalledOnce());
+    replacements
+      .slice(count)
+      .forEach(({ cancel }) => expect(cancel).not.toHaveBeenCalled());
+    second?.();
+    replacements
+      .slice(count)
+      .forEach(({ cancel }) => expect(cancel).toHaveBeenCalledOnce());
+  },
+);
 
-it('ignores stale or reduced callbacks without cancelling another navigation', () => {
-  routeContentMotion({ name }, () => false);
-  expect(nativeCancel).not.toHaveBeenCalled();
-  expect(animate).not.toHaveBeenCalled();
-  expect(skip).not.toHaveBeenCalled();
-});
+it.each([false, true])(
+  'ignores stale or reduced callbacks without cancelling another navigation, paired title=%s',
+  (paired) => {
+    routeContentMotion({ name }, () => false, undefined, paired);
+    expect(nativeCancel).not.toHaveBeenCalled();
+    expect(animate).not.toHaveBeenCalled();
+    expect(skip).not.toHaveBeenCalled();
+  },
+);
 
 it('falls back if privacy or Reduced motion invalidates authority during geometry setup', () => {
   let reads = 0;

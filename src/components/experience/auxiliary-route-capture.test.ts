@@ -418,26 +418,28 @@ it('consumes one approval/handle and an old rearm cannot withdraw newer claims; 
   expect(old.root.style.viewTransitionName).toBe('');
 });
 
-it('uses the shared scroll-correct geometry replacement only when both auxiliary images actually exist', async () => {
-  const cleanup = vi.fn();
-  vi.mocked(routeContentMotion).mockReturnValueOnce(cleanup);
-  controller.register(participant('/source'));
-  arm();
-  document.startViewTransition();
-  controller.register(participant('/destination'));
-  effects = [
-    effect('route-owned-header', 'old'),
-    effect('route-owned-header', 'new'),
-  ];
-  handles[0].ready.resolve();
-  await flush();
-  expect(routeContentMotion).toHaveBeenCalledWith(
-    { name: 'route-owned-header' },
-    expect.any(Function),
-    expect.any(Function),
-  );
-  expect(participate).toHaveBeenCalledOnce();
-  handles[0].finished.resolve();
-  await flush();
-  expect(cleanup).toHaveBeenCalledOnce();
-});
+it.each(['header', 'body'] as const)(
+  'uses the shared scroll-correct %s geometry replacement only when both auxiliary images actually exist',
+  async (region) => {
+    const cleanup = vi.fn();
+    vi.mocked(routeContentMotion).mockReturnValueOnce(cleanup);
+    controller.register(participant('/source', region));
+    arm();
+    document.startViewTransition();
+    controller.register(participant('/destination', region));
+    const name = region === 'body' ? 'route-owned' : 'route-owned-header';
+    effects = [effect(name, 'old'), effect(name, 'new')];
+    handles[0].ready.resolve();
+    await flush();
+    expect(routeContentMotion).toHaveBeenCalledWith(
+      { name },
+      expect.any(Function),
+      expect.any(Function),
+      region === 'body',
+    );
+    expect(participate).toHaveBeenCalledOnce();
+    handles[0].finished.resolve();
+    await flush();
+    expect(cleanup).toHaveBeenCalledOnce();
+  },
+);

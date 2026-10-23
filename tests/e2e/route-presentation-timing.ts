@@ -9,6 +9,8 @@ export type RouteEffectTiming = {
   rateChanged: boolean;
   delay?: number;
   opacityFrames?: number[];
+  opacityOffsets?: number[];
+  easing?: string;
 };
 
 export type RoutePresentationStage = {

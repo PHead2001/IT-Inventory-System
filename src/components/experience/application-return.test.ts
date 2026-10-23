@@ -43,6 +43,12 @@ function fixture(
     value: navigation,
   });
   const scroll = vi.fn();
+  let headingTop = -588;
+  const forwardScroll = vi
+    .spyOn(window, 'scrollBy')
+    .mockImplementation((options: number | ScrollToOptions) => {
+      if (typeof options === 'object') headingTop -= options.top ?? 0;
+    });
   HTMLElement.prototype.scrollIntoView = scroll;
   vi.spyOn(HTMLElement.prototype, 'getClientRects').mockReturnValue([
     { width: 300, height: 200 },
@@ -120,13 +126,45 @@ function fixture(
     });
   };
   reveal();
-  const navigateForward = () => {
-    const close = controller.beginNavigation(detail, 0);
-    controller.stageForward(target);
-    controller.acceptNavigation(detail, 0);
+  const navigateForward = (href = detail, staged = true) => {
+    const close = controller.beginNavigation(href, 0);
+    if (staged) controller.stageForward(target);
+    controller.acceptNavigation(href, 0);
     close();
     withdraw();
-    history.replaceState(null, '', detail);
+    history.replaceState(null, '', href);
+  };
+  const revealDetail = (
+    options: {
+      count?: number;
+      top?: number;
+      hidden?: boolean;
+      wrongActor?: boolean;
+      key?: string;
+    } = {},
+  ) => {
+    withdraw();
+    headingTop = options.top ?? -588;
+    const root = document.createElement('div');
+    root.append(document.createElement('section'));
+    for (let index = 0; index < (options.count ?? 1); index++) {
+      const heading = document.createElement('h1');
+      heading.textContent = 'Cable';
+      heading.hidden = options.hidden ?? false;
+      heading.getBoundingClientRect = () =>
+        ({ top: headingTop, bottom: headingTop + 104 }) as DOMRect;
+      root.append(heading);
+    }
+    document.body.append(root);
+    unregister = readiness.register({
+      actorId: options.wrongActor ? 'other-actor' : 'actor',
+      routeKey:
+        options.key ??
+        routeKey(location.pathname, new URLSearchParams(location.search)),
+      contentIdentity: 'authorized-detail-primary',
+      root,
+    });
+    return root;
   };
   const back = () => {
     const close = controller.beginNavigation(returned, 0);
@@ -153,7 +191,9 @@ function fixture(
     controller,
     readiness,
     scroll,
+    forwardScroll,
     reveal,
+    revealDetail,
     withdraw,
     navigateForward,
     back,
@@ -166,6 +206,217 @@ function fixture(
     },
   };
 }
+
+it.each(['full', 'reduced'])(
+  'reveals an offscreen accepted forward heading once after its real primary in %s motion',
+  async (mode) => {
+    const f = fixture();
+    document.documentElement.dataset.motion = mode;
+    f.navigateForward();
+    f.controller.reconcile();
+    await Promise.resolve();
+    expect(f.forwardScroll).not.toHaveBeenCalled();
+    const primary = f.revealDetail();
+    expect(f.forwardScroll).not.toHaveBeenCalled();
+    await Promise.resolve();
+    expect(f.forwardScroll).toHaveBeenCalledExactlyOnceWith({
+      top: -588,
+      behavior: 'instant',
+    });
+    expect(primary.querySelector('h1')!.getBoundingClientRect().top).toBe(0);
+    expect(document.activeElement).toBe(document.body);
+    expect(location.pathname + location.search).toBe(f.detail);
+    f.controller.reconcile();
+    f.revealDetail();
+    await Promise.resolve();
+    expect(f.forwardScroll).toHaveBeenCalledTimes(1);
+    f.back();
+    f.reveal();
+    await Promise.resolve();
+    expect(f.scroll).toHaveBeenCalledExactlyOnceWith({
+      block: 'start',
+      inline: 'nearest',
+      behavior: 'instant',
+    });
+    expect(location.pathname + location.search + location.hash).toBe(
+      f.returned,
+    );
+  },
+);
+
+it('leaves an already visible Full heading untouched after the pre-capture reveal', async () => {
+  const f = fixture();
+  f.navigateForward();
+  f.revealDetail({ top: 120 });
+  await Promise.resolve();
+  expect(f.forwardScroll).not.toHaveBeenCalled();
+});
+
+it('places a fresh heading below a fixed header and its scroll margin without changing focus', async () => {
+  const f = fixture();
+  f.navigateForward();
+  const root = f.revealDetail();
+  root.querySelector('h1')!.style.scrollMarginTop = '12px';
+  const header = document.createElement('header');
+  header.className = 'experience-header';
+  header.style.position = 'fixed';
+  header.getBoundingClientRect = () => ({ bottom: 72 }) as DOMRect;
+  document.body.append(header);
+  await Promise.resolve();
+  expect(f.forwardScroll).toHaveBeenCalledExactlyOnceWith({
+    top: -672,
+    behavior: 'instant',
+  });
+  expect(root.querySelector('h1')!.getBoundingClientRect().top).toBe(84);
+  expect(document.activeElement).toBe(document.body);
+});
+
+it('preserves native Back and Forward without replaying a fresh forward repair', async () => {
+  const f = fixture();
+  f.navigateForward();
+  f.event(f.returned, 'traverse');
+  history.replaceState(null, '', f.returned);
+  window.dispatchEvent(new PopStateEvent('popstate'));
+  f.reveal();
+  f.event(f.detail, 'traverse');
+  history.replaceState(null, '', f.detail);
+  window.dispatchEvent(new PopStateEvent('popstate'));
+  f.revealDetail();
+  await Promise.resolve();
+  expect(f.forwardScroll).not.toHaveBeenCalled();
+  expect(f.scroll).not.toHaveBeenCalled();
+  f.back();
+  f.reveal();
+  await Promise.resolve();
+  expect(f.scroll).toHaveBeenCalledTimes(1);
+});
+
+it.each([
+  'wheel',
+  'pointerdown',
+  'touchstart',
+  'Tab',
+  'new-navigation',
+  'abort',
+  'grant-change',
+  'denial',
+  'dispose',
+  'invalidate',
+  'query-drift',
+  'target-replaced',
+])('does not replay a queued forward repair after %s', async (change) => {
+  const f = fixture();
+  f.navigateForward();
+  const attempt = f.event(f.detail);
+  f.revealDetail();
+  if (['wheel', 'pointerdown', 'touchstart'].includes(change))
+    window.dispatchEvent(new Event(change));
+  if (change === 'Tab')
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab' }));
+  if (change === 'new-navigation') {
+    const close = f.controller.beginNavigation('/history', 0);
+    f.controller.acceptNavigation('/history', 0);
+    close();
+  }
+  if (change === 'abort') attempt.abort();
+  if (change === 'grant-change') f.permission().key = 'new-authority';
+  if (change === 'denial') f.deny();
+  if (change === 'dispose') f.controller.dispose();
+  if (change === 'invalidate') f.controller.invalidate();
+  if (change === 'query-drift')
+    history.replaceState(null, '', f.detail + '&other=1');
+  if (change === 'target-replaced') f.revealDetail();
+  await Promise.resolve();
+  expect(f.forwardScroll).not.toHaveBeenCalled();
+  history.replaceState(null, '', f.detail);
+  f.revealDetail();
+  f.controller.reconcile();
+  await Promise.resolve();
+  expect(f.forwardScroll).not.toHaveBeenCalled();
+});
+
+it('waits for the same authority and canonical destination primary before the forward repair', async () => {
+  const f = fixture();
+  f.navigateForward();
+  f.revealDetail({ wrongActor: true });
+  await Promise.resolve();
+  f.revealDetail({ key: '/inventory/quantity/cable?other=1' });
+  await Promise.resolve();
+  expect(f.forwardScroll).not.toHaveBeenCalled();
+  f.permission().ready = false;
+  f.revealDetail();
+  await Promise.resolve();
+  expect(f.forwardScroll).not.toHaveBeenCalled();
+  f.permission().ready = true;
+  f.controller.reconcile();
+  await Promise.resolve();
+  expect(f.forwardScroll).toHaveBeenCalledTimes(1);
+});
+
+it.each([{ count: 0 }, { count: 2 }, { hidden: true }])(
+  'retires a missing or ambiguous forward heading without guessing: %j',
+  async (options) => {
+    const f = fixture();
+    f.navigateForward();
+    f.revealDetail(options);
+    await Promise.resolve();
+    f.revealDetail();
+    await Promise.resolve();
+    expect(f.forwardScroll).not.toHaveBeenCalled();
+  },
+);
+
+it.each([false, true])(
+  'waits for actual capture release before a forward repair (cancelled: %s)',
+  async (cancelled) => {
+    const f = fixture();
+    f.navigateForward();
+    let release!: () => void;
+    const capturing = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const original = document.startViewTransition;
+    Object.defineProperty(document, 'startViewTransition', {
+      configurable: true,
+      writable: true,
+      value: () => ({ updateCallbackDone: capturing }),
+    });
+    const stop = observeTransitionCapture(document, () => {});
+    try {
+      f.revealDetail();
+      document.startViewTransition(() => {});
+      await Promise.resolve();
+      expect(f.forwardScroll).not.toHaveBeenCalled();
+      if (cancelled) window.dispatchEvent(new Event('wheel'));
+      release();
+      await capturing;
+      expect(f.forwardScroll).toHaveBeenCalledTimes(cancelled ? 0 : 1);
+    } finally {
+      stop();
+      if (original)
+        Object.defineProperty(document, 'startViewTransition', {
+          configurable: true,
+          writable: true,
+          value: original,
+        });
+      else Reflect.deleteProperty(document, 'startViewTransition');
+    }
+  },
+);
+
+it.each(['unpaired', 'hash'])(
+  'retains ordinary Next scroll ownership for an %s detail link',
+  async (mode) => {
+    const f = fixture();
+    f.navigateForward(
+      f.detail + (mode === 'hash' ? '#technical' : ''),
+      mode !== 'unpaired',
+    );
+    f.revealDetail();
+    await Promise.resolve();
+    expect(f.forwardScroll).not.toHaveBeenCalled();
+  },
+);
 
 it.each([false, true])(
   'retains an unsorted complete return query through an accepted forward and application Back (native round trip: %s)',

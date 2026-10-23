@@ -1513,13 +1513,6 @@ export function MetadataForm({
           : '/inventory',
       )
     : `/inventory/${kind === 'asset' ? 'assets' : 'quantity'}/${baseline?.id}`;
-  const reportTask = useReportTaskState({
-    dirty: dirty && !state?.ok && !actorStale,
-    pending: pending && !state?.ok,
-    uncertain,
-    completed: state?.ok === true,
-    completedVersion: state?.ok ? state.version : undefined,
-  });
   const [navigationTarget, setNavigationTarget] = useState<string | null>(null);
   const navigationAnchor = useRef<HTMLAnchorElement | null>(null);
   const discardedEdit = useRef<{
@@ -1702,7 +1695,9 @@ export function MetadataForm({
     if (discardOpen)
       return afterTransitionCapture(document, () => keepRef.current?.focus());
   }, [discardOpen]);
-  useEffect(() => {
+  // Commit navigation protection with the recovery controls. A passive effect
+  // can leave the visible Retry state using a listener from healthy storage.
+  useLayoutEffect(() => {
     if (
       preview ||
       terminalDraft ||
@@ -1778,6 +1773,14 @@ export function MetadataForm({
     editRecoveryEnabled,
     recoveryError,
   ]);
+  // Publish the task only after this commit's navigation guard is installed.
+  const reportTask = useReportTaskState({
+    dirty: dirty && !state?.ok && !actorStale,
+    pending: pending && !state?.ok,
+    uncertain,
+    completed: state?.ok === true,
+    completedVersion: state?.ok ? state.version : undefined,
+  });
   const keepEditing = () => {
     setDiscardOpen(false);
     setNavigationTarget(null);

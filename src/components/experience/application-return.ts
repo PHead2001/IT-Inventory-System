@@ -14,13 +14,15 @@ import { routeKey } from './route-key';
 type Authority = { key: string; ready: boolean } | null;
 type Source = Extract<TitleTarget, { source: { kind: 'inventory' } }>;
 type Pending = {
+  kind: 'forward' | 'back';
   source: Source;
   authority: string;
   href: string;
   fromKey: string;
+  toKey: string;
 };
 
-/** Repair a consumed application Back hash after its authorized primary reveals.
+/** Repair an accepted inventory Link after its authorized primary reveals.
  * Native history owns its own restoration; this never changes focus or history. */
 export function createApplicationReturn(
   readiness: Pick<
@@ -96,6 +98,22 @@ export function createApplicationReturn(
     );
     return matches.length === 1 ? matches[0].element : undefined;
   };
+  const visibleTarget = (operation: Pending) => {
+    if (operation.kind === 'back') return visibleSource(operation.source);
+    const primary = readiness.currentPrimary();
+    if (!primary || primary.routeKey !== operation.toKey) return;
+    const headings = [
+      ...primary.root.querySelectorAll<HTMLElement>('h1'),
+    ].filter(
+      (element) =>
+        element.isConnected &&
+        element.getAttribute('aria-hidden') !== 'true' &&
+        !hasBlockingPresentationAncestor(element) &&
+        element.getClientRects().length > 0 &&
+        getComputedStyle(element).visibility !== 'hidden',
+    );
+    return headings.length === 1 ? headings[0] : undefined;
+  };
   const reconcile = () => {
     const value = grant();
     const operation = pending;
@@ -103,10 +121,10 @@ export function createApplicationReturn(
       return;
     if (exact(location.href) !== operation.href) return;
     const primary = readiness.currentPrimary();
-    if (!primary || primary.routeKey !== operation.source.listHref) return;
-    // Once this exact primary is admitted, missing/changed/ambiguous rows are
+    if (!primary || primary.routeKey !== operation.toKey) return;
+    // Once this exact primary is admitted, missing/changed/ambiguous targets are
     // terminal. A later unrelated render must not guess an original occurrence.
-    const element = visibleSource(operation.source);
+    const element = visibleTarget(operation);
     if (!element) {
       cancel();
       return;
@@ -118,7 +136,7 @@ export function createApplicationReturn(
       if (pending !== operation) return;
       if (
         exact(location.href) !== operation.href ||
-        visibleSource(operation.source) !== element
+        visibleTarget(operation) !== element
       ) {
         cancel();
         return;
@@ -131,6 +149,22 @@ export function createApplicationReturn(
       stopAbort?.();
       stopAbort = undefined;
       try {
+        if (operation.kind === 'forward') {
+          const rect = element.getBoundingClientRect();
+          const header =
+            document.querySelector<HTMLElement>('.experience-header');
+          const position = header && getComputedStyle(header).position;
+          const inset =
+            header && (position === 'fixed' || position === 'sticky')
+              ? Math.max(0, header.getBoundingClientRect().bottom)
+              : 0;
+          const margin =
+            Number.parseFloat(getComputedStyle(element).scrollMarginTop) || 0;
+          const top = inset + margin;
+          if (rect.top < top || rect.bottom > window.innerHeight)
+            window.scrollBy({ top: rect.top - top, behavior: 'instant' });
+          return;
+        }
         element
           .closest<HTMLElement>(`[id="${operation.source.anchor}"]`)
           ?.scrollIntoView({
@@ -219,6 +253,7 @@ export function createApplicationReturn(
       const { kind, source } = accepted.stage;
       if (kind === 'back') {
         pending = {
+          kind: 'back',
           source,
           authority: value.key,
           href: returnHref(source),
@@ -226,6 +261,7 @@ export function createApplicationReturn(
             location.pathname,
             new URLSearchParams(location.search),
           ),
+          toKey: source.listHref,
         };
         return;
       }
@@ -239,16 +275,29 @@ export function createApplicationReturn(
             recordDetailReturnPath(destination.searchParams.get('returnTo')),
           ) === returnHref(source) &&
           visibleSource(source)
-        )
+        ) {
           origin = structuredClone(source);
+          const destinationKey = exact(href);
+          if (!destination.hash && destinationKey)
+            pending = {
+              kind: 'forward',
+              source,
+              authority: value.key,
+              href: destinationKey,
+              fromKey: routeKey(
+                location.pathname,
+                new URLSearchParams(location.search),
+              ),
+              toKey: destinationKey,
+            };
+        }
       } catch {
         // Malformed links retain ordinary navigation without a return owner.
       }
     },
     reconcile,
     routeChanged: (key: string) => {
-      if (pending && key !== pending.fromKey && key !== pending.source.listHref)
-        cancel();
+      if (pending && key !== pending.fromKey && key !== pending.toKey) cancel();
     },
     invalidate,
     cancel,
