@@ -68,6 +68,8 @@ if ($LASTEXITCODE -ne 0) { throw 'Fresh Windows PowerShell lifecycle atomicity r
 if ($LASTEXITCODE -ne 0) { throw 'Fresh Windows PowerShell cleanup integrity regression failed.' }
 & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'Guest.Network.Tests.ps1')
 if ($LASTEXITCODE -ne 0) { throw 'Fresh Windows PowerShell guest MAC regression failed.' }
+& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'Isolation.Port.Tests.ps1')
+if ($LASTEXITCODE -ne 0) { throw 'Fresh Windows PowerShell isolation listener port regression failed.' }
 
 & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'Memory.Admission.Tests.ps1')
 if ($LASTEXITCODE -ne 0) { throw 'Fresh Windows PowerShell memory admission regression failed.' }

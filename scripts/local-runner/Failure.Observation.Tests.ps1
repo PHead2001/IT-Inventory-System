@@ -162,6 +162,26 @@ Check 'unset failure remains explicit and recovery diagnostics reject untrusted 
     $refused = $false; try { Assert-RunnerFailureRecord $record } catch { $refused = $true }
     Require $refused
 }
+Check 'new admission diagnostics preserve legacy projections and reject untrusted optional fields' {
+    Reset-Fixture
+    $script:state.networkRecovery | Add-Member diagnostics ([pscustomobject]@{
+        trigger = 'fingerprint-change'; lastTransition = 'verified'; refusal = 'stale-observation'
+        observationUnavailableCount = 0; fingerprintChangeCount = 1; staleAdmissionCount = 1; applyCount = 1
+        observationElapsedMs = 500; preflightElapsedMs = 3000; applyElapsedMs = 1000
+        admissionOperation = 'connect'; observationAgeMs = -1000; quarantineElapsedMs = 20; connectElapsedMs = 3000; resumeElapsedMs = 0
+    })
+    $record = New-RunnerFailureObservation 'session-guardian' 'recovery-expiry' $script:state $script:now
+    Require ($record.capture -ceq 'complete' -and $record.recoveryDiagnostic.admissionOperation -ceq 'connect' -and $record.recoveryDiagnostic.observationAgeMs -eq -1000)
+    Assert-RunnerFailureRecord ($record | ConvertTo-Json -Depth 4 -Compress | ConvertFrom-Json)
+    $legacy = $record.recoveryDiagnostic | ConvertTo-Json -Compress | ConvertFrom-Json
+    foreach ($name in @('admissionOperation', 'observationAgeMs', 'quarantineElapsedMs', 'connectElapsedMs', 'resumeElapsedMs')) { $legacy.PSObject.Properties.Remove($name) }
+    Assert-RunnerRecoveryDiagnostic $legacy
+    foreach ($bad in @('SECRET', $true, 86400001, -86400001, 1.5, [double]::NaN)) {
+        $script:state.networkRecovery.diagnostics.observationAgeMs = $bad
+        $invalid = New-RunnerFailureObservation 'session-guardian' 'recovery-expiry' $script:state $script:now
+        Require ($invalid.capture -ceq 'unavailable')
+    }
+}
 Check 'rich first and latest recovery evidence fits the unchanged journal bound and older unset records remain readable' {
     Reset-Fixture
     $r = $script:state.networkRecovery
