@@ -164,10 +164,17 @@ function Assert-AdapterRules([string] $VmName, $Expected) {
 
 function Test-GuestIsolation($State, $Config) {
     $args = Get-SshArgs $State
-    $listener = [Net.Sockets.TcpListener]::new([ipaddress]::Parse($Config.gatewayIp), 49581)
-    $listener.Start()
+    $gateway = [ipaddress]::Parse($Config.gatewayIp)
+    $listener = [Net.Sockets.TcpListener]::new($gateway, 0)
     try {
-        $exitCode = Invoke-RunnerNative 'ssh.exe' ($args + @("runner@$($Config.guestIp)", 'timeout 4 bash -c "echo probe >/dev/tcp/172.30.240.1/49581" >/dev/null 2>&1; test $? -ne 0'))
+        # Port zero lets Windows select an available port outside exclusions.
+        # Keep this exact gateway listener bound throughout the guest deny test.
+        $listener.Start()
+        $endpoint = $listener.LocalEndpoint
+        if ($endpoint -isnot [Net.IPEndPoint] -or -not $endpoint.Address.Equals($gateway) -or $endpoint.Port -lt 1 -or $endpoint.Port -gt 65535) { throw 'Isolation listener endpoint readback differs.' }
+        $port = $endpoint.Port
+        $command = 'timeout 4 bash -c "echo probe >/dev/tcp/{0}/{1}" >/dev/null 2>&1; test $? -ne 0' -f $gateway.ToString(), $port
+        $exitCode = Invoke-RunnerNative 'ssh.exe' ($args + @("runner@$($Config.guestIp)", $command))
         if ($exitCode -ne 0 -or $listener.Pending()) {
             throw 'Guest-to-host isolation probe failed.'
         }

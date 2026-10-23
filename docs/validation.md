@@ -922,6 +922,16 @@ The E2E reporter writes sanitized `test-results/e2e-performance.json` and a comp
 
 Offline PowerShell contracts cover profile capacity boundaries, strict label classification, queue skipping, exact-profile VM/JIT propagation/readback, capacity loss and legacy recovery. `powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File scripts/local-runner/Contract.Tests.ps1` also exercises profile-specific cloud-config/readiness, current-metadata archive reuse, hash/ACL/reparse refusal, atomic publication and bounded retention, plus immediate successful-job pickup and retained idle/error backoff. Light/mid workflows use Bash/Node and remote Supabase CLI operations; Docker readiness remains required for heavy/legacy/pilot guests. Install the reviewed runtime before exercising its changed routing; source contracts do not establish installed cutover, measured startup improvement or real job results.
 
+Recovery admission regressions retain the two-second original capture lease and
+120-second original outage deadline. They cover removal of the duplicate handoff
+ACL read, isolated verified-policy retry with three new observations, changed
+fingerprint reapplication, failed live ACL/isolation readback, forged stale-error
+wording, generation/Stop/clock/deadline preemption, and provider-object/ACL changes
+during capture. Diagnostic tests preserve older protected projections while
+checking bounded signed capture age and per-transition timings. All providers are
+mocked in these checks; a passing contract suite is not live Hyper-V recovery or
+evidence that every future admission can complete before the unchanged deadline.
+
 The heavy profile is a fixed 6 GiB/static-memory candidate with 1 GiB unallocated host reserve (7 GiB admission). Light/mid keep their previous sizes/reserves; legacy ephemeral and exact-SHA pilot remain 8+2 GiB. `Contract.Tests.ps1` includes capacity-observation and unattended-recovery regressions: actual queue/loop wait and resume, complete per-profile Status, guarded active-only recovery, explicit Stop/journal/provenance/credential/VM refusal, cleanup-before-restart and fail-fast exclusion by a separate real fixture process. Scheduler/VM operations remain mocked; these tests do not establish installed task startup, host process-loss recovery or real reboot. The runbook describes owner-installed verification. Before accepting the smaller heavy profile, record a complete real database/Playwright job with no skipped checks, its exact workload SHA, installed bundle version/hash and verified live guest memory/dynamic flag. A pass does not establish measured OOM absence or continuous 24/7 availability.
 
 The diagnostic `Local runner pilot` uses its exact workflow/head SHA and must record Linux and Docker versions plus a real disposable container execution and verified removal. Static YAML/shell checks do not prove the VM, runner registration, Docker lifecycle, app/database/E2E gates or trusted secret-bearing jobs. Before enabling active pickup on the live host, complete host security checks and independent review. After normal routing is enabled on the live host, certify the full workload in the first normal PR CI run and certify the four validation/preview jobs through their appropriate PR/main/preview contexts; preserve the `required` check, trusted-main preview execution and protected environment restrictions. Record activation and runtime certification as installation-specific PR evidence, including installed bundle identity, pilot/recovery receipts, owner acceptance of the residual detection window, and exact-SHA normal job results. Activation and a passing diagnostic pilot do not establish normal-workload or production certification; keep unexercised contexts and real reboot recovery explicit. No GitHub-hosted runner fallback or npm Actions cache is configured.
@@ -1676,3 +1686,35 @@ supporting metadata while retaining all metadata and preview content. The full
 application Back/anchor journey, phone geometry, actual context loss with the
 retained quantity draft, complete validation and exact-SHA CI remain integration
 gates; the focused native fixture does not certify them.
+
+## Next 16.3.6 learned-route fragment correction
+
+Reloading an anchored results URL poisoned Next's learned route cache with the
+fragment. A later **Back to results** then appended the requested fragment again,
+producing `#inventory-row-2#inventory-row-2`. Hydration, server actions and PPR retry
+responses all write through `discoverKnownRoute`; the shared cache entry must
+exclude fragments while the document and router state retain their complete URL.
+
+`npm ci` automatically runs `scripts/patch-next-route-cache.mjs`. For pinned Next
+16.3.6 only, it removes the first literal `#` and following fragment from the local
+cache-insertion argument in both CJS and ESM `optimistic-routes.js`. Encoded `%23`,
+path and query bytes are preserved. Both whole-file original/corrected SHA256
+values and the package version are checked before writes; unknown bytes or a
+version change stop installation. The correction is idempotent and verifies each
+write. A filesystem failure can leave one corrected format; installation fails,
+and rerunning the correction safely finishes the other. The `prebuild` hook checks
+both corrected digests without writing, so skipped or incomplete installation
+cannot pass the normal production build. Dependency upgrades require reviewing or
+removing this temporary correction; see upstream Next issues/changes
+[#96714](https://github.com/vercel/next.js/issues/96714) and
+[#96737](https://github.com/vercel/next.js/pull/96737).
+
+`tests/unit/next-route-cache.test.mjs` executes the actual installed hydration,
+route-learning and cached navigation functions in both formats with storage and
+renderer/network adapters. It checks same/different/absent fragments, query and
+encoded `%23` preservation, and ordinary/pending cache writes. Guard regressions
+cover version/source drift, verify-only rejection, idempotence, interrupted writes
+and readback failure. These tests prove the dependency URL contract; the four
+existing Reduced-motion browser journeys remain unchanged and require execution
+on the final candidate. The runner image recipe still caches package tarballs
+with `--ignore-scripts`; actual PR jobs run fresh `npm ci` and apply the correction.

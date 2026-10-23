@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 import userEvent from '@testing-library/user-event';
 import Link from 'next/link';
 import {
@@ -4867,19 +4867,32 @@ describe('existing edit recovery and review', () => {
             throw new DOMException('quota');
           original.call(this, key, raw);
         });
+      onTestFinished(() => storage.mockRestore());
       vi.mocked(submitInventory).mockResolvedValue({
         ok: true,
         entityId: item.id,
         version: changed ? '2' : '1',
         changed,
       });
+      const navigation = vi.fn((event: React.MouseEvent<HTMLAnchorElement>) =>
+        event.preventDefault(),
+      );
+      let attemptedNavigation = false;
+      const report = (task: { uncertain: boolean }) => {
+        if (task.uncertain && !attemptedNavigation) {
+          attemptedNavigation = true;
+          // Exercise the first committed uncertain state, before passive effects
+          // can replace a listener that still sees healthy recovery storage.
+          screen.getByRole('link', { name: 'Sites' }).click();
+        }
+      };
       render(
-        <>
-          <Link href="/sites" onClick={(event) => event.preventDefault()}>
+        <TaskStateContext.Provider value={report}>
+          <Link href="/sites" onClick={navigation}>
             Sites
           </Link>
           <MetadataForm {...props} forms={{ [categoryId]: form() }} />
-        </>,
+        </TaskStateContext.Provider>,
       );
       fireEvent.change(screen.getByLabelText('Name'), {
         target: { value: 'Possibly saved' },
@@ -4900,7 +4913,8 @@ describe('existing edit recovery and review', () => {
         ),
       ).toBeVisible();
       if (!changed) expect(screen.queryByText(/Details were saved/)).toBeNull();
-      fireEvent.click(screen.getByRole('link', { name: 'Sites' }));
+      expect(attemptedNavigation).toBe(true);
+      expect(navigation).not.toHaveBeenCalled();
       expect(
         screen.getByRole('dialog', { name: 'Leave this edit?' }),
       ).toHaveTextContent('retry the same save');

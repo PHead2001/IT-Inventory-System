@@ -127,6 +127,7 @@ function New-RunnerRecoveryEpisodeDiagnostic {
         lastFingerprint = ''; operation = ''; operationStartedUtc = ''
         observationUnavailableCount = 0; fingerprintChangeCount = 0; staleAdmissionCount = 0; applyCount = 0
         observationElapsedMs = 0; preflightElapsedMs = 0; applyElapsedMs = 0
+        admissionOperation = ''; observationAgeMs = 0; quarantineElapsedMs = 0; connectElapsedMs = 0; resumeElapsedMs = 0
     }
 }
 
@@ -137,8 +138,18 @@ function Set-RunnerRecoveryDiagnostic($Recovery, [string] $Name, $Value) {
     if ($Recovery.PSObject.Properties.Name -notcontains 'diagnostics') {
         $Recovery | Add-Member -NotePropertyName diagnostics -NotePropertyValue (New-RunnerRecoveryEpisodeDiagnostic)
     }
-    if ($Name -cin @('trigger', 'lastTransition', 'refusal', 'lastFingerprint', 'operation', 'operationStartedUtc')) { $Recovery.diagnostics.$Name = $Value; return }
-    if ($Name -cnotin @('observationUnavailableCount', 'fingerprintChangeCount', 'staleAdmissionCount', 'applyCount', 'observationElapsedMs', 'preflightElapsedMs', 'applyElapsedMs')) { return }
+    if ($Name -cin @('trigger', 'lastTransition', 'refusal', 'lastFingerprint', 'operation', 'operationStartedUtc', 'admissionOperation')) {
+        if ($Recovery.diagnostics.PSObject.Properties.Name -notcontains $Name) { $Recovery.diagnostics | Add-Member -NotePropertyName $Name -NotePropertyValue $Value }
+        else { $Recovery.diagnostics.$Name = $Value }
+        return
+    }
+    if ($Name -cnotin @('observationUnavailableCount', 'fingerprintChangeCount', 'staleAdmissionCount', 'applyCount', 'observationElapsedMs', 'preflightElapsedMs', 'applyElapsedMs', 'observationAgeMs', 'quarantineElapsedMs', 'connectElapsedMs', 'resumeElapsedMs')) { return }
+    if ($Recovery.diagnostics.PSObject.Properties.Name -notcontains $Name) { $Recovery.diagnostics | Add-Member -NotePropertyName $Name -NotePropertyValue 0 }
+    if ($Name -ceq 'observationAgeMs') {
+        # Last actual retained-capture age, including a future-clock refusal.
+        $Recovery.diagnostics.$Name = [long][Math]::Truncate([Math]::Max(-86400000, [Math]::Min(86400000, [double]$Value)))
+        return
+    }
     $maximum = if ($Name -clike '*Count') { 1000000 } else { 86400000 }
     if ($Name -clike '*Count') {
         $old = $Recovery.diagnostics.$Name
@@ -355,12 +366,30 @@ function Install-RunnerRecoveryRules($Adapter, $Rules) {
     return $installed
 }
 
+function Get-RunnerRecoveryAdmissionKey($Recovery) {
+    $rules = @($Recovery.verifiedRules | ForEach-Object { Get-RunnerRecoveryRuleKey $_ } | Sort-Object)
+    return Get-RunnerRecoveryHash (@(
+        ($Recovery.binding | ConvertTo-Json -Depth 4 -Compress), [string]$Recovery.generation,
+        $Recovery.operation, $Recovery.candidateFingerprint, $Recovery.observationUtc, ($rules -join "`n")
+    ) -join "`n")
+}
+
+function Test-RunnerIsolatedStaleAdmission($Failure, $Recovery) {
+    try {
+        $key = $Failure.Exception.Data['runnerIsolatedStaleAdmission']
+        return $key -is [string] -and $key -cmatch '^[0-9a-f]{64}$' -and
+            $key -ceq (Get-RunnerRecoveryAdmissionKey $Recovery)
+    } catch { return $false }
+}
+
 function Assert-RunnerRecoveryDispatch($State, $Recovery, $Vm, $Adapter) {
     # Called AFTER slow provider identity/ACL reads, immediately before the
     # reconnect/resume command. A stale observation never grants live access.
     $now = Get-RunnerRecoveryNow
-    if ((Get-RunnerRecoveryExpiry $Recovery $now) -or $now -ge [DateTime]::Parse($State.deadlineUtc).ToUniversalTime()) { throw 'Recovery deadline reached before dispatch.' }
+    Set-RunnerRecoveryDiagnostic $Recovery 'admissionOperation' $Recovery.operation
     $age = ($now - [DateTime]::Parse($Recovery.observationUtc).ToUniversalTime()).TotalSeconds
+    Set-RunnerRecoveryDiagnostic $Recovery 'observationAgeMs' ($age * 1000)
+    if ((Get-RunnerRecoveryExpiry $Recovery $now) -or $now -ge [DateTime]::Parse($State.deadlineUtc).ToUniversalTime()) { throw 'Recovery deadline reached before dispatch.' }
     if ($age -lt 0 -or $age -gt 2) {
         Set-RunnerRecoveryDiagnostic $Recovery 'staleAdmissionCount' 1
         Set-RunnerRecoveryDiagnostic $Recovery 'refusal' 'stale-observation'
@@ -369,7 +398,17 @@ function Assert-RunnerRecoveryDispatch($State, $Recovery, $Vm, $Adapter) {
         $readback = Get-VM -Id ([guid]$Recovery.binding.vmId) -ErrorAction Stop
         $switch = Get-VMSwitch -Id ([guid]$Recovery.binding.switchId) -ErrorAction Stop
         [void](Assert-RunnerNetworkBinding $State $Recovery.binding $readback @(Get-VMNetworkAdapter -VM $readback -ErrorAction Stop) $switch -RequireDisconnected)
-        throw 'Recovery observation stale; isolated reinspection required.'
+        $current = Get-RunnerState
+        $isolatedUtc = Get-RunnerRecoveryNow
+        if (-not (Test-RunnerRecoveryGeneration $current $Recovery.binding $Recovery.generation $Recovery.operation) -or
+            (Test-RunnerSessionStopRequested $State) -or (Get-RunnerRecoveryExpiry $Recovery $isolatedUtc) -or
+            $isolatedUtc -ge [DateTime]::Parse($State.deadlineUtc).ToUniversalTime() -or
+            $isolatedUtc -lt [DateTime]::Parse($Recovery.progressUtc).ToUniversalTime()) { throw 'Isolated stale recovery lost its lifetime.' }
+        # Only this post-isolation branch may retain already-live-read policy.
+        # A provider exception with similar text never acquires retry authority.
+        $failure = [Management.Automation.RuntimeException]::new('Recovery observation stale; isolated reinspection required.')
+        $failure.Data['runnerIsolatedStaleAdmission'] = Get-RunnerRecoveryAdmissionKey $Recovery
+        throw $failure
     }
     $current = Get-RunnerState
     if (-not (Test-RunnerRecoveryGeneration $current $Recovery.binding $Recovery.generation $Recovery.operation) -or
@@ -379,6 +418,8 @@ function Assert-RunnerRecoveryDispatch($State, $Recovery, $Vm, $Adapter) {
 function Invoke-RunnerRecoveryAdapterEffect($State, $Recovery, [ValidateSet('quarantine', 'apply', 'connect', 'resume')][string] $Action) {
     # Caller MUST hold the checked session mutex. No sleeps/network probes here.
     # These provider calls are synchronous, not bounded cancellation promises.
+    $attemptStartedUtc = Get-RunnerRecoveryNow
+    try {
     $binding = $Recovery.binding
     $preflightStartedUtc = Get-RunnerRecoveryNow
     $current = Get-RunnerState
@@ -420,6 +461,9 @@ function Invoke-RunnerRecoveryAdapterEffect($State, $Recovery, [ValidateSet('qua
     if ($Action -ceq 'connect' -and ([guid]$adapter.SwitchId -ne [guid]$binding.switchId -or [string]$vm.State -cnotin @('Paused', 'Off'))) { throw 'Recovery connect readback failed.' }
     if ($Action -ceq 'resume' -and [string]$vm.State -cne 'Running') { throw 'Recovery resume readback failed.' }
     if ($Action -ceq 'apply') { return $installed }
+    } finally {
+        if ($Action -cne 'apply') { Set-RunnerRecoveryDiagnostic $Recovery ($Action + 'ElapsedMs') (((Get-RunnerRecoveryNow) - $attemptStartedUtc).TotalMilliseconds) }
+    }
 }
 
 function New-RunnerProbeProcess([string] $Executable, [string] $Arguments) {
@@ -511,12 +555,18 @@ function Invoke-RunnerRecoveryReconnect($Binding, [long] $Generation, [ValidateS
         Write-RunnerJson $script:RunnerStatePath $state
         try {
             [void](Invoke-RunnerRecoveryAdapterEffect $state $r $effect)
+            # Adapter-effect finally records admission/elapsed evidence only after
+            # provider readback. Persist it while still holding this generation's lock.
+            Write-RunnerJson $script:RunnerStatePath $state
             return [pscustomobject]@{ continue = $true; outcome = [pscustomobject]@{ generation = $r.generation; operation = $effect; success = $true } }
         } catch {
-            if ($_.Exception.Message -ceq 'Recovery observation stale; isolated reinspection required.') {
+            if (Test-RunnerIsolatedStaleAdmission $_ $r) {
                 Set-RunnerRecoveryDiagnostic $r 'refusal' 'stale-observation'
-                Set-RunnerRecoveryDiagnostic $r 'lastTransition' 'isolated'
-                $r.generation++; $r.phase = 'isolated'; $r.operation = ''; $r.stableObservations = 0; $r.lastStableUtc = ''; $r.progressUtc = (Get-RunnerRecoveryNow).ToString('o')
+                Set-RunnerRecoveryDiagnostic $r 'lastTransition' 'verified'
+                # Exact live ACL/binding passed before the stale lease refused;
+                # positive disconnect/readback retained isolation. Recheck three
+                # new observations and every live admission check next time.
+                $r.generation++; $r.phase = 'verified'; $r.operation = ''; $r.operationStartedUtc = ''; $r.stableObservations = 0; $r.lastStableUtc = ''; $r.progressUtc = (Get-RunnerRecoveryNow).ToString('o')
                 Write-RunnerJson $script:RunnerStatePath $state
                 return [pscustomobject]@{ continue = $true; outcome = $null }
             }
@@ -619,26 +669,19 @@ function Invoke-RunnerNetworkRecoveryTick([string] $SessionName, $Config, $Outco
         }
         if ($plan.action -ceq 'probe') { $probe = $true; $probeState = $state }
         elseif ($plan.action -cin @('connect', 'resume')) {
-            # No dispatch here: slow ACL preflight is followed by a new coherent
-            # observation outside the lock, then final serialized admission.
-            $preflightAdapter = @($adapters)[0]
-            Assert-RunnerRecoveryRules $preflightAdapter $plan.recovery.verifiedRules
-            Set-RunnerRecoveryDiagnostic $plan.recovery 'preflightElapsedMs' (((Get-RunnerRecoveryNow) - $preflightStartedUtc).TotalMilliseconds)
+            # No dispatch or duplicate ACL query here. The fresh capture below
+            # is still followed by ALL live identity/isolation/ACL checks.
             $reconnect = $plan
         }
         elseif ($plan.action -cne 'none') {
             try {
                 $installed = @(Invoke-RunnerRecoveryAdapterEffect $state $plan.recovery $plan.action)
-                if ($plan.action -ceq 'apply') { $state.networkRecovery.verifiedRules = $installed; Write-RunnerJson $script:RunnerStatePath $state }
+                if ($plan.action -ceq 'apply') { $state.networkRecovery.verifiedRules = $installed }
+                # Both apply and quarantine may finish with new diagnostics.
+                # Publish their completed state before exposing a success outcome.
+                Write-RunnerJson $script:RunnerStatePath $state
                 $result = [pscustomobject]@{ generation = $plan.recovery.generation; operation = $plan.action; success = $true }
             } catch {
-                if ($_.Exception.Message -ceq 'Recovery observation stale; isolated reinspection required.') {
-                    Set-RunnerRecoveryDiagnostic $plan.recovery 'refusal' 'stale-observation'
-                    Set-RunnerRecoveryDiagnostic $plan.recovery 'lastTransition' 'isolated'
-                    $state.networkRecovery.generation++; $state.networkRecovery.phase = 'isolated'; $state.networkRecovery.operation = ''; $state.networkRecovery.stableObservations = 0; $state.networkRecovery.lastStableUtc = ''; $state.networkRecovery.progressUtc = (Get-RunnerRecoveryNow).ToString('o')
-                    Write-RunnerJson $script:RunnerStatePath $state
-                    return [pscustomobject]@{ continue = $true; outcome = $null }
-                }
                 # No provider cancellation/retry claim. Canonical cleanup can
                 # itself refuse; retain protected state/files in that case.
                 Set-RunnerRecoveryDiagnostic $plan.recovery 'refusal' 'provider-uncertain'

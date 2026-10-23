@@ -33,6 +33,7 @@
     "test:db:form-save": "node scripts/db.mjs test-form-save",
     "test:db:compatibility": "node scripts/db.mjs test-compatibility",
     "validate:db": "node scripts/db.mjs validate",
+    "prebuild": "node scripts/patch-next-route-cache.mjs --check",
     "build": "next build",
     "test:e2e": "node scripts/e2e.mjs",
     "test:performance": "node scripts/navigation-performance.mjs",
@@ -42,7 +43,7 @@
     "test:e2e:list": "playwright test --list",
     "test:staging-user-sync": "node --test tests/staging-user-sync.test.mjs",
     "test:staging-file-keys": "node --test tests/staging-file-keys.test.mjs",
-    "postinstall": "node scripts/patch-postprocessing.mjs"
+    "postinstall": "node scripts/patch-postprocessing.mjs && node scripts/patch-next-route-cache.mjs"
   },
   "dependencies": {
     "@dnd-kit/helpers": "0.5.0",

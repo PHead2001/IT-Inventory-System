@@ -15,6 +15,7 @@ import { roomSchema } from '../../src/features/room/schema';
 import type { RoomOccupancy } from '../../src/features/room/occupancy-contract';
 import { occupancyText } from '../../src/features/room/occupancy-contract';
 import { roomSelectionOccupancy } from './room-occupancy-snapshot';
+import { measureRoomLabelName } from './room-label-name';
 import { measureRoomTarget, roomTargetMeetsMinimum } from './room-target-size';
 import {
   enableRoomLayoutDiagnostics,
@@ -344,33 +345,219 @@ async function chooseRoomLocation(page: Page, code: string) {
 
 async function settledLabels(page: Page, afterRevision?: number) {
   const canvas = page.locator('[aria-label="Interactive room canvas"] canvas');
+  const startedAt = Date.now();
+  const matrix = (value: string | undefined): number[] | null => {
+    if (!value || value.length > 1024) return null;
+    try {
+      const parsed: unknown = JSON.parse(value);
+      return Array.isArray(parsed) &&
+        parsed.length === 16 &&
+        parsed.every(
+          (entry) => typeof entry === 'number' && Number.isFinite(entry),
+        )
+        ? parsed
+        : null;
+    } catch {
+      return null;
+    }
+  };
+  type Observation = {
+    atMs: number;
+    pending: 'true' | 'false' | 'unknown';
+    revision: number | null;
+    status: string;
+    layoutError: string | null;
+    phase: string | null;
+    sceneFrames: number | null;
+    composerFrames: number | null;
+    viewChanged: boolean;
+    projectionChanged: boolean;
+  };
+  const recent: Observation[] = [];
+  let last:
+    | (Observation & { view: number[] | null; projection: number[] | null })
+    | null = null;
+  let observations = 0,
+    pendingObservations = 0,
+    revisionChanges = 0,
+    viewChanges = 0,
+    projectionChanges = 0;
+  let previousFrame: (string | undefined)[] | undefined;
   let previous = '';
-  await expect
-    .poll(async () => {
-      const current = await canvas.evaluate(async (element) => {
-        // Let the requested control update project and measure before accepting
-        // a settled flag that could still belong to the previous camera frame.
-        await new Promise<void>((resolve) =>
-          requestAnimationFrame(() => resolve()),
-        );
-        return {
-          pending: element.dataset.labelLayoutPending,
-          revision: Number(element.dataset.labelLayoutRevision ?? 0),
-          frame: [
-            element.dataset.cameraViewMatrix,
-            element.dataset.cameraProjectionMatrix,
-          ],
-        };
-      });
-      const key = JSON.stringify(current);
-      const stable =
-        current.pending === 'false' &&
-        key === previous &&
-        (afterRevision === undefined || current.revision > afterRevision);
-      previous = key;
-      return stable;
-    })
-    .toBe(true);
+  try {
+    await expect
+      .poll(async () => {
+        const {
+          current,
+          status,
+          layoutError,
+          phase,
+          sceneFrames,
+          composerFrames,
+        } = await canvas.evaluate(async (element) => {
+          // Let the requested control update project and measure before accepting
+          // a settled flag that could still belong to the previous camera frame.
+          await new Promise<void>((resolve) =>
+            requestAnimationFrame(() => resolve()),
+          );
+          const current = {
+            pending: element.dataset.labelLayoutPending,
+            revision: Number(element.dataset.labelLayoutRevision ?? 0),
+            frame: [
+              element.dataset.cameraViewMatrix,
+              element.dataset.cameraProjectionMatrix,
+            ],
+          };
+          const counter = (value: string | undefined) => {
+            const number = Number(value);
+            return value !== undefined &&
+              Number.isSafeInteger(number) &&
+              number >= 0 &&
+              number <= 1_000_000
+              ? number
+              : null;
+          };
+          try {
+            const statuses = [
+              'complete',
+              'candidate-infeasible',
+              'budget-exhausted',
+            ];
+            const errors = [
+              'Room viewport is not measured',
+              'Label measurement work budget exhausted',
+              'Label placement work budget exhausted',
+              'Label remeasurement work budget exhausted',
+              'Unstable label dimensions after four placement passes',
+            ];
+            const errorIndex = errors.indexOf(
+              element.dataset.labelLayoutError ?? '',
+            );
+            return {
+              current,
+              phase: [
+                'idle',
+                'flying',
+                'revealing',
+                'settled',
+                'cancelled',
+              ].includes(element.dataset.spatialPhase ?? '')
+                ? element.dataset.spatialPhase!
+                : null,
+              sceneFrames: counter(element.dataset.sceneEffectFrames),
+              composerFrames: counter(element.dataset.composerFrames),
+              status: statuses.includes(element.dataset.labelLayoutStatus ?? '')
+                ? element.dataset.labelLayoutStatus!
+                : 'unknown',
+              // Only fixed codes leave the browser, never arbitrary attribute text.
+              layoutError:
+                errorIndex >= 0
+                  ? [
+                      'viewport-unmeasured',
+                      'measurement-budget',
+                      'placement-budget',
+                      'remeasurement-budget',
+                      'unstable-dimensions',
+                    ][errorIndex]
+                  : element.dataset.labelLayoutError === undefined
+                    ? null
+                    : 'unknown',
+            };
+          } catch {
+            return {
+              current,
+              status: 'unavailable',
+              layoutError: 'unavailable',
+              phase: null,
+              sceneFrames: null,
+              composerFrames: null,
+            };
+          }
+        });
+        const key = JSON.stringify(current);
+        const stable =
+          current.pending === 'false' &&
+          key === previous &&
+          (afterRevision === undefined || current.revision > afterRevision);
+        // Diagnostics do not participate in readiness or alter the poll cadence.
+        try {
+          const observation: Observation = {
+            atMs: Date.now() - startedAt,
+            pending:
+              current.pending === 'true' || current.pending === 'false'
+                ? current.pending
+                : 'unknown',
+            revision:
+              Number.isSafeInteger(current.revision) && current.revision >= 0
+                ? current.revision
+                : null,
+            status,
+            layoutError,
+            phase,
+            sceneFrames,
+            composerFrames,
+            viewChanged:
+              previousFrame !== undefined &&
+              current.frame[0] !== previousFrame[0],
+            projectionChanged:
+              previousFrame !== undefined &&
+              current.frame[1] !== previousFrame[1],
+          };
+          observations++;
+          pendingObservations += Number(observation.pending === 'true');
+          revisionChanges += Number(
+            last !== null && observation.revision !== last.revision,
+          );
+          viewChanges += Number(observation.viewChanged);
+          projectionChanges += Number(observation.projectionChanged);
+          if (
+            key !== previous ||
+            status !== last?.status ||
+            layoutError !== last?.layoutError ||
+            phase !== last?.phase ||
+            sceneFrames !== last?.sceneFrames ||
+            composerFrames !== last?.composerFrames
+          ) {
+            recent.push(observation);
+            if (recent.length > 12) recent.shift();
+          }
+          last = {
+            ...observation,
+            view: matrix(current.frame[0]),
+            projection: matrix(current.frame[1]),
+          };
+          previousFrame = current.frame;
+        } catch {
+          /* A diagnostic failure must not change readiness. */
+        }
+        previous = key;
+        return stable;
+      })
+      .toBe(true);
+  } catch (error) {
+    try {
+      console.error(
+        'ROOM_LABEL_SETTLE_FAILURE ' +
+          JSON.stringify({
+            schema: 1,
+            elapsedMs: Date.now() - startedAt,
+            afterRevision: Number.isSafeInteger(afterRevision)
+              ? afterRevision
+              : null,
+            observations,
+            pendingObservations,
+            revisionChanges,
+            viewChanges,
+            projectionChanges,
+            last,
+            recent,
+          }),
+      );
+    } catch {
+      /* Preserve the original assertion even if reporting fails. */
+    }
+    throw error;
+  }
 }
 
 async function uncoveredCanvasGesture(page: Page, dx: number, dy: number) {
@@ -2588,10 +2775,23 @@ test('visible drawer labels remain distinct and clickable across desktop and pho
           return range.getClientRects().length;
         });
         try {
+          const name = await label.evaluate(measureRoomLabelName);
+          expect(name.text, `expected drawer name for ${code}`).toBe(
+            locationNames.get(code),
+          );
+          expect(name.visible, `visible drawer name for ${code}`).toBe(true);
           expect(
-            firstChildRectCount,
+            name.rects,
             'ordinary drawer names remain readable on one line',
-          ).toBe(1);
+          ).toHaveLength(1);
+          expect(
+            name.rects[0].width,
+            `drawer name width for ${code}`,
+          ).toBeGreaterThan(0);
+          expect(
+            name.rects[0].height,
+            `drawer name height for ${code}`,
+          ).toBeGreaterThan(0);
         } catch (error) {
           reportRoomAssertionFailure('drawer-name-lines', code, {
             viewport,

@@ -1,4 +1,10 @@
-import { expect, test, type Page, type Request } from '@playwright/test';
+import {
+  expect,
+  test,
+  type Locator,
+  type Page,
+  type Request,
+} from '@playwright/test';
 import { withHeldQuantityPrimary } from './route-primary-delay';
 import {
   armNativeReady,
@@ -465,6 +471,7 @@ async function observeMotion(page: Page, unsupported = false) {
                 value.endTime = Number(timing.endTime);
                 value.activeDuration = Number(timing.activeDuration);
                 value.delay = Number(timing.delay);
+                value.easing = effect.getTiming().easing;
                 value.opacityFrames = effect
                   .getKeyframes()
                   .flatMap((frame) =>
@@ -472,6 +479,15 @@ async function observeMotion(page: Page, unsupported = false) {
                       typeof frame.opacity === 'number') &&
                     Number.isFinite(Number(frame.opacity))
                       ? [Number(frame.opacity)]
+                      : [],
+                  );
+                value.opacityOffsets = effect
+                  .getKeyframes()
+                  .flatMap((frame) =>
+                    (typeof frame.opacity === 'string' ||
+                      typeof frame.opacity === 'number') &&
+                    Number.isFinite(Number(frame.opacity))
+                      ? [frame.computedOffset]
                       : [],
                   );
                 value.documentTimeline =
@@ -684,6 +700,25 @@ async function expectResultAnchor(page: Page, anchor: string) {
     .toBe(true);
 }
 
+/** Inspect settled heading geometry without scrolling or focusing the page. */
+async function expectHeadingViewport(heading: Locator) {
+  await expect
+    .poll(() =>
+      heading.evaluate((element) => {
+        const rect = element.getBoundingClientRect();
+        const header =
+          document.querySelector<HTMLElement>('.experience-header');
+        const position = header && getComputedStyle(header).position;
+        const inset =
+          header && (position === 'sticky' || position === 'fixed')
+            ? Math.max(0, header.getBoundingClientRect().bottom)
+            : 0;
+        return rect.top >= inset - 1 && rect.bottom <= innerHeight + 1;
+      }),
+    )
+    .toBe(true);
+}
+
 /** Cancel any real partial prefetch attempted by the production router. The
  * old link policy exercised Next's canceled/fulfilled-null prefetch path here;
  * the mitigation must prevent those requests rather than patching that cache. */
@@ -828,11 +863,35 @@ async function completedTitlePair(
         b.x + b.width > 0,
     ),
   );
-  if (bodyVisibleOnBothSides)
+  if (bodyVisibleOnBothSides) {
     expect(
       pairedBodyCrossfade(observed.transitions, titleName),
       diagnostic,
     ).toBe(true);
+    const incomingOpacity = paired[0].effects.find(
+      (effect) =>
+        effect.pseudo === `::view-transition-new(${titleName}-content)` &&
+        effect.opacityFrames?.length === 3,
+    );
+    expect(incomingOpacity, diagnostic).toMatchObject({
+      opacityFrames: [0, 0, 1],
+      opacityOffsets: [0, 0.5, 1],
+      easing: 'linear',
+      delay: 0,
+      activeDuration: 200,
+      endTime: 200,
+    });
+    const titleGeometry = paired[0].effects.find(
+      (effect) => effect.pseudo === `::view-transition-group(${titleName})`,
+    );
+    expect(titleGeometry, diagnostic).toBeDefined();
+    expect(incomingOpacity!.startTime, diagnostic).toBe(
+      titleGeometry!.startTime,
+    );
+    // The linear native effect maps 0.5 to 100ms elapsed, rather than applying
+    // the title's ease-out to that offset. Forward and app Back both use this
+    // check; it does not claim arbitrary travelling rectangles never intersect.
+  }
   return observed;
 }
 
@@ -2441,6 +2500,7 @@ for (const mode of ['system-reduced', 'local-reduced'] as const) {
         'false',
       );
       const arrival = await instant();
+      await expectHeadingViewport(heading);
       await resetProof(page);
       await page.goBack();
       await results(scope);
@@ -2453,8 +2513,23 @@ for (const mode of ['system-reduced', 'local-reduced'] as const) {
       await expect(page).toHaveURL(destination.href);
       await expect(heading).toBeVisible();
       const nativeForward = await instant();
+      await expectHeadingViewport(heading);
       await resetProof(page);
       const applicationBack = await appBack();
+      // A fresh result document removes the prior client cache and carries the
+      // genuine return hash. Its ordinary second-row click must reveal the H1.
+      await page.reload();
+      await results(anchoredScope);
+      await row.click();
+      await expect(page).toHaveURL(destination.href);
+      await expect(heading).toBeVisible();
+      await expect(routeProgress(page)).toHaveAttribute(
+        'data-visible',
+        'false',
+      );
+      await instant();
+      await expectHeadingViewport(heading);
+      await appBack();
       // Observe the known detail's committed history entry while its genuine
       // response is held. Back restores the anchored list; late Flight delivery
       // must preserve it, and Forward restores detail without title motion.

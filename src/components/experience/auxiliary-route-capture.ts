@@ -298,6 +298,7 @@ export function createAuxiliaryRouteCapture() {
                         { name },
                         capture.current,
                         () => withdraw(capture.token),
+                        name === capture.base,
                       );
                       if (cleanup) capture.cleanups.push(cleanup);
                     } else {
