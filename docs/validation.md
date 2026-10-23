@@ -1278,3 +1278,35 @@ widths in Full/Reduced motion; report its execution separately from unit coverag
 Focused resolver/parser/chooser/assignment and tag-advisory regressions cover exact spelling, Unicode lengths, legal duplicates, cross-namespace collisions, typed-prefix isolation, unknowns, errors, overflow and retained cancellation/privacy guards. `supabase/tests/serial_scan.test.sql` adds transactional fixtures for stable invoker/empty-search-path grants, active viewer/staff reads, nonmember/inactive/anonymous denial, exact case/whitespace lookup, 200 supplementary Unicode characters, deterministic first21 results, truthful site/retired context and nonmutating reads. The migration and provisional generated-type addition require canonical clean-database execution and `db:types:check`; they have not been validated against local PostgreSQL here because its Docker daemon is unavailable.
 
 `tests/e2e/audit-four-identifier-guidance.spec.ts` retains owned new fixtures for duplicate serials, serial/tag/SKU collisions, tag blur guidance and a synthetic camera QR frame. Scan and tag-blur cases are defined at 1280/390 px with Full/Reduced motion. A separate 390 px Reduced-motion Scan-and-assign journey enters a duplicate serial through the real input, requires a named/contextual chooser, deliberately selects the intended asset, checks the review's immutable record link and storage source, then cancels with **Skip inspection / review**. Caller-scoped reads compare both assets, their versions and their inventory/assignment events before choice, after inspection and after cancellation to prove that no assignment was made. These are durable test definitions; browser/hosted execution and physical-camera testing remain pending. SQL timeout configuration likewise requires effective REST hoisting and elapsed-time proof before it establishes any request-time bound. This is iteration evidence, not final PR certification.
+
+## Next 16.3.6 learned-route fragment correction
+
+Reloading an anchored results URL poisoned Next's learned route cache with the
+fragment. A later **Back to results** then appended the requested fragment again,
+producing `#inventory-row-2#inventory-row-2`. Hydration, server actions and PPR retry
+responses all write through `discoverKnownRoute`; the shared cache entry must
+exclude fragments while the document and router state retain their complete URL.
+
+`npm ci` automatically runs `scripts/patch-next-route-cache.mjs`. For pinned Next
+16.3.6 only, it removes the first literal `#` and following fragment from the local
+cache-insertion argument in both CJS and ESM `optimistic-routes.js`. Encoded `%23`,
+path and query bytes are preserved. Both whole-file original/corrected SHA256
+values and the package version are checked before writes; unknown bytes or a
+version change stop installation. The correction is idempotent and verifies each
+write. A filesystem failure can leave one corrected format; installation fails,
+and rerunning the correction safely finishes the other. The `prebuild` hook checks
+both corrected digests without writing, so skipped or incomplete installation
+cannot pass the normal production build. Dependency upgrades require reviewing or
+removing this temporary correction; see upstream Next issues/changes
+[#96714](https://github.com/vercel/next.js/issues/96714) and
+[#96737](https://github.com/vercel/next.js/pull/96737).
+
+`tests/unit/next-route-cache.test.mjs` executes the actual installed hydration,
+route-learning and cached navigation functions in both formats with storage and
+renderer/network adapters. It checks same/different/absent fragments, query and
+encoded `%23` preservation, and ordinary/pending cache writes. Guard regressions
+cover version/source drift, verify-only rejection, idempotence, interrupted writes
+and readback failure. These tests prove the dependency URL contract; the four
+existing Reduced-motion browser journeys remain unchanged and require execution
+on the final candidate. The runner image recipe still caches package tarballs
+with `--ignore-scripts`; actual PR jobs run fresh `npm ci` and apply the correction.

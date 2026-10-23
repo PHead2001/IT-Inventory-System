@@ -8,6 +8,8 @@
   },
   "packageManager": "npm@11.11.0",
   "scripts": {
+    "postinstall": "node scripts/patch-next-route-cache.mjs",
+    "prebuild": "node scripts/patch-next-route-cache.mjs --check",
     "dev": "next dev",
     "start": "next start",
     "typecheck": "next typegen && tsc --noEmit",
