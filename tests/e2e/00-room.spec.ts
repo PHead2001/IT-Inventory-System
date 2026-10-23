@@ -15,6 +15,7 @@ import { roomSchema } from '../../src/features/room/schema';
 import type { RoomOccupancy } from '../../src/features/room/occupancy-contract';
 import { occupancyText } from '../../src/features/room/occupancy-contract';
 import { roomSelectionOccupancy } from './room-occupancy-snapshot';
+import { measureRoomLabelName } from './room-label-name';
 import { measureRoomTarget, roomTargetMeetsMinimum } from './room-target-size';
 import {
   enableRoomLayoutDiagnostics,
@@ -340,32 +341,101 @@ async function chooseRoomLocation(page: Page, code: string) {
 async function settledLabels(page: Page, afterRevision?: number) {
   const canvas = page.locator('[aria-label="Interactive room canvas"] canvas');
   let previous = '';
-  await expect
-    .poll(async () => {
-      const current = await canvas.evaluate(async (element) => {
-        // Let the requested control update project and measure before accepting
-        // a settled flag that could still belong to the previous camera frame.
-        await new Promise<void>((resolve) =>
-          requestAnimationFrame(() => resolve()),
+  const samples: Record<string, unknown>[] = [];
+  try {
+    await expect
+      .poll(async () => {
+        const { current, diagnostic } = await canvas.evaluate(
+          async (element) => {
+            // Let the requested control update project and measure before accepting
+            // a settled flag that could still belong to the previous camera frame.
+            await new Promise<void>((resolve) =>
+              requestAnimationFrame(() => resolve()),
+            );
+            const current = {
+              pending: element.dataset.labelLayoutPending,
+              revision: Number(element.dataset.labelLayoutRevision ?? 0),
+              frame: [
+                element.dataset.cameraViewMatrix,
+                element.dataset.cameraProjectionMatrix,
+              ],
+            };
+            const counter = (value: string | undefined) => {
+              const number = Number(value);
+              return value !== undefined &&
+                Number.isSafeInteger(number) &&
+                number >= 0 &&
+                number <= 1_000_000
+                ? number
+                : null;
+            };
+            const matrix = (value: string | undefined) => {
+              try {
+                const parsed: unknown = JSON.parse(value ?? '');
+                return Array.isArray(parsed) &&
+                  parsed.length === 16 &&
+                  parsed.every(
+                    (entry) =>
+                      typeof entry === 'number' && Number.isFinite(entry),
+                  )
+                  ? parsed
+                  : null;
+              } catch {
+                return null;
+              }
+            };
+            const allowed = (value: string | undefined, values: string[]) =>
+              value && values.includes(value) ? value : null;
+            return {
+              current,
+              diagnostic: {
+                pending: allowed(current.pending, ['true', 'false']),
+                revision: counter(element.dataset.labelLayoutRevision),
+                view: matrix(current.frame[0]),
+                projection: matrix(current.frame[1]),
+                status: allowed(element.dataset.labelLayoutStatus, [
+                  'complete',
+                  'candidate-infeasible',
+                  'budget-exhausted',
+                ]),
+                error: allowed(element.dataset.labelLayoutError, [
+                  'Room viewport is not measured',
+                  'Label measurement work budget exhausted',
+                  'Label placement work budget exhausted',
+                  'Label remeasurement work budget exhausted',
+                  'Unstable label dimensions after four placement passes',
+                ]),
+                phase: allowed(element.dataset.spatialPhase, [
+                  'idle',
+                  'flying',
+                  'revealing',
+                  'settled',
+                  'cancelled',
+                ]),
+                sceneFrames: counter(element.dataset.sceneEffectFrames),
+                composerFrames: counter(element.dataset.composerFrames),
+              },
+            };
+          },
         );
-        return {
-          pending: element.dataset.labelLayoutPending,
-          revision: Number(element.dataset.labelLayoutRevision ?? 0),
-          frame: [
-            element.dataset.cameraViewMatrix,
-            element.dataset.cameraProjectionMatrix,
-          ],
-        };
-      });
-      const key = JSON.stringify(current);
-      const stable =
-        current.pending === 'false' &&
-        key === previous &&
-        (afterRevision === undefined || current.revision > afterRevision);
-      previous = key;
-      return stable;
-    })
-    .toBe(true);
+        samples.push(diagnostic);
+        if (samples.length > 8) samples.shift();
+        const key = JSON.stringify(current);
+        const stable =
+          current.pending === 'false' &&
+          key === previous &&
+          (afterRevision === undefined || current.revision > afterRevision);
+        previous = key;
+        return stable;
+      })
+      .toBe(true);
+  } catch (error) {
+    console.error(
+      'ROOM_LABEL_SETTLE_DIAGNOSTIC',
+      JSON.stringify({ afterRevision: afterRevision ?? null, samples }),
+    );
+    throw error;
+  }
 }
 
 async function uncoveredCanvasGesture(page: Page, dx: number, dy: number) {
@@ -2507,16 +2577,23 @@ test('visible drawer labels remain distinct and clickable across desktop and pho
         }
         await label.scrollIntoViewIfNeeded({ timeout: 3000 });
         await settledLabels(page);
+        const name = await label.evaluate(measureRoomLabelName);
+        expect(name.text, `expected drawer name for ${code}`).toBe(
+          locationNames.get(code),
+        );
+        expect(name.visible, `visible drawer name for ${code}`).toBe(true);
         expect(
-          await label.evaluate((element) => {
-            const text = element.firstChild;
-            if (!text) return 0;
-            const range = document.createRange();
-            range.selectNodeContents(text);
-            return range.getClientRects().length;
-          }),
+          name.rects,
           'ordinary drawer names remain readable on one line',
-        ).toBe(1);
+        ).toHaveLength(1);
+        expect(
+          name.rects[0].width,
+          `drawer name width for ${code}`,
+        ).toBeGreaterThan(0);
+        expect(
+          name.rects[0].height,
+          `drawer name height for ${code}`,
+        ).toBeGreaterThan(0);
         const box = await label.boundingBox();
         expect(box, `visible label bounds for ${code}`).toBeTruthy();
         const point = {
