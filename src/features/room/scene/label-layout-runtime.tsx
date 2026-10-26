@@ -295,6 +295,7 @@ export function createRoomLabelRegistry(
       if (canvas) {
         canvas.dataset.labelLayoutError = message;
         canvas.dataset.labelLayoutStatus = 'budget-exhausted';
+        canvas.dataset.labelLayoutPending = 'false';
       }
     };
     let suppressed = 0;

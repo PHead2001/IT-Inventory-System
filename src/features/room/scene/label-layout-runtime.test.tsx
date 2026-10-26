@@ -385,12 +385,17 @@ describe('unified room label registry', () => {
     item.element.addEventListener('blur', blur);
     slow = true;
     registry.schedule();
+    expect(canvas.dataset.labelLayoutPending).toBe('true');
     flush();
     expect(blur).toHaveBeenCalledOnce();
     expect(item.element).toHaveAttribute('aria-hidden', 'true');
     expect(item.element.tabIndex).toBe(-1);
     expect(issues).toHaveBeenLastCalledWith(['ITC-S1A']);
     expect(canvas.dataset.labelLayoutStatus).toBe('budget-exhausted');
+    expect(canvas.dataset.labelLayoutPending).toBe('false');
+    expect(item.element.style.visibility).toBe('hidden');
+    expect(item.element.style.pointerEvents).toBe('none');
+    expect(item.leader.style.display).toBe('none');
     expect(queue).toHaveLength(0);
     cleanup();
   });
@@ -891,13 +896,27 @@ describe('unified room label registry', () => {
         mandatory: true,
       });
       flush();
-      expect(canvas.dataset.labelLayoutPending).toBe(String(!settles));
+      // Both success and terminal instability finish their bounded work.
+      expect(canvas.dataset.labelLayoutPending).toBe('false');
       expect(reads).toBe(settles ? 2 : 8);
-      if (settles) expect(canvas.dataset.labelLayoutError).toBeUndefined();
-      else
+      expect(queue).toHaveLength(0);
+      if (settles) {
+        expect(canvas.dataset.labelLayoutError).toBeUndefined();
+        expect(canvas.dataset.labelLayoutStatus).toBe('complete');
+        expect(item.element.dataset.labelSuppressed).toBe('false');
+      } else {
         expect(canvas.dataset.labelLayoutError).toMatch(
           /four placement passes/,
         );
+        expect(canvas.dataset.labelLayoutStatus).toBe('budget-exhausted');
+        expect(canvas.dataset.labelLayoutRevision).toBeUndefined();
+        expect(item.element.dataset.labelSuppressed).toBe('true');
+        expect(item.element.style.visibility).toBe('hidden');
+        expect(item.element.style.pointerEvents).toBe('none');
+        expect(item.element.tabIndex).toBe(-1);
+        expect(item.element).toHaveAttribute('aria-hidden', 'true');
+        expect(item.leader.style.display).toBe('none');
+      }
       cleanup();
     },
   );
@@ -926,9 +945,16 @@ describe('unified room label registry', () => {
     });
     flush();
     expect(reads).toBe(8);
-    expect(canvas.dataset.labelLayoutPending).toBe('true');
+    expect(canvas.dataset.labelLayoutPending).toBe('false');
+    expect(canvas.dataset.labelLayoutStatus).toBe('budget-exhausted');
     expect(canvas.dataset.labelLayoutError).toMatch(/four placement passes/);
     expect(canvas.dataset.labelLayoutRevision).toBeUndefined();
+    expect(item.element.dataset.labelSuppressed).toBe('true');
+    expect(item.element.style.visibility).toBe('hidden');
+    expect(item.element.style.pointerEvents).toBe('none');
+    expect(item.element.tabIndex).toBe(-1);
+    expect(item.element).toHaveAttribute('aria-hidden', 'true');
+    expect(item.leader.style.display).toBe('none');
     expect(notify).not.toHaveBeenCalled();
     expect(queue).toHaveLength(0);
     vi.mocked(full.getBoundingClientRect).mockReturnValue({
@@ -937,9 +963,18 @@ describe('unified room label registry', () => {
       height: 18,
     });
     registry.schedule();
+    expect(canvas.dataset.labelLayoutPending).toBe('true');
+    expect(queue).toHaveLength(1);
     flush();
     expect(canvas.dataset.labelLayoutPending).toBe('false');
+    expect(canvas.dataset.labelLayoutStatus).toBe('complete');
     expect(canvas.dataset.labelLayoutError).toBeUndefined();
+    expect(item.element.dataset.labelSuppressed).toBe('false');
+    expect(item.element.style.pointerEvents).toBe('auto');
+    expect(item.element.tabIndex).toBe(0);
+    expect(item.element).not.toHaveAttribute('aria-hidden');
+    expect(notify).toHaveBeenCalledOnce();
+    expect(queue).toHaveLength(0);
     cleanup();
   });
   it('remeasures after font readiness and font changes, then removes that subscription', async () => {
