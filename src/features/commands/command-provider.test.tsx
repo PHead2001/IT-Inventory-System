@@ -1586,6 +1586,111 @@ it.each([401, 403])(
   },
 );
 
+it.each(['pending', 'failed', 'retry'] as const)(
+  'contains Add focus in both directions while session verification is %s',
+  async (state) => {
+    const caller = pendingCaller();
+    if (state === 'pending') auth.getUser.mockReturnValueOnce(caller.promise);
+    else {
+      auth.getUser.mockResolvedValueOnce({
+        data: { user: null },
+        error: { status: 503 },
+      });
+      if (state === 'retry') auth.getUser.mockReturnValueOnce(caller.promise);
+    }
+    render(<Workspace />);
+    const launcher = screen.getByRole('button', {
+      name: 'Search and commands',
+    });
+    launcher.focus();
+    fireEvent.keyDown(window, { key: 'n' });
+    await act(async () => {});
+    const dialog = screen.getByRole('dialog');
+    const close = screen.getByRole('button', { name: 'Close dialog' });
+    expect(close).toHaveFocus();
+    if (state === 'retry') {
+      fireEvent.click(screen.getByRole('button', { name: 'Try again' }));
+      await act(async () => {});
+    }
+    expect(launcher.closest('[inert]')).not.toBeNull();
+    for (const name of ['Add quantity item', 'Add individual asset']) {
+      const choice = screen.getByRole('link', { name });
+      expect(choice).toHaveAttribute('aria-disabled', 'true');
+      expect(choice).not.toHaveAttribute('href');
+    }
+    if (state === 'failed')
+      expect(screen.getByRole('alert')).toHaveTextContent(
+        'Your session could not be checked',
+      );
+    else
+      expect(screen.getByRole('status')).toHaveTextContent(
+        'Checking your session',
+      );
+    const last =
+      state === 'failed'
+        ? screen.getByRole('button', { name: 'Try again' })
+        : close;
+    // Retry deliberately focuses the container before removing its button.
+    // Both it and any other non-tab-stop focus must remain inside the modal.
+    for (const shiftKey of [true, false]) {
+      dialog.focus();
+      expect(fireEvent.keyDown(dialog, { key: 'Tab', shiftKey })).toBe(false);
+      expect(shiftKey ? last : close).toHaveFocus();
+    }
+    close.focus();
+    fireEvent.keyDown(close, { key: 'Tab', shiftKey: true });
+    expect(last).toHaveFocus();
+    fireEvent.keyDown(last, { key: 'Tab' });
+    expect(close).toHaveFocus();
+    expect(navigation.push).not.toHaveBeenCalled();
+    expect(fetch).not.toHaveBeenCalled();
+    fireEvent.keyDown(window, { key: 'Escape' });
+    await act(async () => {});
+    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(launcher).toHaveFocus();
+  },
+);
+
+it.each(['search', 'help'] as const)(
+  'contains container focus in %s without intercepting an interior Tab',
+  async (mode) => {
+    render(<Workspace />);
+    if (mode === 'search') open();
+    else
+      fireEvent.click(
+        screen.getByRole('button', { name: 'Keyboard shortcuts' }),
+      );
+    await act(async () => {});
+    const dialog = screen.getByRole('dialog');
+    const first = screen.getByRole('button', { name: 'Close dialog' });
+    const last =
+      mode === 'search'
+        ? screen.getAllByRole('option').at(-1)!
+        : screen
+            .getAllByRole('checkbox', {
+              name: 'Enable application keyboard shortcuts',
+            })
+            .at(-1)!;
+    for (const shiftKey of [true, false]) {
+      dialog.focus();
+      expect(fireEvent.keyDown(dialog, { key: 'Tab', shiftKey })).toBe(false);
+      expect(shiftKey ? last : first).toHaveFocus();
+    }
+    if (mode === 'search') {
+      const search = screen.getByRole<HTMLInputElement>('combobox');
+      fireEvent.change(search, { target: { value: 'camera' } });
+      search.focus();
+      search.setSelectionRange(1, 3);
+      for (const shiftKey of [true, false]) {
+        expect(fireEvent.keyDown(search, { key: 'Tab', shiftKey })).toBe(true);
+        expect(search).toHaveFocus();
+        expect(search.selectionStart).toBe(1);
+        expect(search.selectionEnd).toBe(3);
+      }
+    }
+  },
+);
+
 it('shows checking status and disabled Add choices until the caller is verified', async () => {
   const caller = pendingCaller();
   auth.getUser.mockReturnValueOnce(caller.promise);

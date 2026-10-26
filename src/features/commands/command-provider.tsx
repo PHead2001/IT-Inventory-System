@@ -589,7 +589,11 @@ export function CommandProvider({
           ? dialog.current?.querySelector<HTMLElement>('a[href]')
           : input.current
         : dialog.current?.querySelector<HTMLElement>(focusable);
-    (target ?? dialog.current)?.focus();
+    (
+      target ??
+      dialog.current?.querySelector<HTMLElement>(focusable) ??
+      dialog.current
+    )?.focus();
     return () => {
       document.body.style.overflow = priorOverflow;
     };
@@ -821,12 +825,21 @@ export function CommandProvider({
         );
         const first = elements[0],
           last = elements.at(-1);
-        if (event.shiftKey && document.activeElement === first) {
+        // The dialog itself can own focus while controls are withheld or
+        // removed (for example, during Add session verification and Retry).
+        // Enter the tab order in either direction instead of leaving the modal.
+        const outsideTabOrder = !elements.some(
+          (element) => element === document.activeElement,
+        );
+        if (
+          outsideTabOrder ||
+          (event.shiftKey
+            ? document.activeElement === first
+            : document.activeElement === last)
+        ) {
           event.preventDefault();
-          last?.focus();
-        } else if (!event.shiftKey && document.activeElement === last) {
-          event.preventDefault();
-          first?.focus();
+          (event.shiftKey ? last : first)?.focus();
+          if (!first) dialog.current?.focus();
         }
         return;
       }
