@@ -3,6 +3,8 @@ import { createRouteReadiness } from './route-readiness';
 import { createRoutePendingState } from './route-pending-state';
 import { routeKey } from './route-key';
 import { titleTarget } from './route-motion-state';
+import { inventoryFilterParams } from '@/features/inventory/scope-presentation';
+import { readFilters } from '@/features/inventory/read-model';
 
 const source = '/inventory?q=cable&type=quantity';
 const returned = source + '#inventory-row-2';
@@ -29,9 +31,29 @@ async function fixture(
     originalHref?: string;
     navigation?: boolean;
     deferAttach?: boolean;
+    registeredRawRoute?: string;
   } = {},
 ) {
   history.replaceState(null, '', options.href ?? returned);
+  const rawRoute = routeKey(
+    location.pathname,
+    new URLSearchParams(location.search),
+  );
+  const registeredRawRoute = options.registeredRawRoute ?? rawRoute;
+  // InventoryPage supplies the canonical filter return path and separately
+  // registers the exact raw readiness key, including defaults/ignored params.
+  const query = new URLSearchParams(location.search);
+  // InventoryPage takes the first value of each repeated search parameter.
+  const params = Object.fromEntries(
+    [...new Set(query.keys())].map((key) => [key, query.get(key) ?? undefined]),
+  );
+  const canonicalParams = inventoryFilterParams(params);
+  if (params.page)
+    canonicalParams.set('page', String(readFilters(params).page));
+  const canonicalReturn =
+    '/inventory' +
+    (canonicalParams.size ? '?' + canonicalParams : '') +
+    '#inventory-row-2';
   vi.spyOn(performance, 'getEntriesByType').mockReturnValue([
     {
       name: new URL(
@@ -117,9 +139,11 @@ async function fixture(
       section.append(row);
       const target = titleTarget(
         record,
-        options.wrongScope ? '/inventory?q=other#inventory-row-2' : returned,
+        options.wrongScope
+          ? '/inventory?q=other#inventory-row-2'
+          : canonicalReturn,
         { domain: 'unplaced' },
-        options.wrongScope ? '/inventory?q=other' : source,
+        options.wrongScope ? '/inventory?q=other' : registeredRawRoute,
       )!;
       if (!options.unregistered)
         unregister.push(owner.registerSource(target, link));
@@ -147,7 +171,12 @@ async function fixture(
     position,
     scroll,
     navigation,
+    canonicalReturn,
     row: () => row,
+    setAuthority: (value: typeof permission) => {
+      permission = value;
+      controller.reconcile();
+    },
     authorize: (key = 'actor:grant') => {
       permission = { key, ready: true };
       controller.reconcile();
@@ -205,6 +234,146 @@ it('authorization before primary waits without manufacturing readiness', async (
   f.reveal();
   await Promise.resolve();
   expect(f.scroll).toHaveBeenCalledTimes(1);
+});
+
+// Match readAuthority's [actor, generation, revocation revision, assignment
+// epoch] lifecycle: a non-null provisional value precedes fresh verification.
+const privacyKey = (generation: string, actor = 'actor') =>
+  JSON.stringify([actor, generation, 0, 0]);
+it.each(['absent', '11111111-1111-4111-8111-111111111111'])(
+  'binds only the first fresh privacy grant after provisional generation becomes %s',
+  async (generation) => {
+    const f = await fixture();
+    f.setAuthority({ key: privacyKey(''), ready: false });
+    f.reveal();
+    await Promise.resolve();
+    expect(f.scroll).not.toHaveBeenCalled();
+    f.setAuthority({ key: privacyKey(generation), ready: true });
+    await Promise.resolve();
+    expect(f.scroll).toHaveBeenCalledExactlyOnceWith({
+      left: 0,
+      top: 234,
+      behavior: 'instant',
+    });
+    f.controller.reconcile();
+    f.reveal();
+    await Promise.resolve();
+    expect(f.scroll).toHaveBeenCalledTimes(1);
+  },
+);
+
+it('explicit revocation while provisional is terminal before the first grant', async () => {
+  const f = await fixture();
+  f.setAuthority({ key: privacyKey(''), ready: false });
+  f.reveal();
+  f.revoke();
+  f.setAuthority({ key: privacyKey('absent'), ready: true });
+  f.reveal();
+  await Promise.resolve();
+  expect(f.scroll).not.toHaveBeenCalled();
+  await f.remount();
+  expect(f.scroll).not.toHaveBeenCalled();
+});
+
+it.each(['null', 'generation', 'actor'])(
+  'retires a bound grant after %s replacement even when the replacement is not ready',
+  async (replacement) => {
+    const f = await fixture();
+    const key = privacyKey('absent');
+    f.setAuthority({ key, ready: true });
+    f.reveal();
+    f.setAuthority(
+      replacement === 'null'
+        ? null
+        : {
+            key: privacyKey(
+              replacement === 'generation' ? 'new-generation' : 'absent',
+              replacement === 'actor' ? 'other-actor' : 'actor',
+            ),
+            ready: false,
+          },
+    );
+    f.setAuthority({ key, ready: true });
+    await Promise.resolve();
+    expect(f.scroll).not.toHaveBeenCalled();
+  },
+);
+
+it('retains a bound same-authority pause while a queued repair waits for a fresh grant', async () => {
+  const f = await fixture();
+  const key = privacyKey('absent');
+  f.setAuthority({ key, ready: true });
+  f.reveal();
+  f.setAuthority({ key, ready: false });
+  await Promise.resolve();
+  expect(f.scroll).not.toHaveBeenCalled();
+  f.setAuthority({ key, ready: true });
+  await Promise.resolve();
+  expect(f.scroll).toHaveBeenCalledExactlyOnceWith({
+    left: 0,
+    top: 234,
+    behavior: 'instant',
+  });
+});
+
+it.each([
+  ['/inventory', '/inventory'],
+  ['/inventory?type=all', '/inventory'],
+  ['/inventory?status=active', '/inventory'],
+  ['/inventory?scopeAdjusted=true', '/inventory'],
+  ['/inventory?type=all&status=active&scopeAdjusted=true', '/inventory'],
+  ['/inventory?q=cable&q=adapter&type=all', '/inventory?q=cable'],
+])(
+  'restores the canonical registered row from its exact raw readiness route %s',
+  async (rawRoute, canonicalRoute) => {
+    const f = await fixture({ href: rawRoute + '#inventory-row-2' });
+    expect(f.canonicalReturn).toBe(canonicalRoute + '#inventory-row-2');
+    f.authorize();
+    f.reveal();
+    await Promise.resolve();
+    expect(f.scroll).toHaveBeenCalledExactlyOnceWith({
+      left: 0,
+      top: 234,
+      behavior: 'instant',
+    });
+  },
+);
+
+it.each([
+  ['/inventory?type=all', '/inventory?status=active'],
+  ['/inventory?q=cable&q=adapter', '/inventory?q=adapter&q=cable'],
+  ['/inventory?q=cable&type=all', '/inventory?q=adapter&type=all'],
+])(
+  'rejects a registered raw source %s when readiness belongs to %s',
+  async (registeredRawRoute, rawRoute) => {
+    const f = await fixture({
+      href: rawRoute + '#inventory-row-2',
+      registeredRawRoute,
+    });
+    f.authorize();
+    f.reveal();
+    await Promise.resolve();
+    expect(f.scroll).not.toHaveBeenCalled();
+  },
+);
+
+it('a canonically equivalent or repeated-query full URL change before execution still cancels first arrival', async () => {
+  for (const [original, changed] of [
+    ['/inventory?type=all', '/inventory'],
+    ['/inventory?q=cable&q=adapter&type=all', '/inventory?q=cable&type=all'],
+  ]) {
+    const f = await fixture({ href: original + '#inventory-row-2' });
+    f.authorize();
+    f.reveal();
+    history.replaceState(null, '', changed + '#inventory-row-2');
+    await Promise.resolve();
+    expect(f.scroll).not.toHaveBeenCalled();
+    history.replaceState(null, '', original + '#inventory-row-2');
+    f.controller.reconcile();
+    await Promise.resolve();
+    expect(f.scroll).not.toHaveBeenCalled();
+    f.controller.dispose();
+  }
 });
 
 it.each(['invalidate', 'accepted-navigation'])(

@@ -124,11 +124,11 @@ export function createApplicationReturn(
       readiness,
       initialActorId,
       () => (disposed ? null : authority()),
-      (anchor, listHref) => {
+      (anchor, rawRouteKey) => {
         const matches = [...sources.values()].filter(
           ({ target, element }) =>
             target.anchor === anchor &&
-            target.listHref === listHref &&
+            matchesTitleListRoute(target, rawRouteKey) &&
             visibleSource(target) === element,
         );
         return matches.length === 1

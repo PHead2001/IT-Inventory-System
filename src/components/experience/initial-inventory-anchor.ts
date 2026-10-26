@@ -21,12 +21,12 @@ export function createInitialInventoryAnchor(
   >,
   actorId: string,
   authority: () => Authority,
-  sourceRow: (anchor: string, listHref: string) => HTMLElement | undefined,
+  sourceRow: (anchor: string, rawRouteKey: string) => HTMLElement | undefined,
 ) {
   let attempt: Attempt | undefined;
   let href: string | undefined;
   let anchor: string | undefined;
-  let listHref: string | undefined;
+  let rawRouteKey: string | undefined;
   let boundAuthority: string | undefined;
   let detach: (() => void) | undefined;
   let scheduled: (() => void) | undefined;
@@ -60,20 +60,22 @@ export function createInitialInventoryAnchor(
       cancel();
       return;
     }
-    if (value) boundAuthority ??= value.key;
+    // A provisional privacy check can change generation before its first grant.
+    // Once granted, any authority replacement (even not-ready/null) retires it.
+    if (value?.ready) boundAuthority ??= value.key;
     return value?.ready ? value : undefined;
   };
   const reconcile = () => {
     const value = current();
-    if (!value || !anchor || !listHref || scheduled) return;
+    if (!value || !anchor || !rawRouteKey || scheduled) return;
     const primary = readiness.currentPrimary();
     if (
       !primary ||
       primary.actorId !== actorId ||
-      primary.routeKey !== listHref
+      primary.routeKey !== rawRouteKey
     )
       return;
-    const row = sourceRow(anchor, listHref);
+    const row = sourceRow(anchor, rawRouteKey);
     // An admitted primary is terminal for a missing/ambiguous source. Never
     // guess an occurrence from a later unrelated render or arbitrary hash.
     if (!row || !primary.root.contains(row)) {
@@ -93,7 +95,7 @@ export function createInitialInventoryAnchor(
         if (!active || !current()) return;
         if (
           readiness.currentPrimary() !== primary ||
-          sourceRow(anchor!, listHref!) !== row ||
+          sourceRow(anchor!, rawRouteKey!) !== row ||
           !primary.root.contains(row)
         ) {
           cancel();
@@ -172,7 +174,7 @@ export function createInitialInventoryAnchor(
           return;
         href = initial.href;
         anchor = initial.hash.slice(1);
-        listHref = routeKey(initial.pathname, initial.searchParams);
+        rawRouteKey = routeKey(initial.pathname, initial.searchParams);
         attempt.phase = 'waiting';
       } catch {
         return;
