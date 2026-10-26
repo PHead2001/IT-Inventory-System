@@ -2,6 +2,8 @@ import { act, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { RecordName } from './record-name';
+import { renderToString } from 'react-dom/server';
+import { hydrateRoot } from 'react-dom/client';
 let overflow = false;
 let remeasure: () => void;
 let fonts: EventTarget & { ready: Promise<void> };
@@ -59,6 +61,39 @@ it('offers no no-op disclosure when the rendered name fits, regardless of its ch
   view.rerender(<RecordName name={'A'.repeat(170)} />);
   expect(screen.queryByRole('button')).toBeNull();
   expect(screen.getByRole('heading')).toHaveTextContent('A'.repeat(170));
+});
+it('hydrates the same reserved control slot and heading before overflow measurement adds an accessible control', async () => {
+  const name = 'Measured overflow, not a character threshold';
+  const container = document.createElement('div');
+  container.innerHTML = renderToString(<RecordName name={name} />);
+  document.body.append(container);
+  const slot = container.querySelector('[data-record-name-control]');
+  const heading = container.querySelector('h1');
+  expect(slot).not.toBeNull();
+  expect(slot!.childElementCount).toBe(0);
+  overflow = true;
+  let root!: ReturnType<typeof hydrateRoot>;
+  try {
+    await act(async () => {
+      root = hydrateRoot(container, <RecordName name={name} />);
+    });
+    expect(container.querySelector('[data-record-name-control]')).toBe(slot);
+    expect(container.querySelector('h1')).toBe(heading);
+    const control = screen.getByRole('button', { name: 'Show full name' });
+    expect(slot).toContainElement(control);
+    expect(control).toHaveAttribute('title', 'Show full name');
+    expect(control).toHaveAttribute('aria-controls', heading!.id);
+    expect(control.querySelector('svg')).toHaveAttribute('aria-hidden', 'true');
+    act(() => {
+      overflow = false;
+      remeasure();
+    });
+    expect(screen.queryByRole('button')).toBeNull();
+    expect(container.querySelector('[data-record-name-control]')).toBe(slot);
+  } finally {
+    act(() => root?.unmount());
+    container.remove();
+  }
 });
 it('reacts to resize and font completion and preserves focus when the disclosure becomes unnecessary', async () => {
   render(<RecordName name="Literal <tag> 🔌" />);

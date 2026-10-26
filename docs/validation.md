@@ -134,6 +134,277 @@ For isolated hosted export proof, set the **server-only** `EXPORT_DIAGNOSTICS_EN
 
 package.json is the canonical command source. Iterate cheaply; certify the final candidate completely.
 
+Route motion regression coverage lives in `route-motion.test.tsx`,
+`shared-title-motion.test.ts` and `page-arrival.test.tsx`. Stable React/React DOM
+and their types are aligned at 19.3.0; Fiber 9.8.1 supports that runtime and
+Activity/Canvas lifecycle compatibility. Drei/Three remain unchanged. The jsdom
+environment lacks native snapshots/layout, so Vitest supplies a children-preserving
+adapter while focused tests inspect boundary intent and captured geometry.
+This proves permission/identity/cancellation and transform-only replacement
+contracts, not native animation. `route-motion.spec.ts` observes actual native
+old/new capture and WAAPI replacement under the production Next runtime, including
+duplicate holdings and animated app Back, instant unanchored/anchored native Back
+and Forward with filter/row/scroll restoration, desktop/390 px/long/scrolled
+titles, live-search query updates, canvas/ancestor exclusion, immediate reduced
+and unsupported paths. It attaches before/after captures and native proof; actual
+recordings/visual inspection must also rule out clipping and end snaps. Full build,
+authenticated real-browser journeys, dirty/error/focus sibling workflows and
+independent review remain required before accepting the route subset of D303.2.
+Two authored supplemental E2E cases remain runtime PENDING: `location-browser-boundaries.spec.ts` requires actual 25+1 pagination and status/child/recovery links to preserve the validated location-browser return; `route-motion.spec.ts` checks that the real held Flight route falls back to an earlier observer for unclaimed prefetch probes before and after claiming navigation. They reuse canonical local fixtures/transport helpers and require the canonical authenticated production-build E2E gate. Authorship, discovery and scoped static checks do not establish browser acceptance or promote any of the 76 audit requirements.
+The focused command is `npm run test:e2e -- tests/e2e/location-browser-boundaries.spec.ts tests/e2e/route-motion.spec.ts --grep "actual location status, pagination, child and recovery|held real Flight preserves earlier observers"`. It retains the canonical build and loopback-only owned-fixture lifecycle; a previous CI run cannot cover these newly authored tests. The existing location-boundary case separately exercises the real 33rd-expansion notice, duplicate-name breadcrumb labels and child Details return. Missing read-only hosted pagination/topology is not a pass for those surfaces.
+
+For the PR54 route subset, exact bd467 canonical browser CI run `39498913854` passed its required/browser step for logout, same-actor/deferred denial, active system/local reduction, unavailable-start navigation, committed 33rd-expansion/duplicate-breadcrumb/child-return coverage and fallback unit tests. A separate 1280 px Full unsupported-identity run passed with `activeViewTransition` explicitly simulated absent before app interaction; it verified zero-stage Forward/App Back and preserved filters against a positive Full baseline in the same Chrome 151 engine. Its receipt is `.local-tools/pr54-hosted-bd467506/unsupported-identity-1280-full-v8-summary-20261021.report.json` (SHA-256 `3B5DB082938F24A05F1B91314B0FB59DB8BF1298D5C384B68C66391CCD12AE16`). This is scoped fixture evidence only: it does not establish natural browser support/absence or a physical-browser unsupported case. Retained bd467 hosted record/cold passes and scoped 390 px Full pixel review are documented in the [acceptance checkpoint](audit-4-2-acceptance.md). The four-configuration hosted Locations matrix completed all seven functional journeys per configuration; its aggregate report remains PARTIAL only for second-page pagination/33rd-expansion gaps (SHA-256 `3CBEA022828789CABCF421D3B6B9DFBD1839FB8142C843D66E0F794989FE4420`). Phone inline Full also has a functional pass, while its earlier residual remains unreproduced and not proved fixed. The newly authored pagination and held-Flight observer E2E cases and broader visual boundaries retain their own pending proof requirements.
+Panels/receipts/disclosures remain pending U406 integration. W09 source and
+journeys are implemented, with final readiness/overlap acceptance still pending.
+
+Inventory title pairing uses the server's canonical row-return scope separately
+from the full raw query key used by readiness and privacy admission. Default
+type/status, trimmed search text, recovery flags and normalized page numbers do
+not disable pairing for those rendered results. A row gesture records both the
+canonical scope and that exact raw primary key. App Back reuses only the approved
+origin with the existing record, holding and anchor checks. Native Back/Forward
+restores the actual history scope without pairing or approving a different query. Focused RouteReady, inventory
+page, pairing-component and motion-state regressions cover these contracts and
+reject unrecorded aliases. They do not replace real browser/native capture proof.
+
+The running local-reduction case uses a second signed-in Settings page in the
+same browser context. Its real motion switch is focused before the first page's
+History transition; Space changes the stored preference at native readiness and
+the browser delivers the cross-tab storage event. The first page must remain
+visible, cancel while the snapshot is active, and keep later routes instant.
+The helper page closes in cleanup. This exercises an actual cross-tab preference,
+without injecting animation state or extending the native animation.
+
+The W08 route-loading tests in `src/app/(protected)/loading.test.tsx`
+mount actual Suspense fallbacks for Inventory/records, History/events, Labels, new
+inventory records and category-form routes. They prove one loading status alongside delayed top
+progress, actual reveal/readiness, retained Back waits, overlapping fallback
+owners, retirement and unrelated pending work. `loading-skeleton.test.tsx` covers
+local/system reduction, hidden-page shimmer/reveal cancellation and retained
+content/focus without delayed errors. The duplicate announcement regression first
+failed against the existing plain route fallback (two status regions), then
+passed after opaque owner election. jsdom readiness geometry is supplied explicitly;
+these tests do not prove streamed Next loading boundaries, native title pairing,
+layout stability or populated visual quality. The existing delayed RSC/browser
+journeys remain separate runtime acceptance. Retained route evidence is a
+137-test batch across nine suites followed by a separate 56-test query/regression
+batch; those results are not one combined run.
+
+The audited inline W08 waits are now implemented in `spaces-workspace.tsx`,
+`room-workspace.tsx`, `metadata-form.tsx`, `files-panel.tsx`, `label-designer.tsx`
+and `assign-workspace.tsx`, with their paired component tests and the shared
+`loading-skeleton.tsx`/test: 14 source/test files in the held local candidate.
+Coverage includes renderer chunks, category fields, files, selected contents,
+label search and compact queued-record details, occupancy and inspection.
+Nonvisual loading announcements sit outside busy ancestors; errors, cancellation,
+usable prior content, drafts, focus and mounted controls retain their existing
+contracts. Quick fades follow real waits, including populated and empty file
+successes; selected contents retain the existing 170 ms reduced-aware arrival.
+The reveal controller reads only the canonical HTML motion mode and the OS
+preference, never Storage. Unknown/missing modes remain static; withdrawal,
+Reduced and hidden-page changes cancel motion without remounting private content.
+
+Accepted local component evidence comprises 422 tests across reused scoped
+batches, followed by the 76-test Files suite including two new deferred-empty
+cases. This is not a single full-suite run or exact-SHA certification. Focused
+regressions cover announcements outside busy regions, real readiness/error
+settlement, deferred queue details, initial and empty file reads, inspection
+cancellation/focus, unchanged privacy-admission storage assertions, stable
+reveal DOM/focus, no fake initial-ready fade, and live motion cancellation.
+Final ordinary consumer and independent Astra helper source reviews have no
+actionable findings. Typecheck, scoped zero-warning lint, formatting and diff
+checks passed during iteration. Native Full/Reduced populated/empty layout and
+fade inspection, screen-reader announcements, streamed Next Flight/browser
+journeys, integrated staging and the final canonical/exact-SHA gates remain
+pending. Neither all of W08 nor D303.2 is accepted by these local checks.
+
+`paired-route-loading.test.tsx` uses actual React Suspense/StrictMode to prove the
+same outgoing node/draft survives a legitimate held pair, plus real primary reveal,
+app Back, native Back cancellation, supersede, errors, reduction, provider retirement,
+fresh-grant fencing and same-page draft/focus preservation. Its pathname/query
+adapter updates inside React's route transition; a global pathname mutation would
+incorrectly force an urgent keyed remount and is not a supported router simulation.
+An accepted route exit may unmount its outgoing owner after revocation while its
+replacement remains hidden; a baseline ordinary loading fallback demonstrates that
+same owner relinquishment. Existing canonical privacy tests retain strict same-page
+business/retry ownership and prove deferred revocation/recovery. Interrupted
+paired navigation explicitly falls back to ordinary loading/crossfade: the real
+privacy-controller regression proves the second destination can reveal or be
+canceled, and late first/second primaries cannot replay over the current route.
+The installed Next `RedirectBoundary` is exercised through an isolated router
+context adapter for an untracked replacement and a query-only Back redirect;
+the latter preserves an unrelated real pending registration. The route-key
+effect cancels a mismatched presentation gate without manufacturing readiness.
+These are React/isolated-boundary checks, not a complete Next LayoutRouter or
+streamed Flight test. None of these jsdom tests establishes native snapshot pairing.
+
+The precommit privacy regressions model a stable opaque router slot whose incoming
+server primary finishes before privacy verification, plus native Back/Forward
+restoration through the canonical post-commit privacy check. Controller/ticket tests cover exact repeated raw query
+values, unrelated targets, original-binding verification, stale actor/backend/
+role/configuration/server-generation/revision/epoch rejection, hidden-page and
+provider retirement, supersede/cancel/redirect settlement, denied/unavailable
+identity and distinct recovery after changed logout evidence. The first changed-
+revision render must reject a completed ticket before private bootstrap effects
+mount. These logical React fixtures do not establish real native snapshots or
+production LayoutRouter timing; browser CI remains required.
+
+Native browser Back/Forward is intentionally instant under the installed eager
+Next/React restore. The removed Navigation API preparation no longer claims a
+native shared-title animation. Native provider regressions in
+`native-route-traverse-provider.test.tsx` verify
+no precommit preparation/interception/history writes, cancellation of departing
+snapshots and paired work, real actor/route readiness, Reduced/unsupported behavior,
+revocation/retirement fencing and animated app Back after native Forward.
+The paired-route-loading suite retains real privacy-controller and cached Activity
+restoration with both router-listener orders and explicit verification delays.
+App Link forward/Back still requires positive shared-title capture and transform
+replacement in the browser suite; native Back/Forward requires zero captures and
+correct filters, source row/anchor, scroll and authorized primary restoration.
+Component fixtures do not establish actual browser history, scroll or hosted Auth.
+
+`native-scroll-restoration.test.ts` covers the bounded provider-local history-entry
+checkpoints used when a privacy recheck collapses the destination and clamps scroll.
+It checks exact query/hash and entry identity, repeated URLs with different offsets,
+both admission and popstate-listener orders, already-authorized entries without a
+new readiness effect, plain router filters, exact internal replacement, user
+interruption, rapid traversal, authority invalidation, stale callbacks, the 50-entry
+cap, finite/nonnegative offsets, shorter-page one-shot clamping and unsupported or
+failed observers. Pointer/scrollbar and middle-mouse interruption coverage also
+proves that inactive input leaves normal checkpoint capture intact. Aborted
+dirty-leave attempts resume capture at the unchanged authorized source, preserving
+the user's later offset; one owned AbortSignal listener is retired on supersede,
+commit, authority change, detach and disposal. Delayed aborts cannot cancel newer
+pending restoration or reauthorize retired callbacks, and temporary privacy checks
+still wait for a fresh grant and real primary. These paths do not prevent browser
+input, intercept navigation or rely on a global navigation-error event. Explicit
+same-document fixtures retain those freeze/abort regressions. Cross-document
+same-origin and external destinations instead leave authorized current-source
+capture active: choosing Stay with neither signal abort nor entry change must
+preserve a newer offset for a later real native traversal. Missing sameDocument
+proof cannot start a departure freeze; superseded same-document abort callbacks
+cannot interfere with a subsequent traversal. These are coordinator regressions,
+not proof of a real browser's beforeunload dialog or hosted document lifecycle.
+`native-scroll-restoration.integration.test.tsx` mounts the real
+route provider and canonical readiness owner to exercise hidden same-authority
+privacy collapse, both admission orders and real revocation notifications. Three
+additional provider regressions reproduced premature restoration when a new
+primary registered in the same commit as a changed privacy generation, a new
+actor with a retained old-actor primary, or ready=false with visible=true. Publishing
+committed privacy/actor references in an insertion effect before child layout
+notifications makes those regressions pass; the same-authority pending checkpoint
+still survives the temporary check and restores once after a later fresh grant.
+`route-readiness.test.ts` also proves that read-only primary observation neither
+acknowledges commits nor settles another owner's pending registration. Focused
+helper/provider/readiness and route-motion sibling checks use one worker and a
+768 MiB heap; canonical typechecking uses 1536 MiB with scoped zero-warning
+lint/format checks. These are local jsdom
+contracts with supplied geometry and scroll behavior. They do not prove actual
+browser document-height collapse, final-candidate native restoration, hosted Auth
+or native animation; authenticated browser proof and independent review remain
+required. Native history must stay instant while application Back remains animated
+under the existing Full-motion requirements.
+
+The native route-motion browser case now authors a real server-primary delay after
+early Flight fallback bytes, rather than holding a complete HTTP response. The
+`route-primary-delay.ts` fixture refuses hosted/nondefault endpoints and scheduling
+overrides before SQL. Only canonical loopback API 54321/database 54322 and the
+single-worker exclusive route-motion phase are accepted. A transaction acquires
+`quantity_items` ACCESS EXCLUSIVE only after the owned source screen is rendered;
+an independent local connection observes blocked primary reads. Acquisition,
+statement and idle-transaction timeouts are session/transaction scoped; finally
+rolls back and closes both connections. This changes no data or schema. A separate
+authenticated bounded Flight reader observes fallback bytes while the actual browser
+request streams normally; neither headers nor body are attached. The held source
+must remain the same visible node, with live progress and no fallback/native capture,
+before release and the exact forward/app Back title assertions, followed by
+functional instant native-history assertions. Fixture/scheduling
+guards have unit coverage. System and browser-local Reduced cases at 1280/390 px
+also hold real primary reads through fallback, restore native history URL/filter/
+scroll state, deliver an interrupted real Flight response after native Back, and
+activate anchored application Back by keyboard. They assert no native transition,
+title replacement or lingering pseudo-element animation, ordinary Reduced record
+skeletons, and normal focus after the departing link is removed. These authored
+cases have not been executed in this
+bounded integration cycle. They require the canonical disposable stack/production
+Next build and cannot run against a hosted preview. Hosted proof uses ordinary slow
+routes and native observation without this local lock fixture.
+The shared held-response helper rejects its delivery promise when genuine fetch
+or fulfillment fails; cleanup completion remains separate. Unit regressions force
+late fulfillment rejection after arrival, prove delivery waits for successful
+fulfillment, and retain cleanup after fetch/abort failure. Cached content therefore
+cannot substitute for the journey's awaited late-response fulfillment.
+Inventory destination-prefetch regressions cover the shared route-link policy,
+navigation hover/focus overrides, URL-object/query/hash handling, creation and
+external-route exclusions, ordinary navigation guards/modifiers, and the raw
+asset-tag advisory exception. The production-browser Full case now includes a
+real custom-answer Full details sibling with the exact paired row href, discards
+the prior router cache through hard source navigation, and cancels any genuinely
+attempted inventory partial prefetch. It requires zero such requests after real
+sibling hover/focus, cold primary-held title pairing, native history, app Back
+and navigation-link intent. The canceling probe exercises the old null-prefetch
+failure path if a caller reintroduces speculative requests; it never manufactures
+Flight, resolves a private cache promise, or bypasses the actual primary lock.
+Unit checks cannot establish native cold pairing; the actual production-browser
+case and exact-candidate hosted acceptance remain required. Disabling speculative
+inventory fetches may increase cold-click latency; no framework patch or provider
+upgrade is included.
+The decisive actual-React regression first reproduced async-action entanglement:
+a replacement caller rendered Ready while native pending remained behind a
+departed caller's unresolved action. It now passes with per-invocation promise
+tracking outside React async transitions and synchronous-only route transitions.
+Focused checks cover simultaneous task owners, late completion/rejection, owned
+abort, actual suspended route reveal, exact synchronous router errors, Activity
+readiness and quiet provider retirement. The latest bounded cycle passed 305 tests
+in ten affected suites, canonical typecheck and scoped zero-warning lint. A
+post-typecheck null-guard correction also passed all 31 route-motion tests.
+Final formatting and full certification remain pending. Independent review found holding-identity and
+local-busy lifetime gaps. The source correction carries stable storage/site UUIDs
+or explicit unplaced identity through Back pairing and separates invocation busy
+from global presentation epochs. New replacement/deletion/reordering, hash Back
+with a held Settings request, same-owner overlap and retained-closure regressions
+passed in that cycle.
+Residual-origin corrections additionally cover prior-origin ambiguous capture,
+ordinary same-record full-details links and canceled capture followed by a plain
+same-href gesture. Their one-event approval and independent-task preservation
+regressions also passed. Lint repairs preserve provider incarnation guards and
+derive local busy from committed snapshots of actual task-map events; the latest
+305-test run includes those repairs. These results do not establish native capture
+or streamed browser readiness.
+Real WebGL mount/unmount, native Back, camera preservation and canvas-ancestor
+exclusion after Fiber upgrade remain mandatory browser criteria. The room journey
+checks a nonempty visible canvas-to-root ancestor chain for excluded transition
+names at remount and Back, plus any names observed during actual native captures.
+The whole-page boundary explicitly excludes room source/destination snapshots;
+ordinary privacy verification can reveal its separate header synchronously, so
+this journey does not require a positive snapshot count. Eligible paired-title
+journeys retain their positive native-capture assertions. It also requires an
+exact camera roundtrip and zero document navigation fallback; it does not claim
+Next's Activity cache was used. These corrections still require browser reruns.
+The camera journey now covers Full and Reduced motion at both widths, including
+Free Orbit, Pan right, Close controls, Search inventory and native Back before
+Hide/Show recreates the renderer. It compares the live canvas pose with the saved
+workspace pose. CameraRig regressions cover replacement camera/controls resources,
+withheld restoration grants, outgoing-resource cleanup, explicit selection focus
+and consumed-command preservation in both motion modes. Passing these local
+resource regressions does not establish that the hosted reduced-motion failure
+used that resource replacement path; the exact hosted journey remains required.
+Repository runner image inputs were regenerated;
+Bundle coherence/version requires root-owned integration with the current runner
+baseline before final certification.
+
+Additional authored native journeys at 1280/390 px use actual mobile Menu
+navigation, ordinary logout/preference controls and genuine read-only action
+denials for disposable loopback actors. They observe cancellation during a
+running snapshot without pausing or extending animations. The deferred-denial
+journey across logout/login proves real response transport, zero observed
+in-flight cancellations and preserved replacement navigation. `route.fulfill`
+is not a client observer-completion barrier: this browser journey does not
+positively observe the private retired-scope continuation. The completed-callback
+and generation-isolation unit regressions remain authoritative for that rule;
+isolated browser continuation proof remains limited. These additional browser
+journeys are authored, not runtime-accepted, until the real loopback suite runs.
+
 The canonical database integration gate runs
 `tests/integration/audit-four-edit-integrity.ts` after the existing Audit three
 contracts. It directly calls every supported legacy/v2/v3 metadata update API,
@@ -225,6 +496,22 @@ origins, GET nonconsumption, explicit confirmation and CSRF protection, and they
 not inspect or change hosted Auth configuration.
 
 ## Proof by layer
+
+`privacy-read-sdk.test.ts` exercises the installed Supabase SSR, Auth and
+PostgREST SDKs with intercepted outbound fetches and cookies seeded by the SDK.
+Expired and near-expiry sessions issue no outbound refresh request or cookie
+write and return unavailable, including the SDK's still-valid bearer fallback.
+Explicit-JWT user verification plus an Authorization-bearing membership request
+also exercises PostgREST's session refresh path. Matching, revoked and changed
+bindings, a held read after caller logout, and ordinary writable refresh followed
+by privacy retry have permanent coverage. The fetch guard separately rejects
+non-GET, other tables, credentials, other origins and redirects. These tests use
+synthetic provider responses; they do not certify hosted Auth configuration.
+The query-only Scan and retained private-title browser fixtures defer or reject
+the canonical `read-generation` POST to `/api/auth/privacy-read`, with exact
+operation selection; identity verification and business actions pass through.
+They continue to assert withheld storage bootstrap, hidden private presentation,
+cleared document titles and preservation of the original draft owner.
 
 The logout privacy regression also mounts a populated label queue with an already
 acknowledged generation, fails authoritative logout cleanup, then retries under
@@ -489,6 +776,43 @@ record names or UUIDs. Authorized successful D304 routes have named titles as
 described above; their missing-resource branches retain these privacy checks.
 Keep real direct missing-resource document requests (including their HTTP 404
 status), anonymous access checks, and client navigation evidence distinct.
+Fallback unit regressions hold the membership guard and separately reject login
+and inactive-member access before returning protected/inventory bodies or
+inventory-specific metadata. The inventory browser journey retains the full
+anonymous redirect-body assertion for image-like quantity and asset paths with
+a forged document selector. Those actual responses must exclude inventory
+fallback identity; mocked guard tests alone do not establish Next serialization.
+Proxy matcher regressions also cover formerly excluded public image and internal
+asset paths: URL-derived selectors replace forged headers without Auth/cookie
+reads or asset cache-policy changes. Protected image-like record paths retain
+their claims refresh and private/no-store response. The inventory browser journey
+checks anonymous and authenticated generic missing JPEG/SVG responses with forged
+inventory headers: HTTP 404, generic fallback identity and no requested UUID.
+The scoped compiled fixture reproduced the forged-selector redirect/private
+fallback on generic JPEG/SVG URLs before broad normalization, then returned
+generic 404s for anonymous and authorized requests afterward. Its real public
+SVG retained `public, max-age=0`; its Next chunk retained public immutable caching.
+The updated focused boundary batch passed 107 tests in eight files. This fixture
+uses simulated membership; final application CI remains the actual Auth/browser
+proof.
+The scoped installed-Next production fixture reproduced fallback identity in
+both login and inactive-member 307 response bodies before the guard, then excluded
+body and metadata markers after it. Both builds used one build worker; guarded
+browser probes retained public/authenticated 404, one main, zero-document client
+recovery, query navigation, native Back/Forward, a formerly missing record becoming
+valid and Flight delivery before the delayed read completed. The focused fallback,
+layout, admission, session and proxy batch passed 93 tests in eight files; canonical
+typechecking and scoped lint/format checks passed. These working-tree checks do
+not certify actual application Supabase/browser responses or replace final-SHA
+application CI and independent review.
+The two retained pristine-site and mapped-location journeys include failure-only
+input handoff diagnostics. A 128-entry buffer records allowlisted field identity,
+focus/input delivery, value lengths/match booleans, native transition milestones
+and matching site-draft write sequences. Raw values, identifiers and action bodies
+are excluded. The observer preserves native transition/storage results and errors;
+four focused tests cover its bounds, privacy, scoping and restoration. It logs once
+on journey failure without extra waits, input retries or altered assertions. This
+is diagnostic coverage for the unresolved input-loss flakes, not a proven fix.
 The navigation-workflow E2E uses a clearly synthetic navigation-boundary fixture: a real
 owned inventory NextLink receives the server's real missing-record RSC response
 through a scoped non-prefetch request rewrite. It requires unavailable content,
@@ -526,12 +850,45 @@ backend-specific build during canonical `npm run test:e2e` and focused build-inf
 It uses the current Node executable, a bounded subprocess deadline/output limit and
 sanitized status/TAP assertions; nonzero exit or missing regression execution fails
 the browser suite. No additional build, package script or workflow is introduced.
-The same command can also run directly after `npm run build` without a database.
-It loads the actual compiled Settings page and compares its read-helper result with
-the saved build configuration, then changes runtime environment and repeats calls
-in two fresh processes. This proves literal immutability without a database; it does
-not render an authenticated HTTP request. Boundary tests separately exercise delayed
-worker reload, strict bridge rejection, typegen/import fallback and fresh build lifetimes.
+Failure diagnostics expose only allowlisted stage/reason tokens, carried over the
+existing private child IPC and extracted from bounded TAP output. Arbitrary child
+fields, error messages, HTML/Flight bodies, cookies and credentials never enter the
+browser assertion label. This distinguishes input/Auth setup, listener setup,
+response validation, literal-tree checks and cleanup without dumping private data.
+The probe requires the canonical disposable loopback backend and fictional viewer.
+It authenticates once with caller credentials, passes the session only over private
+IPC, and serves the existing production build on an ephemeral loopback port in two
+sequential processes (512 MiB heap and 30 seconds each). Each process checks two real
+authorized Settings Flight responses against the saved allowlisted snapshot, with forged
+runtime environment before startup and again between requests. Requests to any
+other backend are rejected before transport. Both servers close before reporting;
+the parent revokes only its own viewer session in cleanup. No second build or
+public probe route is introduced. The request uses `RSC: 1` and
+`Accept: text/x-component`; the pinned installed Next router helper computes the
+matching `_rsc` query parameter from those actual request headers before transport.
+Installed Next 16.3.6 validates this parameter even when its expected hash is empty:
+omitting `_rsc` supplies null and triggers a 307 before rendering. The focused
+regression first reproduced that mismatch, then passed with the canonical request.
+Redirects remain refused. This source and regression evidence establishes the
+request correction; attribution of the observed CI redirect and confirmation of
+the corrected compiled probe still require an actual compiled browser CI rerun.
+Status/content type and a 512 KiB raw-stream cap are
+checked before parsing only bounded JSON data records. A narrow recognizer finds
+the exact static BuildInfo host section and checks its rendered children
+and time property. It follows only bounded JSON data and lazy host references,
+including own-property paths, within that section; import/debug rows and unrelated
+provenance props never supply proof. Missing, cyclic, unsupported or prototype
+reference paths fail closed. The recognizer allows at most 1,024 JSON records,
+64 traversal/reference-path levels and 20,000 nodes per traversal, rather than
+implementing a general Flight decoder. Unsupported length-framed text/binary/typed-array records
+fail closed before any line scanning, so their raw payload cannot manufacture
+apparent JSON data records. Privacy withholding on SSR HTML remains intact. This
+proves compiled server-rendered Flight values; the separate signed-in Settings
+browser test remains the hydrated DOM/visual proof. Focused helper tests reject stale fields and
+hosted transports; source tests retain the frozen-object contract. The real compiled
+HTTP check remains part of canonical browser CI, not a database-free unit claim.
+Boundary tests separately exercise delayed worker reload, strict bridge rejection,
+typegen/import fallback and fresh build lifetimes.
 
 PR51's integration with main `48b3ca79208d6813bc6dc43c5483194796af28bf`
 keeps the Settings build card inside the protected page content gate alongside
@@ -636,6 +993,23 @@ remain required.
 
 ## Protected page content gates
 
+The held D303.2/W09 route foundation now nests readiness markers inside each
+resolved page content gate. The populated room page deliberately relies on the
+workspace marker after its selected-location contents resolve, rather than
+acknowledging its outer server shell. `room/page.test.tsx` preserves that exception.
+The layout route slot stays rendered through the provider while privacy checks run.
+
+`route-privacy-integration.test.tsx` mounts the real protected privacy controller,
+route provider and content gates with deferred action responses. It checks initial
+closure, original-binding grant/recheck/recovery, unchanged field node/value/focus/
+selection and business busy ownership, synchronous revocation before native
+cancellation, stale callbacks and actor drift, terminal action denial/logout/Auth
+closure, sibling insertion races and old-provider retirement. Existing route tests
+retain hash Back, overlapping request, refresh and Activity readiness coverage.
+These are local component contracts; native snapshot timing, real Flight/HTTP
+status, browser Back/WebGL, actual logout broadcast and visual motion acceptance
+still require the canonical runtime gates on the final committed candidate.
+
 Protected server pages resolve existing authorization/read/validation decisions
 before returning gated private content. The shared controller and all layout
 providers must keep the opaque route slot rendered, without an ancestor Suspense
@@ -651,6 +1025,31 @@ private bootstrap consumer. `tests/unit/protected-page-gates.test.ts` additional
 checks every JSX return branch of every protected server page, including future
 pages. This structural guard supplements runtime proof; it does not establish
 HTTP status, database authorization, delivered Flight or visual acceptance.
+
+Direct record documents additionally await membership and the existing
+request-cached caller read before the shell. Their shared protected layout
+resolves to `DocumentAdmission`, which throws a generic missing result only
+during document SSR, above every shell/Suspense boundary. Throwing from the
+shared server layout instead caches a rejected layout node: a recovery Link can
+commit its URL, title and successful Flight while the old root 404 body remains.
+Browser rendering always delegates missing/auth decisions to the destination
+page; the initial document flag cannot suppress later valid records or reset
+retained shell state. Invalid site opening kinds use the same document flag;
+authorization redirects and read failures still propagate normally.
+
+The DB-free installed-Next production fixture reproduced that stale body, then
+verified document 404 (including encoded identifiers/trailing slash), hydrated
+missing UI, query-only missing navigation, visible Link recovery with zero
+documents, native Back/Forward, and a formerly missing record becoming valid
+after another page-owned 404. A denied fixture read redirected before shell
+rendering, and Flight headers arrived before the delayed page read completed.
+These framework checks do not establish real Supabase authorization or hosted
+application acceptance. The inventory E2E requires a visible Inventory heading
+and search control inside its matching primary, one main, and removal of the
+missing heading in addition to URL/title/404 and inventory zero-document checks.
+The fixture also observed that `router.refresh()` at the same missing URL does
+not reset Next's root HTTP fallback; this change does not fix that separate
+framework behavior, and the missing UI offers destination recovery links.
 
 The scoped production fixture used installed Next.js 16.3.6/React 19.2.8, a
 delayed async `notFound()`, the actual privacy components and PageArrival, and
@@ -765,7 +1164,119 @@ metadata/title/privacy and working-control checks provide local integration
 evidence only. Earlier PR48 CI/review remains bound to `d2c6222`; the new combined
 commit requires its own canonical CI, fresh review and hosted acceptance.
 
+### Independent logout transport local verification
+
+Ordinary logout and cleanup-generation comparison use the dedicated same-origin
+POST transport so a held navigation cannot queue either acknowledgement. The
+initial auth/proxy batch passed 202 tests in eight files; affected auth, password,
+layout, scan, designer and label component siblings pass another 370 tests in
+nine files. Both use one worker and a 768 MiB heap. Scoped zero-warning lint and
+formatting pass. Route regressions cover mandatory exact request-origin admission,
+missing/null/multiple/path/forged origins, fetch metadata, strict JSON shapes,
+actual chunked UTF-8 byte limits, non-POST denial, retained caller-cookie receipts,
+sanitized failure/uncertainty and read-only cookie comparison. Proxy tests prove
+that these exact endpoints perform no pre-admission claims refresh/cookie writes,
+while neighboring routes retain refresh. Client and recovery tests cover bounded
+timeout/response validation, UNKNOWN recovery retention, verified designer cleanup
+after the original owner is gone, blocked erasure/readback and cleanup-only retry.
+The subsequent loopback-origin and receipt-ordering batch passes 265 tests in
+seven files with one worker and a 768 MiB heap. Real installed NextRequest tests
+prove loopback normalization, exact supported direct-Host restoration and rejection
+of malformed, alternate, cross-host, cross-scheme and cross-port authorities.
+A component regression proves that a privacy alert can precede the logout receipt
+without authorizing cleanup; the reload browser test now awaits the actual receipt
+and matching cookie before its retained recovery assertions.
+
+The held-History logout browser regression now requires both independent HTTP
+acknowledgements, with the same verified generation, to complete before History
+Flight is released; its late delivery must leave login in place. This authored
+browser assertion has separate candidate-specific evidence. Actual loopback
+invitation/recovery completion and the amended first-read-failure/reload journey
+remain pending browser verification on the new candidate. These focused working-tree results
+do not certify real browser cookie delivery, local/hosted request-origin routing,
+database behavior, the full production build/E2E gate, or final committed-SHA
+remote checks and fresh review. Root integration owns those remaining boundaries.
+
+## Native capture interactivity and focus
+
+The focused native fixture in `transition-capture.spec.ts` bundles the installed
+Next React runtime and real capture boundary without a database. It reproduces
+dropped controlled input without the guard, checks guarded input/selection,
+domain-disabled controls, destination layout-effect focus and outside focus/pointer
+cancellation, and distinguishes
+capture release from animation completion. The fixture imports the compiler
+provided transitively by the existing locked toolchain; no dependency was added.
+Default Playwright discovery must retain this spec. This isolated fixture does
+not certify actual application routes, production-server navigation, authorized
+data, real form drafts or the complete local Supabase/browser gate.
+
+Consumer regressions hold the public capture observer through pending DOM updates
+and prove deferred focus, superseding task/picker state, unmount and account-change
+cancellation. Guard regressions prove native-call/error identity and release of
+later subscribers after an earlier callback throws, with sanitized reporting.
+Boundary tests distinguish native capture blur from outside focus followed by blur,
+outside nonfocusable pointer input and history cancellation. jsdom's disabled-input
+blur is explicitly modeled; actual application native-browser focus remains a separate gate.
+The broad consumer map covers Scan and assignment, task return/discard focus,
+pickers, settings rename, file dialogs, inventory completion, metadata review and
+designer entry/placement, and the room toolbar. Immediate pointer/keyboard handlers
+retain their existing semantics because capture interactivity blocks their targets.
+
+On the 2026-10-13 working tree, the focused consumer/sibling batch passed 673 tests
+in 17 suites, and the room/navigation/camera batch passed 122 tests in eight suites.
+Both used one Vitest worker and a 768 MiB heap. Canonical typechecking passed at
+1536 MiB, and scoped zero-warning lint and formatting passed. The five isolated
+Chromium capture tests passed using ignored
+`.local-tools/pr54-capture.playwright.config.ts` with one worker and no application
+web server, database or build; canonical default discovery retained all five.
+These results precede the final integration commit and do not certify the complete
+application/database/browser gate or exact committed-SHA remote checks.
+
+## Locations retained drafts and native-ready regressions
+
+Locations browser regressions distinguish retained local drafts from fresh URL
+write admission. An original mounted owner with a previously fresh privacy grant
+may edit its visible draft during a same-authority recheck; one coalesced unsent
+revision survives older server replies and writes only after fresh admission.
+Actual withdrawal, grant/provider drift, unmount or accepted departure discards
+queued writes. Accepted departure stays latched until real mount/Activity
+reactivation; native cancellation only discards queued work and preserves current
+controls. Hook/controller tests cover these boundaries without granting readiness.
+The native-ready E2E helper registers one binding per page and validates each real
+running snapshot animation independently, including repeated arming and closure.
+Its bounded Chromium smoke proves two actual transitions on one page; full
+application journeys and exact-SHA hosted acceptance remain separate gates.
+
+## Room Back camera retention with the configured router
+
+Cache Components is not enabled in this app. Installed Next 16.3.6 defaults it
+to false; its layout router adds Activity retention only under that flag and
+otherwise keeps one active entry. A stable ancestor alone therefore cannot
+preserve a page-local camera map across Room → Inventory → Back.
+
+The actual workspace unmount/remount regression first failed with null initial
+view instead of the saved pose. The protected-layout camera provider uses a
+bounded, per-key external store with independent actor/backend/privacy-grant
+ownership. Store/provider/workspace tests prove exact restoration input,
+cloning/bounds, stale callback retirement, ordinary visible rechecks and scoped
+publication without rerendering unrelated consumers. They use a mocked renderer,
+so actual native Back camera equality, explicit focus precedence and canvas
+ancestor exclusion still require the retained real WebGL/browser gate. No
+application-wide Cache Components switch or global camera cache is introduced.
+
+The working-tree sibling batch passed 81 tests across ten files with one worker
+and a 768 MiB heap, including the actual CameraRig initial-frame policy, legacy
+room workspace, protected room page/layout and privacy content. Canonical
+typechecking passed with a 1536 MiB heap; scoped zero-warning lint, formatting
+and diff whitespace checks passed. Independent architecture review found no
+actionable source issue. These are local working-tree results based on
+`43874f64`, not committed-SHA CI or native browser acceptance.
+
 ## A306/A310 serial identification integration
+
+The following records PR55 iteration coverage and local limitations before final
+acceptance. Its pending-gate statements are historical; the accepted final-candidate
+CI and hosted evidence are recorded in the [PR55 acceptance checkpoint](audit-4-2-acceptance.md#pr55-a306a310-acceptance-checkpoint).
 
 Serial-mode regressions cover literal colon/prefix/URL serials, caller denial,
 Unicode bounds, contextual duplicates/overflow and unchanged automatic URL guards.
@@ -777,3 +1288,35 @@ widths in Full/Reduced motion; report its execution separately from unit coverag
 Focused resolver/parser/chooser/assignment and tag-advisory regressions cover exact spelling, Unicode lengths, legal duplicates, cross-namespace collisions, typed-prefix isolation, unknowns, errors, overflow and retained cancellation/privacy guards. `supabase/tests/serial_scan.test.sql` adds transactional fixtures for stable invoker/empty-search-path grants, active viewer/staff reads, nonmember/inactive/anonymous denial, exact case/whitespace lookup, 200 supplementary Unicode characters, deterministic first21 results, truthful site/retired context and nonmutating reads. The migration and provisional generated-type addition require canonical clean-database execution and `db:types:check`; they have not been validated against local PostgreSQL here because its Docker daemon is unavailable.
 
 `tests/e2e/audit-four-identifier-guidance.spec.ts` retains owned new fixtures for duplicate serials, serial/tag/SKU collisions, tag blur guidance and a synthetic camera QR frame. Scan and tag-blur cases are defined at 1280/390 px with Full/Reduced motion. A separate 390 px Reduced-motion Scan-and-assign journey enters a duplicate serial through the real input, requires a named/contextual chooser, deliberately selects the intended asset, checks the review's immutable record link and storage source, then cancels with **Skip inspection / review**. Caller-scoped reads compare both assets, their versions and their inventory/assignment events before choice, after inspection and after cancellation to prove that no assignment was made. These are durable test definitions; browser/hosted execution and physical-camera testing remain pending. SQL timeout configuration likewise requires effective REST hoisting and elapsed-time proof before it establishes any request-time bound. This is iteration evidence, not final PR certification.
+
+## Next 16.3.6 learned-route fragment correction
+
+Reloading an anchored results URL poisoned Next's learned route cache with the
+fragment. A later **Back to results** then appended the requested fragment again,
+producing `#inventory-row-2#inventory-row-2`. Hydration, server actions and PPR retry
+responses all write through `discoverKnownRoute`; the shared cache entry must
+exclude fragments while the document and router state retain their complete URL.
+
+`npm ci` automatically runs `scripts/patch-next-route-cache.mjs`. For pinned Next
+16.3.6 only, it removes the first literal `#` and following fragment from the local
+cache-insertion argument in both CJS and ESM `optimistic-routes.js`. Encoded `%23`,
+path and query bytes are preserved. Both whole-file original/corrected SHA256
+values and the package version are checked before writes; unknown bytes or a
+version change stop installation. The correction is idempotent and verifies each
+write. A filesystem failure can leave one corrected format; installation fails,
+and rerunning the correction safely finishes the other. The `prebuild` hook checks
+both corrected digests without writing, so skipped or incomplete installation
+cannot pass the normal production build. Dependency upgrades require reviewing or
+removing this temporary correction; see upstream Next issues/changes
+[#96714](https://github.com/vercel/next.js/issues/96714) and
+[#96737](https://github.com/vercel/next.js/pull/96737).
+
+`tests/unit/next-route-cache.test.mjs` executes the actual installed hydration,
+route-learning and cached navigation functions in both formats with storage and
+renderer/network adapters. It checks same/different/absent fragments, query and
+encoded `%23` preservation, and ordinary/pending cache writes. Guard regressions
+cover version/source drift, verify-only rejection, idempotence, interrupted writes
+and readback failure. These tests prove the dependency URL contract; the four
+existing Reduced-motion browser journeys remain unchanged and require execution
+on the final candidate. The runner image recipe still caches package tarballs
+with `--ignore-scripts`; actual PR jobs run fresh `npm ci` and apply the correction.

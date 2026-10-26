@@ -1,6 +1,10 @@
 'use client';
-import { useRef, useState, useTransition } from 'react';
-import { useRouter } from 'next/navigation';
+import { useRouteTask } from '@/components/experience/route-pending';
+import { useRouteRouter as useRouter } from '@/components/experience/route-pending';
+
+import { useRouteActionResult } from '@/components/experience/route-pending';
+import { useRef, useState } from 'react';
+
 import { useReportTaskState, useTaskReset } from './task-state';
 import { Button } from '@/components/ui/button';
 import {
@@ -25,6 +29,7 @@ export function ArchiveQuantityForm({
   actorId?: string;
   itemName?: string;
 }) {
+  const observeRouteActionResult = useRouteActionResult();
   const resetTask = useTaskReset();
   const router = useRouter();
   const [baseline, setBaseline] = useState(latestReview);
@@ -38,7 +43,7 @@ export function ArchiveQuantityForm({
   const [receipt, setReceipt] = useState<{ key: string; id: string } | null>(
     null,
   );
-  const [pending, startTransition] = useTransition();
+  const [pending, startTask] = useRouteTask();
   const [uncertain, setUncertain] = useState(false);
   const inFlight = useRef(false);
   const submitted = useRef<Parameters<typeof submitInventory>[0] | null>(null);
@@ -114,9 +119,9 @@ export function ArchiveQuantityForm({
     submitted.current = command;
     inFlight.current = true;
     reportTask({ pending: true });
-    startTransition(async () => {
+    startTask(async () => {
       try {
-        const result = await submitInventory(command);
+        const result = await observeRouteActionResult(submitInventory(command));
         const unresolved =
           !result.ok &&
           (result.kind === 'unexpected' ||

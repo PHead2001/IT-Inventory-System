@@ -5,9 +5,18 @@ import {
   assignmentEndpointSummary,
 } from '../history-summary';
 import { RecordStatus } from '@/components/record-status';
+import {
+  InventoryRecordLink,
+  HistoryRecordLink,
+} from '@/components/experience/record-transition';
+import { detailRecordHref } from '@/features/inventory/detail-return';
+import {
+  inventoryHolding,
+  recordHoldingKey,
+} from '@/components/experience/route-motion-state';
 import { ShowInRoom } from '@/features/room/show-in-room';
 import { OperationalTimestamp } from '@/components/operational-time';
-import Link from 'next/link';
+import Link from '@/components/experience/route-link';
 import { Box } from 'lucide-react';
 import type { ReactNode } from 'react';
 import { countLabel } from '@/lib/count';
@@ -110,6 +119,13 @@ export function InventoryRows({
     return (
       emptyState ?? <p className={panel}>No inventory matches these filters.</p>
     );
+  const holdingKeys = rows.map((row) =>
+    recordHoldingKey(row, inventoryHolding(row)),
+  );
+  const holdingCounts = new Map<string, number>();
+  holdingKeys.forEach((key) => {
+    if (key) holdingCounts.set(key, (holdingCounts.get(key) ?? 0) + 1);
+  });
   return (
     <ul className={`experience-surface ${styles.list}`}>
       {rows.map((row, index) => {
@@ -155,9 +171,23 @@ export function InventoryRows({
                   )}
                 </span>
                 <div className="min-w-0">
-                  <Link className={styles.name} href={recordHref}>
+                  <InventoryRecordLink
+                    className={styles.name}
+                    href={recordHref}
+                    record={{ kind: row.kind, id: row.id }}
+                    holding={inventoryHolding(row)}
+                    pairable={
+                      holdingKeys[index] !== null &&
+                      holdingCounts.get(holdingKeys[index]!) === 1
+                    }
+                    returnTo={
+                      returnTo
+                        ? `${returnTo}#${inventoryRowAnchor(index)}`
+                        : undefined
+                    }
+                  >
                     {row.name}
-                  </Link>
+                  </InventoryRecordLink>
                   <p className={styles.meta}>
                     {row.categoryName} ·{' '}
                     {row.kind === 'quantity'
@@ -340,11 +370,14 @@ export function HistoryList({
   events,
   compact = false,
   linkToEvent = false,
+  returnTo,
 }: {
   events: HistoryEvent[];
   compact?: boolean;
   /** Link to the immutable event identity, independent of history pagination. */
   linkToEvent?: boolean;
+  /** Main history list only; detail/event timelines remain ordinary. */
+  returnTo?: string;
 }) {
   const DetailTag = compact ? 'details' : 'div';
   if (!events.length)
@@ -366,17 +399,33 @@ export function HistoryList({
             />
           </div>
           <p className="mt-2 min-w-0 text-sm [overflow-wrap:anywhere]">
-            <Link
-              className="text-cyan-300 underline"
-              href={
-                '/inventory/' +
-                (event.kind === 'quantity' ? 'quantity' : 'assets') +
-                '/' +
-                event.entityId
-              }
-            >
-              {event.entityName}
-            </Link>{' '}
+            {returnTo ? (
+              <HistoryRecordLink
+                record={{ kind: event.kind, id: event.entityId }}
+                event={{ kind: event.kind, id: event.id }}
+                returnTo={`${returnTo}#history-event-${event.kind}-${event.id}`}
+                href={detailRecordHref(
+                  event.kind,
+                  event.entityId,
+                  `${returnTo}#history-event-${event.kind}-${event.id}`,
+                )}
+                className="text-cyan-300 underline"
+              >
+                {event.entityName}
+              </HistoryRecordLink>
+            ) : (
+              <Link
+                className="text-cyan-300 underline"
+                href={
+                  '/inventory/' +
+                  (event.kind === 'quantity' ? 'quantity' : 'assets') +
+                  '/' +
+                  event.entityId
+                }
+              >
+                {event.entityName}
+              </Link>
+            )}{' '}
             · {event.actorName}
           </p>
           {historySummary(event) && (

@@ -1,8 +1,18 @@
 import { act, fireEvent, render, screen } from '@testing-library/react';
 import { beforeEach, expect, it, vi } from 'vitest';
 import { AssetTagAdvisory, useAssetTagAdvisory } from './asset-tag-advisory';
-const mocks = vi.hoisted(() => ({ check: vi.fn() }));
+import type { ComponentProps } from 'react';
+const mocks = vi.hoisted(() => ({ check: vi.fn(), prefetch: vi.fn() }));
 vi.mock('../asset-tag.actions', () => ({ checkAssetTag: mocks.check }));
+vi.mock('next/link', () => ({
+  default: ({
+    prefetch,
+    ...props
+  }: ComponentProps<'a'> & { prefetch?: boolean }) => {
+    mocks.prefetch(prefetch);
+    return <a {...props} />;
+  },
+}));
 const id = '70000000-0000-4000-8000-000000000001';
 const conflict = {
   id,
@@ -43,6 +53,7 @@ it('shows a named link and only the actual lifecycle of a conflicting record', a
     await screen.findByRole('link', { name: 'Existing device' }),
   ).toHaveAttribute('href', '/inventory/assets/' + id);
   expect(screen.getByRole('status')).toHaveTextContent('(retired)');
+  expect(mocks.prefetch).toHaveBeenLastCalledWith(false);
   expect(mocks.check).toHaveBeenCalledExactlyOnceWith('Mixed', id);
 });
 it('failure says could not check and never claims availability', async () => {

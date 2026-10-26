@@ -1,5 +1,7 @@
+import { RouteReady } from '@/components/experience/route-ready';
+import { routeReadyProps } from '@/components/experience/route-ready.server';
+import Link from '@/components/experience/route-link';
 import { ProtectedPrivacyContent } from '@/components/auth/privacy-content';
-import Link from 'next/link';
 import { Map, ArrowRight } from 'lucide-react';
 import { ClosetPreview } from '@/components/experience/closet-preview';
 import { AmbientLight } from '@/components/experience/ambient-light';
@@ -19,36 +21,38 @@ export default async function DashboardPage({
     redirect('/dashboard?page=1');
   return (
     <ProtectedPrivacyContent>
-      <div className="space-y-5">
-        <section className="experience-overview-hero experience-surface-bright">
-          <AmbientLight />
-          <div>
-            <p className="experience-eyebrow">
-              Storage availability · Overview
-            </p>
-            <h1 className="experience-heading mt-3">Low-stock overview</h1>
-            <p className="experience-muted mt-3 max-w-xl text-sm leading-6">
-              Keep storage ready for the next request. See which items need
-              attention.
-            </p>
-            <Link
-              href="/room"
-              className="mt-4 inline-flex min-h-11 items-center gap-2 text-sm font-semibold text-cyan-200 hover:text-white"
-            >
-              <Map size={16} aria-hidden="true" /> Explore Spaces &amp; maps{' '}
-              <ArrowRight size={15} aria-hidden="true" />
-            </Link>
-          </div>
-          <div className="experience-closet-preview">
-            <ClosetPreview />
-          </div>
-        </section>
-        <DashboardSnapshotView
-          key={snapshot.fetchedAt}
-          initialSnapshot={snapshot}
-          params={params}
-        />
-      </div>
+      <RouteReady {...await routeReadyProps('/dashboard', searchParams)}>
+        <div className="space-y-5">
+          <section className="experience-overview-hero experience-surface-bright">
+            <AmbientLight />
+            <div>
+              <p className="experience-eyebrow">
+                Storage availability · Overview
+              </p>
+              <h1 className="experience-heading mt-3">Low-stock overview</h1>
+              <p className="experience-muted mt-3 max-w-xl text-sm leading-6">
+                Keep storage ready for the next request. See which items need
+                attention.
+              </p>
+              <Link
+                href="/room"
+                className="mt-4 inline-flex min-h-11 items-center gap-2 text-sm font-semibold text-cyan-200 hover:text-white"
+              >
+                <Map size={16} aria-hidden="true" /> Explore Spaces &amp; maps{' '}
+                <ArrowRight size={15} aria-hidden="true" />
+              </Link>
+            </div>
+            <div className="experience-closet-preview">
+              <ClosetPreview />
+            </div>
+          </section>
+          <DashboardSnapshotView
+            key={snapshot.fetchedAt}
+            initialSnapshot={snapshot}
+            params={params}
+          />
+        </div>
+      </RouteReady>
     </ProtectedPrivacyContent>
   );
 }

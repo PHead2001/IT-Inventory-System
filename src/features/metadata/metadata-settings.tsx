@@ -1,4 +1,9 @@
 'use client';
+import { afterTransitionCapture } from '@/components/forms/transition-capture';
+import { useRouteTask } from '@/components/experience/route-pending';
+import { useRouteRouter as useRouter } from '@/components/experience/route-pending';
+
+import { useRouteActionResult } from '@/components/experience/route-pending';
 import { OperationalTimestamp } from '@/components/operational-time';
 import { usePrivacyRevocationRevision } from '@/components/auth/privacy-readiness';
 import { readPrivacyRevocationRevision } from '@/features/scan/assign-batch';
@@ -9,10 +14,9 @@ import {
   useMemo,
   useRef,
   useState,
-  useTransition,
   type ReactNode,
 } from 'react';
-import { useRouter } from 'next/navigation';
+
 import { Button } from '@/components/ui/button';
 import { useEffectiveReducedMotion } from '@/components/experience/motion-preference';
 import { motion } from 'motion/react';
@@ -609,6 +613,7 @@ export function MetadataSettings({
   memberId: string;
   selectedCategoryId?: string;
 }) {
+  const observeRouteActionResult = useRouteActionResult();
   const router = useRouter();
   const revocationRevision = usePrivacyRevocationRevision();
   const initialRevocation = useRef(readPrivacyRevocationRevision());
@@ -617,12 +622,15 @@ export function MetadataSettings({
   const panesRef = useRef<HTMLDivElement>(null);
   const inspectorRef = useRef<HTMLElement>(null);
   const pendingDesignerFocus = useRef<number | null>(null);
+  const pendingCaptureFocus = useRef<(() => void) | null>(null);
   const focusIntent = useRef(0);
   const cancelDesignerFocus = useCallback(() => {
     focusIntent.current++;
     if (pendingDesignerFocus.current !== null)
       cancelAnimationFrame(pendingDesignerFocus.current);
     pendingDesignerFocus.current = null;
+    pendingCaptureFocus.current?.();
+    pendingCaptureFocus.current = null;
   }, []);
   useEffect(() => cancelDesignerFocus, [cancelDesignerFocus]);
   const scheduleDesignerFocus = useCallback(
@@ -631,7 +639,10 @@ export function MetadataSettings({
       const intent = focusIntent.current;
       pendingDesignerFocus.current = requestAnimationFrame(() => {
         pendingDesignerFocus.current = null;
-        if (intent === focusIntent.current) focus();
+        if (intent === focusIntent.current)
+          pendingCaptureFocus.current = afterTransitionCapture(document, () => {
+            if (intent === focusIntent.current) focus();
+          });
       });
     },
     [cancelDesignerFocus],
@@ -699,7 +710,7 @@ export function MetadataSettings({
     'none' | 'durable' | 'memory'
   >('none');
   const [blockedAccessMessage, setBlockedAccessMessage] = useState('');
-  const [pending, startTransition] = useTransition();
+  const [pending, startTask] = useRouteTask();
   const [operationPending, setOperationPending] = useState(false);
   const [recovery, setRecovery] = useState<DesignerRecovery | null>(null);
   const [recoveryLoadedScope, setRecoveryLoadedScope] = useState<string | null>(
@@ -717,14 +728,16 @@ export function MetadataSettings({
   useEffect(() => {
     const dialog = recoveryToolsRef.current;
     if (!dialog) return;
-    if (recoveryToolsOpen && identityStatus !== 'blocked') {
-      if (dialog.showModal) dialog.showModal();
-      else dialog.setAttribute('open', '');
-    } else if (dialog.open) {
-      if (dialog.close) dialog.close();
-      else dialog.removeAttribute('open');
-      recoveryToolsTrigger.current?.focus();
-    }
+    return afterTransitionCapture(document, () => {
+      if (recoveryToolsOpen && identityStatus !== 'blocked') {
+        if (dialog.showModal) dialog.showModal();
+        else dialog.setAttribute('open', '');
+      } else if (dialog.open) {
+        if (dialog.close) dialog.close();
+        else dialog.removeAttribute('open');
+        recoveryToolsTrigger.current?.focus();
+      }
+    });
   }, [recoveryToolsOpen, identityStatus]);
   const identityCheck = useRef(0);
   const identityInFlight = useRef(false);
@@ -875,7 +888,9 @@ export function MetadataSettings({
     setBlockedAccessMessage('Verifying the original actor’s access…');
     const check = ++identityCheck.current;
     try {
-      const result = await verifyMetadataDesignerIdentity(memberId);
+      const result = await observeRouteActionResult(
+        verifyMetadataDesignerIdentity(memberId),
+      );
       if (check !== identityCheck.current) return;
       if (!result.ok) {
         setBlockedAccessMessage(
@@ -950,7 +965,9 @@ export function MetadataSettings({
       identityInFlight.current = true;
       const check = ++identityCheck.current;
       try {
-        const result = await verifyMetadataDesignerIdentity(memberId);
+        const result = await observeRouteActionResult(
+          verifyMetadataDesignerIdentity(memberId),
+        );
         if (
           !mounted ||
           terminalDenied.current ||
@@ -982,7 +999,7 @@ export function MetadataSettings({
       window.removeEventListener('focus', verify);
       document.removeEventListener('visibilitychange', onVisible);
     };
-  }, [denyIdentity, memberId]);
+  }, [denyIdentity, memberId, observeRouteActionResult]);
   useEffect(() => {
     let active = true;
     completeDesignerNavigation(memberId, categoryId);
@@ -1191,7 +1208,9 @@ export function MetadataSettings({
           return {
             result,
             identity: result.ok
-              ? await verifyMetadataDesignerIdentity(memberId)
+              ? await observeRouteActionResult(
+                  verifyMetadataDesignerIdentity(memberId),
+                )
               : null,
           };
         })(),
@@ -1320,14 +1339,16 @@ export function MetadataSettings({
     const requestId = receipt?.key === key ? receipt.id : newId();
     setReceipt({ key, id: requestId });
     setMessage('');
-    startTransition(async () => {
+    startTask(async () => {
       try {
-        const response = await submitMetadataDraft({
-          operation,
-          requestId,
-          expectedActorId: memberId,
-          payload,
-        });
+        const response = await observeRouteActionResult(
+          submitMetadataDraft({
+            operation,
+            requestId,
+            expectedActorId: memberId,
+            payload,
+          }),
+        );
         if (
           terminalDenied.current ||
           categorySession.current !== submittedSession ||
@@ -1474,13 +1495,15 @@ export function MetadataSettings({
         payload.expected_published_revision_id ?? '',
       ),
     };
-    startTransition(async () => {
+    startTask(async () => {
       try {
-        const result = await saveMetadataForm({
-          requestId,
-          expectedActorId: memberId,
-          payload,
-        });
+        const result = await observeRouteActionResult(
+          saveMetadataForm({
+            requestId,
+            expectedActorId: memberId,
+            payload,
+          }),
+        );
         if (
           terminalDenied.current ||
           submittedSession !== categorySession.current ||

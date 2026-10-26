@@ -14,6 +14,8 @@ import fixture from '../fixtures/auth.json' with { type: 'json' };
 import { chooseLocation } from './location-picker';
 import { displayedInstant } from '../helpers/displayed-instant';
 import { exactOperationalTime as exactTime } from '../helpers/operational-time';
+import { auditReadback } from './audit-two-controls';
+import { inventoryFileCardsSchema } from '../../src/features/files/contract';
 
 function richStatePath(name: string) {
   const directory = resolve('.local-tools/experience-visual/rich-states');
@@ -231,9 +233,65 @@ test('quantity recognition photo uploads, previews for viewers, replaces and rem
     exact: true,
   });
   await expect(browse).toHaveCount(1);
+  try {
+    // Native capture temporarily disables/inerts the page fieldset. A one-shot
+    // focus before release is ignored; waiting for focus alone cannot replay it.
+    await expect(browse).toBeEnabled();
+    await expect
+      .poll(
+        () =>
+          browse.evaluate((button) => {
+            for (
+              let node: Element | null = button;
+              node;
+              node = node.parentElement
+            )
+              if (
+                (node instanceof HTMLElement && (node.hidden || node.inert)) ||
+                node.hasAttribute('hidden') ||
+                node.hasAttribute('inert') ||
+                node.matches(':disabled')
+              )
+                return false;
+            return true;
+          }),
+        { timeout: 5000 },
+      )
+      .toBe(true);
+    await browse.focus();
+    await expect(browse).toBeFocused();
+  } catch (error) {
+    // The original CI trace was unavailable. Capture structure/state only,
+    // without filenames, record text, URLs or user-entered values.
+    const diagnostics = await browse
+      .evaluate((button) => {
+        const ancestors = [];
+        for (let node: Element | null = button; node; node = node.parentElement)
+          ancestors.push({
+            tag: node.tagName,
+            hidden:
+              (node instanceof HTMLElement && node.hidden) ||
+              node.hasAttribute('hidden'),
+            inert:
+              (node instanceof HTMLElement && node.inert) ||
+              node.hasAttribute('inert'),
+            disabled: node.matches(':disabled'),
+          });
+        return {
+          connected: button.isConnected,
+          focused: document.activeElement === button,
+          activeTag: document.activeElement?.tagName,
+          ancestors,
+        };
+      })
+      .catch(() => ({ unavailable: true }));
+    await testInfo.attach('browse-focus-admission', {
+      body: JSON.stringify(diagnostics),
+      contentType: 'application/json',
+    });
+    throw error;
+  }
   const chooserEvent = page.waitForEvent('filechooser');
-  await browse.focus();
-  await expect(browse).toBeFocused();
   await page.keyboard.press('Enter');
   const chooser = await chooserEvent;
   await chooser.setFiles({
@@ -295,7 +353,17 @@ test('quantity recognition photo uploads, previews for viewers, replaces and rem
     await files.getByRole('button', { name: 'Upload and review' }).click();
     await firstRequest;
     await expect(files.getByRole('button', { name: 'Working…' })).toBeVisible();
-    await expect(files.getByText('File request in progress…')).toBeVisible();
+    const pendingFileAnnouncement = page
+      .getByRole('status')
+      .filter({ hasText: /^File request in progress…$/ });
+    await expect(pendingFileAnnouncement).toHaveCount(1);
+    await expect(pendingFileAnnouncement).toBeVisible();
+    expect(
+      await pendingFileAnnouncement.evaluate(
+        (node) => node.closest('[aria-busy="true"]') === null,
+      ),
+    ).toBe(true);
+    await expect(files).toHaveAttribute('aria-busy', 'true');
     await expect(files.getByText('No photo yet.', { exact: true })).toHaveCount(
       0,
     );
@@ -619,13 +687,25 @@ test('asset PDF is structurally validated and downloads as an attachment', async
     })
     .first();
   await expect(listRow.getByText('1 PDF')).toBeVisible();
-  const reviewedCards = page.waitForResponse((response) =>
-    response.url().includes('/rpc/inventory_file_cards'),
-  );
   await page.goto(assetUrl);
-  const reviewedFiles = (await (await reviewedCards).json()) as {
-    files: { id: string; version: string }[];
-  };
+  await expect(
+    cards.getByText('Updated manual title', { exact: true }),
+  ).toBeVisible();
+  // Detail cards are server-seeded. Read the reviewed version through the same
+  // caller-scoped RPC rather than waiting for a browser request that cannot occur.
+  const readback = await auditReadback();
+  const reviewedFiles = await (async () => {
+    try {
+      const result = await readback.rpc('inventory_file_cards', {
+        p_parent_type: 'asset',
+        p_parent_id: new URL(assetUrl).pathname.split('/').at(-1)!,
+      });
+      expect(result.error).toBeNull();
+      return inventoryFileCardsSchema.parse(result.data);
+    } finally {
+      await readback.auth.signOut({ scope: 'local' });
+    }
+  })();
   const input = files.getByLabel('Add photo or PDF');
   let reserves = 0;
   const countReserve = (request: import('@playwright/test').Request) => {

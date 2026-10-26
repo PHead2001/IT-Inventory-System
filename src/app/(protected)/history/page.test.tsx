@@ -1,3 +1,14 @@
+vi.mock('server-only', () => ({}));
+// Protected page readiness receives the same mocked request actor as its reads.
+vi.mock('@/lib/auth/session.server', () => ({
+  requireMember: async () => ({
+    member: {
+      user_id: 'route-test-actor',
+      role: 'staff',
+      can_manage_configuration: true,
+    },
+  }),
+}));
 import { render, screen } from '@testing-library/react';
 import { beforeEach, expect, it, vi } from 'vitest';
 const m = vi.hoisted(() => ({
@@ -14,7 +25,11 @@ vi.mock('@/features/inventory/queries.server', () => ({
 vi.mock('@/features/metadata/queries.server', () => ({
   getEventCustomPage: m.custom,
 }));
-vi.mock('next/navigation', () => ({ notFound: vi.fn(), redirect: m.redirect }));
+vi.mock('next/navigation', () => ({
+  notFound: vi.fn(),
+  redirect: m.redirect,
+  useRouter: () => ({ push: vi.fn() }),
+}));
 import Page from './page';
 import { OperationalTimeProvider } from '@/components/operational-time';
 import * as operationalTime from '@/lib/operational-time';
@@ -22,6 +37,50 @@ const id = '00000000-0000-4000-8000-000000000001';
 beforeEach(() => {
   m.history.mockResolvedValue({ rows: [], total: 0, page: 1, pageSize: 25 });
   m.identity.mockResolvedValue({ id, name: 'Adapters', kind: 'quantity' });
+});
+it('passes canonical main history filter/page scope to its event entity links', async () => {
+  const eventId = '00000000-0000-4000-8000-000000000002';
+  m.history.mockResolvedValue({
+    rows: [
+      {
+        id: eventId,
+        kind: 'quantity',
+        entityId: id,
+        entityName: 'Scoped adapters',
+        eventType: 'created',
+        at: '2026-10-13T10:00:00Z',
+        actorName: 'Staff',
+        reason: null,
+        assignment: null,
+        lines: [],
+        fromLocation: null,
+        toLocation: null,
+        metadataChanges: [],
+        customMetadataPresent: false,
+        customMetadataChanged: false,
+      },
+    ],
+    total: 30,
+    page: 2,
+    pageSize: 25,
+  });
+  render(
+    await Page({
+      searchParams: Promise.resolve({
+        type: 'quantity',
+        location: 'ITC',
+        entityId: id,
+        page: '2',
+      }),
+    }),
+  );
+  const url = new URL(
+    screen.getByRole('link', { name: 'Scoped adapters' }).getAttribute('href')!,
+    'https://inventory.invalid',
+  );
+  expect(url.searchParams.get('returnTo')).toBe(
+    `/history?type=quantity&location=ITC&entityId=${id}&page=2#history-event-quantity-${eventId}`,
+  );
 });
 it.each([
   ['datetime', '2026-10-03T05:23:06.123456Z'],

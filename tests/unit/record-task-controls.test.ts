@@ -2,6 +2,7 @@
 import type { Page } from '@playwright/test';
 import { describe, expect, it, vi } from 'vitest';
 import { openRecordTask } from '../e2e/record-task-controls';
+import { auditOpenMetadataTask } from '../e2e/audit-two-controls';
 
 vi.mock('@playwright/test', () => ({
   expect: (locator: { isVisible: () => Promise<boolean> }) => ({
@@ -96,11 +97,14 @@ function taskPage({
   return { page, launcher, section, summary, form };
 }
 
-describe('openRecordTask locator contract', () => {
+describe.each([
+  ['canonical task helper', openRecordTask],
+  ['audit metadata wrapper', auditOpenMetadataTask],
+] as const)('%s locator contract', (_name, openTask) => {
   it('waits for a deferred primary launcher without inventing a disclosure', async () => {
     const fixture = taskPage({ deferred: true });
     await expect(
-      openRecordTask(fixture.page, 'Edit quantity metadata'),
+      openTask(fixture.page, 'Edit quantity metadata'),
     ).resolves.toBe(fixture.form);
     expect(fixture.launcher.waitFor).toHaveBeenCalledWith({
       state: 'attached',
@@ -111,30 +115,30 @@ describe('openRecordTask locator contract', () => {
 
   it('opens a genuinely closed secondary group with an ordinary summary click', async () => {
     const fixture = taskPage({ group: 'closed' });
-    await openRecordTask(fixture.page, 'Edit asset metadata');
+    await openTask(fixture.page, 'Edit asset metadata');
     expect(fixture.summary.click).toHaveBeenCalledExactlyOnceWith();
     expect(fixture.launcher.click).toHaveBeenCalledExactlyOnceWith();
   });
 
   it('does not collapse a group that is already open', async () => {
     const fixture = taskPage({ group: 'open' });
-    await openRecordTask(fixture.page, 'Edit asset metadata');
+    await openTask(fixture.page, 'Edit asset metadata');
     expect(fixture.summary.click).not.toHaveBeenCalled();
     expect(fixture.launcher.click).toHaveBeenCalledExactlyOnceWith();
   });
 
   it('keeps an open group expanded while its parent waits for readiness', async () => {
     const fixture = taskPage({ deferred: true, group: 'open' });
-    await openRecordTask(fixture.page, 'Edit asset metadata');
+    await openTask(fixture.page, 'Edit asset metadata');
     expect(fixture.summary.click).not.toHaveBeenCalled();
     expect(fixture.launcher.click).toHaveBeenCalledExactlyOnceWith();
   });
 
   it('returns an already visible form without reopening its launcher', async () => {
     const fixture = taskPage({ formOpen: true });
-    await expect(
-      openRecordTask(fixture.page, 'Edit asset metadata'),
-    ).resolves.toBe(fixture.form);
+    await expect(openTask(fixture.page, 'Edit asset metadata')).resolves.toBe(
+      fixture.form,
+    );
     expect(fixture.launcher.waitFor).not.toHaveBeenCalled();
     expect(fixture.launcher.click).not.toHaveBeenCalled();
     expect(fixture.summary.click).not.toHaveBeenCalled();
@@ -142,9 +146,9 @@ describe('openRecordTask locator contract', () => {
 
   it('fails for a missing launcher without trying an unrelated summary', async () => {
     const fixture = taskPage({ missing: true });
-    await expect(
-      openRecordTask(fixture.page, 'Edit asset metadata'),
-    ).rejects.toThrow('Launcher never attached');
+    await expect(openTask(fixture.page, 'Edit asset metadata')).rejects.toThrow(
+      'Launcher never attached',
+    );
     expect(fixture.summary.click).not.toHaveBeenCalled();
     expect(fixture.launcher.click).not.toHaveBeenCalled();
   });

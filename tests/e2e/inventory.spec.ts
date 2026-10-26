@@ -1368,12 +1368,33 @@ test('inventory search location picker exposes keyboard paths and stays framed o
 
 interfaceTest(
   'missing resources keep direct transport status and private-safe identity with client recovery',
-  async ({ page }, info) => {
+  async ({ page, browser }, info) => {
     await interfaceLogin(page);
-    for (const [path, heading] of [
-      ['/audit-three-missing-' + randomUUID(), 'Page not found'],
-      ['/inventory/quantity/' + randomUUID(), 'Inventory record unavailable'],
-      ['/inventory/assets/' + randomUUID(), 'Inventory record unavailable'],
+    const missingId = randomUUID();
+    const missingCode = 'MISSING-' + randomUUID();
+    const unknownPath = '/audit-three-missing-' + randomUUID();
+    for (const [path, heading, privateIdentity] of [
+      [unknownPath, 'Page not found', unknownPath.slice(1)],
+      [
+        '/inventory/quantity/' + missingId,
+        'Inventory record unavailable',
+        missingId,
+      ],
+      [
+        '/inventory/assets/' + missingId,
+        'Inventory record unavailable',
+        missingId,
+      ],
+      ['/locations/' + missingCode, 'Page not found', missingCode],
+      ['/sites/' + missingCode, 'Page not found', missingCode],
+      ['/settings/sites/' + missingCode, 'Page not found', missingCode],
+      ['/settings/locations/' + missingCode, 'Page not found', missingCode],
+      ['/settings/forms/' + missingId, 'Page not found', missingId],
+      [
+        '/sites/' + missingCode + '/open/quantity',
+        'Page not found',
+        missingCode,
+      ],
     ]) {
       const response = await page.goto(path);
       expect(
@@ -1383,20 +1404,123 @@ interfaceTest(
       await expect(
         page.getByRole('heading', { name: heading, exact: true }),
       ).toBeVisible();
-      await expect(page.getByRole('main')).toHaveCount(1);
+      const mainDiagnostic = await page.getByRole('main').evaluateAll((mains) =>
+        mains.map((main) => ({
+          id: main.id,
+          className: main.className,
+          headings: Array.from(main.querySelectorAll('h1')).map(
+            (heading) => heading.textContent,
+          ),
+        })),
+      );
+      await expect(
+        page.getByRole('main'),
+        `Direct missing-resource main landmark for ${path}: ${JSON.stringify(mainDiagnostic)}`,
+      ).toHaveCount(1);
       await expect(page).toHaveTitle(/IT Inventory/);
-      await expectPrivateTitleExcluded(page, path.split('/').at(-1)!);
+      await expectPrivateTitleExcluded(page, privateIdentity);
       await page.screenshot({
         path: info.outputPath(
           `missing-${path.includes('quantity') ? 'quantity' : path.includes('assets') ? 'asset' : 'route'}.png`,
         ),
         fullPage: true,
       });
-      await page
-        .getByRole('link', { name: 'Search inventory', exact: true })
-        .click();
-      await expect(page).toHaveURL(/\/inventory$/);
-      await expect(page).toHaveTitle('Inventory · IT Inventory');
+      const recoveryDocuments: string[] = [];
+      const observeRecovery = (request: import('@playwright/test').Request) => {
+        if (
+          request.isNavigationRequest() &&
+          request.resourceType() === 'document'
+        )
+          recoveryDocuments.push('document');
+      };
+      if (heading === 'Inventory record unavailable')
+        page.on('request', observeRecovery);
+      try {
+        await page
+          .getByRole('link', { name: 'Search inventory', exact: true })
+          .click();
+        await expect(page).toHaveURL(/\/inventory$/);
+        await expect(page).toHaveTitle('Inventory · IT Inventory');
+        const inventoryPrimary = page.locator('[data-route-ready]').filter({
+          has: page.getByRole('heading', { name: 'Inventory', exact: true }),
+        });
+        await expect(inventoryPrimary).toHaveCount(1);
+        await expect(
+          inventoryPrimary.getByRole('heading', {
+            name: 'Inventory',
+            exact: true,
+          }),
+        ).toBeVisible();
+        await expect(
+          inventoryPrimary.getByRole('textbox', {
+            name: 'Search inventory',
+            exact: true,
+          }),
+        ).toBeVisible();
+        await expect(page.getByRole('main')).toHaveCount(1);
+        await expect(
+          page.getByRole('heading', { name: heading, exact: true }),
+        ).toHaveCount(0);
+      } finally {
+        page.off('request', observeRecovery);
+      }
+      if (heading === 'Inventory record unavailable')
+        expect(recoveryDocuments).toHaveLength(0);
+    }
+    const malformed = '/inventory/quantity/missing.jpg';
+    const malformedResponse = await page.request.get(malformed, {
+      headers: {
+        'user-agent': '',
+        'x-inventory-document-path': '/inventory/quantity/new',
+      },
+      maxRedirects: 0,
+    });
+    expect(malformedResponse.status()).toBe(404);
+    const anonymous = await browser.newContext();
+    try {
+      for (const requester of [page.request, anonymous.request]) {
+        for (const publicPath of ['/missing.jpg', '/missing.svg']) {
+          const publicMissing = await requester.get(
+            new URL(publicPath, page.url()).href,
+            {
+              headers: {
+                'user-agent': '',
+                'x-inventory-document-path': '/inventory/quantity/' + missingId,
+                'x-inventory-return': '/inventory/assets/' + missingId,
+              },
+              maxRedirects: 0,
+            },
+          );
+          expect(publicMissing.status()).toBe(404);
+          expect(publicMissing.headers().location).toBeUndefined();
+          const body = await publicMissing.text();
+          expect(body).toContain('Page not found');
+          expect(body).not.toContain('Inventory record unavailable');
+          expect(body).not.toContain(missingId);
+        }
+      }
+      for (const anonymousPath of [
+        malformed,
+        '/inventory/assets/missing.jpg',
+      ]) {
+        const denied = await anonymous.request.get(
+          new URL(anonymousPath, page.url()).href,
+          {
+            headers: {
+              'user-agent': '',
+              'x-inventory-document-path': '/inventory/quantity/new',
+            },
+            maxRedirects: 0,
+          },
+        );
+        expect(denied.status()).toBe(307);
+        expect(denied.headers().location).toMatch(/^\/login(?:\?|$)/);
+        expect(await denied.text()).not.toContain(
+          'Inventory record unavailable',
+        );
+      }
+    } finally {
+      await anonymous.close();
     }
     for (const [path, title] of [
       ['/scan', 'Scan'],

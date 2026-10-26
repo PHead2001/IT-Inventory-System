@@ -2,6 +2,7 @@
 
 import { useEffect, useId, useSyncExternalStore } from 'react';
 import { MotionConfig } from 'motion/react';
+import { cancelRouteSnapshots } from './route-motion-state';
 
 const storageKey = 'it-inventory-reduce-motion';
 const changeEvent = 'it-inventory-motion-change';
@@ -20,16 +21,24 @@ function serverReady() {
 }
 
 function subscribe(listener: () => void) {
+  function changed() {
+    // Suppress already-running native snapshots before React's next render.
+    if (snapshot() || systemSnapshot()) {
+      document.documentElement.dataset.motion = 'reduced';
+      cancelRouteSnapshots();
+    }
+    listener();
+  }
   function onStorage(event: StorageEvent) {
     if (event.key !== storageKey && event.key !== null) return;
     volatilePreference = null;
-    listener();
+    changed();
   }
   window.addEventListener('storage', onStorage);
-  window.addEventListener(changeEvent, listener);
+  window.addEventListener(changeEvent, changed);
   return () => {
     window.removeEventListener('storage', onStorage);
-    window.removeEventListener(changeEvent, listener);
+    window.removeEventListener(changeEvent, changed);
   };
 }
 
@@ -45,8 +54,15 @@ function snapshot() {
 function subscribeSystem(listener: () => void) {
   if (typeof window.matchMedia !== 'function') return () => {};
   const media = window.matchMedia('(prefers-reduced-motion: reduce)');
-  media.addEventListener('change', listener);
-  return () => media.removeEventListener('change', listener);
+  const changed = () => {
+    if (media.matches) {
+      document.documentElement.dataset.motion = 'reduced';
+      cancelRouteSnapshots();
+    }
+    listener();
+  };
+  media.addEventListener('change', changed);
+  return () => media.removeEventListener('change', changed);
 }
 
 function systemSnapshot() {

@@ -1,3 +1,14 @@
+vi.mock('server-only', () => ({}));
+// Protected page readiness receives the same mocked request actor as its reads.
+vi.mock('@/lib/auth/session.server', () => ({
+  requireMember: async () => ({
+    member: {
+      user_id: 'route-test-actor',
+      role: 'staff',
+      can_manage_configuration: true,
+    },
+  }),
+}));
 import { render, screen } from '@testing-library/react';
 import { beforeEach, expect, it, vi } from 'vitest';
 import type { HistoryEvent } from '@/features/inventory/contracts-ui';

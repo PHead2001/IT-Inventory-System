@@ -1,7 +1,12 @@
 'use client';
-import { useLayoutEffect, useRef, useState, useTransition } from 'react';
-import { useRouter } from 'next/navigation';
-import Link from 'next/link';
+import { afterTransitionCapture } from '@/components/forms/transition-capture';
+import { useRouteTask } from '@/components/experience/route-pending';
+import { useRouteRouter as useRouter } from '@/components/experience/route-pending';
+
+import { useRouteActionResult } from '@/components/experience/route-pending';
+import { useLayoutEffect, useRef, useState } from 'react';
+
+import Link from '@/components/experience/route-link';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { OperationalTimestamp } from '@/components/operational-time';
@@ -48,8 +53,9 @@ export function SettingsPanel({
   canManage: boolean;
   mode?: 'both' | 'categories' | 'labels';
 }) {
+  const observeRouteActionResult = useRouteActionResult();
   const router = useRouter();
-  const [pending, startTransition] = useTransition();
+  const [pending, startTask] = useRouteTask();
   const [message, setMessage] = useState('');
   const [receipt, setReceipt] = useState<{ key: string; id: string } | null>(
     null,
@@ -65,14 +71,16 @@ export function SettingsPanel({
   const returnToCategory = useRef<string | null>(null);
   const categoryList = useRef<HTMLUListElement>(null);
   useLayoutEffect(() => {
-    if (editing) renameInput.current?.focus();
-    else if (!pending && returnToCategory.current) {
-      (
-        renameTriggers.current.get(returnToCategory.current) ??
-        categoryList.current
-      )?.focus();
-      returnToCategory.current = null;
-    }
+    return afterTransitionCapture(document, () => {
+      if (editing) renameInput.current?.focus();
+      else if (!pending && returnToCategory.current) {
+        (
+          renameTriggers.current.get(returnToCategory.current) ??
+          categoryList.current
+        )?.focus();
+        returnToCategory.current = null;
+      }
+    });
   }, [editing, pending]);
   const closeRename = () => {
     setEditing(null);
@@ -156,10 +164,10 @@ export function SettingsPanel({
         operation: 'label_defaults_update',
       };
     inFlight.current = true;
-    startTransition(async () => {
+    startTask(async () => {
       let result;
       try {
-        result = await submitConfiguration(command);
+        result = await observeRouteActionResult(submitConfiguration(command));
       } catch {
         result = configurationError(undefined);
       } finally {
@@ -226,8 +234,10 @@ export function SettingsPanel({
   const previewRemoval = () => {
     if (!removing) return;
     setMessage('');
-    startTransition(async () => {
-      const result = await reviewCategoryRemoval(removing, replacement || null);
+    startTask(async () => {
+      const result = await observeRouteActionResult(
+        reviewCategoryRemoval(removing, replacement || null),
+      );
       if (!result.ok) {
         setMessage(result.message);
         setReview(null);

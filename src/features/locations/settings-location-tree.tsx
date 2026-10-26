@@ -1,6 +1,6 @@
 'use client';
 
-import Link from 'next/link';
+import Link from '@/components/experience/route-link';
 import { useId, useMemo, useState } from 'react';
 import type { ManagedLocation } from '@/features/custody/queries.server';
 import type { LocationRef } from '@/features/inventory/contracts-ui';

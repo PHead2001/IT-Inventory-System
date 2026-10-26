@@ -1,13 +1,17 @@
 'use client';
+import { afterTransitionCapture } from '@/components/forms/transition-capture';
+import { useRouteTask } from '@/components/experience/route-pending';
+import { useRouteRouter as useRouter } from '@/components/experience/route-pending';
+
+import { useRouteActionResult } from '@/components/experience/route-pending';
 import {
   useCallback,
   useEffect,
   useLayoutEffect,
   useRef,
   useState,
-  useTransition,
 } from 'react';
-import { useRouter } from 'next/navigation';
+
 import { countLabel } from '@/lib/count';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -112,7 +116,7 @@ function MoveRecovery(props: Props) {
   const [freshStart, setFreshStart] = useState<Awaited<
     ReturnType<typeof loadMoveSnapshot>
   > | null>(null);
-  const [recoveryPending, startRecovery] = useTransition();
+  const [recoveryPending, startRecoveryTask] = useRouteTask();
   const router = useRouter();
   useReportTaskState(
     {
@@ -210,7 +214,7 @@ function MoveRecovery(props: Props) {
   ]);
   const discardInvalidPointer = () => {
     if (!invalidPointer || !storageKey || recoveryPending) return;
-    startRecovery(async () => {
+    startRecoveryTask(async () => {
       try {
         const snapshot = await loadMoveSnapshot({
           entityId: itemId,
@@ -300,6 +304,7 @@ function MutationFormFields({
   initialStorageWarning?: string;
   freshStart?: Awaited<ReturnType<typeof loadMoveSnapshot>> | null;
 }) {
+  const observeRouteActionResult = useRouteActionResult();
   const resetTask = useTaskReset();
   const taskEligible = useTaskEligibility();
   const taskEligibleRef = useRef(taskEligible);
@@ -405,7 +410,7 @@ function MutationFormFields({
       state?.ok !== true,
   });
   const invalidateTagAdvisory = tagAdvisory.invalidate;
-  const [pending, startTransition] = useTransition();
+  const [pending, startTask] = useRouteTask();
   const inFlight = useRef(false);
   const submitted = useRef<MutationCommand | null>(null);
   const [uncertain, setUncertain] = useState(false);
@@ -453,7 +458,10 @@ function MutationFormFields({
     completedVersion: state?.ok ? state.version : undefined,
   });
   useEffect(() => {
-    if (completed) completionRef.current?.focus();
+    if (completed)
+      return afterTransitionCapture(document, () =>
+        completionRef.current?.focus(),
+      );
   }, [completed]);
   // A verified action snapshot may be newer than unchanged route props. Only
   // a newly observed prop catalog supersedes it; any changed review stays invalid.
@@ -1042,7 +1050,7 @@ function MutationFormFields({
     if (!uncertain && !validReview) {
       setReviewKey(currentReviewKey);
       if (serialized && metadata && values.serial_number.trim()) {
-        startTransition(async () => {
+        startTask(async () => {
           try {
             setDuplicates(
               await findDuplicateSerials(values.serial_number, asset?.id),
@@ -1083,9 +1091,9 @@ function MutationFormFields({
     submitted.current = command;
     inFlight.current = true;
     reportTask({ pending: true });
-    startTransition(async () => {
+    startTask(async () => {
       try {
-        const result = await submitInventory(command);
+        const result = await observeRouteActionResult(submitInventory(command));
         setState(result);
         {
           const unresolved =
@@ -1161,7 +1169,7 @@ function MutationFormFields({
     )
       return;
     inFlight.current = true;
-    startTransition(async () => {
+    startTask(async () => {
       try {
         const fresh = await loadMoveSnapshot({
           entityId: item.id,
@@ -1213,7 +1221,7 @@ function MutationFormFields({
   const refreshReceipt = () => {
     if (!state?.ok || !state.eventId || !actorId || pending) return;
     const saved = state;
-    startTransition(async () => {
+    startTask(async () => {
       try {
         const movement = await reloadMoveReceipt({
           entityId: saved.entityId,
@@ -1378,7 +1386,7 @@ function MutationFormFields({
                   type="button"
                   variant="outline"
                   onClick={() =>
-                    startTransition(async () => {
+                    startTask(async () => {
                       try {
                         setDuplicates(
                           await findDuplicateSerials(

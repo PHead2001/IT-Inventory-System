@@ -1,27 +1,24 @@
 'use client';
+import { afterTransitionCapture } from '@/components/forms/transition-capture';
+import {
+  LoadingAnnouncement,
+  LoadingReveal,
+} from '@/components/ui/loading-skeleton';
 import { OperationalTimestamp } from '@/components/operational-time';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { createSupabaseBrowserClient } from '@/lib/supabase/browser';
 import { formatFileSize } from '@/lib/file-size';
-import { cleanupResultSchema, type CleanupResult } from './contract';
+import {
+  cleanupResultSchema,
+  inventoryFileCardsSchema,
+  type CleanupResult,
+  type InventoryFileCard as Card,
+  type InventoryFileCards as CardsEnvelope,
+  type InventoryFileCardsState,
+} from './contract';
 import { validateSelectedFile } from './selection';
 
 const bucket = 'inventory-files';
-type Card = {
-  id: string;
-  name: string;
-  filename: string;
-  uploader: string;
-  ready_at: string | null;
-  type: string;
-  bytes: number | null;
-  purpose: string;
-  state: string;
-  created_at: string;
-  version: string;
-  replaces_file_id: string | null;
-  reviewed_replaced_file_version: string | null;
-};
 type FileHistory = {
   id: string;
   action: string;
@@ -33,7 +30,6 @@ type FileHistory = {
   file_bytes: number;
   collection_revision: string;
 };
-type CardsEnvelope = { revision: string; files: Card[] };
 function fileState(state: string) {
   switch (state) {
     case 'ready':
@@ -140,6 +136,7 @@ export function FilesPanel({
   staff,
   actorId,
   parentName = 'this inventory record',
+  initialState,
 }: {
   parentType: 'asset' | 'quantity';
   parentId: string;
@@ -147,6 +144,7 @@ export function FilesPanel({
   staff: boolean;
   actorId: string;
   parentName?: string;
+  initialState: InventoryFileCardsState;
 }) {
   return (
     <BoundFilesPanel
@@ -156,6 +154,7 @@ export function FilesPanel({
       active={active}
       staff={staff}
       parentName={parentName}
+      initialState={initialState}
     />
   );
 }
@@ -166,16 +165,24 @@ function BoundFilesPanel({
   active,
   staff,
   parentName,
+  initialState,
 }: {
   parentType: 'asset' | 'quantity';
   parentId: string;
   active: boolean;
   staff: boolean;
   parentName: string;
+  initialState: InventoryFileCardsState;
 }) {
   const [client] = useState(createSupabaseBrowserClient);
-  const [cards, setCards] = useState<Card[]>([]);
-  const [collectionRevision, setCollectionRevision] = useState('1');
+  const [cards, setCards] = useState<Card[]>(() =>
+    initialState.status === 'ready' ? initialState.envelope.files : [],
+  );
+  const [collectionRevision, setCollectionRevision] = useState<string | null>(
+    () =>
+      initialState.status === 'ready' ? initialState.envelope.revision : null,
+  );
+  const collectionKnown = collectionRevision !== null;
   const [history, setHistory] = useState<FileHistory[]>([]);
   const [historyPage, setHistoryPage] = useState(1);
   const [historyMore, setHistoryMore] = useState(false);
@@ -192,6 +199,7 @@ function BoundFilesPanel({
     [],
   );
   function handleSelectedFile(next: File | null) {
+    if (next && !collectionKnown) return;
     if (selectedPreviewRef.current)
       URL.revokeObjectURL(selectedPreviewRef.current);
     selectedPreviewRef.current = null;
@@ -235,18 +243,23 @@ function BoundFilesPanel({
   const removalDialog = useRef<HTMLDialogElement>(null);
   const removalTrigger = useRef<HTMLButtonElement | null>(null);
   useEffect(() => {
-    if (removal) {
-      const dialog = removalDialog.current;
-      if (dialog && !dialog.open) {
-        if (dialog.showModal) dialog.showModal();
-        else dialog.setAttribute('open', '');
-        dialog.querySelector<HTMLButtonElement>('button')?.focus();
+    return afterTransitionCapture(document, () => {
+      if (removal) {
+        const dialog = removalDialog.current;
+        if (dialog && !dialog.open) {
+          if (dialog.showModal) dialog.showModal();
+          else dialog.setAttribute('open', '');
+          dialog.querySelector<HTMLButtonElement>('button')?.focus();
+        }
+      } else {
+        if (removalTrigger.current?.isConnected) removalTrigger.current.focus();
       }
-    } else {
-      if (removalTrigger.current?.isConnected) removalTrigger.current.focus();
-    }
+    });
   }, [removal]);
   const [message, setMessage] = useState('');
+  const [readError, setReadError] = useState(
+    initialState.status === 'unavailable',
+  );
   useEffect(() => {
     function preventFileNavigation(event: DragEvent) {
       if (event.dataTransfer?.types.includes('Files')) event.preventDefault();
@@ -258,7 +271,7 @@ function BoundFilesPanel({
       document.removeEventListener('drop', preventFileNavigation);
     };
   }, []);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(false);
   const [historyError, setHistoryError] = useState(false);
   const [cleanupPending, setCleanupPending] = useState(false);
   const [preview, setPreview] = useState<{
@@ -269,33 +282,55 @@ function BoundFilesPanel({
   const [rpc] = useState(() => client.rpc.bind(client) as unknown as Rpc);
   const mounted = useRef(true);
   const invalidatedFiles = useRef(new Set<string>());
+  const readGeneration = useRef(0);
   useEffect(() => {
     mounted.current = true;
     return () => {
       mounted.current = false;
     };
   }, []);
-  const load = useCallback(async (): Promise<CardsEnvelope | null> => {
-    const { data, error } = await rpc('inventory_file_cards', {
-      p_parent_type: parentType,
-      p_parent_id: parentId,
-    });
-    if (!mounted.current) return null;
-    if (error) {
-      setMessage('Files could not be loaded.');
-      return null;
-    }
-    const envelope = data as CardsEnvelope;
-    setCards(
-      Array.isArray(envelope?.files)
-        ? envelope.files.filter(
+  const load = useCallback(
+    async (
+      isCurrent: () => boolean = () => true,
+    ): Promise<CardsEnvelope | null> => {
+      const generation = ++readGeneration.current;
+      try {
+        const { data, error } = await rpc('inventory_file_cards', {
+          p_parent_type: parentType,
+          p_parent_id: parentId,
+        });
+        if (
+          !mounted.current ||
+          !isCurrent() ||
+          generation !== readGeneration.current
+        )
+          return null;
+        const parsed = inventoryFileCardsSchema.safeParse(data);
+        if (error || !parsed.success) {
+          setReadError(true);
+          return null;
+        }
+        const envelope = parsed.data;
+        setCards(
+          envelope.files.filter(
             (card) => !invalidatedFiles.current.has(card.id),
-          )
-        : [],
-    );
-    setCollectionRevision(envelope?.revision ?? '1');
-    return envelope;
-  }, [rpc, parentType, parentId]);
+          ),
+        );
+        setCollectionRevision(envelope.revision);
+        setReadError(false);
+        return envelope;
+      } catch {
+        if (
+          mounted.current &&
+          isCurrent() &&
+          generation === readGeneration.current
+        )
+          setReadError(true);
+        return null;
+      }
+    },
+    [rpc, parentType, parentId],
+  );
   async function cleanupTerminalFiles() {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 15000);
@@ -318,25 +353,32 @@ function BoundFilesPanel({
       clearTimeout(timeout);
     }
   }
+  const seenEnvelope = useRef(initialState);
+  const refreshPending = useRef(false);
   useEffect(() => {
-    let cancelled = false;
-    void rpc('inventory_file_cards', {
-      p_parent_type: parentType,
-      p_parent_id: parentId,
-    }).then(({ data, error }) => {
-      if (cancelled) return;
-      setLoading(false);
-      if (error) setMessage('Files could not be loaded.');
-      else {
-        const envelope = data as CardsEnvelope;
-        setCards(Array.isArray(envelope?.files) ? envelope.files : []);
-        setCollectionRevision(envelope?.revision ?? '1');
-      }
+    if (seenEnvelope.current !== initialState) {
+      seenEnvelope.current = initialState;
+      refreshPending.current = true;
+    }
+    // RSC refresh props are an invalidation signal, never an ordered snapshot:
+    // pending file versions can change without advancing collection revision.
+    // Keep local intents and ambiguous removal outcomes intact until settled.
+    // Feedback and cleanup retries survive rereads; they are not refresh locks.
+    if (!refreshPending.current || busy || removal || file || replace) return;
+    refreshPending.current = false;
+    setLoading(true);
+    let current = true;
+    let completed = false;
+    void load(() => current).finally(() => {
+      completed = true;
+      if (mounted.current && current) setLoading(false);
     });
     return () => {
-      cancelled = true;
+      current = false;
+      setLoading(false);
+      if (!completed) refreshPending.current = true;
     };
-  }, [rpc, parentType, parentId]);
+  }, [initialState, busy, removal, file, replace, load]);
   useEffect(() => {
     let cancelled = false;
     void rpc('inventory_file_history', {
@@ -403,6 +445,8 @@ function BoundFilesPanel({
     requestId = crypto.randomUUID(),
     replacedId: string | null = null,
   ) {
+    if (!collectionKnown)
+      throw new Error('Load current files before publishing.');
     const response = await fetch('/api/inventory-files/validate', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -457,7 +501,7 @@ function BoundFilesPanel({
   }
 
   function beginPicker(target: string) {
-    if (busy) return;
+    if (busy || !collectionKnown) return;
     // A new picker intent must not reuse bytes if the native picker is cancelled.
     handleSelectedFile(null);
     if (fileInput.current) fileInput.current.value = '';
@@ -466,7 +510,7 @@ function BoundFilesPanel({
   }
 
   async function upload() {
-    if (!file) return;
+    if (!file || !collectionKnown) return;
     setBusy(true);
     setMessage('');
     try {
@@ -539,6 +583,7 @@ function BoundFilesPanel({
   }
 
   async function pendingAction(card: Card, action: 'validate' | 'cancel') {
+    if (!collectionKnown) return;
     setBusy(true);
     setMessage('');
     try {
@@ -724,6 +769,7 @@ function BoundFilesPanel({
   }
 
   async function rename(card: Card) {
+    if (!collectionKnown) return;
     const title = window.prompt('File title', card.name)?.trim();
     if (title === undefined || title === card.name) return;
     setBusy(true);
@@ -750,469 +796,504 @@ function BoundFilesPanel({
   }
 
   return (
-    <section
-      aria-label="Inventory files"
-      aria-busy={busy}
-      className="experience-surface my-5 min-w-0 p-4"
-    >
-      <h2 className="text-xl font-semibold">
-        {parentType === 'quantity'
-          ? 'Recognition photo'
-          : 'Photos and documents'}
-      </h2>
-      <p className="experience-muted mt-2 text-sm">
-        {parentType === 'quantity'
-          ? 'JPEG, PNG or still WebP · Up to 20 MiB. Photos are normalized before display.'
-          : 'JPEG, PNG, still WebP or PDF · Up to 20 MiB. Photos are normalized before display; PDFs download as attachments.'}
-      </p>
-      {message && !removal && (
-        <p
-          role="alert"
-          className="experience-feedback mt-3 break-words text-amber-100"
-        >
-          {message}
+    <>
+      <LoadingAnnouncement
+        label={busy ? 'File request in progress…' : 'Loading files…'}
+        active={busy || loading}
+      />
+      <section
+        aria-label="Inventory files"
+        aria-busy={busy || loading}
+        className="experience-surface my-5 min-w-0 p-4"
+      >
+        <h2 className="text-xl font-semibold">
+          {parentType === 'quantity'
+            ? 'Recognition photo'
+            : 'Photos and documents'}
+        </h2>
+        <p className="experience-muted mt-2 text-sm">
+          {parentType === 'quantity'
+            ? 'JPEG, PNG or still WebP · Up to 20 MiB. Photos are normalized before display.'
+            : 'JPEG, PNG, still WebP or PDF · Up to 20 MiB. Photos are normalized before display; PDFs download as attachments.'}
         </p>
-      )}
-      {busy && (
-        <p role="status" className="mt-2 text-sm text-cyan-200">
-          File request in progress…
-        </p>
-      )}
-      {loading && (
-        <p role="status" className="mt-3 text-sm">
-          Loading files…
-        </p>
-      )}
-      <ul className="mt-3 space-y-2">
-        {cards
-          .toSorted(
-            (a, b) => Number(b.state === 'ready') - Number(a.state === 'ready'),
-          )
-          .map((card) => (
-            <li
-              key={card.id}
-              className="flex min-w-0 flex-col gap-3 rounded-lg border border-cyan-100/15 bg-slate-950/40 p-3 sm:flex-row sm:flex-wrap sm:items-center"
-            >
-              <div className="flex min-w-0 items-start gap-3 sm:min-w-64 sm:flex-1">
-                <span className="w-16 shrink-0">
-                  <FileThumb card={card} read={read} />
-                </span>
-                <div className="min-w-0 flex-1">
-                  <p className="break-words font-medium [overflow-wrap:anywhere]">
-                    {card.name}
-                  </p>
-                  <span className="mt-1 inline-block rounded-full border border-cyan-200/20 px-2 py-0.5 text-xs text-cyan-100">
-                    {fileState(card.state).label}
-                  </span>
-                  {fileState(card.state).detail && (
-                    <p className="mt-2 text-sm text-amber-100">
-                      {fileState(card.state).detail}
-                    </p>
-                  )}
-                  <p className="break-words text-xs text-slate-400 [overflow-wrap:anywhere]">
-                    Original: {card.filename}
-                  </p>
-                  <p className="text-xs leading-5 text-slate-400 [overflow-wrap:anywhere]">
-                    {formatFileSize(card.bytes)} · {fileType(card.type)} ·{' '}
-                    {card.uploader} ·{' '}
-                    {card.ready_at ? 'Published: ' : 'Uploaded: '}
-                    <OperationalTimestamp
-                      value={card.ready_at ?? card.created_at}
-                    />
-                  </p>
-                </div>
-              </div>
-              <div className="flex w-full flex-wrap items-center gap-x-4 gap-y-1 sm:ml-auto sm:w-auto">
-                {card.state === 'ready' && (
-                  <button
-                    type="button"
-                    className="min-h-11 text-cyan-300 underline"
-                    onClick={() =>
-                      void read(
-                        card,
-                        card.type === 'application/pdf' ? 'source' : 'display',
-                        card.type === 'application/pdf',
-                      )
-                    }
-                  >
-                    {card.type === 'application/pdf'
-                      ? 'Download PDF'
-                      : 'View photo'}
-                  </button>
-                )}
-                {staff && card.state === 'ready' && (
-                  <button
-                    type="button"
-                    disabled={busy || Boolean(removal)}
-                    className="min-h-11 text-cyan-300 underline disabled:opacity-50"
-                    onClick={() => beginPicker(card.id)}
-                  >
-                    Replace
-                  </button>
-                )}
-                {staff && card.state === 'ready' && (
-                  <button
-                    type="button"
-                    disabled={busy || Boolean(removal)}
-                    className="min-h-11 text-cyan-300 underline disabled:opacity-50"
-                    onClick={() => void rename(card)}
-                  >
-                    Rename
-                  </button>
-                )}
-                {staff && card.state === 'ready' && (
-                  <button
-                    type="button"
-                    disabled={busy || Boolean(removal)}
-                    className="ml-2 min-h-11 border-l border-amber-200/30 pl-4 text-amber-200 underline disabled:opacity-50"
-                    onClick={(event) => {
-                      if (busy || removal) return;
-                      setMessage('');
-                      removalTrigger.current = event.currentTarget;
-                      setRemoval({
-                        card: { ...card },
-                        owner: parentName,
-                        revision: collectionRevision,
-                        requestId: crypto.randomUUID(),
-                        phase: 'review',
-                      });
-                    }}
-                  >
-                    Remove
-                  </button>
-                )}
-                {staff && pendingStates.has(card.state) && (
-                  <>
-                    <button
-                      type="button"
-                      disabled={busy || Boolean(removal)}
-                      className="min-h-11 text-cyan-300 underline disabled:opacity-50"
-                      onClick={() => void pendingAction(card, 'validate')}
-                    >
-                      {card.state === 'reserved'
-                        ? 'Confirm uploaded bytes'
-                        : 'Review and publish'}
-                    </button>
-                    <button
-                      type="button"
-                      disabled={busy || Boolean(removal)}
-                      className="min-h-11 text-amber-200 underline disabled:opacity-50"
-                      onClick={() => void pendingAction(card, 'cancel')}
-                    >
-                      Cancel
-                    </button>
-                  </>
-                )}
-              </div>
-            </li>
-          ))}
-      </ul>
-      {!loading && !busy && cards.length === 0 && !message && (
-        <p className="experience-muted mt-3 rounded-lg border border-dashed border-cyan-100/20 px-3 py-2 text-sm">
-          {parentType === 'quantity' ? 'No photo yet.' : 'No attachments yet.'}
-        </p>
-      )}
-      {staff && (
-        <div className="mt-4 space-y-3 border-t border-cyan-100/15 pt-4">
-          <div
-            role="group"
-            aria-label="Choose an inventory file"
-            className="rounded-lg border-2 border-dashed border-cyan-100/30 bg-slate-950 p-4"
-            onDragOver={(event) => event.preventDefault()}
-            onDrop={(event) => {
-              event.preventDefault();
-              event.stopPropagation();
-              if (busy || removal) return;
-              if (event.dataTransfer.files.length !== 1) {
-                handleSelectedFile(null);
-                if (fileInput.current) fileInput.current.value = '';
-                setMessage('Choose one file at a time.');
-                return;
-              }
-              if (parentType === 'quantity')
-                setReplace(
-                  cards.find((card) => card.state === 'ready')?.id ?? '',
-                );
-              handleSelectedFile(event.dataTransfer.files[0]);
+        {(message || readError) && !removal && (
+          <p
+            role="alert"
+            className="experience-feedback mt-3 break-words text-amber-100"
+          >
+            {message && <span className="block">{message}</span>}
+            {readError && (
+              <span className="block">Files could not be loaded.</span>
+            )}
+          </p>
+        )}
+        {readError && (
+          <button
+            type="button"
+            disabled={busy || loading || Boolean(removal)}
+            className="mt-2 min-h-11 text-cyan-300 underline disabled:opacity-50"
+            onClick={() => {
+              setLoading(true);
+              void load().finally(() => {
+                if (mounted.current) setLoading(false);
+              });
             }}
           >
-            <label
-              className="block text-sm font-medium"
-              htmlFor="inventory-file"
+            Retry files
+          </button>
+        )}
+        <LoadingReveal busy={loading} reveal={!message && !readError}>
+          <ul className="mt-3 space-y-2">
+            {cards
+              .toSorted(
+                (a, b) =>
+                  Number(b.state === 'ready') - Number(a.state === 'ready'),
+              )
+              .map((card) => (
+                <li
+                  key={card.id}
+                  className="flex min-w-0 flex-col gap-3 rounded-lg border border-cyan-100/15 bg-slate-950/40 p-3 sm:flex-row sm:flex-wrap sm:items-center"
+                >
+                  <div className="flex min-w-0 items-start gap-3 sm:min-w-64 sm:flex-1">
+                    <span className="w-16 shrink-0">
+                      <FileThumb card={card} read={read} />
+                    </span>
+                    <div className="min-w-0 flex-1">
+                      <p className="break-words font-medium [overflow-wrap:anywhere]">
+                        {card.name}
+                      </p>
+                      <span className="mt-1 inline-block rounded-full border border-cyan-200/20 px-2 py-0.5 text-xs text-cyan-100">
+                        {fileState(card.state).label}
+                      </span>
+                      {fileState(card.state).detail && (
+                        <p className="mt-2 text-sm text-amber-100">
+                          {fileState(card.state).detail}
+                        </p>
+                      )}
+                      <p className="break-words text-xs text-slate-400 [overflow-wrap:anywhere]">
+                        Original: {card.filename}
+                      </p>
+                      <p className="text-xs leading-5 text-slate-400 [overflow-wrap:anywhere]">
+                        {formatFileSize(card.bytes)} · {fileType(card.type)} ·{' '}
+                        {card.uploader} ·{' '}
+                        {card.ready_at ? 'Published: ' : 'Uploaded: '}
+                        <OperationalTimestamp
+                          value={card.ready_at ?? card.created_at}
+                        />
+                      </p>
+                    </div>
+                  </div>
+                  <div className="flex w-full flex-wrap items-center gap-x-4 gap-y-1 sm:ml-auto sm:w-auto">
+                    {card.state === 'ready' && (
+                      <button
+                        type="button"
+                        className="min-h-11 text-cyan-300 underline"
+                        onClick={() =>
+                          void read(
+                            card,
+                            card.type === 'application/pdf'
+                              ? 'source'
+                              : 'display',
+                            card.type === 'application/pdf',
+                          )
+                        }
+                      >
+                        {card.type === 'application/pdf'
+                          ? 'Download PDF'
+                          : 'View photo'}
+                      </button>
+                    )}
+                    {staff && card.state === 'ready' && (
+                      <button
+                        type="button"
+                        disabled={busy || Boolean(removal) || !collectionKnown}
+                        className="min-h-11 text-cyan-300 underline disabled:opacity-50"
+                        onClick={() => beginPicker(card.id)}
+                      >
+                        Replace
+                      </button>
+                    )}
+                    {staff && card.state === 'ready' && (
+                      <button
+                        type="button"
+                        disabled={busy || Boolean(removal) || !collectionKnown}
+                        className="min-h-11 text-cyan-300 underline disabled:opacity-50"
+                        onClick={() => void rename(card)}
+                      >
+                        Rename
+                      </button>
+                    )}
+                    {staff && card.state === 'ready' && (
+                      <button
+                        type="button"
+                        disabled={busy || Boolean(removal) || !collectionKnown}
+                        className="ml-2 min-h-11 border-l border-amber-200/30 pl-4 text-amber-200 underline disabled:opacity-50"
+                        onClick={(event) => {
+                          if (busy || removal || collectionRevision === null)
+                            return;
+                          setMessage('');
+                          removalTrigger.current = event.currentTarget;
+                          setRemoval({
+                            card: { ...card },
+                            owner: parentName,
+                            revision: collectionRevision,
+                            requestId: crypto.randomUUID(),
+                            phase: 'review',
+                          });
+                        }}
+                      >
+                        Remove
+                      </button>
+                    )}
+                    {staff && pendingStates.has(card.state) && (
+                      <>
+                        <button
+                          type="button"
+                          disabled={
+                            busy || Boolean(removal) || !collectionKnown
+                          }
+                          className="min-h-11 text-cyan-300 underline disabled:opacity-50"
+                          onClick={() => void pendingAction(card, 'validate')}
+                        >
+                          {card.state === 'reserved'
+                            ? 'Confirm uploaded bytes'
+                            : 'Review and publish'}
+                        </button>
+                        <button
+                          type="button"
+                          disabled={
+                            busy || Boolean(removal) || !collectionKnown
+                          }
+                          className="min-h-11 text-amber-200 underline disabled:opacity-50"
+                          onClick={() => void pendingAction(card, 'cancel')}
+                        >
+                          Cancel
+                        </button>
+                      </>
+                    )}
+                  </div>
+                </li>
+              ))}
+          </ul>
+          {collectionKnown &&
+            !busy &&
+            cards.length === 0 &&
+            !message &&
+            !readError && (
+              <p className="experience-muted mt-3 rounded-lg border border-dashed border-cyan-100/20 px-3 py-2 text-sm">
+                {parentType === 'quantity'
+                  ? 'No photo yet.'
+                  : 'No attachments yet.'}
+              </p>
+            )}
+        </LoadingReveal>
+        {staff && (
+          <div className="mt-4 space-y-3 border-t border-cyan-100/15 pt-4">
+            <div
+              role="group"
+              aria-label="Choose an inventory file"
+              className="rounded-lg border-2 border-dashed border-cyan-100/30 bg-slate-950 p-4"
+              onDragOver={(event) => event.preventDefault()}
+              onDrop={(event) => {
+                event.preventDefault();
+                event.stopPropagation();
+                if (busy || removal || !collectionKnown) return;
+                if (event.dataTransfer.files.length !== 1) {
+                  handleSelectedFile(null);
+                  if (fileInput.current) fileInput.current.value = '';
+                  setMessage('Choose one file at a time.');
+                  return;
+                }
+                if (parentType === 'quantity')
+                  setReplace(
+                    cards.find((card) => card.state === 'ready')?.id ?? '',
+                  );
+                handleSelectedFile(event.dataTransfer.files[0]);
+              }}
             >
-              Add{' '}
-              {parentType === 'quantity' ? 'recognition photo' : 'photo or PDF'}
-            </label>
-            <input
-              id="inventory-file"
-              ref={fileInput}
-              type="file"
-              className="sr-only"
-              tabIndex={-1}
-              disabled={busy || Boolean(removal)}
-              accept={
-                parentType === 'quantity'
-                  ? 'image/jpeg,image/png,image/webp'
-                  : 'image/jpeg,image/png,image/webp,application/pdf'
-              }
-              onChange={(event) =>
-                handleSelectedFile(event.target.files?.[0] ?? null)
-              }
-            />
-            <p className="my-2 text-xs text-slate-300">
-              Drop one file here, or browse your device. Nothing uploads until
-              you choose Upload and review.
-            </p>
+              <label
+                className="block text-sm font-medium"
+                htmlFor="inventory-file"
+              >
+                Add{' '}
+                {parentType === 'quantity'
+                  ? 'recognition photo'
+                  : 'photo or PDF'}
+              </label>
+              <input
+                id="inventory-file"
+                ref={fileInput}
+                type="file"
+                className="sr-only"
+                tabIndex={-1}
+                disabled={busy || Boolean(removal) || !collectionKnown}
+                accept={
+                  parentType === 'quantity'
+                    ? 'image/jpeg,image/png,image/webp'
+                    : 'image/jpeg,image/png,image/webp,application/pdf'
+                }
+                onChange={(event) =>
+                  handleSelectedFile(event.target.files?.[0] ?? null)
+                }
+              />
+              <p className="my-2 text-xs text-slate-300">
+                Drop one file here, or browse your device. Nothing uploads until
+                you choose Upload and review.
+              </p>
+              <button
+                type="button"
+                disabled={busy || Boolean(removal) || !collectionKnown}
+                className="min-h-11 rounded border border-cyan-400 px-4 py-2 text-cyan-200 disabled:opacity-50"
+                onClick={() =>
+                  beginPicker(
+                    parentType === 'quantity'
+                      ? (cards.find((card) => card.state === 'ready')?.id ?? '')
+                      : replace,
+                  )
+                }
+              >
+                Browse files
+              </button>
+              {file && (
+                <div className="mt-3 space-y-2">
+                  <p className="break-all text-sm">
+                    Selected: {file.name} · {formatFileSize(file.size)}
+                  </p>
+                  {selectedPreview ? (
+                    <>
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img
+                        src={selectedPreview}
+                        alt="Selected file preview"
+                        className="max-h-40 max-w-full rounded object-contain"
+                      />
+                    </>
+                  ) : (
+                    <span className="inline-flex rounded border border-slate-600 px-3 py-2 text-xs">
+                      {file.type === 'application/pdf'
+                        ? 'PDF document · download after review'
+                        : 'Photo preview unavailable'}
+                    </span>
+                  )}
+                  <button
+                    type="button"
+                    disabled={busy || Boolean(removal) || !collectionKnown}
+                    className="min-h-11 text-cyan-200 underline"
+                    onClick={() => {
+                      handleSelectedFile(null);
+                      if (fileInput.current) fileInput.current.value = '';
+                    }}
+                  >
+                    Clear selection
+                  </button>
+                </div>
+              )}
+            </div>
+            {(cards.some((card) => card.state === 'ready') ||
+              replaceUnavailable) && (
+              <label className="block text-sm">
+                Replace a ready file
+                <select
+                  className="experience-field mt-1 block min-h-11 w-full p-2"
+                  value={replace}
+                  onChange={(event) => setReplace(event.target.value)}
+                >
+                  <option value="">Add without replacing</option>
+                  {replaceUnavailable && (
+                    <option value={replace} disabled>
+                      Previously selected replacement unavailable — choose again
+                    </option>
+                  )}
+                  {cards
+                    .filter((card) => card.state === 'ready')
+                    .map((card) => (
+                      <option key={card.id} value={card.id}>
+                        {card.name}
+                      </option>
+                    ))}
+                </select>
+                {replaceUnavailable && (
+                  <span
+                    role="alert"
+                    className="mt-1 block text-sm text-amber-200"
+                  >
+                    The selected replacement is unavailable. Choose another
+                    ready file or add without replacing.
+                  </span>
+                )}
+              </label>
+            )}
+            <button
+              type="button"
+              disabled={!file || busy || replaceUnavailable || !collectionKnown}
+              className="min-h-11 rounded-lg bg-cyan-700 px-4 py-2 font-semibold text-white disabled:opacity-50"
+              onClick={() => void upload()}
+            >
+              {busy ? 'Working…' : 'Upload and review'}
+            </button>
+          </div>
+        )}
+        {!active && staff && (
+          <p className="mt-3 text-sm text-slate-400">
+            This record is archived or retired; its files remain manageable.
+          </p>
+        )}
+        <details className="mt-4 border-t border-cyan-100/15 pt-3">
+          <summary className="min-h-11 cursor-pointer py-2 font-semibold">
+            File activity
+            {history.length > 0 ? ` · ${history.length} shown` : ''}
+            {cleanupPending ? ' · cleanup unconfirmed' : ''}
+          </summary>
+          {staff && (
             <button
               type="button"
               disabled={busy || Boolean(removal)}
-              className="min-h-11 rounded border border-cyan-400 px-4 py-2 text-cyan-200 disabled:opacity-50"
-              onClick={() =>
-                beginPicker(
-                  parentType === 'quantity'
-                    ? (cards.find((card) => card.state === 'ready')?.id ?? '')
-                    : replace,
-                )
-              }
+              className="mt-2 min-h-11 text-cyan-300 underline disabled:opacity-50"
+              onClick={() => {
+                setBusy(true);
+                void cleanupTerminalFiles()
+                  .then((deleted) => setMessage(cleanupStatus(deleted)))
+                  .finally(() => setBusy(false));
+              }}
             >
-              Browse files
+              {cleanupPending ? 'Retry file cleanup' : 'Check file cleanup'}
             </button>
-            {file && (
-              <div className="mt-3 space-y-2">
-                <p className="break-all text-sm">
-                  Selected: {file.name} · {formatFileSize(file.size)}
-                </p>
-                {selectedPreview ? (
-                  <>
-                    {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img
-                      src={selectedPreview}
-                      alt="Selected file preview"
-                      className="max-h-40 max-w-full rounded object-contain"
-                    />
-                  </>
-                ) : (
-                  <span className="inline-flex rounded border border-slate-600 px-3 py-2 text-xs">
-                    {file.type === 'application/pdf'
-                      ? 'PDF document · download after review'
-                      : 'Photo preview unavailable'}
-                  </span>
-                )}
-                <button
-                  type="button"
-                  disabled={busy || Boolean(removal)}
-                  className="min-h-11 text-cyan-200 underline"
-                  onClick={() => {
-                    handleSelectedFile(null);
-                    if (fileInput.current) fileInput.current.value = '';
-                  }}
-                >
-                  Clear selection
-                </button>
-              </div>
-            )}
-          </div>
-          {(cards.some((card) => card.state === 'ready') ||
-            replaceUnavailable) && (
-            <label className="block text-sm">
-              Replace a ready file
-              <select
-                className="experience-field mt-1 block min-h-11 w-full p-2"
-                value={replace}
-                onChange={(event) => setReplace(event.target.value)}
-              >
-                <option value="">Add without replacing</option>
-                {replaceUnavailable && (
-                  <option value={replace} disabled>
-                    Previously selected replacement unavailable — choose again
-                  </option>
-                )}
-                {cards
-                  .filter((card) => card.state === 'ready')
-                  .map((card) => (
-                    <option key={card.id} value={card.id}>
-                      {card.name}
-                    </option>
-                  ))}
-              </select>
-              {replaceUnavailable && (
-                <span
-                  role="alert"
-                  className="mt-1 block text-sm text-amber-200"
-                >
-                  The selected replacement is unavailable. Choose another ready
-                  file or add without replacing.
-                </span>
-              )}
-            </label>
           )}
-          <button
-            type="button"
-            disabled={!file || busy || replaceUnavailable}
-            className="min-h-11 rounded-lg bg-cyan-700 px-4 py-2 font-semibold text-white disabled:opacity-50"
-            onClick={() => void upload()}
-          >
-            {busy ? 'Working…' : 'Upload and review'}
-          </button>
-        </div>
-      )}
-      {!active && staff && (
-        <p className="mt-3 text-sm text-slate-400">
-          This record is archived or retired; its files remain manageable.
-        </p>
-      )}
-      <details className="mt-4 border-t border-cyan-100/15 pt-3">
-        <summary className="min-h-11 cursor-pointer py-2 font-semibold">
-          File activity{history.length > 0 ? ` · ${history.length} shown` : ''}
-          {cleanupPending ? ' · cleanup unconfirmed' : ''}
-        </summary>
-        {staff && (
-          <button
-            type="button"
-            disabled={busy || Boolean(removal)}
-            className="mt-2 min-h-11 text-cyan-300 underline disabled:opacity-50"
-            onClick={() => {
-              setBusy(true);
-              void cleanupTerminalFiles()
-                .then((deleted) => setMessage(cleanupStatus(deleted)))
-                .finally(() => setBusy(false));
+          {historyError ? (
+            <p role="alert" className="mt-2 text-sm text-amber-100">
+              File activity could not be loaded. Reload this record to try
+              again.
+            </p>
+          ) : history.length === 0 ? (
+            <p className="mt-2 text-sm text-slate-400">No file changes yet.</p>
+          ) : (
+            <ol className="mt-2 space-y-2">
+              {history.map((event) => (
+                <li key={event.id} className="text-sm text-slate-300">
+                  <OperationalTimestamp value={event.created_at} /> ·{' '}
+                  {event.actor_name} {event.action}{' '}
+                  {event.before_title && event.before_title !== event.title
+                    ? `${event.before_title} → `
+                    : ''}
+                  {event.title} · revision {event.collection_revision}
+                </li>
+              ))}
+            </ol>
+          )}
+          {historyMore && (
+            <button
+              type="button"
+              className="mt-2 min-h-11 text-cyan-300 underline"
+              onClick={() => setHistoryPage((page) => page + 1)}
+            >
+              More file history
+            </button>
+          )}
+        </details>
+        {removal && (
+          <dialog
+            ref={removalDialog}
+            aria-labelledby="remove-file-title"
+            aria-describedby="remove-file-effect"
+            className="m-auto w-[min(32rem,calc(100%-2rem))] rounded-xl border border-amber-200/30 bg-slate-950 p-5 text-slate-100 backdrop:bg-slate-950/80"
+            onCancel={(event) => {
+              event.preventDefault();
+              if (removal.phase === 'review' && !removalLock.current)
+                setRemoval(null);
             }}
           >
-            {cleanupPending ? 'Retry file cleanup' : 'Check file cleanup'}
-          </button>
-        )}
-        {historyError ? (
-          <p role="alert" className="mt-2 text-sm text-amber-100">
-            File activity could not be loaded. Reload this record to try again.
-          </p>
-        ) : history.length === 0 ? (
-          <p className="mt-2 text-sm text-slate-400">No file changes yet.</p>
-        ) : (
-          <ol className="mt-2 space-y-2">
-            {history.map((event) => (
-              <li key={event.id} className="text-sm text-slate-300">
-                <OperationalTimestamp value={event.created_at} /> ·{' '}
-                {event.actor_name} {event.action}{' '}
-                {event.before_title && event.before_title !== event.title
-                  ? `${event.before_title} → `
-                  : ''}
-                {event.title} · revision {event.collection_revision}
-              </li>
-            ))}
-          </ol>
-        )}
-        {historyMore && (
-          <button
-            type="button"
-            className="mt-2 min-h-11 text-cyan-300 underline"
-            onClick={() => setHistoryPage((page) => page + 1)}
-          >
-            More file history
-          </button>
-        )}
-      </details>
-      {removal && (
-        <dialog
-          ref={removalDialog}
-          aria-labelledby="remove-file-title"
-          aria-describedby="remove-file-effect"
-          className="m-auto w-[min(32rem,calc(100%-2rem))] rounded-xl border border-amber-200/30 bg-slate-950 p-5 text-slate-100 backdrop:bg-slate-950/80"
-          onCancel={(event) => {
-            event.preventDefault();
-            if (removal.phase === 'review' && !removalLock.current)
-              setRemoval(null);
-          }}
-        >
-          <h3
-            id="remove-file-title"
-            className="break-words text-xl font-semibold"
-          >
-            Remove {removal.card.name}?
-          </h3>
-          <p id="remove-file-effect" className="mt-3 break-words">
-            Remove {removal.card.filename} from {removal.owner}. This{' '}
-            {removal.card.type === 'application/pdf' ? 'document' : 'photo'}{' '}
-            will become unavailable in this record. Stored bytes are cleaned up
-            separately and may remain pending. Previously issued signed links
-            may remain valid until their short expiry. This cannot be undone.
-          </p>
-          {removal.phase === 'unknown' && (
-            <p role="status" className="mt-3">
-              The outcome is unconfirmed. Retry uses the exact same file and
-              request. Cancellation cannot undo a request that may have
-              committed.
+            <h3
+              id="remove-file-title"
+              className="break-words text-xl font-semibold"
+            >
+              Remove {removal.card.name}?
+            </h3>
+            <p id="remove-file-effect" className="mt-3 break-words">
+              Remove {removal.card.filename} from {removal.owner}. This{' '}
+              {removal.card.type === 'application/pdf' ? 'document' : 'photo'}{' '}
+              will become unavailable in this record. Stored bytes are cleaned
+              up separately and may remain pending. Previously issued signed
+              links may remain valid until their short expiry. This cannot be
+              undone.
             </p>
-          )}
-          {removal.phase === 'stale' && (
-            <p role="status" className="mt-3">
-              This removal was not applied. Refresh and review the current
-              files, then explicitly choose Remove again.
-            </p>
-          )}
-          {message && (
-            <p role="alert" className="mt-3 break-words text-amber-100">
-              {message}
-            </p>
-          )}
-          <div className="mt-4 flex flex-wrap gap-3">
-            {removal.phase === 'review' && (
-              <button
-                type="button"
-                className="min-h-11 rounded-lg border px-4"
-                onClick={() => setRemoval(null)}
-              >
-                Cancel
-              </button>
+            {removal.phase === 'unknown' && (
+              <p role="status" className="mt-3">
+                The outcome is unconfirmed. Retry uses the exact same file and
+                request. Cancellation cannot undo a request that may have
+                committed.
+              </p>
             )}
-            {removal.phase === 'stale' ? (
-              <button
-                type="button"
-                disabled={busy}
-                className="min-h-11 rounded-lg border px-4"
-                onClick={() => void refreshRemoval()}
-              >
-                Refresh files
-              </button>
-            ) : (
-              <button
-                type="button"
-                disabled={busy}
-                className="experience-danger-action disabled:opacity-50"
-                onClick={() => void remove()}
-              >
-                {removal.phase === 'unknown'
-                  ? 'Retry removal'
-                  : removal.phase === 'sending'
-                    ? 'Removing…'
-                    : 'Remove file'}
-              </button>
+            {removal.phase === 'stale' && (
+              <p role="status" className="mt-3">
+                This removal was not applied. Refresh and review the current
+                files, then explicitly choose Remove again.
+              </p>
             )}
+            {message && (
+              <p role="alert" className="mt-3 break-words text-amber-100">
+                {message}
+              </p>
+            )}
+            <div className="mt-4 flex flex-wrap gap-3">
+              {removal.phase === 'review' && (
+                <button
+                  type="button"
+                  className="min-h-11 rounded-lg border px-4"
+                  onClick={() => setRemoval(null)}
+                >
+                  Cancel
+                </button>
+              )}
+              {removal.phase === 'stale' ? (
+                <button
+                  type="button"
+                  disabled={busy}
+                  className="min-h-11 rounded-lg border px-4"
+                  onClick={() => void refreshRemoval()}
+                >
+                  Refresh files
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  disabled={busy}
+                  className="experience-danger-action disabled:opacity-50"
+                  onClick={() => void remove()}
+                >
+                  {removal.phase === 'unknown'
+                    ? 'Retry removal'
+                    : removal.phase === 'sending'
+                      ? 'Removing…'
+                      : 'Remove file'}
+                </button>
+              )}
+            </div>
+          </dialog>
+        )}
+        {preview && (
+          <div
+            role="dialog"
+            aria-label={preview.name}
+            className="fixed inset-0 z-50 flex flex-col items-center justify-center bg-slate-950/95 p-4"
+          >
+            <button
+              type="button"
+              className="mb-3 min-h-11 self-end text-cyan-300 underline"
+              onClick={() => setPreview(null)}
+            >
+              Close photo
+            </button>
+            {/* Blob URL contains only a normalized, validated JPEG. */}
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src={preview.url}
+              alt={preview.name}
+              className="max-h-[80vh] max-w-full object-contain"
+            />
           </div>
-        </dialog>
-      )}
-      {preview && (
-        <div
-          role="dialog"
-          aria-label={preview.name}
-          className="fixed inset-0 z-50 flex flex-col items-center justify-center bg-slate-950/95 p-4"
-        >
-          <button
-            type="button"
-            className="mb-3 min-h-11 self-end text-cyan-300 underline"
-            onClick={() => setPreview(null)}
-          >
-            Close photo
-          </button>
-          {/* Blob URL contains only a normalized, validated JPEG. */}
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img
-            src={preview.url}
-            alt={preview.name}
-            className="max-h-[80vh] max-w-full object-contain"
-          />
-        </div>
-      )}
-    </section>
+        )}
+      </section>
+    </>
   );
 }
 

@@ -1,5 +1,5 @@
 'use client';
-import { acknowledgeLogoutPrivacyGeneration } from '@/lib/auth/actions';
+import { acknowledgeLogoutPrivacyGeneration } from '@/lib/auth/logout-transport';
 import {
   isLogoutGeneration,
   logoutAcknowledgementKey,

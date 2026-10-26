@@ -513,12 +513,17 @@ test('real scan batch cancels late reads, refreshes stale stock, reconciles lost
     await page.getByLabel('Scan, paste, or search inventory').fill(path);
     await page.getByLabel('Scan, paste, or search inventory').press('Enter');
     await intercepted; // Prove the real read is held before cancelling it.
-    await expect(
-      page.getByRole('form', { name: 'Inspect equipment' }).getByRole('status'),
-    ).toBeVisible();
-    await expect(
-      page.getByRole('form', { name: 'Inspect equipment' }).getByRole('status'),
-    ).toHaveText('Inspecting equipment…');
+    const inspectingAnnouncement = page
+      .getByRole('status')
+      .filter({ hasText: /^Inspecting equipment…$/ });
+    await expect(inspectingAnnouncement).toHaveCount(1);
+    await expect(inspectingAnnouncement).toBeVisible();
+    await expect(inspectingAnnouncement).toHaveText('Inspecting equipment…');
+    expect(
+      await inspectingAnnouncement.evaluate(
+        (node) => node.closest('[aria-busy="true"]') === null,
+      ),
+    ).toBe(true);
     await expect(
       page.getByRole('form', { name: 'Inspect equipment' }),
     ).toHaveAttribute('aria-busy', 'true');

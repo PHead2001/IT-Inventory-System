@@ -1,6 +1,13 @@
 'use client';
+import {
+  LoadingAnnouncement,
+  LoadingReveal,
+  LoadingSkeleton,
+} from '@/components/ui/loading-skeleton';
+import { useRouteRouter as useRouter } from '@/components/experience/route-pending';
 import { recordStatusLabel } from '@/lib/record-status';
 import { RecordStatus } from '@/components/record-status';
+import { usePathname, useSearchParams } from 'next/navigation';
 import {
   useCallback,
   useEffect,
@@ -12,7 +19,7 @@ import {
   type FormEvent,
   type SetStateAction,
 } from 'react';
-import Link from 'next/link';
+import Link from '@/components/experience/route-link';
 import {
   PrivateRestorationGate,
   usePrivacyReadiness,
@@ -23,7 +30,7 @@ import {
   readAuthoritativeCleanupRevision,
   readPrivacyRevocationRevision,
 } from '@/features/scan/assign-batch';
-import { usePathname, useRouter, useSearchParams } from 'next/navigation';
+
 import { flushSync } from 'react-dom';
 import { waitForSheetReadiness } from './sheet-readiness';
 import { PrintMediaEditor } from './print-media-editor';
@@ -286,6 +293,7 @@ function LabelDesignerWorkspace({
     page: number;
     pageSize: number;
   } | null>(null);
+  const [searchPending, setSearchPending] = useState(true);
   const [printRows, setPrintRows] = useState<LabelRecord[] | null>(null);
   const [prepared, setPrepared] = useState<LiveLabel[] | null>(null);
   const [validatedKey, setValidatedKey] = useState('');
@@ -372,6 +380,7 @@ function LabelDesignerWorkspace({
     setLive([]);
     setSelected([]);
     setSearch(null);
+    setSearchPending(true);
     setFilters(defaultFilters);
     setDraftState(defaultFilters);
     setJob(defaultJob);
@@ -516,10 +525,16 @@ function LabelDesignerWorkspace({
     let current = true;
     void searchLabelRecords(filters)
       .then((result) => {
-        if (current) setSearch(result);
+        if (current) {
+          setSearch(result);
+          setSearchPending(false);
+        }
       })
       .catch(() => {
-        if (current) setMessage('Label search could not be loaded. Try again.');
+        if (current) {
+          setSearchPending(false);
+          setMessage('Label search could not be loaded. Try again.');
+        }
       });
     return () => {
       current = false;
@@ -1248,6 +1263,7 @@ function LabelDesignerWorkspace({
         'Unsubmitted label selection cleared because search or filters changed.',
       );
     setSearch(null);
+    setSearchPending(true);
     setFilters({ ...draft, page: 1 });
   };
   const fallbackCount = entries.filter(
@@ -1434,14 +1450,29 @@ function LabelDesignerWorkspace({
             />
             <button className={styles.primaryButton}>Search</button>
           </form>
-          <section className={styles.surface} aria-label="Label search results">
+          <LoadingAnnouncement
+            label="Loading matching records…"
+            active={admitted && searchPending}
+          />
+          <section
+            className={styles.surface}
+            aria-label="Label search results"
+            aria-busy={searchPending}
+          >
             <p className={styles.eyebrow}>Search results</p>
             <h2 className={styles.title}>Records</h2>
             <p className={styles.subtle} id="label-results-scroll-hint">
               {search
                 ? `${countLabel(search.total, 'matching record')}. Scroll this list to browse the current page.`
-                : 'Loading matching records…'}
+                : 'Search records to add to your label queue.'}
             </p>
+            {admitted && searchPending && (
+              <LoadingSkeleton
+                shape="rows"
+                label="Loading matching records…"
+                announce={false}
+              />
+            )}
             <div className={styles.queueActions}>
               <span>{countLabel(selected.length, 'selected record')}</span>
               <button
@@ -1472,159 +1503,171 @@ function LabelDesignerWorkspace({
             <p role="status" aria-live="polite" className={styles.notice}>
               {queueFeedback}
             </p>
-            <div
-              className={styles.results}
-              role="region"
-              aria-label="Search result records"
-              aria-describedby="label-results-scroll-hint"
-              tabIndex={0}
+            <LoadingReveal
+              busy={searchPending}
+              reveal={!!search}
+              motionReady={admitted}
             >
-              {search?.rows.map((record) => (
-                <div key={record.kind + record.key} className={styles.result}>
-                  <div className={styles.resultMain}>
-                    <label className={styles.fieldLabel}>
-                      <input
-                        type="checkbox"
-                        disabled={busy}
-                        aria-label={`Select ${record.name}, ${recordKind(record.kind)}, ${record.holdingContext}`}
-                        checked={selected.some(
-                          (row) => queueIdentity(row) === queueIdentity(record),
-                        )}
-                        onChange={(event) =>
-                          setSelected((current) =>
-                            event.target.checked
-                              ? selectLabelRows(current, [record])
-                              : current.filter(
-                                  (row) =>
-                                    queueIdentity(row) !==
-                                    queueIdentity(record),
-                                ),
-                          )
+              <div
+                className={styles.results}
+                role="region"
+                aria-label="Search result records"
+                aria-describedby="label-results-scroll-hint"
+                tabIndex={0}
+              >
+                {search?.rows.map((record) => (
+                  <div key={record.kind + record.key} className={styles.result}>
+                    <div className={styles.resultMain}>
+                      <label className={styles.fieldLabel}>
+                        <input
+                          type="checkbox"
+                          disabled={busy}
+                          aria-label={`Select ${record.name}, ${recordKind(record.kind)}, ${record.holdingContext}`}
+                          checked={selected.some(
+                            (row) =>
+                              queueIdentity(row) === queueIdentity(record),
+                          )}
+                          onChange={(event) =>
+                            setSelected((current) =>
+                              event.target.checked
+                                ? selectLabelRows(current, [record])
+                                : current.filter(
+                                    (row) =>
+                                      queueIdentity(row) !==
+                                      queueIdentity(record),
+                                  ),
+                            )
+                          }
+                        />
+                        Select record
+                      </label>
+                      <Link
+                        href={
+                          record.kind === 'quantity'
+                            ? '/inventory/quantity/' + record.key
+                            : '/inventory/assets/' + record.key
                         }
-                      />
-                      Select record
-                    </label>
-                    <Link
-                      href={
-                        record.kind === 'quantity'
-                          ? '/inventory/quantity/' + record.key
-                          : '/inventory/assets/' + record.key
-                      }
-                      className={styles.resultLink}
-                    >
-                      {record.name}
-                    </Link>
-                    <p className={styles.resultMeta}>
-                      {recordKind(record.kind)} · {record.categoryName} ·{' '}
-                      <RecordStatus status={record.status} />
-                    </p>
-                    <p className={styles.resultMeta}>
-                      {record.kind === 'quantity' ? 'Holdings: ' : 'Location: '}
-                      {record.holdingContext}
-                    </p>
-                    {(record.itemCode ||
-                      record.assetTag ||
-                      record.serialNumber ||
-                      record.manufacturer ||
-                      record.model) && (
+                        className={styles.resultLink}
+                      >
+                        {record.name}
+                      </Link>
                       <p className={styles.resultMeta}>
-                        {[
-                          record.itemCode && `Item code: ${record.itemCode}`,
-                          record.assetTag,
-                          record.serialNumber,
-                        ]
-                          .filter(Boolean)
-                          .map((code, index) => (
-                            <span key={index} className="experience-code">
-                              {index > 0 && ' · '}
-                              {code}
-                            </span>
-                          ))}
-                        {[record.manufacturer, record.model]
-                          .filter(Boolean)
-                          .map((label, index) => (
-                            <span key={index}>
-                              {(record.itemCode ||
-                                record.assetTag ||
-                                record.serialNumber ||
-                                index > 0) &&
-                                ' · '}
-                              {label}
-                            </span>
-                          ))}
+                        {recordKind(record.kind)} · {record.categoryName} ·{' '}
+                        <RecordStatus status={record.status} />
                       </p>
-                    )}
-                    {record.customPreview &&
-                      record.customPreview.answers.length > 0 && (
-                        <div className={styles.resultMeta}>
-                          <dl>
-                            {record.customPreview.answers.map(
-                              (answer, index) => (
-                                <div key={index}>
-                                  <dt className="inline font-medium">
-                                    {answer.label}:{' '}
-                                  </dt>
-                                  <dd className="inline">
-                                    {answer.displayValue}
-                                    {answer.truncated ? '…' : ''}
-                                  </dd>
-                                </div>
-                              ),
-                            )}
-                          </dl>
-                          <Link
-                            href={
-                              record.kind === 'quantity'
-                                ? '/inventory/quantity/' + record.key
-                                : '/inventory/assets/' + record.key
-                            }
-                            className={styles.resultLink}
-                          >
-                            {record.customPreview.truncated
-                              ? 'View all details'
-                              : 'Full details'}
-                          </Link>
-                        </div>
+                      <p className={styles.resultMeta}>
+                        {record.kind === 'quantity'
+                          ? 'Holdings: '
+                          : 'Location: '}
+                        {record.holdingContext}
+                      </p>
+                      {(record.itemCode ||
+                        record.assetTag ||
+                        record.serialNumber ||
+                        record.manufacturer ||
+                        record.model) && (
+                        <p className={styles.resultMeta}>
+                          {[
+                            record.itemCode && `Item code: ${record.itemCode}`,
+                            record.assetTag,
+                            record.serialNumber,
+                          ]
+                            .filter(Boolean)
+                            .map((code, index) => (
+                              <span key={index} className="experience-code">
+                                {index > 0 && ' · '}
+                                {code}
+                              </span>
+                            ))}
+                          {[record.manufacturer, record.model]
+                            .filter(Boolean)
+                            .map((label, index) => (
+                              <span key={index}>
+                                {(record.itemCode ||
+                                  record.assetTag ||
+                                  record.serialNumber ||
+                                  index > 0) &&
+                                  ' · '}
+                                {label}
+                              </span>
+                            ))}
+                        </p>
                       )}
-                  </div>
-                  <button
-                    type="button"
-                    disabled={
-                      busy ||
-                      entries.some(
+                      {record.customPreview &&
+                        record.customPreview.answers.length > 0 && (
+                          <div className={styles.resultMeta}>
+                            <dl>
+                              {record.customPreview.answers.map(
+                                (answer, index) => (
+                                  <div key={index}>
+                                    <dt className="inline font-medium">
+                                      {answer.label}:{' '}
+                                    </dt>
+                                    <dd className="inline">
+                                      {answer.displayValue}
+                                      {answer.truncated ? '…' : ''}
+                                    </dd>
+                                  </div>
+                                ),
+                              )}
+                            </dl>
+                            <Link
+                              href={
+                                record.kind === 'quantity'
+                                  ? '/inventory/quantity/' + record.key
+                                  : '/inventory/assets/' + record.key
+                              }
+                              className={styles.resultLink}
+                            >
+                              {record.customPreview.truncated
+                                ? 'View all details'
+                                : 'Full details'}
+                            </Link>
+                          </div>
+                        )}
+                    </div>
+                    <button
+                      type="button"
+                      disabled={
+                        busy ||
+                        entries.some(
+                          (entry) =>
+                            queueIdentity(entry) === queueIdentity(record),
+                        )
+                      }
+                      onClick={() =>
+                        void add({ kind: record.kind, key: record.key })
+                      }
+                      className={styles.secondaryButton}
+                    >
+                      {entries.some(
                         (entry) =>
                           queueIdentity(entry) === queueIdentity(record),
                       )
-                    }
-                    onClick={() =>
-                      void add({ kind: record.kind, key: record.key })
-                    }
-                    className={styles.secondaryButton}
-                  >
+                        ? 'In queue'
+                        : 'Add to queue'}
+                    </button>
                     {entries.some(
                       (entry) => queueIdentity(entry) === queueIdentity(record),
-                    )
-                      ? 'In queue'
-                      : 'Add to queue'}
-                  </button>
-                  {entries.some(
-                    (entry) => queueIdentity(entry) === queueIdentity(record),
-                  ) && (
-                    <a
-                      href="#label-queue"
-                      className={styles.resultLink}
-                      aria-label={`Review queue for ${record.name}`}
-                    >
-                      {countLabel(entries.length, 'record')} /{' '}
-                      {countLabel(totalCopies(entries), 'label')}
-                    </a>
-                  )}
-                </div>
-              ))}
-              {search && search.total === 0 && (
-                <p className={styles.empty}>No records match these filters.</p>
-              )}
-            </div>
+                    ) && (
+                      <a
+                        href="#label-queue"
+                        className={styles.resultLink}
+                        aria-label={`Review queue for ${record.name}`}
+                      >
+                        {countLabel(entries.length, 'record')} /{' '}
+                        {countLabel(totalCopies(entries), 'label')}
+                      </a>
+                    )}
+                  </div>
+                ))}
+                {search && search.total === 0 && (
+                  <p className={styles.empty}>
+                    No records match these filters.
+                  </p>
+                )}
+              </div>
+            </LoadingReveal>
             {search && search.total > 0 && (
               <div className={styles.pagination}>
                 <span>
@@ -1635,6 +1678,7 @@ function LabelDesignerWorkspace({
                   disabled={filters.page <= 1}
                   onClick={() => (
                     setSearch(null),
+                    setSearchPending(true),
                     setFilters({ ...filters, page: filters.page - 1 })
                   )}
                   className={styles.textButton}
@@ -1645,6 +1689,7 @@ function LabelDesignerWorkspace({
                   disabled={filters.page * search.pageSize >= search.total}
                   onClick={() => (
                     setSearch(null),
+                    setSearchPending(true),
                     setFilters({ ...filters, page: filters.page + 1 })
                   )}
                   className={styles.textButton}
@@ -1899,6 +1944,18 @@ function LabelDesignerWorkspace({
             {entries.length === 0 && (
               <p className={styles.empty}>Add a record or location to begin.</p>
             )}
+            <LoadingAnnouncement
+              label="Loading queued record details…"
+              active={
+                admitted &&
+                !refreshFailed &&
+                entries.some(
+                  (entry) =>
+                    !byId.has(queueIdentity(entry)) &&
+                    !unavailable.includes(queueIdentity(entry)),
+                )
+              }
+            />
             <div className={styles.queueList}>
               {entries.map((entry, index) => {
                 const id = queueIdentity(entry),
@@ -1909,16 +1966,32 @@ function LabelDesignerWorkspace({
                     ? 'refresh failed; retry'
                     : unavailable.includes(id)
                       ? 'unavailable to this account'
-                      : 'loading…';
+                      : '';
+                const detailsPending =
+                  !record && !refreshFailed && !unavailable.includes(id);
                 const invalidCopies = Object.hasOwn(copyDrafts, id);
                 const noticeId = `${copyNoticeId}-copies-${index}`;
                 return (
                   <div key={id} className={styles.queueEntry}>
-                    <span className={styles.queueName}>
-                      {record
-                        ? `${record.name} · ${record.kind === 'location' ? 'Location' : (record.categoryName ?? 'Uncategorized')} · ${record.holdingContext} · ${recordStatusLabel(record.state)}`
-                        : `${recordKind(entry.kind)} ${index + 1} · ${readState}`}
-                    </span>
+                    <LoadingReveal
+                      className={styles.queueName}
+                      busy={detailsPending}
+                      reveal={!!record}
+                      motionReady={admitted}
+                    >
+                      <span>
+                        {record
+                          ? `${record.name} · ${record.kind === 'location' ? 'Location' : (record.categoryName ?? 'Uncategorized')} · ${record.holdingContext} · ${recordStatusLabel(record.state)}`
+                          : `${recordKind(entry.kind)} ${index + 1}${readState ? ' · ' + readState : ''}`}
+                      </span>
+                      {admitted && detailsPending && (
+                        <LoadingSkeleton
+                          shape="queue-row"
+                          label="Loading queued record details…"
+                          announce={false}
+                        />
+                      )}
+                    </LoadingReveal>
                     <div className={styles.queueActions}>
                       <div className={styles.copiesControl}>
                         <label className={styles.copies}>

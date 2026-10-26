@@ -1,4 +1,11 @@
 'use client';
+import {
+  LoadingAnnouncement,
+  LoadingReveal,
+  LoadingSkeleton,
+} from '@/components/ui/loading-skeleton';
+
+import { useRouteActionResult } from '@/components/experience/route-pending';
 import { ScanMatchLabel, ScanMatchContext } from './scan-match-label';
 import { RecordStatus } from '@/components/record-status';
 import {
@@ -10,7 +17,7 @@ import {
   useRef,
   useState,
 } from 'react';
-import Link from 'next/link';
+import Link from '@/components/experience/route-link';
 import {
   PrivateRestorationGate,
   usePrivacyReadiness,
@@ -18,6 +25,7 @@ import {
   usePrivacyRevocationRevision,
 } from '@/components/auth/privacy-readiness';
 import { Button } from '@/components/ui/button';
+import { afterTransitionCapture } from '@/components/forms/transition-capture';
 import { Input } from '@/components/ui/input';
 import { field, panel } from '@/features/inventory/components/read-ui';
 import { submitCustody, loadCustodyReceipt } from '@/features/custody/actions';
@@ -93,6 +101,7 @@ function AssignmentFields({
   initialSiteId,
   siteIssue,
 }: Props) {
+  const observeRouteActionResult = useRouteActionResult();
   const privacy = usePrivacyReadiness();
   const cleanupRevision = useAuthoritativeCleanupRevision();
   const revocationRevision = usePrivacyRevocationRevision();
@@ -156,10 +165,10 @@ function AssignmentFields({
   const deferredReviewFocus = useRef<number | null>(null);
   const reviewRef = useRef<HTMLElement>(null);
   const chooserRef = useRef<HTMLUListElement>(null);
+  const pendingResumeFocus = useRef<(() => void) | null>(null);
   const resumeReviewFocus = useCallback(() => {
     if (cancelPress.current !== null) return;
     const token = deferredReviewFocus.current;
-    deferredReviewFocus.current = null;
     if (
       token === null ||
       !mounted.current ||
@@ -169,10 +178,23 @@ function AssignmentFields({
       document.activeElement !== cancelRef.current
     )
       return;
-    if (stateRef.current.phase === 'review') reviewRef.current?.focus();
-    else if (stateRef.current.phase === 'choose') chooserRef.current?.focus();
-    else if (stateRef.current.phase === 'ready' && stateRef.current.message)
-      inputRef.current?.focus();
+    pendingResumeFocus.current?.();
+    pendingResumeFocus.current = afterTransitionCapture(document, () => {
+      if (
+        !mounted.current ||
+        epoch.current !== assignmentEpoch() ||
+        generation.current !== token ||
+        stateRef.current.generation !== token ||
+        cancelPress.current !== null ||
+        document.activeElement !== cancelRef.current
+      )
+        return;
+      deferredReviewFocus.current = null;
+      if (stateRef.current.phase === 'review') reviewRef.current?.focus();
+      else if (stateRef.current.phase === 'choose') chooserRef.current?.focus();
+      else if (stateRef.current.phase === 'ready' && stateRef.current.message)
+        inputRef.current?.focus();
+    });
   }, []);
   useEffect(() => {
     const release = (event: PointerEvent) => {
@@ -210,6 +232,8 @@ function AssignmentFields({
       cancelPress.current = null;
       abortedCancelClick.current = null;
       deferredReviewFocus.current = null;
+      pendingResumeFocus.current?.();
+      pendingResumeFocus.current = null;
     };
   }, [resumeReviewFocus]);
   const [ready, setReady] = useState(false);
@@ -223,20 +247,23 @@ function AssignmentFields({
   const [receiptIssue, setReceiptIssue] = useState('');
   const [restoring, setRestoring] = useState(false);
   useLayoutEffect(() => {
-    if (restoring) cancelRef.current?.focus();
+    if (restoring)
+      return afterTransitionCapture(document, () => cancelRef.current?.focus());
   }, [restoring]);
   useLayoutEffect(() => {
     stateRef.current = state;
   });
   useLayoutEffect(() => {
-    if (focusDestination.current) {
-      focusDestination.current = false;
-      destinationRef.current?.focus();
-    }
-    if (focusInput.current && state.phase === 'ready') {
-      focusInput.current = false;
-      inputRef.current?.focus();
-    }
+    return afterTransitionCapture(document, () => {
+      if (focusDestination.current) {
+        focusDestination.current = false;
+        destinationRef.current?.focus();
+      }
+      if (focusInput.current && state.phase === 'ready') {
+        focusInput.current = false;
+        inputRef.current?.focus();
+      }
+    });
   }, [state.phase, state.generation, state.context]);
   useLayoutEffect(() => {
     const eventId = state.receipt?.result.eventId;
@@ -246,24 +273,32 @@ function AssignmentFields({
       eventId &&
       eventId !== previousReceiptId.current
     )
-      inputRef.current?.focus();
+      return afterTransitionCapture(document, () => {
+        inputRef.current?.focus();
+        previousReceiptId.current = eventId;
+      });
     previousReceiptId.current = eventId;
   }, [state.phase, state.receipt?.result.eventId, batch?.finished]);
   useLayoutEffect(() => {
-    if (batch?.finished) summaryRef.current?.focus();
+    if (batch?.finished)
+      return afterTransitionCapture(document, () =>
+        summaryRef.current?.focus(),
+      );
   }, [batch?.finished]);
   useLayoutEffect(() => {
     // Keep the pressed Cancel target in place until release. Review focus can
     // scroll the form away between pointerdown and the accepted click.
-    deferredReviewFocus.current = null;
-    if (cancelPress.current !== null) {
-      deferredReviewFocus.current = state.generation;
-      return;
-    }
-    if (state.phase === 'review') reviewRef.current?.focus();
-    else if (state.phase === 'choose') chooserRef.current?.focus();
-    else if (state.phase === 'ready' && state.message)
-      inputRef.current?.focus();
+    return afterTransitionCapture(document, () => {
+      deferredReviewFocus.current = null;
+      if (cancelPress.current !== null) {
+        deferredReviewFocus.current = state.generation;
+        return;
+      }
+      if (state.phase === 'review') reviewRef.current?.focus();
+      else if (state.phase === 'choose') chooserRef.current?.focus();
+      else if (state.phase === 'ready' && state.message)
+        inputRef.current?.focus();
+    });
   }, [state.phase, state.message, state.generation]);
   const alive = () => mounted.current && epoch.current === assignmentEpoch();
   const resetReceiptRead = () => {
@@ -986,7 +1021,7 @@ function AssignmentFields({
     const mutationEpoch = epoch.current;
     const mutationActive = () => alive() && epoch.current === mutationEpoch;
     try {
-      const result = await submitCustody(command);
+      const result = await observeRouteActionResult(submitCustody(command));
       if (!mutationActive()) return; // old outcomes stay fenced after readmission
       if (result.ok) {
         if (!result.eventId || result.entityId !== current.candidate.id) {
@@ -1471,6 +1506,10 @@ function AssignmentFields({
           }}
         />
       )}
+      <LoadingAnnouncement
+        label="Inspecting equipment…"
+        active={state.phase === 'lookup' || restoring}
+      />
       <form
         className={panel + ' space-y-3'}
         aria-label="Inspect equipment"
@@ -1522,14 +1561,11 @@ function AssignmentFields({
             : 'Skip inspection / review'}
         </Button>
         {(state.phase === 'lookup' || restoring) && (
-          <div role="status" className="space-y-3">
-            <p>Inspecting equipment…</p>
-            <div aria-hidden="true" className="space-y-3">
-              <div className="h-6 w-2/3 rounded bg-slate-700" />
-              <div className="h-12 rounded bg-slate-800" />
-              <div className="h-12 rounded bg-slate-800" />
-            </div>
-          </div>
+          <LoadingSkeleton
+            shape="inspection"
+            label="Inspecting equipment…"
+            announce={false}
+          />
         )}
         <label className="space-y-2">
           Lookup method
@@ -1598,223 +1634,230 @@ function AssignmentFields({
           {state.message}
         </p>
       )}
-      {state.matches.length > 0 && (
-        <ul
-          className={panel + ' space-y-2'}
-          aria-label="Choose inventory record"
-          ref={chooserRef}
-          tabIndex={-1}
-        >
-          {state.matches.map((match, index) => (
-            <li key={match.path}>
-              <Button
-                variant="outline"
-                type="button"
-                aria-describedby={
-                  match.context ? `assign-match-context-${index}` : undefined
-                }
-                onClick={() => {
-                  if (!alive() || resolving.current || submitting.current)
-                    return;
-                  cancelRef.current?.focus();
-                  resetReceiptRead();
-                  resolving.current = true;
-                  const token = ++generation.current;
-                  dispatch({ type: 'lookup', generation: token });
-                  void inspect(match, token).finally(() => {
-                    if (alive() && token === generation.current)
-                      resolving.current = false;
-                  });
-                }}
-              >
-                <ScanMatchLabel match={match} /> ·{' '}
-                {match.kind === 'quantity'
-                  ? 'Quantity item'
-                  : match.kind === 'location'
-                    ? 'Location'
-                    : 'Individual asset'}{' '}
-                · <RecordStatus status={match.state} />
-              </Button>
-              {match.context && (
-                <p
-                  id={`assign-match-context-${index}`}
-                  className="break-words text-sm text-[var(--muted)]"
-                >
-                  <ScanMatchContext match={match} />
-                </p>
-              )}
-            </li>
-          ))}
-        </ul>
-      )}
-      {state.truncated && (
-        <Link href="/inventory" className="underline">
-          Search inventory
-        </Link>
-      )}
-      {state.search && (
-        <nav
-          aria-label="Assignment candidate pages"
-          className={panel + ' flex flex-wrap items-center gap-3'}
-        >
-          <p className="text-sm">
-            Page {state.search.page} · {state.search.total} matching inventory
-            records · {state.search.pageSize} per page
-          </p>
-          <Button
-            type="button"
-            variant="outline"
-            disabled={busy || !ready || state.search.page <= 1}
-            onClick={() => {
-              if (state.search)
-                void lookup(
-                  state.search.query,
-                  'search',
-                  state.search.page - 1,
-                  true,
-                );
-            }}
+      <LoadingReveal
+        busy={state.phase === 'lookup' || restoring}
+        reveal={state.matches.length > 0 || !!candidate}
+        motionReady={privacy.ready && freshReady}
+      >
+        {state.matches.length > 0 && (
+          <ul
+            className={panel + ' space-y-2'}
+            aria-label="Choose inventory record"
+            ref={chooserRef}
+            tabIndex={-1}
           >
-            Previous candidates
-          </Button>
-          <Button
-            type="button"
-            variant="outline"
-            disabled={
-              busy ||
-              !freshReady ||
-              state.search.page >= 100000 ||
-              state.search.page * state.search.pageSize >= state.search.total
-            }
-            onClick={() => {
-              if (state.search)
-                void lookup(
-                  state.search.query,
-                  'search',
-                  state.search.page + 1,
-                  true,
-                );
-            }}
-          >
-            Next candidates
-          </Button>
-          {state.search.page >= 100000 &&
-            state.search.total > state.search.page * state.search.pageSize && (
-              <p>
-                Refine the search to reach the remaining records within the
-                candidate page limit.
-              </p>
-            )}
-        </nav>
-      )}
-      {candidate && (
-        <section
-          aria-label="Review assignment"
-          ref={reviewRef}
-          tabIndex={-1}
-          className={panel + ' space-y-3'}
-        >
-          <h2 className="break-words text-lg font-semibold">
-            {candidate.name}
-          </h2>
-          <p className="break-words text-sm">
-            {candidate.kind === 'quantity'
-              ? 'Quantity item'
-              : 'Individual asset'}{' '}
-            ·{' '}
-            <span className="experience-code">
-              {candidate.identifier || 'No display identifier'}
-            </span>{' '}
-            · <RecordStatus status={candidate.status} />
-          </p>
-          <p>
-            Destination: {state.context?.siteName}
-            {state.context?.reference
-              ? ` · Ticket ${state.context.reference}`
-              : ''}
-          </p>
-          <fieldset
-            disabled={unresolved || state.phase === 'conflict'}
-            className="space-y-3"
-          >
-            <label className="block space-y-2">
-              Storage source
-              <select
-                aria-label="Storage source"
-                className={field}
-                value={state.sourceId}
-                onChange={(e) => editReview({ sourceId: e.target.value })}
-              >
-                <option value="">Choose source</option>
-                {candidate.sources.map((source) => (
-                  <option key={source.id} value={source.id}>
-                    {source.name} · {source.quantity} available
-                    {!source.active ? ' · inactive source' : ''}
-                  </option>
-                ))}
-              </select>
-            </label>
-            {candidate.kind === 'quantity' && (
-              <label className="block space-y-2">
-                Units to assign
-                <Input
-                  aria-label="Units to assign"
-                  type="number"
-                  min={1}
-                  max={
-                    candidate.sources.find((row) => row.id === state.sourceId)
-                      ?.quantity ?? 2147483647
+            {state.matches.map((match, index) => (
+              <li key={match.path}>
+                <Button
+                  variant="outline"
+                  type="button"
+                  aria-describedby={
+                    match.context ? `assign-match-context-${index}` : undefined
                   }
-                  step={1}
-                  value={state.units}
-                  onChange={(e) => editReview({ units: e.target.value })}
-                />
-              </label>
-            )}
-          </fieldset>
-          {problem && (
-            <p role="note" className="text-sm text-amber-200">
-              {problem}
+                  onClick={() => {
+                    if (!alive() || resolving.current || submitting.current)
+                      return;
+                    cancelRef.current?.focus();
+                    resetReceiptRead();
+                    resolving.current = true;
+                    const token = ++generation.current;
+                    dispatch({ type: 'lookup', generation: token });
+                    void inspect(match, token).finally(() => {
+                      if (alive() && token === generation.current)
+                        resolving.current = false;
+                    });
+                  }}
+                >
+                  <ScanMatchLabel match={match} /> ·{' '}
+                  {match.kind === 'quantity'
+                    ? 'Quantity item'
+                    : match.kind === 'location'
+                      ? 'Location'
+                      : 'Individual asset'}{' '}
+                  · <RecordStatus status={match.state} />
+                </Button>
+                {match.context && (
+                  <p
+                    id={`assign-match-context-${index}`}
+                    className="break-words text-sm text-[var(--muted)]"
+                  >
+                    <ScanMatchContext match={match} />
+                  </p>
+                )}
+              </li>
+            ))}
+          </ul>
+        )}
+        {state.truncated && (
+          <Link href="/inventory" className="underline">
+            Search inventory
+          </Link>
+        )}
+        {state.search && (
+          <nav
+            aria-label="Assignment candidate pages"
+            className={panel + ' flex flex-wrap items-center gap-3'}
+          >
+            <p className="text-sm">
+              Page {state.search.page} · {state.search.total} matching inventory
+              records · {state.search.pageSize} per page
             </p>
-          )}
-          {candidate.currentSite && (
-            <p>Current custody: {candidate.currentSite}</p>
-          )}
-          <div className="flex flex-wrap gap-3">
             <Button
               type="button"
-              disabled={
-                !freshReady ||
-                state.phase === 'pending' ||
-                (state.phase !== 'unknown' &&
-                  (!!problem || state.phase !== 'review'))
-              }
-              onClick={() => void confirm()}
+              variant="outline"
+              disabled={busy || !ready || state.search.page <= 1}
+              onClick={() => {
+                if (state.search)
+                  void lookup(
+                    state.search.query,
+                    'search',
+                    state.search.page - 1,
+                    true,
+                  );
+              }}
             >
-              {state.phase === 'pending'
-                ? 'Assigning…'
-                : state.phase === 'unknown'
-                  ? 'Retry same assignment'
-                  : 'Confirm assign'}
+              Previous candidates
             </Button>
-            {state.phase === 'conflict' && (
-              <Button
-                variant="outline"
-                type="button"
-                onClick={refreshInspection}
-              >
-                Inspect current state
-              </Button>
-            )}
-            <Link
-              className="inline-flex min-h-11 items-center text-cyan-300 underline"
-              href={candidate.path}
+            <Button
+              type="button"
+              variant="outline"
+              disabled={
+                busy ||
+                !freshReady ||
+                state.search.page >= 100000 ||
+                state.search.page * state.search.pageSize >= state.search.total
+              }
+              onClick={() => {
+                if (state.search)
+                  void lookup(
+                    state.search.query,
+                    'search',
+                    state.search.page + 1,
+                    true,
+                  );
+              }}
             >
-              Open inventory record
-            </Link>
-          </div>
-        </section>
-      )}
+              Next candidates
+            </Button>
+            {state.search.page >= 100000 &&
+              state.search.total >
+                state.search.page * state.search.pageSize && (
+                <p>
+                  Refine the search to reach the remaining records within the
+                  candidate page limit.
+                </p>
+              )}
+          </nav>
+        )}
+        {candidate && (
+          <section
+            aria-label="Review assignment"
+            ref={reviewRef}
+            tabIndex={-1}
+            className={panel + ' space-y-3'}
+          >
+            <h2 className="break-words text-lg font-semibold">
+              {candidate.name}
+            </h2>
+            <p className="break-words text-sm">
+              {candidate.kind === 'quantity'
+                ? 'Quantity item'
+                : 'Individual asset'}{' '}
+              ·{' '}
+              <span className="experience-code">
+                {candidate.identifier || 'No display identifier'}
+              </span>{' '}
+              · <RecordStatus status={candidate.status} />
+            </p>
+            <p>
+              Destination: {state.context?.siteName}
+              {state.context?.reference
+                ? ` · Ticket ${state.context.reference}`
+                : ''}
+            </p>
+            <fieldset
+              disabled={unresolved || state.phase === 'conflict'}
+              className="space-y-3"
+            >
+              <label className="block space-y-2">
+                Storage source
+                <select
+                  aria-label="Storage source"
+                  className={field}
+                  value={state.sourceId}
+                  onChange={(e) => editReview({ sourceId: e.target.value })}
+                >
+                  <option value="">Choose source</option>
+                  {candidate.sources.map((source) => (
+                    <option key={source.id} value={source.id}>
+                      {source.name} · {source.quantity} available
+                      {!source.active ? ' · inactive source' : ''}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              {candidate.kind === 'quantity' && (
+                <label className="block space-y-2">
+                  Units to assign
+                  <Input
+                    aria-label="Units to assign"
+                    type="number"
+                    min={1}
+                    max={
+                      candidate.sources.find((row) => row.id === state.sourceId)
+                        ?.quantity ?? 2147483647
+                    }
+                    step={1}
+                    value={state.units}
+                    onChange={(e) => editReview({ units: e.target.value })}
+                  />
+                </label>
+              )}
+            </fieldset>
+            {problem && (
+              <p role="note" className="text-sm text-amber-200">
+                {problem}
+              </p>
+            )}
+            {candidate.currentSite && (
+              <p>Current custody: {candidate.currentSite}</p>
+            )}
+            <div className="flex flex-wrap gap-3">
+              <Button
+                type="button"
+                disabled={
+                  !freshReady ||
+                  state.phase === 'pending' ||
+                  (state.phase !== 'unknown' &&
+                    (!!problem || state.phase !== 'review'))
+                }
+                onClick={() => void confirm()}
+              >
+                {state.phase === 'pending'
+                  ? 'Assigning…'
+                  : state.phase === 'unknown'
+                    ? 'Retry same assignment'
+                    : 'Confirm assign'}
+              </Button>
+              {state.phase === 'conflict' && (
+                <Button
+                  variant="outline"
+                  type="button"
+                  onClick={refreshInspection}
+                >
+                  Inspect current state
+                </Button>
+              )}
+              <Link
+                className="inline-flex min-h-11 items-center text-cyan-300 underline"
+                href={candidate.path}
+              >
+                Open inventory record
+              </Link>
+            </div>
+          </section>
+        )}
+      </LoadingReveal>
       {state.receipt && (
         <section
           aria-label="Latest assignment receipt"

@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 import userEvent from '@testing-library/user-event';
 import Link from 'next/link';
 import {
@@ -152,6 +152,39 @@ const props = {
   item,
 };
 describe('published metadata form', () => {
+  it('replaces a deferred category form skeleton with retry guidance and then actual fields', async () => {
+    let finish!: (value: Awaited<ReturnType<typeof fetchCategoryForm>>) => void;
+    vi.mocked(fetchCategoryForm).mockReturnValueOnce(
+      new Promise((resolve) => {
+        finish = resolve;
+      }),
+    );
+    render(<MetadataForm {...props} forms={{}} />);
+    const status = await screen.findByText('Loading category form…');
+    expect(status).toHaveClass('sr-only');
+    expect(
+      document.querySelector('[data-loading-shape="fields"]'),
+    ).toBeInTheDocument();
+    await act(async () =>
+      finish({ ok: false, message: 'Form unavailable. Retry.' }),
+    );
+    expect(
+      document.querySelector('[data-loading-shape="fields"]'),
+    ).not.toBeInTheDocument();
+    expect(screen.getByRole('alert')).toHaveTextContent(
+      'Form unavailable. Retry.',
+    );
+    vi.mocked(fetchCategoryForm).mockResolvedValueOnce({
+      ok: true,
+      form: form(),
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Retry form load' }));
+    await screen.findByLabelText('Name');
+    expect(
+      document.querySelector('[data-loading-shape="fields"]'),
+    ).not.toBeInTheDocument();
+    expect(submitInventory).not.toHaveBeenCalled();
+  });
   beforeEach(() => {
     vi.resetAllMocks();
     sessionStorage.clear();
@@ -4751,19 +4784,32 @@ describe('existing edit recovery and review', () => {
             throw new DOMException('quota');
           original.call(this, key, raw);
         });
+      onTestFinished(() => storage.mockRestore());
       vi.mocked(submitInventory).mockResolvedValue({
         ok: true,
         entityId: item.id,
         version: changed ? '2' : '1',
         changed,
       });
+      const navigation = vi.fn((event: React.MouseEvent<HTMLAnchorElement>) =>
+        event.preventDefault(),
+      );
+      let attemptedNavigation = false;
+      const report = (task: { uncertain: boolean }) => {
+        if (task.uncertain && !attemptedNavigation) {
+          attemptedNavigation = true;
+          // Exercise the first committed uncertain state, before passive effects
+          // can replace a listener that still sees healthy recovery storage.
+          screen.getByRole('link', { name: 'Sites' }).click();
+        }
+      };
       render(
-        <>
-          <Link href="/sites" onClick={(event) => event.preventDefault()}>
+        <TaskStateContext.Provider value={report}>
+          <Link href="/sites" onClick={navigation}>
             Sites
           </Link>
           <MetadataForm {...props} forms={{ [categoryId]: form() }} />
-        </>,
+        </TaskStateContext.Provider>,
       );
       fireEvent.change(screen.getByLabelText('Name'), {
         target: { value: 'Possibly saved' },
@@ -4784,7 +4830,8 @@ describe('existing edit recovery and review', () => {
         ),
       ).toBeVisible();
       if (!changed) expect(screen.queryByText(/Details were saved/)).toBeNull();
-      fireEvent.click(screen.getByRole('link', { name: 'Sites' }));
+      expect(attemptedNavigation).toBe(true);
+      expect(navigation).not.toHaveBeenCalled();
       expect(
         screen.getByRole('dialog', { name: 'Leave this edit?' }),
       ).toHaveTextContent('retry the same save');

@@ -2,19 +2,54 @@ import { createServerClient } from '@supabase/ssr';
 import { NextResponse, type NextRequest } from 'next/server';
 import { supabaseConfig } from './lib/supabase/config';
 import { validReturnPath } from './features/scan/targets';
+import { documentPathHeader } from './lib/document-route';
 import {
   createAuthDiagnostic,
   observeAuthStage,
 } from './lib/auth/diagnostic.server';
 
+function skipsClaimsRefresh(pathname: string) {
+  // Preserve the former matcher refresh coverage while normalizing headers on
+  // every path. Image-like record paths still belong to the protected routes.
+  const protectedRecord = [
+    '/inventory/quantity',
+    '/inventory/assets',
+    '/locations',
+    '/sites',
+    '/settings/sites',
+    '/settings/locations',
+    '/settings/forms',
+  ].some((prefix) => pathname === prefix || pathname.startsWith(prefix + '/'));
+  return (
+    !protectedRecord &&
+    (pathname.startsWith('/_next/static') ||
+      pathname.startsWith('/_next/image') ||
+      pathname.startsWith('/favicon.ico') ||
+      /\.(?:svg|png|jpg|jpeg|gif|webp)$/.test(pathname))
+  );
+}
+
 export async function proxy(request: NextRequest) {
+  request.headers.set(documentPathHeader, request.nextUrl.pathname);
   // Replace any caller-supplied header with a value derived from the matched URL.
   request.headers.set(
     'x-inventory-return',
     validReturnPath(request.nextUrl.pathname) ?? '',
   );
   let response = NextResponse.next({ request: { headers: request.headers } });
+  // Public assets retain Next's cache policy and never read or refresh Auth.
+  // Missing image-like public paths still need a canonical root-fallback selector.
+  if (skipsClaimsRefresh(request.nextUrl.pathname)) return response;
   response.headers.set('Cache-Control', 'private, no-store');
+  // These handlers own transport admission and caller-scoped logout/cookie reads.
+  // Refreshing here would write cookies even before a rejected request, and turn
+  // the read-only generation comparison into a session refresh.
+  if (
+    request.nextUrl.pathname === '/api/auth/logout' ||
+    request.nextUrl.pathname === '/api/auth/privacy-confirm' ||
+    request.nextUrl.pathname === '/api/auth/privacy-read'
+  )
+    return response;
   const { url, key } = supabaseConfig();
   const supabase = createServerClient(url, key, {
     cookies: {
@@ -45,7 +80,5 @@ export async function proxy(request: NextRequest) {
   return response;
 }
 export const config = {
-  matcher: [
-    '/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)',
-  ],
+  matcher: '/:path*',
 };

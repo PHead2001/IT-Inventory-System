@@ -591,14 +591,18 @@ test('shared print defaults persist while job overrides and printable output ret
         .getByRole('combobox', { name: settingNames[index], exact: true })
         .selectOption(value);
     await page.getByRole('button', { name: 'Save shared defaults' }).click();
-    await expect(page.getByRole('status')).toContainText(
-      'Label settings saved.',
-    );
+    await expect(
+      page.getByRole('status').filter({ hasText: 'Label settings saved.' }),
+    ).toHaveText('Label settings saved.');
     owned = {
       ...selected,
       version: (BigInt(starting.version) + 1n).toString(),
     };
     expect(await readDefaults()).toEqual(owned);
+    await expect(page.locator('.experience-route-progress')).toHaveAttribute(
+      'data-visible',
+      'false',
+    );
     await page.reload();
     for (const [index, value] of Object.values(selected).entries())
       await expect(
@@ -641,15 +645,19 @@ test('shared print defaults persist while job overrides and printable output ret
       .getByRole('combobox', { name: 'Barcode type', exact: true })
       .selectOption('code128');
     await page.getByRole('button', { name: 'Save shared defaults' }).click();
-    await expect(page.getByRole('status')).toContainText(
-      'Label settings saved.',
-    );
+    await expect(
+      page.getByRole('status').filter({ hasText: 'Label settings saved.' }),
+    ).toHaveText('Label settings saved.');
     owned = {
       ...selected,
       format: 'code128',
       version: (BigInt(owned!.version) + 1n).toString(),
     };
     expect(await readDefaults()).toEqual(owned);
+    await expect(page.locator('.experience-route-progress')).toHaveAttribute(
+      'data-visible',
+      'false',
+    );
     await job.reload();
     await expect(
       job.locator('.label-card[data-code-ready="true"]'),

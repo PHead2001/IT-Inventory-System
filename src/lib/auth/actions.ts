@@ -14,10 +14,8 @@ import {
   readLogoutGeneration,
   recordConfirmedLogout,
 } from './privacy-barrier.server';
-import {
-  logoutGenerationField,
-  type LogoutPrivacyReceipt,
-} from './privacy-barrier';
+import { logoutGenerationField } from './privacy-barrier';
+import { signOutCurrentSession } from './logout.server';
 import {
   confirmationSchema,
   emailSchema,
@@ -81,22 +79,8 @@ export async function login(
     redirect(loginDestination(form.get('next')));
   });
 }
-export async function signOutSession(): Promise<
-  ({ ok: true } & LogoutPrivacyReceipt) | { ok: false; message: string }
-> {
-  try {
-    const supabase = await createSupabaseServerClient(true);
-    const { error } = await supabase.auth.signOut({ scope: 'local' });
-    return error
-      ? { ok: false, message: 'Unable to sign out. Please try again.' }
-      : { ok: true, ...(await recordConfirmedLogout()) };
-  } catch {
-    return {
-      ok: false,
-      message:
-        'Sign-out could not be confirmed. Retry when your connection is available.',
-    };
-  }
+export async function signOutSession() {
+  return signOutCurrentSession();
 }
 export async function logout() {
   const result = await signOutSession();

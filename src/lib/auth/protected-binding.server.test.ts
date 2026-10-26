@@ -1,16 +1,17 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 vi.mock('server-only', () => ({}));
 const mocks = vi.hoisted(() => ({
+  client: vi.fn(),
+  readOnlyClient: vi.fn(),
+  blocked: vi.fn(),
   user: vi.fn(),
   member: vi.fn(),
   from: vi.fn(),
   generation: vi.fn(),
 }));
 vi.mock('@/lib/supabase/server', () => ({
-  createSupabaseServerClient: async () => ({
-    auth: { getUser: mocks.user },
-    from: mocks.from,
-  }),
+  createSupabaseServerClient: mocks.client,
+  createSupabasePrivacyReadClient: mocks.readOnlyClient,
 }));
 vi.mock('./privacy-barrier.server', () => ({
   readLogoutGeneration: mocks.generation,
@@ -31,6 +32,15 @@ const member = {
 };
 beforeEach(() => {
   vi.resetAllMocks();
+  mocks.client.mockResolvedValue({
+    auth: { getUser: mocks.user },
+    from: mocks.from,
+  });
+  mocks.blocked.mockReturnValue(false);
+  mocks.readOnlyClient.mockImplementation(async () => ({
+    client: await mocks.client(),
+    blocked: mocks.blocked,
+  }));
   vi.stubEnv('NEXT_PUBLIC_SUPABASE_URL', binding.backend + '/');
   mocks.user.mockResolvedValue({
     data: { user: { id: binding.actorId } },
@@ -52,6 +62,17 @@ it('verifies the original actor and privileges before returning the current logo
   expect(mocks.from).toHaveBeenCalledWith('app_members');
   expect(mocks.member).toHaveBeenCalledOnce();
   expect(mocks.generation).toHaveBeenCalledOnce();
+  expect(mocks.client).toHaveBeenCalledWith(true);
+});
+it('lets the HTTP privacy reader suppress cookie writes while preserving canonical identity checks', async () => {
+  expect(await verifyProtectedPrivacyBinding(binding, false)).toEqual({
+    status: 'match',
+    generation: { status: 'absent' },
+  });
+  expect(mocks.readOnlyClient).toHaveBeenCalledOnce();
+  expect(mocks.client).not.toHaveBeenCalledWith(true);
+  expect(mocks.user).toHaveBeenCalledOnce();
+  expect(mocks.member).toHaveBeenCalledOnce();
 });
 it('rejects another authenticated actor before reading membership or generation', async () => {
   mocks.user.mockResolvedValue({
@@ -102,5 +123,23 @@ it('keeps an interrupted membership read retryable without authorizing readmissi
   expect(await verifyProtectedPrivacyBinding(binding)).toEqual({
     status: 'unavailable',
   });
+  expect(mocks.generation).not.toHaveBeenCalled();
+});
+
+it('rejects an SDK fallback identity when the read-only guard blocked a refresh attempt', async () => {
+  mocks.blocked.mockReturnValue(true);
+  expect(await verifyProtectedPrivacyBinding(binding, false)).toEqual({
+    status: 'unavailable',
+  });
+  expect(mocks.user).toHaveBeenCalledOnce();
+  expect(mocks.from).not.toHaveBeenCalled();
+  expect(mocks.generation).not.toHaveBeenCalled();
+});
+it('rejects blocked REST session refresh even if its membership result looks valid', async () => {
+  mocks.blocked.mockReturnValueOnce(false).mockReturnValue(true);
+  expect(await verifyProtectedPrivacyBinding(binding, false)).toEqual({
+    status: 'unavailable',
+  });
+  expect(mocks.member).toHaveBeenCalledOnce();
   expect(mocks.generation).not.toHaveBeenCalled();
 });

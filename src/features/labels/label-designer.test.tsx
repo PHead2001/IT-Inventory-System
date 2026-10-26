@@ -37,6 +37,16 @@ vi.mock('@/lib/auth/actions', () => ({
   acknowledgeLogoutPrivacyGeneration: mocks.acknowledgeLogoutPrivacyGeneration,
   readProtectedPrivacyIdentity: mocks.readProtectedPrivacyIdentity,
 }));
+vi.mock('@/lib/auth/privacy-read-transport', () => ({
+  readLogoutPrivacyGeneration: mocks.readLogoutPrivacyGeneration,
+  acknowledgeLogoutPrivacyGeneration: mocks.acknowledgeLogoutPrivacyGeneration,
+  readProtectedPrivacyIdentity: mocks.readProtectedPrivacyIdentity,
+}));
+vi.mock('@/lib/auth/logout-transport', () => ({
+  readLogoutPrivacyGeneration: mocks.readLogoutPrivacyGeneration,
+  acknowledgeLogoutPrivacyGeneration: mocks.acknowledgeLogoutPrivacyGeneration,
+  readProtectedPrivacyIdentity: mocks.readProtectedPrivacyIdentity,
+}));
 vi.mock('next/navigation', () => {
   const router = { replace: mocks.replace };
   return {
@@ -354,6 +364,41 @@ beforeEach(() => {
 });
 afterEach(() => vi.restoreAllMocks());
 
+it('keeps the label queue usable while a deferred search is busy and clears busy on failure', async () => {
+  let fail!: (reason: Error) => void;
+  mocks.searchLabelRecords.mockReturnValueOnce(
+    new Promise((_resolve, reject) => {
+      fail = reject;
+    }),
+  );
+  render(<LabelDesigner {...props} />);
+  const results = screen.getByRole('region', { name: 'Label search results' });
+  await waitFor(() => expect(mocks.searchLabelRecords).toHaveBeenCalled());
+  expect(results).toHaveAttribute('aria-busy', 'true');
+  expect(
+    results.querySelector('[data-loading-shape="rows"]'),
+  ).toBeInTheDocument();
+  expect(screen.getByText('Loading matching records…')).toHaveClass('sr-only');
+  const queue = screen.getByRole('region', { name: 'Label queue' });
+  expect(
+    screen.getByText('Loading matching records…').closest('[aria-busy="true"]'),
+  ).toBeNull();
+  await within(queue).findByText(/^Laptop ·/);
+  await act(async () => fail(new Error('private backend detail')));
+  expect(results).toHaveAttribute('aria-busy', 'false');
+  expect(
+    screen.queryByText('Loading matching records…'),
+  ).not.toBeInTheDocument();
+  expect(
+    results.querySelector('[data-loading-shape="rows"]'),
+  ).not.toBeInTheDocument();
+  expect(queue).toHaveTextContent('Laptop');
+  expect(
+    screen.getByText('Label search could not be loaded. Try again.'),
+  ).toBeVisible();
+  expect(screen.queryByText('private backend detail')).not.toBeInTheDocument();
+});
+
 const restoredLocation: LiveLabel = {
   ...quantity,
   kind: 'location',
@@ -404,6 +449,14 @@ it('restores a mixed queue with human refreshing labels until the authorized def
   ).toBeVisible();
   expect(within(queue).getByText('Location 3 · refreshing…')).toBeVisible();
   expectPrivateQueueIdentity(queue);
+  expect(
+    queue.querySelector('[data-loading-shape="queue-row"]'),
+  ).toBeInTheDocument();
+  const announcement = within(queue).getByText(
+    'Loading queued record details…',
+  );
+  expect(announcement).toHaveClass('sr-only');
+  expect(announcement.closest('[aria-busy="true"]')).toBeNull();
   expect(printButton()).toBeDisabled();
   await waitFor(() =>
     expect(mocks.getQueueRecords).toHaveBeenCalledWith(
@@ -415,6 +468,9 @@ it('restores a mixed queue with human refreshing labels until the authorized def
   expect(queue).toHaveTextContent('Laptop');
   expect(queue).toHaveTextContent('Adapters');
   expect(queue).toHaveTextContent('Clear Container');
+  expect(
+    queue.querySelector('[data-loading-shape="queue-row"]'),
+  ).not.toBeInTheDocument();
   expect(
     within(queue)
       .getAllByRole('spinbutton')

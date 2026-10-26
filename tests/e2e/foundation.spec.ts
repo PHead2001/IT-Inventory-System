@@ -98,8 +98,12 @@ test('anonymous public 404 Overview recovery preserves its destination through s
   page,
 }) => {
   await page.goto('/audit3-missing-' + crypto.randomUUID());
+  const recoveryDocument = await page.evaluate(() => performance.timeOrigin);
   await page.getByRole('link', { name: 'Open Overview', exact: true }).click();
   await expect(page).toHaveURL(/\/login\?next=%2Fdashboard$/);
+  expect(await page.evaluate(() => performance.timeOrigin)).not.toBe(
+    recoveryDocument,
+  );
   await page.getByLabel('Email', { exact: true }).fill(fixtureEmails.viewer);
   await page.getByLabel('Password', { exact: true }).fill(fixturePassword);
   await page.getByRole('button', { name: 'Sign in', exact: true }).click();

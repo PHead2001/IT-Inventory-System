@@ -43,6 +43,7 @@ Use the existing tokens (`--background`, `--surface`, `--foreground`, `--muted`,
 - **One primary action per region.** The cyan filled button marks the single most likely next step. Peer choices use the outline style.
 - **Destructive and lifecycle confirmations** (retire, archive, remove, discard) use `--danger` (or `--warning` for reversible states) and name the record, for example "Retire CLAUDE-REVIEW Dell Latitude 5450".
 - **Status is visible.** Retired, archived, low-stock and pending states get a badge or banner, not only muted text.
+- Protected-workspace privacy cleanup uses a bounded fixed status surface so its completion does not displace admitted page content. Pending status, errors, Retry and retained-workspace recovery instructions remain accessible; long messages scroll within the viewport. Cleanup on unprotected Auth routes retains its existing placement.
 - **Atmosphere is earned.** Glow, grid texture and ambient effects belong to Overview, sign-in and Spaces. Working forms and tables use calm, opaque surfaces. Avoid nesting cards more than two levels deep.
 - Verify contrast for muted text on surface tokens at the actual size used (WCAG AA: 4.5:1 below 18 px).
 
@@ -146,9 +147,323 @@ Rules:
 
 - Transition only the properties that change. No computed `transition-property: all`, including controls with zero duration. The shared `--transition-interactive-properties` covers background-color, border-color, color, box-shadow, opacity and transform. Minimal interactive defaults in the base cascade layer set only that property list; they never start motion or override narrower utilities. The opt-in utility lives in the components layer so caller utilities retain control. Existing animated buttons use `experience-interactive` with `--motion-feedback` (130 ms) and `--ease-workspace`; narrower existing property lists remain narrow.
 - Settings exposes **Reduce motion in this browser** as a labeled switch. Its checked state is the saved browser choice; adjacent help explains effective motion and any OS requirement. Turning it off cannot override system reduced motion.
+- Under either effective Reduced motion setting, show every animation's end state immediately. This newer Audit 4.2 owner decision supersedes the former short-fade allowance. Static visual quality must remain.
 - Until the browser preference is loaded, the motion control is a disabled ordinary button with loading help and no switch role or checked state. Once loaded, it exposes the saved choice as an enabled switch. The first styled paint remains reduced; an initial server value must not be treated as the saved choice.
-- Under Reduced motion, replace movement with an instant state change or a fade of 120 ms or less. Static visual quality must remain.
+
 - No motion that delays a request, replays on query-string updates, or runs continuously behind working forms.
+
+Protected route motion uses stable React 19.3 `ViewTransition` with the installed
+Next.js 16.3.6 commit integration, with a pathname-keyed content boundary and no update
+animation. React/Next owns server commits and streaming; never wrap `router.push`
+in `document.startViewTransition` or retain outgoing private children. Full motion
+crossfades content and settles it 8 px in `--motion-route` (200 ms); header/sidebar
+remain live. Native viewport/root snapshots are disabled. The **entire** `/room`
+ancestor content boundary opts out. Separate header, command, conventional inventory
+pane and location-browser boundaries animate without any canvas descendant.
+
+Only a body explicitly paired with a shared title phases its incoming opacity:
+it stays transparent for the first 100 ms and fades linearly over the remaining
+100 ms of that same 200 ms document-clock stage. Its 8 px movement, outgoing
+fade and title morph retain their existing ease-out. The opacity effect has no
+delay and finishes with the other effects; ordinary unpaired arrivals keep their
+existing crossfade. This reduces title/control interference, without promising
+that arbitrary travelling title rectangles never intersect other content. It
+changes no DOM visibility, focus, request, readiness or interactive availability;
+Reduced motion and native browser Back/Forward remain instant.
+
+Presentation begins suspended under the protected privacy controller. A verified
+original-binding grant must match the live revocation revision and assignment
+callback epoch before route motion, pending work or readiness can resume. An
+ordinary same-binding recheck may retain an already accepted visible grant and
+editable work. Revocation withdraws that grant and invalidates presentation before
+native cancellation; restored access resumes presentation without replacing
+business owners. Explicit logout, Auth account change and action access denial
+close the presentation owner permanently. These presentation rules do not change
+the authorization or recovery contracts.
+
+Inventory shared titles use an opaque per-navigation name only after Next's
+`Link.onNavigate` and existing dirty guards permit the initiating row. Matching
+requires record kind/identity, normalized results scope and stable holding identity
+(storage location UUID, site UUID or explicit unplaced);
+other holdings of the same record stay unnamed. The detail H1 is emitted only
+after server authorization. The application's **Back to results** link reuses only
+that approved initiating origin and animates its shared title in supported Full
+motion. Native browser Back/Forward is instant under the installed Next/React
+history restore. It restores the actual history URL, filters, row/anchor and scroll
+through Next/browser history and the ordinary authorization/privacy gates. Native
+traversal cancels a departing animation or paired wait and tracks real destination
+readiness; it never arms a shared title or a precommit privacy animation ticket.
+
+Inventory **Back to results** also repairs an anchor that Next consumed while a
+loading fallback had no result row. This application-Link owner is independent of
+motion: it retains only the accepted source's record/holding identity and exact
+result scope/anchor in the current provider. A real matching Back gesture can
+replay the ordinary anchor scroll once, instantly, only after fresh actor/privacy
+admission and the canonical visible primary reveal the unique same occurrence.
+Changed, missing or ambiguous rows never select a guessed substitute. New
+navigation, user scroll/pointer/keyboard intervention, access withdrawal and
+provider/actor/generation retirement cancel a pending replay. No history or
+browser storage is written. Existing non-motion focus behavior is preserved;
+the application return repair never moves focus. Native Back/Forward continues
+to use its separate instant coordinator below.
+
+The same accepted inventory-title Link owner also repairs a fresh detail arrival
+whose heading remains outside the viewport after Next has consumed its initial
+scroll intent. This one-shot intent is independent of Full/Reduced motion and
+requires the exact accepted same-origin path and complete query, the original
+actor/privacy authority and the canonical visible primary with one visible H1.
+After the commit and any active capture release, it reveals only an offscreen
+heading, respecting a fixed/sticky header and the heading's scroll margin. Full
+motion retains its earlier pre-capture title reveal; an already visible heading
+does not move again. The existing abort, user-input, superseding navigation,
+native-traversal and authority-retirement cancellation rules apply. App Back
+keeps its unique result-anchor repair. Unpaired/plain detail links and links with
+a destination hash retain ordinary Next scroll handling; no global readiness
+notification, search update, refresh or native history restore creates this intent.
+
+A fresh inventory document can receive its `inventory-row-N` fragment before
+private results are admitted. A separate document-lifetime attempt may restore
+that original fragment once after the original actor has a fresh privacy grant
+and the canonical primary exposes the unique registered inventory source row.
+The original document URL and navigation timing must match an initial navigate
+or reload; full-document history traversal/BFCache remains browser-owned. URL or
+hash equality alone grants no readiness or row identity. A provider remount,
+search update or later same-URL return cannot create another attempt.
+
+The initial-fragment attempt waits through initial not-ready state, but retires
+permanently on explicit revocation, authority replacement, accepted navigation,
+traversal, hash change, pagehide or user scroll intent. An admitted primary with
+a missing, duplicate, unregistered, hidden or outside-primary row is terminal.
+After the layout commit and any active capture, it rechecks authority, complete
+URL, primary and the exact registered element, consumes the attempt, then uses
+an instant viewport-clamped scroll respecting scroll margin/padding. It changes
+no focus/history and creates no animation. Existing App Back and native-history
+checkpoint ownership remain separate.
+
+Privacy checks can temporarily collapse the destination document and clamp the
+browser's restored scroll to zero. A provider-local scroll coordinator retains at
+most 50 finite, nonnegative offset checkpoints, bound to the browser history entry
+key, exact path/query/hash and actor/privacy authority generation. A temporary
+same-authority recheck freezes capture without deleting those checkpoints;
+revocation, actor/generation change, access denial and provider retirement clear
+them. Native traversal may restore once, instantly, only when the current entry
+and exact URL match, the privacy grant is fresh and the canonical primary is
+connected, visible, actor-matched and ready for the complete query. Primary/privacy
+notifications and post-popstate reconciliation cover either admission order and
+already-authorized same-URL or hash-only entries. Consume the pending restore
+before scrolling; a shorter final page clamps naturally without retries. User
+wheel/touch/pointer/mouse/scroll-key input or a new navigation cancels the pending restore;
+ordinary scroll events cannot cancel it because document collapse also emits them.
+Only Next's exact same-entry/same-URL replacement preserves a pending restore.
+Only an explicitly same-document destination starts a departure freeze or native
+restore token. A true cross-document attempt leaves current-source capture active
+under the existing fresh-grant and canonical-primary checks until the document
+actually leaves. Choosing Stay in a native beforeunload prompt therefore needs no
+synthetic abort or entry-change evidence to preserve later source scroll. A missing
+sameDocument flag cannot prove a retained-document departure. A single listener on
+the current same-document navigation attempt's AbortSignal releases a
+cancelled departure freeze only while its original history entry, exact URL and
+authority remain current. Resuming capture still requires the existing fresh
+privacy grant and canonical visible primary. A commit, new attempt, authority
+change or retired provider fences and removes the old abort listener; a delayed
+abort cannot cancel a newer restore or revive an old actor's checkpoint.
+This coordination never intercepts navigation, changes history or scroll restoration
+mode, persists checkpoints, moves focus or grants authorization/readiness. Without
+supported Navigation API entry observation, ordinary browser restoration remains
+in charge.
+
+Generic page and canvas-free route arrivals also require a fresh accepted
+application-navigation intent for the exact source/destination query keys and
+provider pending generation. Generic arrivals also require successful registration
+of a passive Navigation API observer. Its `navigate` event with type `traverse`
+synchronously retires generic and active title intent and commits static boundary
+classes before Next restores history. The approved title origin survives for a
+fresh application Back gesture. It never intercepts navigation or changes privacy
+or readiness owners. Missing/failed observer support keeps all route and shared-title
+motion instant, preserving ordinary navigation and restoration.
+The committed page consumes its intent after React queues capture callbacks;
+the later popstate cleanup remains in place. Motion support or a retained title
+origin alone cannot authorize another arrival snapshot.
+The shared title retains the original accepted source/destination keys and pending
+epoch independently until that title's capture finishes. An outer pathname commit
+may consume generic arrival before Next reveals the inner primary; it must not
+prevent the authorized forward H1 from being scrolled into the capture viewport.
+This layout-only reveal may pass the exact fieldset made inert by an active capture,
+while controls stay disabled. Previously inert fieldsets, other inert ancestors,
+hidden content, stale epochs and withdrawn privacy grants still reject it. Native
+traversal and title retirement clear this title-specific identity as before.
+Generic snapshot completion retires only its exact generic arrival owner;
+it never consumes a shared title. Only the matching named title snapshot may
+finish that title's intent. Provider, pending-epoch and captured-owner checks
+prevent late completion from consuming a newer gesture. A retained title owner
+remains a single metadata entry and is also retired by existing cancellation,
+traversal, superseding navigation, mismatched readiness and privacy paths.
+The approved origin can survive traversal for a later application Back link, but
+cannot authorize another Link gesture. No history entry is changed for animation.
+Ordinals locate anchors and do not identify holdings. Reordered holdings can pair
+at their new ordinal on app Back; deleted/replaced/ambiguous holdings use ordinary
+navigation. Do not patch router history methods, lanes or browser events to force
+native animation.
+Inventory list and quantity/asset detail destinations disable Next Link prefetch
+in every motion mode through the shared route-link policy. Plain Full details,
+filter, history and navigation links must follow it as well; the standalone asset
+tag advisory also opts out. Creation forms and other destinations retain their
+existing prefetch behavior. This uses public `prefetch={false}`: navigation still
+uses Next's normal Link/history/scroll handling. In the installed Next 16.3.6,
+a canceled partial prefetch can fulfill with null and take precedence over the
+available primary, committing an empty source before its fallback and losing
+the cold shared title. Avoiding those speculative requests preserves the source
+without modifying framework files or private caches. Cold clicks may wait longer
+for their actual Flight request; ordinary loading/progress remains visible.
+Pair approval is staged and consumed within the same accepted Link event, for its
+exact href and current provider generation. Prevented/thrown handlers discard it;
+plain detail navigation or failed capture retires any older title intent/origin.
+Dirty guards and modified gestures never enter that transaction. Retirement affects
+only title metadata, preserving pending tasks, progress and ordinary navigation.
+Missing/ambiguous/pre-capture pairs use the normal route crossfade. Separate
+streaming commits consume the intent and cannot reconstruct the old private tree.
+An accepted navigation that interrupts an unfinished paired load cancels that pair
+and uses ordinary loading/crossfade for the new destination. It does not promise
+that the original source node survives every interrupted route. Next-owned server
+redirects remain unrestricted; a committed destination/query mismatch cancels only
+the presentation gate, never acknowledges primary readiness or cancels actual work.
+
+React owns shared pairing and capture. A narrow `onShare` adapter replaces the
+exact named native group effect: it reads browser-captured source geometry,
+including identity when React omits an unchanged source transform. Paired
+presentation requires both `startViewTransition` and the `activeViewTransition`
+capability used to bind its owned clock; idle `null` is supported. Missing that
+capability keeps ordinary instant navigation and loading fallbacks. The adapter
+holds then cancels native width/height keyframes, reads the fixed destination box, then
+animates only translation/scale at 200 ms. Snapshot image fitting and dimensions
+are static. Unsupported/nonpositive/nonfinite/transformed geometry or unsupported
+pseudo-element WAAPI skips the **whole** transition instantly after capture;
+recapturing private DOM to rebuild a crossfade is prohibited. Browser proof of
+ordinary forward/app Back morphing, scrolled/mobile/long titles, no clipping/end snap,
+allowed keyframes and CLS remains mandatory; the Vitest adapter is not that proof.
+Record titles reserve a compact 44 px trailing control slot in the title row,
+including server HTML before overflow measurement. The measured three-line
+disclosure uses an accessible Show full name/Show less button with a title hint;
+adding that control must not shift following record content. Names that fit
+leave no focusable control. Expansion retains the same heading and native title
+identity; it does not reserve a separate empty row under short names.
+
+Effective motion reduction suppresses/cancels native snapshots synchronously.
+The protected provider cancels on null/different Supabase actor, permitted logout
+submission, actor replacement and unmount (including access-denied redirects).
+Logout invokes the cancellation helper directly inside its existing submit
+handler after unresolved-save confirmation permits exit, before cleanup/action
+dispatch. A prevented native submit cannot distinguish the guard from React's
+server-action interception; document-level submit listeners do not decide this.
+Stale callbacks cannot restore invalidated intent or suppress a new provider.
+This hook grants no access and replaces no server membership/RLS checks. It stores
+only ephemeral record/URL metadata, never titles, private DOM or credentials.
+Existing structured inventory, custody, configuration and metadata action results
+are observed at their client await boundaries. Explicit `forbidden`, `P1001`,
+`42501` or `actor_changed` results synchronously cancel snapshots and clear intent
+for the provider that was mounted when the action started. Later callbacks cannot
+restart motion; results from a retired provider cannot suppress its replacement.
+This conservative presentation suppression does not prove membership revocation
+(`P1001` also covers insufficient staff permission), change authentication, sign
+out, or clear drafts/receipts. Generic messages, transport failures and successful
+results are not denial signals. Action paths without structured access codes and
+revocation without an observed response remain lifecycle limitations pending
+security review.
+Unsupported browsers retain instant ordinary navigation. Task/panel, review,
+receipt and disclosure motion remains pending U406 integration. W09 is an unfinished
+draft: Link pending, tracked imperative router operations, real action promises and
+mounted local fallback/request UI contribute registrations. A 150 ms timer only
+reveals pending work; it never declares completion. Reduced motion makes pending
+static and completion immediate. Required protected auth/title/primary data resolve
+in the same reveal boundary. A stable unkeyed Suspense boundary sits inside the
+canonical privacy content wrapper around pathname-keyed PageArrival; privacy,
+progress and provider controllers remain outside it. Inventory/list/detail loading
+fallbacks suspend into that stable boundary only for a current accepted paired
+navigation with the exact destination, opaque title/navigation owner, provider and
+pending generation, a fresh original-binding grant and supported Full motion.
+That navigation allocates one cached promise before rendering. React retains the
+actual outgoing content until the authorized incoming title/primary data reveals;
+the gate stores no private children, titles or DOM. Direct, unpaired, Reduced and
+unsupported loading shows the ordinary shape-matched skeleton. All intermediate
+inventory loading boundaries honor the gate. Server-issued actor/full-query ready markers acknowledge
+only connected visible matching content, and only close native history tokens.
+Refresh completion remains tied to real React work. Activity reactivation runs the
+marker layout effect again; presentation epochs alone never fabricate readiness.
+Room query history instead uses its accepted selection and validated current contents
+or visibly committed current error, preserving the independent camera/renderer.
+Per-mounted caller cleanup withdraws presentation, never cancels a backend request.
+Async task promises are tracked per invocation outside React async transitions:
+the retained actual-React regression reproduced shared async-action entanglement,
+then passed after separating task promises from synchronous route transitions.
+Owner incarnation keeps local busy until actual settlement or caller retirement,
+independently of presentation epochs. History cancellation cannot enable resubmit
+on a still-mounted request. Provider epochs suppress stale global presentation
+and private denial callbacks, while the same live caller can finish its local busy.
+Completion releases presentation after its UI commit; it never completes another
+owner's task or a route refresh. Synchronous router errors still reach the original
+caller, including existing Retry recovery. Actual browser readiness and native
+overlap remain required before W09 acceptance.
+
+The partial W08 route port uses decorative content-shaped skeletons for Inventory,
+record pages, History/events, Labels, new inventory records and category-form routes.
+One polite nonvisual fallback status sits outside the busy geometry. Mounted
+fallbacks register only their own real Suspense lifetime with W09; an opaque
+fallback owner elects one announcement and suppresses the duplicate top status.
+Fallback retirement neither acknowledges route readiness nor finishes another
+request. Shimmer is static until hydration and suppressed in Reduced motion or a
+hidden page. The optional local-content reveal never delays data/focus/errors;
+hidden-page reveals are canceled without replay. No feature request uses that
+primitive in this route-only port.
+
+The paired-loading gate withdraws on supersede, Back cancellation, error, privacy
+revocation, reduction and provider retirement. Only the existing visible authorized
+readiness protocol releases a matching completed destination; animation completion
+and timers cannot declare readiness. Cancellation retires presentation rather than
+resolving a request, discarding drafts or changing retry identity. Canonical privacy
+fencing outside Suspense immediately hides/inerts retained content. A same-page
+recheck preserves the existing draft owner. An explicitly accepted route exit may
+relinquish its outgoing owner normally, including while its replacement remains
+hidden; this is not a request acknowledgement or permission to reveal late content.
+
+The isolated native Next experiment established the retention/pairing mechanism,
+not product acceptance. The application integration still needs real delayed-primary
+forward/Back, privacy, room/canvas and production-runtime proof.
+Room, files, contents, occupancy, inspection and label-result waits remain a
+separate port. Populated desktop/390 px Full/Reduced inspection, layout-shift
+measurements and native route proof are still required; unit geometry does not
+certify the final visual match or D303.2.
+
+The 13 existing imperative router modules are scan-panel, settings-panel,
+custody management-form, custody activity-filter, custody-change-form,
+label-designer, inventory mutation-form, archive-quantity-form, refresh-button,
+search-form, room-workspace, metadata-form and metadata-settings. Their supported
+push/replace/refresh calls use the tracked router; existing local transitions use
+the tracked transition hook. refresh-button currently has no mounted product caller.
+The one history Next Form became a progressive ordinary GET form: native validation,
+successful controls/submitter, repeated values, overrides/modifiers and existing
+prevented submissions retain their semantics. Signed-in internal Links, including
+server-rendered navigation, report public descendant useLinkStatus. Export/download
+anchors, external links, modified/new-tab navigation, no-JavaScript document loads,
+authentication forms outside the protected shell and API/file requests without an
+owned presentation boundary remain native; they do not fabricate global route pending.
+
+Native view-transition DOM capture briefly disables and inerts conventional page
+content through a display-contents fieldset. Release follows the actual
+`updateCallbackDone` settlement, including rejection; it never waits for animation
+completion or acknowledges a backend request. Domain-disabled controls stay
+disabled. Effect-driven focus, dialog entry, designer placement and primary route
+readiness retain cancellable intent until capture releases. Superseded effects,
+Activity retirement and unmount cancel their own queued intent. The prior focused
+control returns only while the boundary still owns focus: outside focus, outside
+pointer input and history/page exit retire restoration even if focus later moves
+to the document body. Subscriber failures are isolated and reported with a bounded
+generic error; they cannot replace the native API's result/error or strand another
+capture owner. No native focus method or React/router implementation is patched.
+
+React/DOM/types 19.3 and Fiber 9.8.1 replace the previous canary type reference;
+Drei/Three are unchanged. Fiber's [React 19.3 compatibility release](https://github.com/pmndrs/react-three-fiber/releases/tag/v9.8.0)
+and Activity/Canvas lifecycle fix require real WebGL/cache-Back/camera regression
+before acceptance. A jsdom children adapter is only an environment fallback.
 
 ---
 

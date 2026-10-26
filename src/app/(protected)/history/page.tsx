@@ -1,3 +1,5 @@
+import { RouteReady } from '@/components/experience/route-ready';
+import { routeReadyProps } from '@/components/experience/route-ready.server';
 import { ProtectedPrivacyContent } from '@/components/auth/privacy-content';
 import { formatCustomValue } from '@/features/metadata/contracts';
 import { WebLinkValue } from '@/features/metadata/web-link-value';
@@ -19,9 +21,10 @@ import { Button } from '@/components/ui/button';
 import { LocationPicker } from '@/features/locations/location-picker';
 import { getEventCustomPage } from '@/features/metadata/queries.server';
 import { notFound, redirect } from 'next/navigation';
-import Form from 'next/form';
-import Link from 'next/link';
+import Form from '@/components/experience/route-get-form';
+import Link from '@/components/experience/route-link';
 import styles from '@/features/inventory/components/inventory-visual.module.css';
+import { recordDetailReturnPath } from '@/features/inventory/detail-return';
 import { OperationalTimestamp } from '@/components/operational-time';
 const canonicalId =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
@@ -31,6 +34,7 @@ export default async function HistoryPage({
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
   const raw = await searchParams;
+  const readiness = await routeReadyProps('/history', searchParams);
   const params = Object.fromEntries(
     Object.entries(raw).map(([k, v]) => [k, Array.isArray(v) ? v[0] : v]),
   );
@@ -66,120 +70,122 @@ export default async function HistoryPage({
       (fieldId ? `&field=${fieldId}` : '') +
       (offset ? `&optionOffset=${offset}` : '');
     return (
-      <ProtectedPrivacyContent>
-        <>
-          <h1 className="text-3xl font-semibold">Custom metadata at event</h1>
-          <p className="my-4 text-slate-400">
-            Append-only {kind} event {event[2]}. Values and revision provenance
-            come from the recorded snapshot.
-          </p>
-          <p>
-            <a className="text-cyan-300 underline" href="/history">
-              Back to history
-            </a>
-          </p>
-          <nav className="my-4 flex gap-5" aria-label="Event snapshot side">
-            <a
-              className="text-cyan-300 underline"
-              href={link('before', custom.field_id)}
-            >
-              Before event
-            </a>
-            <a
-              className="text-cyan-300 underline"
-              href={link('after', custom.field_id)}
-            >
-              After event
-            </a>
-          </nav>
-          {custom.field_id ? (
-            <section className={panel} aria-label="Custom history field">
-              <h2 className="text-xl font-semibold">
-                {custom.label} {custom.legacy ? '(legacy)' : ''}
-              </h2>
-              <p className="mt-2 text-sm text-slate-400">
-                {side === 'before' ? 'Before event' : 'After event'}
-              </p>
-              {custom.present ? (
-                <>
-                  {custom.field_type === 'datetime' && (
-                    <p className="mt-2 text-sm">
-                      Display time:{' '}
-                      <OperationalTimestamp value={custom.value} />
-                    </p>
-                  )}
-                  {custom.field_type === 'url' ? (
-                    <div className="mt-3">
-                      <WebLinkValue value={custom.value} />
-                    </div>
-                  ) : (
-                    custom.field_type !== 'datetime' && (
-                      <p className="mt-3 whitespace-pre-wrap text-sm [overflow-wrap:anywhere]">
-                        {formatCustomValue(custom.value, custom.option_paths)}
-                      </p>
-                    )
-                  )}
-                  <details className="mt-3 text-sm">
-                    <summary className="min-h-11 cursor-pointer py-2">
-                      Technical recorded value
-                    </summary>
-                    <p>Field: {custom.field_id}</p>
-                    <p className="mt-2 text-sm">Type: {custom.field_type}</p>
-                    <p className="mt-2 text-sm">
-                      Validated revision: {custom.validated_revision_id}
-                    </p>
-                    <p className="mt-2 text-sm">
-                      Field owner category: {custom.owner_category_id}
-                    </p>
-                    <pre className="whitespace-pre-wrap break-all">
-                      {JSON.stringify(custom.value)}
-                    </pre>
-                  </details>
-                  {custom.option_offset && custom.option_offset > 0 && (
-                    <a
-                      className="mr-4 text-cyan-300 underline"
-                      href={link(
-                        side,
-                        custom.field_id,
-                        Math.max(0, custom.option_offset - 16),
-                      )}
-                    >
-                      Previous option paths
-                    </a>
-                  )}
-                  {custom.next_option_offset !== null && (
-                    <a
-                      className="text-cyan-300 underline"
-                      href={link(
-                        side,
-                        custom.field_id,
-                        custom.next_option_offset,
-                      )}
-                    >
-                      Next option paths
-                    </a>
-                  )}
-                </>
-              ) : (
-                <p className="mt-3">Field absent in this snapshot.</p>
-              )}
-              {custom.next_field_id && (
-                <p className="mt-5">
-                  <a
-                    className="text-cyan-300 underline"
-                    href={link(side, custom.next_field_id)}
-                  >
-                    Next custom field
-                  </a>
-                </p>
-              )}
-            </section>
-          ) : (
-            <p className={panel}>
-              No custom values were recorded for this event.
+      <ProtectedPrivacyContent routeKey={readiness.routeKey}>
+        <RouteReady {...readiness} conventionalPrimary>
+          <>
+            <h1 className="text-3xl font-semibold">Custom metadata at event</h1>
+            <p className="my-4 text-slate-400">
+              Append-only {kind} event {event[2]}. Values and revision
+              provenance come from the recorded snapshot.
             </p>
-          )}
-        </>
+            <p>
+              <Link className="text-cyan-300 underline" href="/history">
+                Back to history
+              </Link>
+            </p>
+            <nav className="my-4 flex gap-5" aria-label="Event snapshot side">
+              <Link
+                className="text-cyan-300 underline"
+                href={link('before', custom.field_id)}
+              >
+                Before event
+              </Link>
+              <Link
+                className="text-cyan-300 underline"
+                href={link('after', custom.field_id)}
+              >
+                After event
+              </Link>
+            </nav>
+            {custom.field_id ? (
+              <section className={panel} aria-label="Custom history field">
+                <h2 className="text-xl font-semibold">
+                  {custom.label} {custom.legacy ? '(legacy)' : ''}
+                </h2>
+                <p className="mt-2 text-sm text-slate-400">
+                  {side === 'before' ? 'Before event' : 'After event'}
+                </p>
+                {custom.present ? (
+                  <>
+                    {custom.field_type === 'datetime' && (
+                      <p className="mt-2 text-sm">
+                        Display time:{' '}
+                        <OperationalTimestamp value={custom.value} />
+                      </p>
+                    )}
+                    {custom.field_type === 'url' ? (
+                      <div className="mt-3">
+                        <WebLinkValue value={custom.value} />
+                      </div>
+                    ) : (
+                      custom.field_type !== 'datetime' && (
+                        <p className="mt-3 whitespace-pre-wrap text-sm [overflow-wrap:anywhere]">
+                          {formatCustomValue(custom.value, custom.option_paths)}
+                        </p>
+                      )
+                    )}
+                    <details className="mt-3 text-sm">
+                      <summary className="min-h-11 cursor-pointer py-2">
+                        Technical recorded value
+                      </summary>
+                      <p>Field: {custom.field_id}</p>
+                      <p className="mt-2 text-sm">Type: {custom.field_type}</p>
+                      <p className="mt-2 text-sm">
+                        Validated revision: {custom.validated_revision_id}
+                      </p>
+                      <p className="mt-2 text-sm">
+                        Field owner category: {custom.owner_category_id}
+                      </p>
+                      <pre className="whitespace-pre-wrap break-all">
+                        {JSON.stringify(custom.value)}
+                      </pre>
+                    </details>
+                    {custom.option_offset && custom.option_offset > 0 && (
+                      <Link
+                        className="mr-4 text-cyan-300 underline"
+                        href={link(
+                          side,
+                          custom.field_id,
+                          Math.max(0, custom.option_offset - 16),
+                        )}
+                      >
+                        Previous option paths
+                      </Link>
+                    )}
+                    {custom.next_option_offset !== null && (
+                      <Link
+                        className="text-cyan-300 underline"
+                        href={link(
+                          side,
+                          custom.field_id,
+                          custom.next_option_offset,
+                        )}
+                      >
+                        Next option paths
+                      </Link>
+                    )}
+                  </>
+                ) : (
+                  <p className="mt-3">Field absent in this snapshot.</p>
+                )}
+                {custom.next_field_id && (
+                  <p className="mt-5">
+                    <Link
+                      className="text-cyan-300 underline"
+                      href={link(side, custom.next_field_id)}
+                    >
+                      Next custom field
+                    </Link>
+                  </p>
+                )}
+              </section>
+            ) : (
+              <p className={panel}>
+                No custom values were recorded for this event.
+              </p>
+            )}
+          </>
+        </RouteReady>
       </ProtectedPrivacyContent>
     );
   }
@@ -188,7 +194,11 @@ export default async function HistoryPage({
     params.entityId !== undefined
       ? await getHistoryRecord(params.entityId)
       : null;
-  const coherentParams = { ...params, type: record?.kind ?? filter.type };
+  const coherentParams: Record<string, string | undefined> & { type: string } =
+    {
+      ...params,
+      type: record?.kind ?? filter.type,
+    };
   const clearQuery = new URLSearchParams();
   if (coherentParams.type !== 'all')
     clearQuery.set('type', coherentParams.type);
@@ -196,22 +206,24 @@ export default async function HistoryPage({
   const clearHref = '/history' + (clearQuery.size ? '?' + clearQuery : '');
   if (params.entityId !== undefined && !record) {
     return (
-      <ProtectedPrivacyContent>
-        <>
-          <h1 className="experience-heading">Inventory history</h1>
-          <div className={panel}>
-            <p>
-              Record history is unavailable. The record may be missing,
-              inaccessible, or the record filter may be invalid.
-            </p>
-            <Link
-              className="inline-flex min-h-11 items-center text-cyan-300 underline"
-              href={clearHref}
-            >
-              Clear record filter
-            </Link>
-          </div>
-        </>
+      <ProtectedPrivacyContent routeKey={readiness.routeKey}>
+        <RouteReady {...readiness}>
+          <>
+            <h1 className="experience-heading">Inventory history</h1>
+            <div className={panel}>
+              <p>
+                Record history is unavailable. The record may be missing,
+                inaccessible, or the record filter may be invalid.
+              </p>
+              <Link
+                className="inline-flex min-h-11 items-center text-cyan-300 underline"
+                href={clearHref}
+              >
+                Clear record filter
+              </Link>
+            </div>
+          </>
+        </RouteReady>
       </ProtectedPrivacyContent>
     );
   }
@@ -221,134 +233,145 @@ export default async function HistoryPage({
   ]);
   const recovery = pageRecoveryHref('/history', coherentParams, result);
   if (recovery) redirect(recovery);
+  const historyScope = new URLSearchParams();
+  for (const key of ['type', 'location', 'entityId', 'page']) {
+    const value = coherentParams[key];
+    if (value) historyScope.set(key, value);
+  }
+  const returnTo = recordDetailReturnPath(
+    '/history' + (historyScope.size ? '?' + historyScope : ''),
+    '/history',
+  );
   return (
-    <ProtectedPrivacyContent>
-      <>
-        <p className="experience-eyebrow">Inventory · Audit trail</p>
-        <h1 className="experience-heading mt-3">Inventory history</h1>
-        <p className="experience-muted my-4 max-w-2xl text-sm">
-          Append-only records of inventory changes. Physical movements and
-          record corrections are shown separately.
-        </p>
-        <Form
-          action="/history"
-          className={panel + ' mb-5 space-y-3'}
-          aria-label="Filter history"
-        >
-          <div className="grid gap-3 sm:grid-cols-2">
-            <div>
-              <label htmlFor="history-type">Tracking type</label>
-              <select
-                key={`${record?.id ?? 'all'}:${coherentParams.type}`}
-                className={field}
-                id="history-type"
-                name="type"
-                defaultValue={
-                  coherentParams.type === 'all' ? '' : coherentParams.type
-                }
-                disabled={Boolean(record)}
-                aria-describedby={record ? 'history-type-help' : undefined}
-              >
-                <option value="">All types</option>
-                <option value="quantity">Quantity items</option>
-                <option value="asset">Individual assets</option>
-              </select>
-              {record && (
-                <>
-                  <input type="hidden" name="type" value={record.kind} />
-                  <p
-                    id="history-type-help"
-                    className="mt-2 text-sm text-slate-400"
-                  >
-                    Tracking type is locked to this record. Clear the record
-                    filter to choose another type.
-                  </p>
-                </>
-              )}
-            </div>
-            <LocationPicker
-              key={params.location ?? ''}
-              id="history-location"
-              label="Location"
-              locations={locations}
-              mode="browse"
-              name="location"
-              defaultValue={params.location ?? ''}
-              allowAll
-            />
-          </div>
-          {record && (
-            <>
-              <input type="hidden" name="entityId" value={record.id} />
-              <p className="text-sm text-slate-400">
-                Record:{' '}
-                <Link
-                  className="text-cyan-300 underline"
-                  href={
-                    '/inventory/' +
-                    (record.kind === 'quantity' ? 'quantity' : 'assets') +
-                    '/' +
-                    record.id
-                  }
-                >
-                  {record.name}
-                </Link>{' '}
-                ·{' '}
-                {record.kind === 'quantity'
-                  ? 'Quantity item'
-                  : 'Individual asset'}
-                .{' '}
-                <Link className="text-cyan-300 underline" href={clearHref}>
-                  Clear record filter
-                </Link>
-              </p>
-              {params.type && params.type !== record.kind && (
-                <p role="status" className="text-sm text-amber-100">
-                  Tracking type was reconciled to{' '}
-                  {record.kind === 'quantity'
-                    ? 'Quantity items'
-                    : 'Individual assets'}{' '}
-                  for this record.
-                </p>
-              )}
-            </>
-          )}
-          <Button type="submit">Filter history</Button>
-        </Form>
-        {filter.location && (
-          <p className="mb-3 text-sm text-slate-300">
-            Location:{' '}
-            {locations.find((location) => location.code === filter.location)
-              ?.breadcrumb ?? filter.location}{' '}
-            ·{' '}
-            <Link
-              className="text-cyan-300 underline"
-              href={
-                '/history?' +
-                new URLSearchParams(
-                  Object.fromEntries(
-                    Object.entries(coherentParams).filter(
-                      ([key, value]) =>
-                        key !== 'location' &&
-                        key !== 'page' &&
-                        value !== undefined,
-                    ) as [string, string][],
-                  ),
-                )
-              }
-            >
-              Clear location filter
-            </Link>
+    <ProtectedPrivacyContent routeKey={readiness.routeKey}>
+      <RouteReady {...readiness} conventionalPrimary>
+        <>
+          <p className="experience-eyebrow">Inventory · Audit trail</p>
+          <h1 className="experience-heading mt-3">Inventory history</h1>
+          <p className="experience-muted my-4 max-w-2xl text-sm">
+            Append-only records of inventory changes. Physical movements and
+            record corrections are shown separately.
           </p>
-        )}
-        <p className="experience-muted mb-3 text-sm">
-          {countLabel(result.total, 'matching event')}
-        </p>
-        <div className={styles.history}>
-          <HistoryList events={result.rows} compact />
-        </div>
-        <Pagination result={result} base="/history" params={coherentParams} />
-      </>
+          <Form
+            action="/history"
+            className={panel + ' mb-5 space-y-3'}
+            aria-label="Filter history"
+          >
+            <div className="grid gap-3 sm:grid-cols-2">
+              <div>
+                <label htmlFor="history-type">Tracking type</label>
+                <select
+                  key={`${record?.id ?? 'all'}:${coherentParams.type}`}
+                  className={field}
+                  id="history-type"
+                  name="type"
+                  defaultValue={
+                    coherentParams.type === 'all' ? '' : coherentParams.type
+                  }
+                  disabled={Boolean(record)}
+                  aria-describedby={record ? 'history-type-help' : undefined}
+                >
+                  <option value="">All types</option>
+                  <option value="quantity">Quantity items</option>
+                  <option value="asset">Individual assets</option>
+                </select>
+                {record && (
+                  <>
+                    <input type="hidden" name="type" value={record.kind} />
+                    <p
+                      id="history-type-help"
+                      className="mt-2 text-sm text-slate-400"
+                    >
+                      Tracking type is locked to this record. Clear the record
+                      filter to choose another type.
+                    </p>
+                  </>
+                )}
+              </div>
+              <LocationPicker
+                key={params.location ?? ''}
+                id="history-location"
+                label="Location"
+                locations={locations}
+                mode="browse"
+                name="location"
+                defaultValue={params.location ?? ''}
+                allowAll
+              />
+            </div>
+            {record && (
+              <>
+                <input type="hidden" name="entityId" value={record.id} />
+                <p className="text-sm text-slate-400">
+                  Record:{' '}
+                  <Link
+                    className="text-cyan-300 underline"
+                    href={
+                      '/inventory/' +
+                      (record.kind === 'quantity' ? 'quantity' : 'assets') +
+                      '/' +
+                      record.id
+                    }
+                  >
+                    {record.name}
+                  </Link>{' '}
+                  ·{' '}
+                  {record.kind === 'quantity'
+                    ? 'Quantity item'
+                    : 'Individual asset'}
+                  .{' '}
+                  <Link className="text-cyan-300 underline" href={clearHref}>
+                    Clear record filter
+                  </Link>
+                </p>
+                {params.type && params.type !== record.kind && (
+                  <p role="status" className="text-sm text-amber-100">
+                    Tracking type was reconciled to{' '}
+                    {record.kind === 'quantity'
+                      ? 'Quantity items'
+                      : 'Individual assets'}{' '}
+                    for this record.
+                  </p>
+                )}
+              </>
+            )}
+            <Button type="submit">Filter history</Button>
+          </Form>
+          {filter.location && (
+            <p className="mb-3 text-sm text-slate-300">
+              Location:{' '}
+              {locations.find((location) => location.code === filter.location)
+                ?.breadcrumb ?? filter.location}{' '}
+              ·{' '}
+              <Link
+                className="text-cyan-300 underline"
+                href={
+                  '/history?' +
+                  new URLSearchParams(
+                    Object.fromEntries(
+                      Object.entries(coherentParams).filter(
+                        ([key, value]) =>
+                          key !== 'location' &&
+                          key !== 'page' &&
+                          value !== undefined,
+                      ) as [string, string][],
+                    ),
+                  )
+                }
+              >
+                Clear location filter
+              </Link>
+            </p>
+          )}
+          <p className="experience-muted mb-3 text-sm">
+            {countLabel(result.total, 'matching event')}
+          </p>
+          <div className={styles.history}>
+            <HistoryList returnTo={returnTo} events={result.rows} compact />
+          </div>
+          <Pagination result={result} base="/history" params={coherentParams} />
+        </>
+      </RouteReady>
     </ProtectedPrivacyContent>
   );
 }

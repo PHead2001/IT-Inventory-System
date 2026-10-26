@@ -1,4 +1,5 @@
 import { openRecordTask } from './record-task-controls';
+import { expectCategoryAdded } from './configuration-assertions';
 import { metadataReviewButton, metadataSaveButton } from './metadata-controls';
 import { randomUUID } from 'node:crypto';
 import { expect, test, type Locator, type Page } from '@playwright/test';
@@ -304,9 +305,7 @@ test('designer hide and restore retain false, zero and empty values while an uns
   await page.goto('/settings/categories');
   await page.getByLabel('Display name').fill(category);
   await page.getByRole('button', { name: 'Add category' }).click();
-  await expect(page.getByRole('status')).toContainText(
-    `Category added: ${category}.`,
-  );
+  await expectCategoryAdded(page, category);
   let designer = await openDesigner(page, category);
   const fields = [
     { type: 'boolean', name: 'False flag' },

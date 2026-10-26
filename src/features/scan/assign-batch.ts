@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { clearLabelQueueSession } from '@/features/labels/queue-model';
+import { clearAllDesignerRecovery } from '@/features/metadata/designer-recovery';
 import {
   assignmentCandidateSchema,
   assignmentContextSchema,
@@ -399,6 +400,7 @@ function clearAssignmentPrivacyStorage(mode: 'all' | 'private') {
     // Keep the strongest tombstone until the independently verified label helper
     // also proves that every queue namespace is absent.
     if (mode === 'all' && !clearLabelQueueSession()) absent = false;
+    if (mode === 'all' && !clearAllDesignerRecovery()) absent = false;
     if (!absent) {
       // Successful independent deletions may have freed marker capacity.
       establishMarker();

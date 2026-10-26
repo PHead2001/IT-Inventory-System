@@ -629,9 +629,9 @@ test('CP3 U08 designer starts with useful canvas and supports keyboard recovery,
   const category = 'CP3 canvas ' + randomUUID().slice(0, 8);
   await page.getByLabel('Display name').fill(category);
   await page.getByRole('button', { name: 'Add category' }).click();
-  await expect(page.getByRole('status')).toContainText(
-    `Category added: ${category}.`,
-  );
+  await expect(
+    page.getByRole('status').filter({ hasText: /^Category added:/ }),
+  ).toContainText(`Category added: ${category}.`);
   await page.goto('/settings/forms');
   await page.getByRole('link', { name: category, exact: true }).click();
   await page.setViewportSize({ width: 1180, height: 757 });

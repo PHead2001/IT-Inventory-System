@@ -1,3 +1,4 @@
+import { isPrivacyGenerationRead } from './privacy-read-request';
 import { expect, test, type Page } from '@playwright/test';
 import fixture from '../fixtures/auth.json' with { type: 'json' };
 import { acceptanceFixtures } from './audit-three-acceptance-fixtures';
@@ -96,12 +97,38 @@ test('real logout survives a first cleanup read failure and a hard reload before
 }) => {
   await signIn(page);
   await seedAndBlockFirstRead(page);
+  const signedOut = page.waitForResponse(
+    (response) =>
+      new URL(response.url()).pathname === '/api/auth/logout' &&
+      response.request().method() === 'POST',
+  );
   await page.getByRole('button', { name: 'Sign out', exact: true }).click();
-  await expect(
-    page.getByRole('alert').filter({
-      hasText: /could not clear|cannot be verified/,
-    }),
-  ).toBeVisible();
+  // Callback invalidation can expose a privacy-check alert before logout settles.
+  // Confirm the actual logout receipt before checking its retained cookie.
+  const response = await signedOut;
+  expect(response.status()).toBe(200);
+  const receipt = await response.json();
+  expect(receipt).toEqual({
+    ok: true,
+    logoutGeneration: expect.any(String),
+  });
+  expect(isLogoutGeneration(receipt.logoutGeneration)).toBe(true);
+  // Unlike the pre-receipt privacy alert, this control belongs to the confirmed
+  // completion owner and retries cleanup without repeating the logout mutation.
+  const finishSignOut = page.getByRole('button', {
+    name: 'Finish signing out',
+    exact: true,
+  });
+  await expect(finishSignOut).toBeVisible();
+  await expect(finishSignOut.locator('..').getByRole('alert')).toHaveText(
+    'This tab’s privacy cleanup state cannot be verified. Keep its saved data intact and close this tab before signing in.',
+  );
+  await expect
+    .poll(async () => {
+      const cookie = await reminder(page);
+      return cookie ? decodeURIComponent(cookie.value) : null;
+    })
+    .toBe(`v1:${receipt.logoutGeneration}`);
   const retained = await reminder(page);
   expect(retained?.httpOnly).toBe(true);
   expect(
@@ -178,20 +205,8 @@ test('real query-only Scan navigation withholds assignment storage bootstrap whi
     release = resolve;
   });
   let held = false;
-  await page.route('**/scan*', async (route) => {
-    const request = route.request();
-    // This fixture deliberately defers the no-argument privacy-generation read.
-    // Inspection/search actions carry business arguments and must pass through.
-    let privacyRead = false;
-    if (request.method() === 'POST' && request.headers()['next-action']) {
-      try {
-        const args: unknown = request.postDataJSON();
-        privacyRead = Array.isArray(args) && args.length === 0;
-      } catch {
-        privacyRead = false;
-      }
-    }
-    if (!held && privacyRead) {
+  await page.route('**/api/auth/privacy-read', async (route) => {
+    if (isPrivacyGenerationRead(route.request())) {
       held = true;
       await deferred;
     }
@@ -226,7 +241,7 @@ test('real query-only Scan navigation withholds assignment storage bootstrap whi
     ).toBeGreaterThan(0);
   } finally {
     release();
-    await page.unroute('**/scan*');
+    await page.unroute('**/api/auth/privacy-read');
   }
 });
 
@@ -270,18 +285,9 @@ test('private document title clears on real privacy failure and logout, then res
       }
     }, privateTitle);
   };
-  await page.route('**/inventory/assets/**', async (route) => {
-    const request = route.request();
-    let noArgumentPrivacyAction = false;
-    if (request.method() === 'POST' && request.headers()['next-action']) {
-      try {
-        const args: unknown = request.postDataJSON();
-        noArgumentPrivacyAction = Array.isArray(args) && args.length === 0;
-      } catch {
-        noArgumentPrivacyAction = false;
-      }
-    }
-    if (rejectPrivacy && noArgumentPrivacyAction) await route.abort('failed');
+  await page.route('**/api/auth/privacy-read', async (route) => {
+    if (rejectPrivacy && isPrivacyGenerationRead(route.request()))
+      await route.abort('failed');
     else await route.continue();
   });
   try {
@@ -371,7 +377,7 @@ test('private document title clears on real privacy failure and logout, then res
           .forEach((node) => node.remove()),
       )
       .catch(() => {});
-    await page.unroute('**/inventory/assets/**');
+    await page.unroute('**/api/auth/privacy-read');
     await other?.close();
     await owned.cleanup();
   }

@@ -1,3 +1,4 @@
+vi.mock('server-only', () => ({}));
 import { render, screen } from '@testing-library/react';
 import { beforeEach, expect, it, vi } from 'vitest';
 import SitePage from './page';

@@ -1,3 +1,4 @@
+vi.mock('server-only', () => ({}));
 import { render, screen } from '@testing-library/react';
 import { beforeEach, expect, it, vi } from 'vitest';
 const guard = vi.hoisted(() => ({ site: vi.fn(), member: vi.fn() }));
@@ -27,6 +28,9 @@ vi.mock('@/features/metadata/queries.server', () => ({
 vi.mock('@/features/metadata/metadata-form', () => ({
   MetadataForm: () => <form aria-label="Opening holdings" />,
 }));
+import { RouteReadyContext } from '@/components/experience/route-ready';
+import { createRouteReadiness } from '@/components/experience/route-readiness';
+import { createRoutePendingState } from '@/components/experience/route-pending-state';
 import * as opening from './page';
 import { metadata as ancestorMetadata } from '../../layout';
 import {
@@ -172,5 +176,51 @@ it.each([
     );
     expect(guard.site).not.toHaveBeenCalled();
     expect(guard.member).not.toHaveBeenCalled();
+  },
+);
+
+it.each([
+  { role: 'viewer', active: true },
+  { role: 'staff', active: false },
+])(
+  'settles exact-query history readiness for the authorized opening restriction %j',
+  async ({ role, active }) => {
+    guard.member.mockResolvedValue({ member: { role, user_id: 'actor' } });
+    guard.site.mockResolvedValue({ name: 'Private office name', active });
+    const rects = vi
+      .spyOn(HTMLElement.prototype, 'getClientRects')
+      .mockReturnValue([{ width: 30, height: 20 }] as unknown as DOMRectList);
+    const originalURL = location.pathname + location.search;
+    const key = '/sites/PRIVATE-CODE/open/asset?draft=owned-instance';
+    history.replaceState(null, '', key);
+    const pending = createRoutePendingState();
+    const committed = vi.fn();
+    const readiness = createRouteReadiness('actor', pending, committed);
+    readiness.history();
+    expect(pending.snapshot().pending).toBe(true);
+    try {
+      const page = await opening.default({
+        params: Promise.resolve({ code: 'PRIVATE-CODE', kind: 'asset' }),
+        searchParams: Promise.resolve({ draft: 'owned-instance' }),
+      });
+      const view = render(
+        <RouteReadyContext value={readiness}>{page}</RouteReadyContext>,
+      );
+      expect(
+        screen.getByText(
+          role === 'viewer' ? /Read-only access/ : /This site is archived/,
+        ),
+      ).toBeVisible();
+      expect(committed).toHaveBeenCalledWith(key);
+      expect(pending.snapshot().pending).toBe(false);
+      expect(document.querySelector('[data-route-ready]')).not.toBeNull();
+      expect(screen.queryByRole('form')).toBeNull();
+      expect(screen.queryByText('Private office name')).toBeNull();
+      view.unmount();
+    } finally {
+      readiness.close();
+      rects.mockRestore();
+      history.replaceState(null, '', originalURL);
+    }
   },
 );

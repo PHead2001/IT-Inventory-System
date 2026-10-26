@@ -1,12 +1,16 @@
 'use client';
+import { useRouteTask } from '@/components/experience/route-pending';
+import { useRouteRouter as useRouter } from '@/components/experience/route-pending';
+
+import { useRouteActionResult } from '@/components/experience/route-pending';
+import { useRef, useState } from 'react';
+
+import Link from '@/components/experience/route-link';
 import {
   RetirementReasonPresets,
   RetirementNote,
   retirementReason,
 } from '@/features/inventory/components/retirement-reason';
-import { useRef, useState, useTransition } from 'react';
-import { useRouter } from 'next/navigation';
-import Link from 'next/link';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { LocationPicker } from '@/features/locations/location-picker';
@@ -119,6 +123,7 @@ export function CustodyChangeForm(latest: Props) {
   );
 }
 function CustodyFields(latest: Props & { startAnother: () => void }) {
+  const observeRouteActionResult = useRouteActionResult();
   const [baseline, setBaseline] = useState(latest);
   const { kind, action, entityId, version } = baseline;
   const {
@@ -134,7 +139,7 @@ function CustodyFields(latest: Props & { startAnother: () => void }) {
   const resetTask = useTaskReset();
   const router = useRouter();
   const scope = `${kind}-${action}`;
-  const [pending, startTransition] = useTransition();
+  const [pending, startTask] = useRouteTask();
   const [state, setState] = useState<CustodyState | null>(null);
   const [closed, setClosed] = useState(false);
   const [reviewed, setReviewed] = useState<{
@@ -495,9 +500,9 @@ function CustodyFields(latest: Props & { startAnother: () => void }) {
     submitted.current = command;
     inFlight.current = true;
     reportTask({ pending: true });
-    startTransition(async () => {
+    startTask(async () => {
       try {
-        const result = await submitCustody(command);
+        const result = await observeRouteActionResult(submitCustody(command));
         setState(result);
         const unresolved =
           !result.ok &&
@@ -602,7 +607,7 @@ function CustodyFields(latest: Props & { startAnother: () => void }) {
                 type="button"
                 disabled={pending || actorMismatch}
                 onClick={() =>
-                  startTransition(async () => {
+                  startTask(async () => {
                     const detail = await loadCustodyReceipt({
                       kind,
                       entityId,

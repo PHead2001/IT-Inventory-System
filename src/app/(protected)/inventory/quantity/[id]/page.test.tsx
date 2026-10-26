@@ -1,3 +1,4 @@
+vi.mock('server-only', () => ({}));
 import { render, screen } from '@testing-library/react';
 import { expect, it, vi } from 'vitest';
 import type { QuantityDetail } from '@/features/inventory/contracts-ui';
@@ -52,7 +53,9 @@ vi.mock('@/features/inventory/components/detail-tasks', () => ({
 vi.mock('@/features/metadata/custom-metadata-list', () => ({
   CustomMetadataList: () => null,
 }));
-vi.mock('@/features/files/files-panel', () => ({ FilesPanel: () => null }));
+vi.mock('@/features/files/files-panel', () => ({
+  FilesPanel: vi.fn(() => null),
+}));
 vi.mock('next/navigation', () => ({ notFound: vi.fn() }));
 
 it('keeps a quantity correction distinct from custody movement in the record history', async () => {
@@ -77,3 +80,47 @@ it('keeps a quantity correction distinct from custody movement in the record his
   expect(history).not.toHaveTextContent('5 units');
 });
 vi.mock('server-only', () => ({}));
+
+vi.mock('@/features/files/cards.server', () => ({
+  getInventoryFileCards: vi.fn(async () => ({
+    status: 'ready',
+    envelope: { revision: '17', files: [] },
+  })),
+}));
+
+it('passes typed server file state while keeping core detail usable on unavailability and propagating authorization failure', async () => {
+  const { getInventoryFileCards } =
+    await import('@/features/files/cards.server');
+  const { FilesPanel } = await import('@/features/files/files-panel');
+  const Page = QuantityPage;
+  const parentId = 'quantity';
+  const view = render(
+    await Page({ params: Promise.resolve({ id: parentId }) }),
+  );
+  expect(getInventoryFileCards).toHaveBeenCalledWith('quantity', parentId);
+  expect(FilesPanel).toHaveBeenCalledWith(
+    expect.objectContaining({
+      initialState: {
+        status: 'ready',
+        envelope: { revision: '17', files: [] },
+      },
+    }),
+    undefined,
+  );
+  view.unmount();
+  vi.mocked(getInventoryFileCards).mockResolvedValueOnce({
+    status: 'unavailable',
+  });
+  render(await Page({ params: Promise.resolve({ id: parentId }) }));
+  expect(screen.getByRole('heading', { name: 'Cable' })).toBeVisible();
+  expect(FilesPanel).toHaveBeenLastCalledWith(
+    expect.objectContaining({ initialState: { status: 'unavailable' } }),
+    undefined,
+  );
+  vi.mocked(getInventoryFileCards).mockRejectedValueOnce(
+    new Error('Membership denied'),
+  );
+  await expect(
+    Page({ params: Promise.resolve({ id: parentId }) }),
+  ).rejects.toThrow('Membership denied');
+});

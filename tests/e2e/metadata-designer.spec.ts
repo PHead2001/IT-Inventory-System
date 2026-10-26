@@ -105,9 +105,9 @@ test('phone designer edits publish with one save and render in quantity and asse
   await page.goto('/settings/categories');
   await page.getByLabel('Display name').fill(category);
   await page.getByRole('button', { name: 'Add category' }).click();
-  await expect(page.getByRole('status')).toContainText(
-    `Category added: ${category}.`,
-  );
+  await expect(
+    page.getByRole('status').filter({ hasText: /^Category added:/ }),
+  ).toContainText(`Category added: ${category}.`);
   const designer = await chooseDesigner(page, category);
   await page.setViewportSize({ width: 390, height: 844 });
   const panels = designer.getByRole('navigation', { name: 'Designer panels' });
@@ -241,9 +241,9 @@ for (const { width, height } of [
     await page.goto('/settings/categories');
     await page.getByLabel('Display name').fill(category);
     await page.getByRole('button', { name: 'Add category' }).click();
-    await expect(page.getByRole('status')).toHaveText(
-      `Category added: ${category}.`,
-    );
+    await expect(
+      page.getByRole('status').filter({ hasText: /^Category added:/ }),
+    ).toHaveText(`Category added: ${category}.`);
     const designer = await chooseDesigner(page, category);
     await designer
       .getByRole('button', { name: 'Recovery & advanced', exact: true })
@@ -672,9 +672,9 @@ test('saved layout survives reload and unsaved navigation requires explicit reco
   await page.goto('/settings/categories');
   await page.getByLabel('Display name').fill(category);
   await page.getByRole('button', { name: 'Add category' }).click();
-  await expect(page.getByRole('status')).toContainText(
-    `Category added: ${category}.`,
-  );
+  await expect(
+    page.getByRole('status').filter({ hasText: /^Category added:/ }),
+  ).toContainText(`Category added: ${category}.`);
   const designer = await chooseDesigner(page, category);
   await designer.getByRole('button', { name: 'Add section' }).click();
   await designer.getByLabel('Section heading').last().fill('Persisted section');
@@ -752,9 +752,9 @@ test('a pre-existing server draft remains reviewable and can be explicitly disca
   await page.goto('/settings/categories');
   await page.getByLabel('Display name').fill(category);
   await page.getByRole('button', { name: 'Add category' }).click();
-  await expect(page.getByRole('status')).toContainText(
-    `Category added: ${category}.`,
-  );
+  await expect(
+    page.getByRole('status').filter({ hasText: /^Category added:/ }),
+  ).toContainText(`Category added: ${category}.`);
   const designer = await chooseDesigner(page, category);
   const categoryId = new URL(page.url()).pathname.split('/').at(-1)!;
   const client = createClient(

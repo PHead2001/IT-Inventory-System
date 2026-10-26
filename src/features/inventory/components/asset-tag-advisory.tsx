@@ -79,6 +79,7 @@ export function AssetTagAdvisory({
           Asset tag already used by{' '}
           <Link
             href={'/inventory/assets/' + result.record.id}
+            prefetch={false}
             className="underline"
           >
             {result.record.name}

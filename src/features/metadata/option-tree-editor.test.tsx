@@ -1,6 +1,13 @@
 import { useState } from 'react';
 import { describe, expect, it, vi } from 'vitest';
-import { fireEvent, render, screen, within } from '@testing-library/react';
+import {
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+} from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { ChoiceDefaultEditor, OptionTreeEditor } from './option-tree-editor';
 import type { Field } from './designer-model';
 import * as designerModel from './designer-model';
@@ -366,6 +373,56 @@ it('reviews paste locally, cancels without changes and applies stable reviewed I
   ).not.toBeInTheDocument();
   fireEvent.click(screen.getByRole('button', { name: 'Undo pasted paths' }));
   expect(current().options).toEqual(base.options);
+});
+it('reviews asynchronous six-level paste input with duplicates before cancel, apply and undo', async () => {
+  const user = userEvent.setup();
+  const original = {
+    ...base,
+    options: [{ id: id(2), label: 'Existing root', active: true }],
+  };
+  render(<Editor initial={original} />);
+  const paths = [
+    'USB > USB-C > USB 3 > Gen 2 > Gen 3 > Gen 4',
+    'USB > USB-A',
+    'USB > Shared',
+    'Ethernet > Shared Ethernet',
+    'Labels > A\\>B',
+    'USB > USB-A',
+  ].join('\n');
+  const review = async () => {
+    await user.click(
+      screen.getByRole('button', { name: 'Paste option paths' }),
+    );
+    await waitFor(() =>
+      expect(screen.getByLabelText('Option paths')).toHaveFocus(),
+    );
+    await user.paste(paths);
+    expect(screen.getByLabelText('Option paths')).toHaveValue(paths);
+    await user.click(screen.getByRole('button', { name: 'Review paths' }));
+    expect(screen.getByText('Skipped identical paths (1)')).toBeVisible();
+    expect(screen.getByText('Conflicts (0)')).toBeVisible();
+    expect(current().options).toEqual(original.options);
+  };
+  await review();
+  await user.click(screen.getByRole('button', { name: 'Cancel paste' }));
+  expect(current().options).toEqual(original.options);
+  await review();
+  await user.click(screen.getByRole('button', { name: 'Apply paths' }));
+  const options = current().options;
+  expect(options).toHaveLength(13);
+  expect(options[0]).toEqual(original.options[0]);
+  const deepest = options.find((option) => option.label === 'Gen 4')!;
+  let depth = 0,
+    node: (typeof options)[number] | undefined = deepest;
+  while (node) {
+    depth++;
+    node = options.find((option) => option.id === node!.parent_id);
+  }
+  expect(depth).toBe(6);
+  expect(options.filter((option) => option.label === 'USB-A')).toHaveLength(1);
+  expect(options.some((option) => option.label === 'A>B')).toBe(true);
+  await user.click(screen.getByRole('button', { name: 'Undo pasted paths' }));
+  expect(current().options).toEqual(original.options);
 });
 it('blocks a retired matching path and refuses sibling-ambiguous restore and reparent', () => {
   render(

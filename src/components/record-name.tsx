@@ -1,8 +1,17 @@
 'use client';
 import { useEffect, useId, useRef, useState } from 'react';
+import { RecordTitle } from '@/components/experience/record-transition';
+import type { RecordIdentity } from '@/components/experience/route-motion-state';
 import { Button } from '@/components/ui/button';
+import { ChevronDown, ChevronUp } from 'lucide-react';
 
-export function RecordName({ name }: { name: string }) {
+export function RecordName({
+  name,
+  record,
+}: {
+  name: string;
+  record?: RecordIdentity;
+}) {
   const id = useId();
   const [expanded, setExpanded] = useState(false);
   const [truncated, setTruncated] = useState(false);
@@ -21,6 +30,7 @@ export function RecordName({ name }: { name: string }) {
         : element;
       if (probe !== element) {
         probe.removeAttribute('id');
+        probe.style.viewTransitionName = 'none';
         probe.setAttribute('aria-hidden', 'true');
         const computed = getComputedStyle(element);
         Object.assign(probe.style, {
@@ -73,28 +83,45 @@ export function RecordName({ name }: { name: string }) {
       document.fonts?.removeEventListener('loadingerror', measure);
     };
   }, [name, expanded]);
+  const headingProps = {
+    ref: heading,
+    tabIndex: -1,
+    id,
+    className: `experience-heading min-w-0 break-words ${expanded ? '' : 'line-clamp-3'}`,
+  };
   return (
-    <div>
-      <h1
-        ref={heading}
-        tabIndex={-1}
-        id={id}
-        className={`experience-heading mt-2 break-words ${expanded ? '' : 'line-clamp-3'}`}
-      >
-        {name}
-      </h1>
-      {truncated && (
-        <Button
-          ref={toggle}
-          type="button"
-          variant="outline"
-          aria-expanded={expanded}
-          aria-controls={id}
-          onClick={() => setExpanded(!expanded)}
-        >
-          {expanded ? 'Show less' : 'Show full name'}
-        </Button>
+    <div
+      data-record-name-row
+      className="mt-2 grid min-h-11 grid-cols-[minmax(0,1fr)_44px] items-start gap-2"
+    >
+      {record ? (
+        <RecordTitle record={record} {...headingProps}>
+          {name}
+        </RecordTitle>
+      ) : (
+        <h1 {...headingProps}>{name}</h1>
       )}
+      <div data-record-name-control className="h-11 w-11">
+        {truncated && (
+          <Button
+            ref={toggle}
+            type="button"
+            variant="outline"
+            className="h-11 w-11 p-0"
+            aria-label={expanded ? 'Show less' : 'Show full name'}
+            title={expanded ? 'Show less' : 'Show full name'}
+            aria-expanded={expanded}
+            aria-controls={id}
+            onClick={() => setExpanded(!expanded)}
+          >
+            {expanded ? (
+              <ChevronUp aria-hidden="true" size={18} />
+            ) : (
+              <ChevronDown aria-hidden="true" size={18} />
+            )}
+          </Button>
+        )}
+      </div>
     </div>
   );
 }

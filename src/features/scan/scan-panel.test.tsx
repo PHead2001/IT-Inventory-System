@@ -14,6 +14,7 @@ import {
 import { AssignmentScopeGuard } from './assignment-scope-guard';
 import { readFileSync } from 'node:fs';
 import { PNG } from 'pngjs';
+import { holdTransitionCapture } from '../../../tests/helpers/transition-capture';
 const mocks = vi.hoisted(() => ({
   decode: vi.fn(),
   stop: vi.fn(),
@@ -136,7 +137,11 @@ it.each(['manual', 'camera'])(
     expect(
       screen.getByRole('list', { name: 'Matching records' }),
     ).toHaveTextContent('Retired');
-    expect(screen.getByRole('link', { name: 'Laptop (Tag-1)' })).toHaveFocus();
+    await waitFor(() =>
+      expect(
+        screen.getByRole('link', { name: 'Laptop (Tag-1)' }),
+      ).toHaveFocus(),
+    );
     expect(
       screen.getByRole('link', { name: 'Laptop (Tag-1)' }),
     ).toHaveAccessibleDescription(
@@ -269,6 +274,100 @@ it('focuses and announces the ambiguous chooser after inspection', async () => {
   );
   expect(mocks.push).not.toHaveBeenCalled();
 });
+it.each(['release', 'unmount', 'account'])(
+  'retains completion focus through native capture and retires it on %s',
+  async (outcome) => {
+    const pending = deferred<unknown>();
+    mocks.resolve.mockReturnValue(pending.promise);
+    const view = render(<ScanPanel />);
+    fireEvent.click(screen.getByRole('button', { name: 'Open' }));
+    const capture = holdTransitionCapture();
+    try {
+      await act(async () =>
+        pending.resolve({
+          status: 'ambiguous',
+          matches: [
+            found.matches[0],
+            { path: '/locations/OTHER', state: 'active', label: 'Other' },
+          ],
+        }),
+      );
+      const match = screen.getByRole('link', { name: 'IT Closet' });
+      expect(match).not.toHaveFocus();
+      if (outcome === 'unmount') view.unmount();
+      if (outcome === 'account') act(() => invalidateAssignmentCallbacks());
+      await act(capture.release);
+      if (outcome === 'release') expect(match).toHaveFocus();
+      else expect(match).not.toHaveFocus();
+    } finally {
+      capture.dispose();
+    }
+  },
+);
+it.each(['manual', 'camera'])(
+  'retains contextual serial chooser focus through native capture for %s lookup',
+  async (entry) => {
+    const pending = deferred<unknown>();
+    mocks.resolveSerial.mockReturnValue(pending.promise);
+    const view = render(<ScanPanel />);
+    fireEvent.click(screen.getByLabelText('Serial number'));
+    if (entry === 'manual') {
+      fireEvent.change(screen.getByLabelText('Enter the exact serial number'), {
+        target: { value: 'SN:literal-device' },
+      });
+      fireEvent.click(screen.getByRole('button', { name: 'Open' }));
+    } else {
+      fireEvent.click(screen.getByRole('button', { name: 'Start camera' }));
+      await waitFor(() => expect(mocks.decode).toHaveBeenCalled());
+      act(() =>
+        mocks.decode.mock.calls[0][2]({ getText: () => 'SN:literal-device' }),
+      );
+    }
+    expect(mocks.resolveSerial).toHaveBeenCalledExactlyOnceWith(
+      'SN:literal-device',
+    );
+    expect(mocks.resolve).not.toHaveBeenCalled();
+    const capture = holdTransitionCapture();
+    try {
+      await act(async () =>
+        pending.resolve({
+          status: 'ambiguous',
+          matches: [
+            {
+              kind: 'asset',
+              path: '/inventory/assets/70000000-0000-4000-8000-000000000001',
+              label: 'Laptop (Tag-1)',
+              name: 'Laptop',
+              identifier: 'Tag-1',
+              serialNumber: 'SN:literal-device',
+              state: 'active',
+              context: 'Manufacturer: Dell · IT Closet / Red Container',
+            },
+            {
+              kind: 'asset',
+              path: '/inventory/assets/70000000-0000-4000-8000-000000000002',
+              label: 'Spare laptop',
+              state: 'retired',
+            },
+          ],
+        }),
+      );
+      const choice = screen.getByRole('link', { name: 'Laptop (Tag-1)' });
+      expect(choice).toHaveAccessibleDescription(
+        'Serial: SN:literal-device · Manufacturer: Dell · IT Closet / Red Container',
+      );
+      expect(choice).not.toHaveFocus();
+      expect(mocks.push).not.toHaveBeenCalled();
+      await act(capture.release);
+      expect(choice).toHaveFocus();
+      expect(mocks.push).not.toHaveBeenCalled();
+    } finally {
+      view.unmount();
+      await act(capture.release);
+      capture.dispose();
+    }
+  },
+);
 it.each(['cancel', 'text', 'mode', 'serial-mode', 'account'])(
   'invalidates a pending lookup on %s without late navigation or context changes',
   async (action) => {

@@ -6,6 +6,7 @@ vi.mock('@/lib/supabase/config', () => ({
 }));
 import { render, screen } from '@testing-library/react';
 import { expect, it, vi } from 'vitest';
+vi.mock('server-only', () => ({}));
 vi.mock('@/lib/auth/session.server', () => ({
   requireMember: async () => ({ member: { user_id: 'PRIVATE_ACTOR' } }),
 }));
@@ -13,7 +14,7 @@ vi.mock('@/features/inventory/queries.server', () => ({
   getLocations: async () => [{ code: 'PRIVATE-CODE' }],
 }));
 vi.mock('@/features/room/spaces', () => ({
-  availableSpaces: () => [{ id: 'private-space' }],
+  roomSelectionNotice: () => null,
   resolveSpace: () => ({ id: 'private-space', name: 'Private physical space' }),
   spaceLocations: () => [{ code: 'PRIVATE-CODE' }],
 }));
@@ -28,6 +29,9 @@ vi.mock('@/features/room/spaces-workspace', () => ({
   },
 }));
 import { PrivacyReadinessContext } from '@/components/auth/privacy-readiness';
+import { RouteReadyContext } from '@/components/experience/route-ready';
+import { createRouteReadiness } from '@/components/experience/route-readiness';
+import { createRoutePendingState } from '@/components/experience/route-pending-state';
 import * as route from './page';
 it('identifies Spaces & maps while keeping selected location and private space names out of metadata', async () => {
   render(
@@ -80,4 +84,44 @@ it('withholds the workspace until privacy readiness, then passes the public back
       initialCode: 'PRIVATE-CODE',
     }),
   );
+});
+
+it('does not acknowledge selected-location contents through the outer server shell', async () => {
+  const pending = createRoutePendingState();
+  const committed = vi.fn();
+  const readiness = createRouteReadiness('PRIVATE_ACTOR', pending, committed);
+  history.replaceState(
+    null,
+    '',
+    '/room?location=PRIVATE-CODE&space=private-space',
+  );
+  const geometry = vi
+    .spyOn(HTMLElement.prototype, 'getClientRects')
+    .mockReturnValue([{ width: 30, height: 20 }] as unknown as DOMRectList);
+  try {
+    readiness.history();
+    render(
+      <RouteReadyContext value={readiness}>
+        {await route.default({
+          searchParams: Promise.resolve({
+            space: 'private-space',
+            location: 'PRIVATE-CODE',
+          }),
+        })}
+      </RouteReadyContext>,
+    );
+    expect(
+      screen.getByRole('heading', { name: 'Spaces & maps' }),
+    ).toBeVisible();
+    expect(mocks.workspace).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        initialRouteKey: '/room?location=PRIVATE-CODE&space=private-space',
+      }),
+    );
+    expect(committed).not.toHaveBeenCalled();
+    expect(pending.snapshot().pending).toBe(true);
+  } finally {
+    geometry.mockRestore();
+    history.replaceState(null, '', '/');
+  }
 });

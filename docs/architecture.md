@@ -84,6 +84,114 @@ Storage failures retain the current in-memory entries and native refresh/tab-clo
 
 The approved v0.1 plan and amendments govern Foundation and Inventory Core. PR3 implements the R3F room navigation surface.
 
+Record detail headings use the measured, focusable `RecordName` h1 as the shared-title transition element. Its three-line disclosure keeps that same heading node and the related accessible control; hidden measurement probes opt out of native transition naming. The optional record identity controls presentation pairing only and never grants document-title or privacy authority.
+
+Paired inventory route loading retains React's actual outgoing content through a
+stable Suspense boundary inside the canonical protected privacy wrapper, while the
+shell, privacy controller and pending owners remain live outside it. Only an
+accepted exact paired navigation under a fresh grant and supported Full motion
+owns the opaque loading promise; it stores no private DOM/data and neither delays
+the request nor owns a business task. Actual authorized visible readiness releases
+that matching navigation; cancellation withdraws presentation without acknowledging
+or canceling backend work. A second accepted navigation interrupts the unfinished
+pair and uses ordinary loading/crossfade, without promising to preserve its first
+source node or reconstructing a missing shared title. A different committed full
+route key (including a Next server redirect or canonical query) cancels only the
+presentation gate; real fallback, Link and task owners settle independently.
+Privacy revocation hides/inerts the retained subtree
+immediately. Normal accepted route exits may relinquish outgoing components, while
+same-page rechecks retain draft/business ownership and existing recovery contracts.
+See [interface standards](interface-standards.md) and [validation](validation.md)
+for supported fallback paths and the remaining native/product acceptance.
+
+Eligible application Link pairs start one controller-owned privacy target check
+before Next commits the pathname. The ticket captures the exact full route key,
+provider incarnation, original server binding, generation, server revision,
+explicit revision, callback/revocation epochs and request sequence. Inventory list
+and detail success bodies supply their explicit server route key before their
+privacy gate renders. Only the matching already-running ticket can suspend that
+incoming primary while the outgoing grant remains current. Its wait settles from
+canonical cleanup and original-binding verification, independently of visible
+RouteReady acknowledgement; a fresh matching completion can admit the target
+before pathname commit. Verification publishes the immutable ticket view, target
+key and accepted epochs together through request-ordered React state. The
+controller’s layout effect settles a still-current verified wait after that view
+commits, with another original-binding, provider and sequence check. Server
+authorization and real visible readiness remain required. Supersede, cancellation, redirect, disposal, hide and invalidation
+retire and settle the old ticket. Changed logout evidence starts distinct current-
+route recovery rather than rebasing the captured target proof.
+
+Successful inventory list, quantity detail and asset detail primaries explicitly
+opt into a consistently mounted paired body boundary inside their exact raw
+RouteReady identity. It shares `${intent.name}-content` while the matching title
+shares `intent.name`, so the body crossfade and title morph occupy one native
+capture even when the inner primary and outer pathname commit in either order.
+That accepted pair suppresses the outer generic fade. Capture consumes only its
+exact generic arrival approval; title/body effects finish together before retiring
+their intent. A body-only capture fades once and retires its unused title approval;
+a title without an opted-in body reveals instantly. Ordinary unpaired routes
+retain their generic arrival. No readiness or request state is granted by these
+presentation boundaries. The body inherits the accepted page's existing source
+and returns its outgoing native cleanup lease; it never mounts a competing source.
+Room, loading/error boundaries and mismatched/retired approvals do not opt in.
+The main History list and ordinary Locations browser/detail primaries use the
+same title/body ownership. Title targets distinguish a real inventory holding,
+a history event kind/UUID and its record UUID, or a location UUID/stable code
+and exact desktop-tree, mobile-level or selected-panel occurrence. History
+event/detail timelines remain ordinary links. Location selection buttons keep
+selection semantics; separate accessible Details links pair the existing visible
+name span or selected heading. Hidden, removed, duplicate or stale occurrences
+cannot borrow another source. Application Back accepts only the exact ephemeral
+origin; native traversal and Reduced motion remain instant.
+
+Detail-only return validation admits canonical main History filters
+(`type`, `location`, `entityId`, `page`) and bounded Locations browser state;
+whole-form Cancel and global inventory return validation are unchanged. Locations
+restores search, selected stable code, mobile level and expanded group codes from
+the URL, validated against freshly authorized locations. Search updates its local
+draft immediately and replaces the URL after 300 ms; explicit selection/tree
+changes coalesce the latest whole draft. Draft state is limited to 200 search
+characters, 32 expanded groups and 3600 serialized query characters. Over-budget
+updates retain the accepted draft and announce the limit rather than discard
+state. Detail return URLs encode that current draft even before its debounce
+settles. Pairing still requires the exact fresh server-primary raw key; a pending
+draft navigates ordinarily. Accepted cross-path navigation in every motion mode,
+native traversal, withdrawal and unmount cancel delayed replacements. The
+existing accepted-navigation scope has a read-only destination observer solely
+for this cancellation; it grants no readiness or presentation authority.
+
+Conventional cross-path navigation between explicitly capable Inventory, History
+and Locations primaries reuses that same event-owned loading/readiness engine
+without a title pair. The existing exact raw source/destination/epoch arrival
+object carries its unique capture name and primary presentation mode. Only an
+actual current authorized visible opted-in source, supported destination, fresh
+privacy and supported Full motion may arm retention. Room/canvas, new-item forms,
+unsupported routes, query-only updates, anchors and interrupted retained navigation
+do not acquire this capability. Successful History and Locations primaries use
+one identical raw key for canonical privacy and readiness; unavailable/error
+responses never opt in.
+
+The mounted inner body shares the exact primary arrival name and inherits its
+source handoff. Capture consumes only that exact approval; real visible primary
+readiness releases its loading wait, never the approval or backend work. Outer
+pathname commits cannot animate or retire a primary approval. Redirect/query
+mismatch, terminal failure, native traversal, Reduced motion, privacy withdrawal
+and provider retirement release the owned presentation wait and retire its approval.
+No extra private node cache, cloned source, deadline-based readiness or new privacy
+decision is introduced. Inventory title/body pairing keeps its existing capture
+and completion contract.
+
+Native browser Back/Forward uses the installed Next/React eager history restore
+and is instant. The route provider observes popstate only to retire departing
+presentation, cancel a paired wait and register real authorized primary readiness.
+It creates no Navigation API preparation or target privacy ticket for traversal,
+and never intercepts navigation or patches router/history methods, lanes or events.
+URL filters, source row/anchor and scroll restore through the canonical Next/browser
+history path; current Auth and privacy verification still govern incoming content.
+The ephemeral approved origin remains available for a later application **Back to
+results** Link after native Forward. Only that accepted Link gesture may stage a
+new shared-title pair. Revocation and provider retirement still clear the origin.
+
 Inventory uses a collapsed Add item disclosure with equally styled quantity-item and individual-asset paths, examples and the existing filtered return context. The protected header exposes the verified member's full name and role through a compact native account disclosure, including at narrow widths; identity is never stored separately in browser storage.
 
 History lists summarize quantities from immutable event deltas or custody snapshots. Quantity history has null top-level endpoints: a conserved, consistent negative/positive ledger pair identifies a move and a single positive line identifies a receipt. Count corrections retain their recorded before/after/delta; zero or ambiguous transfer shapes never become invented moves. Missing or inconsistent movement deltas display Amount not recorded. Custody endpoint names use recorded labels. Older storage events only expose location IDs and current reference labels; technical event details explain this provenance and the current record name without appending it to ordinary summaries. Headings share one event vocabulary; summaries add endpoints, amounts or changed fields instead of repeating the operation.
@@ -197,6 +305,48 @@ observer cleanup. That confirmed cleanup clears hydrated label queues and their
 late persistence without remounting unrelated action owners. A matching generation
 cannot revive a cleared queue. Unchanged checks and attempted logout do not
 advance this revision.
+Ordinary Sign out, logout-generation comparison and privacy generation/original-
+binding reads use independent same-origin JSON POST Route Handlers
+(`/api/auth/logout`, `/api/auth/privacy-confirm` and `/api/auth/privacy-read`). They do not enter Next's Server Action queue behind
+a pending route navigation. Existing Server Action wrappers delegate to the same
+cookie-scoped logic for compatibility; other authentication actions retain their
+existing transport. The endpoints admit only a mandatory exact serialized Origin
+matching `request.nextUrl.origin`, with `Sec-Fetch-Site: same-origin` when present.
+When Next normalizes the request hostname to `localhost`, the direct Host may
+restore exactly `127.0.0.1` or `[::1]` with the request's scheme and effective port.
+Origin must then match that restored authority exclusively; normalized localhost
+is not an additional accepted origin. Malformed, duplicate, alternate loopback
+and mismatched authorities fail closed.
+They do not trust forwarded headers or the configured branch/canonical APP_ORIGIN
+for this transport check. Input is strictly shaped and bounded to 256 actual UTF-8
+stream bytes for logout/comparison and 512 bytes for privacy reads; all methods except POST are rejected and every result is private,
+no-store without CORS. Sign-out uses the caller's writable Supabase cookies and
+local session scope, without a membership gate that would strand revoked users.
+The privacy-read handler uses the canonical caller-scoped generation/identity
+service with a dedicated read-only SDK client. Its per-request fetch guard admits
+only GET `/auth/v1/user` and GET `/rest/v1/app_members` on the configured backend,
+without following redirects. It refuses token refresh and every other provider
+request before network dispatch, suppresses cookie writes, and remembers a blocked
+attempt even if the SDK subsequently preserves a still-valid bearer. An expired
+or near-expiry session that requires refresh therefore returns `unavailable`;
+ordinary session refresh followed by explicit privacy retry can recover. Writable
+Server Actions, the ordinary proxy and browser refresh retain their existing
+behavior. The proxy skips Supabase session refresh for
+precisely these three endpoint paths, so their rejected requests and read-only
+verification cannot write refresh cookies
+before handler admission. All other routes retain the existing proxy behavior.
+The browser bounds the request and strict response parsing; failure, timeout or
+abort never proves server cancellation or grants recovery-erasure authority.
+Unknown designer saves retain their original command through an unconfirmed
+logout. Confirmed all-cleanup verifies designer recovery deletion alongside scan
+and label namespaces under the existing durable cleanup marker. Deletion or
+readback failure blocks login navigation and retries cleanup only.
+This shares server-only mutation logic as described by
+[Next's data-security guide](https://nextjs.org/docs/app/guides/data-security).
+The installed Next 16.3.6 `app-call-server` dispatches Server Actions through the
+router queue; `app-router-instance` gives navigation/restore priority while other
+actions wait. The independent transport preserves the existing
+[Supabase local-session signout scope](https://supabase.com/docs/reference/javascript/auth-signout).
 Label hydration and persistence also compare their mounted revision with the live
 authoritative cleanup revision immediately before storage access. This prevents
 an old queued effect or late refresh from restoring cleared entries while React
@@ -351,6 +501,10 @@ Structural parsing runs at build/test/load time without a database. A separate l
 ## Access boundary
 
 Invite-only email/password Auth; public signup and anonymous sign-in disabled. Proxy refreshes verified sessions and preserves refreshed cookie chunks and cache headers. Protected server requests verify Auth identity and current membership, never user-editable role metadata.
+
+Direct record documents settle authenticated existence in the protected layout before it returns a Suspense boundary, so missing resources can retain HTTP 404. Proxy overwrites a dedicated pathname header on every path, including image-like public missing pages, so caller headers cannot select an inventory fallback on a different URL. Public static/image paths that previously bypassed Proxy return after header normalization without Auth reads or cache-policy changes. The existing explicit protected route prefixes retain claims refresh even for image-like suffixes, and other application routes retain private/no-store responses and refreshed cookies. The path selects an existing caller-authenticated, React request-cached reader; it grants no access. Valid documents await the full shared detail read, including its history/reference work. Flight requests retain page-owned authorization, generic metadata and streaming. Missing document inventory records use fixed unavailable copy in the root fallback without private names or IDs; the protected shell is absent there. Next 16.3.6 production fixtures establish this transport boundary; the authenticated application still requires direct missing/anonymous/recovery and held-Flight E2E certification. Blocking viewport or metadata generation alone did not preserve HTTP status under the streaming layout.
+
+Protected and inventory not-found components independently await the same request-cached membership guard, because Next can serialize fallback nodes concurrently with a denying layout. Inventory-specific fallback metadata and the root fallback selected by an inventory document path await that guard too; the path header is only a selector. Login and inactive-member redirects propagate before those fallback results are returned. Generic unmatched root 404 recovery stays public. These guards do not change the document admission flag or client recovery contract.
 
 Active viewers/staff may read reference data and their own active membership. Nonmembers/inactive members read nothing. RLS independently enforces access. Both application roles are denied direct writes. Inventory Core adds authorized mutation RPCs; the application still has no service-role key.
 
