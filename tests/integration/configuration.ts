@@ -13,8 +13,8 @@ function local(value: string | undefined, port: number) {
   assert.equal(Number(url.port), port);
   return value;
 }
-const api = local(process.env.LOCAL_API_URL, 54321);
-const db = local(process.env.LOCAL_DB_URL, 54322);
+const api = local(process.env.LOCAL_API_URL, 45321);
+const db = local(process.env.LOCAL_DB_URL, 45322);
 assert.ok(process.env.LOCAL_ANON_KEY && process.env.LOCAL_SERVICE_ROLE_KEY);
 const options = { auth: { persistSession: false, autoRefreshToken: false } };
 const admin = createClient(api, process.env.LOCAL_SERVICE_ROLE_KEY, options);

@@ -31,7 +31,7 @@ export function localBackend(value) {
   const backend = new URL(value);
   assert.equal(backend.protocol, 'http:');
   assert.ok(['localhost', '127.0.0.1', '[::1]'].includes(backend.hostname));
-  assert.equal(backend.port, '54321');
+  assert.equal(backend.port, '45321');
   return backend;
 }
 

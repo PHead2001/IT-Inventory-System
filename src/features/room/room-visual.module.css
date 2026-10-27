@@ -408,6 +408,16 @@
   color: var(--muted);
   font-size: 12px;
 }
+/* The selected full label shares the Html root's canvas-relative cap. Ordinary
+   labels, compact markers and focus/hover expansion retain their own bounds. */
+.selectedLabel {
+  max-width: var(--room-selected-label-width);
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+.selectedLabel .labelFull {
+  max-width: var(--room-selected-label-text-width);
+}
 .locationLabel[data-room-occupied='true']:not([data-label-compact='true']) {
   padding-block: 3px;
 }

@@ -10,7 +10,7 @@ const connectionString = process.env.LOCAL_DB_URL;
 assert.ok(connectionString);
 const url = new URL(connectionString);
 assert.ok(['localhost', '127.0.0.1', '[::1]'].includes(url.hostname));
-assert.equal(url.port, '54322');
+assert.equal(url.port, '45322');
 const name = `preview-file-key-${randomBytes(8).toString('hex')}`;
 const owner = new Client({ connectionString });
 const worker = new Client({ connectionString, application_name: name });

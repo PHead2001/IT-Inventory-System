@@ -85,7 +85,7 @@ test('both measurement datasets require an empty fixture and audit state', () =>
 const bindingInputs = {
   commit: 'a'.repeat(40),
   env: {
-    NEXT_PUBLIC_SUPABASE_URL: 'http://127.0.0.1:54321',
+    NEXT_PUBLIC_SUPABASE_URL: 'http://127.0.0.1:45321',
     NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: 'fictional-public-key',
     APP_ENV: 'local',
     APP_ORIGIN: 'http://localhost:3000',
@@ -128,7 +128,7 @@ test('backend, public environment, env file and toolchain changes invalidate a r
     {
       env: {
         ...bindingInputs.env,
-        NEXT_PUBLIC_SUPABASE_URL: 'http://localhost:54321',
+        NEXT_PUBLIC_SUPABASE_URL: 'http://localhost:45321',
       },
     },
     {

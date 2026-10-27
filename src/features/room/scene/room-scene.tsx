@@ -400,6 +400,7 @@ function CameraFacingLabel({
     <group ref={origin}>
       <group ref={anchor} position={initial}>
         <RoomLabelHtml
+          selected={prioritySelected}
           center
           style={{ pointerEvents: 'none', whiteSpace: 'nowrap' }}
           zIndexRange={[20, 0]}

@@ -18,7 +18,7 @@ async function signIn(page: Page, role: 'staff' | 'viewer' = 'staff') {
 function localApi() {
   const url = new URL(process.env.LOCAL_API_URL!);
   expect(['localhost', '127.0.0.1']).toContain(url.hostname);
-  expect(url.port).toBe('54321');
+  expect(url.port).toBe('45321');
   return url.href;
 }
 async function fixtureCaller() {

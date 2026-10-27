@@ -204,7 +204,7 @@ export function RouteMotionProvider({
     createNativeScrollRestoration(readiness),
   );
   const [applicationReturn] = useState(() =>
-    createApplicationReturn(readiness),
+    createApplicationReturn(readiness, actorId),
   );
   const [presentation] = useState(createRoutePresentationLifetime);
   const [captures] = useState(createRouteCaptureCompletion);

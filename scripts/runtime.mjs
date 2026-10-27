@@ -25,12 +25,30 @@ export function node(args, env = process.env) {
     throw new Error('Node validation failed: ' + args[0]);
 }
 export function assertLocalUrl(value, port) {
-  const url = new URL(value);
+  let url;
+  try {
+    url = new URL(value);
+  } catch {
+    throw new Error('Refusing nonlocal database/test target: invalid URL');
+  }
   if (
+    ![45321, 45322].includes(port) ||
     !['127.0.0.1', 'localhost', '[::1]'].includes(url.hostname) ||
-    Number(url.port) !== port
+    Number(url.port) !== port ||
+    url.search ||
+    url.hash ||
+    (port === 45321 &&
+      (url.protocol !== 'http:' ||
+        url.username ||
+        url.password ||
+        url.pathname !== '/')) ||
+    (port === 45322 &&
+      (!['postgres:', 'postgresql:'].includes(url.protocol) ||
+        url.pathname !== '/postgres'))
   )
-    throw new Error('Refusing nonlocal database/test target');
+    throw new Error(
+      'Refusing nonlocal database/test target. Expected canonical loopback API 45321 or database 45322. If upgrading an existing local checkout, stop/start it with npm run db:stop and npm run db:start, then refresh only its local URL from status; do not reset the database or change hosted settings.',
+    );
   return value;
 }
 export function localStatus() {
@@ -39,8 +57,8 @@ export function localStatus() {
       capture: true,
     }),
   );
-  assertLocalUrl(status.API_URL, 54321);
-  assertLocalUrl(status.DB_URL, 54322);
+  assertLocalUrl(status.API_URL, 45321);
+  assertLocalUrl(status.DB_URL, 45322);
   if (!status.ANON_KEY || !status.SERVICE_ROLE_KEY)
     throw new Error('Local Supabase credentials are unavailable');
   return status;

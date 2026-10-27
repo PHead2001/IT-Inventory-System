@@ -9,8 +9,8 @@ import { formEnvelope as baselineEnvelope } from '../fixtures/metadata-baseline-
 const api = process.env.LOCAL_API_URL!;
 const db = process.env.LOCAL_DB_URL!;
 for (const [url, port] of [
-  [api, 54321],
-  [db, 54322],
+  [api, 45321],
+  [db, 45322],
 ] as const) {
   const parsed = new URL(url);
   assert.ok(['localhost', '127.0.0.1', '[::1]'].includes(parsed.hostname));

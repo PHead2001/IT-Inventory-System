@@ -84,6 +84,23 @@ Another route's history event never becomes room selection.
 
 Use simple reusable geometry and restrained lighting, a capped device pixel ratio and demand rendering. Physical material colors are retained; accent edges/emissive feedback mark selection and other geometry dims slightly until clearing it. Full motion permits one bounded selection pulse; Reduced motion uses a static highlight. Standard adds cached contact shadows and lazy selective bloom; Low keeps contacts without bloom, and Off disables both. Static corner grounding and a clipped floor grid retain depth. Controls, relevant hover changes, bounded visibility/focus transitions, contact refreshes and the brief Full-motion pulse request finite extra frames. Nonessential pulses stop offscreen or in a hidden document; the camera stays idle at rest. The canvas exposes passive camera telemetry for real-interaction browser assertions; it cannot set camera state.
 
+Selected full location labels derive their maximum width from R3F's actual canvas
+CSS width before crossing the independent Html root. The outer cap is the canvas
+width minus 30px, bounded to 44–298px; its existing 18px inline padding/border leaves
+a text cap of 26–280px. A 315px canvas therefore permits 285px outer/267px text.
+The Html root, selected button (or noninteractive preview) and nested full span
+share that cap; nonselected labels and focused/hovered compact expansions retain
+their existing bounds. Selected buttons and noninteractive previews explicitly
+restore normal/anywhere wrapping despite the camera-facing Html parent’s nowrap;
+deselected previews retain their original inherited nowrap. Font sizes, complete
+names and exact count text are unchanged.
+Existing ResizeObserver/font remeasurement, physical-pick reservations, focus pins,
+four-pass packing and the shared 16ms/work limits remain authoritative. Component
+regressions prove width transfer/cascade, resize and deselection without claiming
+browser line wrapping or height. Frozen-clock geometry replay is separate evidence;
+the unchanged canonical 375px hosted journey must still prove actual reflow,
+complete placement and timing on the new candidate.
+
 ## Shared spatial composition and embedded maps
 
 Modeled selection uses one immutable scope/generation/request/code token for a
@@ -265,8 +282,39 @@ The separate Settings Storage locations tree opens below the first level collaps
 
 The populated 375px browser harness explicitly opts into read-only label-layout
 diagnostics before application loading. Ordinary sessions expose no snapshot.
-Only the latest placement transaction is retained, with at most four exact packing
-input/output passes, 96 labels and 32 reserved rectangles. The snapshot is deeply
+Only the latest actual placement detail is retained. Each runtime transaction
+publishes its own monotonic attempt ID at begin and at completion or abort.
+An unchanged failed measurement preserves the preceding actual root
+`transaction`, `passes`, `complete`, `settled` and `runtime`; `lastAttempt` names
+the newer `cached-suppression` attempt and its `cacheSourceTransaction`. It does
+not invent a solver pass or layout revision. Actual measurement, remeasurement, viewport or
+placement failures publish an incomplete attempt with a fixed failure code,
+rather than an empty successful capture or an ambiguous invalid-data error.
+There are at most four exact packing input/output passes, 96 labels and 32
+reserved rectangles. Each attempted solver pass can include bounded numeric
+operation/candidate/node/backtrack counts, elapsed milliseconds, greedy coverage
+status and its first fixed exhaustion reason/phase. These observations do not
+add work allowance or retry a failed layout. Snapshot `complete` means a fully
+captured attempt; the recorded solver status still distinguishes successful
+placement from exhausted work or candidate infeasibility.
+Optional `runtime` timing uses the registry's transaction clock, recording initial
+measurement, each solver entry's remaining time and counters, solver end, DOM
+application, remeasurement and the terminal stage. Whole `elapsedMs` and summed
+solver-entry/end interval `solverElapsedMs` are separate. Both solver boundaries
+are sampled before diagnostic collection, so collector overhead neither extends
+the solver allowance nor contributes to solver elapsed time. Timing is `unavailable` when the caller
+supplies no timestamps. Stage times include preceding diagnostic work but end
+before terminal snapshot serialization. Diagnostics add no clock reads, DOM
+measurements or solver calls when disabled, and never increase the shared 16 ms,
+2,000,000 operation, 50,000 candidate, 4096 node, 128 input or four-pass limits.
+`recentTransactions` holds at most twelve numeric/enum summaries, including
+suppression, with explicit `omittedTransactions`. Old summaries are also removed
+under the unchanged 112 KiB snapshot byte cap before an oversized detailed
+fixture fails closed. There is no history of full fixtures. Native polling can
+miss intermediate detailed snapshots; report observed IDs and gaps rather than
+claiming complete capture history. These fields are optional additions to schema
+1, so existing fixture inputs and solver-result parsing remain unchanged.
+The snapshot is deeply
 copied and frozen; only checked-in scene IDs, exact renderer opening-coordinate
 IDs, stable location codes, finite layout numbers and flags are allowed. It contains
 no display names, inventory content, summaries, DOM nodes or callbacks. Invalid or
@@ -275,6 +323,54 @@ More assertion failure, the harness emits bounded JSON (128 KiB including existi
 layout telemetry) at `fit-open-selected-before-long-text` and rethrows the original
 assertion. This supplies an observed replay fixture without changing placement,
 visibility, scheduling or the ordinary user flow; it does not establish a repair.
+
+Failed preferred packing can use one shared geometric slot domain when every
+remaining unpinned mandatory action has the same finite compact footprint of at
+least 44px. Preferred recovery first tries this domain around its currently
+verified full selected rectangle, before directional grids and selected-position
+trials. That rectangle uses this pass's measured full dimensions and remains an
+exact obstacle; it is never replaced by a compact selected variant. Unpinned
+selected/focus/hover/pointer actions and mixed footprints retain the existing
+general fallback. Existing validated focus/hover
+pins and physical/UI reservations remain exact obstacles. Obstacle-edge row
+seeds and raw open horizontal forbidden intervals generate separated slots once;
+weighted row scheduling chooses compatible rows without permuting identical
+location identities. Existing ordered identities then take the nearest remaining
+certified slot using the existing L1/horizontal/vertical/coordinate tie rules.
+This is a deterministic preference, not a global displacement or capacity optimum.
+Every actual anchor-relative assigned rectangle is checked against the viewport,
+reservations, protected pins and preceding assignments before publication, then
+the ordinary final proof and optional expansion still run.
+
+The shared path consumes the same 16ms deadline, 2,000,000 operations, 50,000
+candidates, 4,096 nodes, 128 combined inputs and 4,096 per-label candidate ceiling.
+Row coordinates and the common slot pool each respect that per-label ceiling;
+slot construction consumes candidate work, row scheduling/assignment consumes
+node work, and loops/sort comparisons/proofs consume operation/deadline work.
+An insufficient lattice falls through to general recovery; an unfinished or
+capped attempt remains budget-exhausted and never establishes infeasibility.
+The opt-in diagnostic phase enum includes `shared-slots`, with all prior privacy,
+copy/freeze and byte/entry/pass bounds preserved. Strict external capture readers
+must accept that fixed enum when preparing a new source-bound hosted run.
+
+The permanent regression fixture is the actual captured 80d below-scroll input:
+27 mandatory compact 44px actions and 28 reservations, with source receipt/hash
+provenance. It is distinct from the older inferred translated 28-label research
+case. Independent geometry checks prove full actual-input logical coverage,
+viewport containment and 3px separation from every reservation/placement under
+the unchanged count limits. Local replay timing does not certify the browser's
+shared DOM/solver 16ms window; new exact-candidate hosted off/on, all-angle,
+keyboard/touch and ordinary full validation/review remain required.
+
+The actual6cd selected fixture preserves all 28 mandatory identities and 29
+reservations from one recorded solver call in an incomplete transaction. Its
+`measurement-budget` abort is retained explicitly: the input is usable for solver
+regression, but does not prove settled DOM, complete physical geometry, synthetic
+long-text completion, or a successful hosted journey. An independently checked
+synthetic 238x118 full footprint cannot fit anywhere among these captured physical
+reservations and remains explicitly incomplete under the unchanged fallback.
+Those dimensions are not a captured CI or hosted long-text measurement. No
+partial shared candidate is published as a complete replacement.
 
 ## Session-owned glow and grounding
 

@@ -19,7 +19,7 @@ export function localCommandPaletteTarget(
     throw new Error('Local timeout proof refuses an unexpected protocol');
   if (!['localhost', '127.0.0.1', '[::1]'].includes(url.hostname))
     throw new Error('Local timeout proof refuses a nonlocal target');
-  if (Number(url.port) !== (kind === 'api' ? 54321 : 54322))
+  if (Number(url.port) !== (kind === 'api' ? 45321 : 45322))
     throw new Error('Local timeout proof refuses an unexpected port');
   return value;
 }

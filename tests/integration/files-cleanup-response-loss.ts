@@ -18,7 +18,7 @@ process.once(
     try {
       const target = new URL(process.env.LOCAL_API_URL!);
       assert.ok(['localhost', '127.0.0.1', '[::1]'].includes(target.hostname));
-      assert.equal(target.port, '54321');
+      assert.equal(target.port, '45321');
       process.env.INVENTORY_FILE_KEYS_JSON = JSON.stringify({
         [input.keyId]: input.secret,
       });

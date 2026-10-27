@@ -67,7 +67,7 @@ test.beforeAll(async ({}, testInfo) => {
   const url = new URL(process.env.LOCAL_API_URL!);
   if (
     !['127.0.0.1', 'localhost', '[::1]'].includes(url.hostname) ||
-    url.port !== '54321'
+    url.port !== '45321'
   ) {
     throw new Error('Refusing a nonlocal room test fixture target');
   }
@@ -190,7 +190,7 @@ test.afterAll(async () => {
   const url = new URL(process.env.LOCAL_API_URL!);
   if (
     !['127.0.0.1', 'localhost', '[::1]'].includes(url.hostname) ||
-    url.port !== '54321'
+    url.port !== '45321'
   )
     throw new Error('Refusing nonlocal occupancy cleanup');
   const client = createClient(
@@ -2706,17 +2706,20 @@ test('real WebGL room raycasting selects shelf and drawer inventory', async ({
   await expect(fixtureRow.getByText('4 units', { exact: true })).toBeVisible();
 });
 
-test('visible drawer labels remain distinct and clickable across desktop and phone orbit views', async ({
-  page,
-}, testInfo) => {
-  test.setTimeout(60_000);
-  trackRoomPage(testInfo, page);
-  markRoomProgress(testInfo, { journey: 'drawer-labels', stage: 'room setup' });
-  await login(page);
-  for (const viewport of [
-    { width: 1280, height: 1100 },
-    { width: 390, height: 844 },
-  ]) {
+for (const { name, viewport } of [
+  { name: 'desktop', viewport: { width: 1280, height: 1100 } },
+  { name: 'phone', viewport: { width: 390, height: 844 } },
+]) {
+  test(`visible drawer labels remain distinct and clickable across ${name} orbit views`, async ({
+    page,
+  }, testInfo) => {
+    test.setTimeout(60_000);
+    trackRoomPage(testInfo, page);
+    markRoomProgress(testInfo, {
+      journey: 'drawer-labels',
+      stage: `room setup at ${viewport.width}px`,
+    });
+    await login(page);
     await page.setViewportSize(viewport);
     await page.goto('/room?location=ITC-S1A');
     const viewer = await ready(page);
@@ -2835,8 +2838,8 @@ test('visible drawer labels remain distinct and clickable across desktop and pho
     }
     expect(clicked.has('ITC-D01'), 'Drawer 1 label reachable').toBe(true);
     expect(clicked.has('ITC-D04'), 'Drawer 4 label reachable').toBe(true);
-  }
-});
+  });
+}
 
 test('panned camera keeps visible drawer labels clickable', async ({
   page,

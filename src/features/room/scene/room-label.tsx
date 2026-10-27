@@ -88,7 +88,9 @@ export function RoomLabel({
         <button
           ref={element}
           type="button"
-          className={styles.locationLabel}
+          className={[styles.locationLabel, selected && styles.selectedLabel]
+            .filter(Boolean)
+            .join(' ')}
           data-location-code={code}
           data-room-label-code={code}
           aria-label={`Select ${label} (${code})${counts !== null ? `; ${counts} at this location` : ''}`}
@@ -125,7 +127,9 @@ export function RoomLabel({
       ) : (
         <span
           ref={element}
-          className={styles.decorativeLabel}
+          className={[styles.decorativeLabel, selected && styles.selectedLabel]
+            .filter(Boolean)
+            .join(' ')}
           data-room-decorative-label="true"
         >
           {content}

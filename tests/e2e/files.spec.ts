@@ -858,7 +858,7 @@ test('browser Storage denial does not block a near-20 MiB PDF upload', async ({
   test.setTimeout(120_000);
   const api = process.env.LOCAL_API_URL;
   const key = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY;
-  expect(api).toMatch(/^http:\/\/(127\.0\.0\.1|localhost):54321$/);
+  expect(api).toMatch(/^http:\/\/(127\.0\.0\.1|localhost):45321$/);
   expect(key).toBeTruthy();
   const actor = createClient(api!, key!, {
     auth: { persistSession: false, autoRefreshToken: false },
@@ -989,7 +989,7 @@ test('browser Storage denial does not block a near-20 MiB PDF upload', async ({
           throw new Error(`Fixture cancel failed: ${cancelled.error.code}`);
         const dbUrl = new URL(process.env.LOCAL_DB_URL ?? '');
         expect(['127.0.0.1', 'localhost']).toContain(dbUrl.hostname);
-        expect(dbUrl.port).toBe('54322');
+        expect(dbUrl.port).toBe('45322');
         const db = new Client({ connectionString: dbUrl.toString() });
         await db.connect();
         try {

@@ -20,7 +20,8 @@ const runtime = vi.hoisted(() => ({
   frame: (() => {}) as () => void,
 }));
 vi.mock('@react-three/fiber', () => ({
-  useThree: () => runtime.state,
+  useThree: (selector?: (state: typeof runtime.state) => unknown) =>
+    selector ? selector(runtime.state) : runtime.state,
   useFrame: (frame: () => void) => {
     runtime.frame = frame;
   },

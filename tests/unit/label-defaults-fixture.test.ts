@@ -33,7 +33,7 @@ const selected = {
 const requestId = 'bea94cf9-138b-4764-839b-fa463563a91c';
 const binding = {
   actorId: 'bea94cf9-138b-4764-839b-fa463563a91c',
-  backend: 'http://127.0.0.1:54321',
+  backend: 'http://127.0.0.1:45321',
   role: 'staff',
   canManageConfiguration: true,
 } satisfies ProtectedPrivacyBinding;
@@ -132,7 +132,7 @@ function client(initial: Record<string, unknown> = starting) {
 }
 describe('owned shared label defaults fixture', () => {
   beforeEach(() => {
-    vi.stubEnv('LOCAL_API_URL', 'http://127.0.0.1:54321');
+    vi.stubEnv('LOCAL_API_URL', 'http://127.0.0.1:45321');
     vi.stubEnv('NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY', 'local-public-key');
     vi.stubEnv('LOCAL_SERVICE_ROLE_KEY', 'must-not-be-used');
   });
@@ -179,7 +179,7 @@ describe('owned shared label defaults fixture', () => {
         }),
       ).rejects.toBe(failure);
       expect(transport.createClient).toHaveBeenCalledWith(
-        'http://127.0.0.1:54321/',
+        'http://127.0.0.1:45321/',
         'local-public-key',
         expect.anything(),
       );
@@ -520,7 +520,7 @@ describe('Settings privacy action argument classification', () => {
     ['absent'],
     ['invalid-generation'],
     [{ ...binding, actorId: 'invalid' }],
-    [{ ...binding, backend: 'http://127.0.0.1:54321/' }],
+    [{ ...binding, backend: 'http://127.0.0.1:45321/' }],
     [{ ...binding, backend: 'https://user:password@owned.supabase.co' }],
     [{ ...binding, backend: 'https://owned.supabase.co/path' }],
     [{ ...binding, backend: 'file:///local' }],

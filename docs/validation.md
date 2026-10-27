@@ -636,7 +636,7 @@ under the existing Full-motion requirements.
 The native route-motion browser case now authors a real server-primary delay after
 early Flight fallback bytes, rather than holding a complete HTTP response. The
 `route-primary-delay.ts` fixture refuses hosted/nondefault endpoints and scheduling
-overrides before SQL. Only canonical loopback API 54321/database 54322 and the
+overrides before SQL. Only canonical loopback API 45321/database 45322 and the
 single-worker exclusive route-motion phase are accepted. A transaction acquires
 `quantity_items` ACCESS EXCLUSIVE only after the owned source screen is rendered;
 an independent local connection observes blocked primary reads. Acquisition,
@@ -1718,3 +1718,14 @@ and readback failure. These tests prove the dependency URL contract; the four
 existing Reduced-motion browser journeys remain unchanged and require execution
 on the final candidate. The runner image recipe still caches package tarballs
 with `--ignore-scripts`; actual PR jobs run fresh `npm ci` and apply the correction.
+
+Local port regressions in `tests/unit/local-supabase-ports.test.mjs` exercise TCP
+exclusions, conflicts and exact owned-service exceptions without changing host
+settings. Native Windows acceptance additionally requires ordinary startup against
+the retained volume, API/database/mail connectivity and unchanged migration
+history. A clean-source CI database reset proves that source revision separately;
+it must not reset a retained local volume containing an owner-held later migration.
+Historical performance and acceptance captures retain their original ports.
+The command-palette timeout proof admits only the same canonical API 45321 and
+database 45322 targets; its unit regressions reject the retired 54321/54322 ports
+as well as URL host overrides before integration clients are constructed.

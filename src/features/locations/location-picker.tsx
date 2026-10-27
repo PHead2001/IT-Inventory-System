@@ -437,11 +437,12 @@ export function LocationPicker({
     const selectedAncestors = selectedLocation
       ? locationAncestorIds(selectedLocation, locations)
       : [];
+    const firstOpen = !hasOpenedRef.current;
     setExpanded(
       (current) =>
         new Set([
           ...current,
-          ...(!hasOpenedRef.current
+          ...(firstOpen
             ? treeRows
                 .filter((row) => row.depth === 0 && row.hasChildren)
                 .map((row) => row.location.id)

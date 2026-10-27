@@ -61,7 +61,7 @@ test('legacy choices remain readable on inventory and labels and editable withou
   // Local-only coherent pre-policy fixture, never a hosted mutation or rewrite.
   const target = new URL(process.env.LOCAL_DB_URL!);
   expect(['localhost', '127.0.0.1', '[::1]']).toContain(target.hostname);
-  expect(target.port).toBe('54322');
+  expect(target.port).toBe('45322');
   const owner = new Client({
     connectionString: target.href,
     application_name: 'choice-identity-browser-fixture',
