@@ -99,7 +99,10 @@ export function createRoomLabelRegistry(
   };
   const place = () => {
     pending = null;
-    const deadline = clock() + limits.maxMilliseconds;
+    const startedAt = clock();
+    const deadline = startedAt + limits.maxMilliseconds;
+    diagnostics?.begin(startedAt);
+    diagnostics?.mark('initial-measurement-start', startedAt);
     const remaining = { ...limits };
     let measurementExhausted = false;
     const charge = () => {
@@ -110,15 +113,16 @@ export function createRoomLabelRegistry(
     };
     const host = canvas?.parentElement;
     const viewport = canvas?.getBoundingClientRect();
-    if (!host || !viewport) return;
+    if (!host || !viewport) {
+      diagnostics?.abort('missing-host', clock());
+      return;
+    }
     if (
       !Number.isFinite(viewport.width) ||
       !Number.isFinite(viewport.height) ||
       viewport.width <= 0 ||
       viewport.height <= 0
     ) {
-      diagnostics?.begin();
-      diagnostics?.abort('unmeasured-viewport');
       const codes: string[] = [];
       for (const entry of entries.values()) {
         hideEntry(entry);
@@ -131,6 +135,7 @@ export function createRoomLabelRegistry(
         canvas.dataset.labelLayoutError = 'Room viewport is not measured';
         canvas.dataset.labelLayoutPending = 'false';
       }
+      diagnostics?.abort('unmeasured-viewport', clock());
       return;
     }
     const measure = () => {
@@ -310,26 +315,30 @@ export function createRoomLabelRegistry(
       'complete';
     // CSS changes a centered Html wrapper immediately. Reflow/validate those
     // real dimensions before exposing a settled revision, without idle frames.
-    // Suppressed frames are not placement attempts: retain the last actual
-    // diagnostic transaction instead of replacing it with an empty failure.
+    // Cached suppression retains the last actual detail, with a separate
+    // diagnostic attempt ID so observers cannot mistake it for current work.
     const initialLabels = measure();
+    diagnostics?.mark('initial-measurement-end', clock());
     if (measurementExhausted) {
-      diagnostics?.begin();
       hideUnverified('Label measurement work budget exhausted', initialLabels);
-      diagnostics?.abort('measurement-budget');
+      diagnostics?.abort('measurement-budget', clock());
       return;
     }
     if (failedMeasurement === measuredKey(initialLabels)) {
       if (canvas) canvas.dataset.labelLayoutPending = 'false';
+      diagnostics?.cachedSuppression(clock());
       return;
     }
-    diagnostics?.begin();
     for (let pass = 0; pass < 4; pass++) {
+      if (pass > 0)
+        diagnostics?.mark('pass-measurement-start', clock(), pass + 1);
       const labels = pass === 0 ? initialLabels : measure();
+      if (pass > 0)
+        diagnostics?.mark('pass-measurement-end', clock(), pass + 1);
       finalLabels = labels;
       if (measurementExhausted) {
         hideUnverified('Label measurement work budget exhausted', labels);
-        diagnostics?.abort('measurement-budget');
+        diagnostics?.abort('measurement-budget', clock());
         return;
       }
       diagnostics?.input(labels, viewport, reserved);
@@ -338,13 +347,25 @@ export function createRoomLabelRegistry(
       missing.length = 0;
       summary = null;
       focusedSummary = false;
+      const solverEntry = clock();
+      const allowance = {
+        ...remaining,
+        maxMilliseconds: Math.max(0, deadline - solverEntry),
+      };
       const outcome = layoutLabelsDetailed(
         labels,
         viewport,
         reserved,
-        { ...remaining, maxMilliseconds: Math.max(0, deadline - clock()) },
+        allowance,
         clock,
       );
+      if (diagnostics) {
+        // Sample both boundaries before collector work. Its cost must neither
+        // extend the solver's shared deadline nor become solver elapsed time.
+        const solverEnd = clock();
+        diagnostics.mark('solver-entry', solverEntry, pass + 1, allowance);
+        diagnostics.mark('solver-end', solverEnd, pass + 1);
+      }
       const placements = outcome.placements;
       diagnostics?.solver(outcome);
       finalStatus = outcome.status;
@@ -355,10 +376,11 @@ export function createRoomLabelRegistry(
       // remain exposed as if it had been checked against this measured view.
       if (placements.length !== labels.length) {
         hideUnverified('Label placement work budget exhausted', labels);
-        diagnostics?.abort('placement-budget');
+        diagnostics?.abort('placement-budget', clock());
         return;
       }
       diagnostics?.output(placements);
+      diagnostics?.mark('dom-application-start', clock(), pass + 1);
       for (const result of placements) {
         charge();
         const entry = entries.get(result.id);
@@ -422,9 +444,12 @@ export function createRoomLabelRegistry(
           leader.style.transform = `rotate(${Math.atan2(entry.dy, entry.dx)}rad)`;
         }
       }
+      diagnostics?.mark('dom-application-end', clock(), pass + 1);
       // Force a final real measurement even when the chosen CSS variant stayed
       // unchanged. A subsequent size-dependent pass is required after a change.
+      diagnostics?.mark('remeasurement-start', clock(), pass + 1);
       const after = measure();
+      diagnostics?.mark('remeasurement-end', clock(), pass + 1);
       finalLabels = after;
       if (measurementExhausted) break;
       const dimensionsStable =
@@ -440,18 +465,18 @@ export function createRoomLabelRegistry(
       }
     }
     if (!settled) {
-      diagnostics?.abort(
-        measurementExhausted ? 'measurement-budget' : 'unstable-dimensions',
-      );
       hideUnverified(
         measurementExhausted
           ? 'Label remeasurement work budget exhausted'
           : 'Unstable label dimensions after four placement passes',
         finalLabels,
       );
+      diagnostics?.abort(
+        measurementExhausted ? 'measurement-budget' : 'unstable-dimensions',
+        clock(),
+      );
       return;
     }
-    diagnostics?.finish(true);
     if (canvas) canvas.dataset.labelLayoutStatus = finalStatus;
     if (finalStatus === 'complete') {
       failedMeasurement = '';
@@ -474,6 +499,7 @@ export function createRoomLabelRegistry(
       canvas.dataset.labelLayoutRevision = String(++revision);
       canvas.dataset.labelLayoutPending = 'false';
     }
+    diagnostics?.finish(true, clock(), finalStatus);
   };
   const schedule = () => {
     if (canvas && pending === null) {

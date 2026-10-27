@@ -2,6 +2,7 @@ import room from '../../../../data/rooms/it-closet.json';
 import { openingTransform } from './opening-transform';
 import {
   LABEL_PACKING_BUDGET,
+  type LabelPackingBudget,
   type LabelArea,
   type LabelPlacement,
   type LabelRect,
@@ -46,15 +47,66 @@ type AttemptFailure =
   | 'measurement-budget'
   | 'placement-budget'
   | 'unstable-dimensions'
-  | 'unmeasured-viewport';
+  | 'unmeasured-viewport'
+  | 'missing-host';
+type DiagnosticError =
+  'invalid-data' | 'entry-bound' | 'pass-bound' | 'byte-bound';
+type TransactionTerminal =
+  | 'pending'
+  | LabelLayoutResult['status']
+  | AttemptFailure
+  | DiagnosticError
+  | 'cached-suppression';
+type TimingStage = {
+  stage:
+    | 'initial-measurement-start'
+    | 'initial-measurement-end'
+    | 'pass-measurement-start'
+    | 'pass-measurement-end'
+    | 'solver-entry'
+    | 'solver-end'
+    | 'dom-application-start'
+    | 'dom-application-end'
+    | 'remeasurement-start'
+    | 'remeasurement-end'
+    | 'terminal';
+  elapsedMs: number;
+  pass?: number;
+  remainingMilliseconds?: number;
+  remainingOperations?: number;
+  remainingCandidates?: number;
+  remainingNodes?: number;
+  remainingInputs?: number;
+  remainingCandidatesPerLabel?: number;
+};
+type TransactionTiming = {
+  source: 'runtime' | 'unavailable';
+  elapsedMs?: number;
+  solverElapsedMs?: number;
+  stages: TimingStage[];
+};
+type TransactionSummary = {
+  transaction: number;
+  terminal: TransactionTerminal;
+  timingSource: TransactionTiming['source'];
+  elapsedMs?: number;
+  solverElapsedMs?: number;
+  passCount: number;
+  cacheSourceTransaction?: number;
+};
 export type LabelLayoutSnapshot = Readonly<{
   schema: 1;
   transaction: number;
   complete: boolean;
   settled: boolean;
   passes: Pass[];
-  error?: 'invalid-data' | 'entry-bound' | 'pass-bound' | 'byte-bound';
+  error?: DiagnosticError;
   failure?: AttemptFailure;
+  runtime?: { terminal: TransactionTerminal; timing: TransactionTiming };
+  recentTransactions?: TransactionSummary[];
+  omittedTransactions?: number;
+  // A cached suppression has its own ID; root detail still names its source.
+  lastAttempt?: TransactionSummary;
 }>;
 declare global {
   interface Window {
@@ -358,51 +410,183 @@ function freeze<T>(value: T): T {
   }
   return value;
 }
-/** Optional observation only: no DOM, callbacks, scheduling or layout mutation. */
+/** Optional observation only: no DOM, callbacks, scheduling or layout mutation.
+ * The caller supplies its transaction clock; absent timing stays unavailable. */
 export function createLabelLayoutDiagnostics(target?: Window) {
   if (target?.__roomLayoutDiagnosticsEnabled !== true) return null;
   let transaction = 0;
-  let snapshot: LabelLayoutSnapshot;
+  let snapshot: LabelLayoutSnapshot | undefined;
+  let retainedActual: LabelLayoutSnapshot | undefined;
   let passes: Pass[] = [];
-  let failed: LabelLayoutSnapshot['error'];
+  let failed: DiagnosticError | undefined;
   let failure: AttemptFailure | undefined;
-  function publish(complete = false, settled = false) {
-    const candidate = {
-      schema: 1 as const,
+  let terminal: TransactionTerminal = 'pending';
+  let startedAt: number | undefined;
+  let solverStartedAt: number | undefined;
+  let timing: TransactionTiming = { source: 'unavailable', stages: [] };
+  const recentTransactions: TransactionSummary[] = [];
+  let omittedTransactions = 0;
+  let lastAttempt: TransactionSummary | undefined;
+  function summary(cacheSourceTransaction?: number): TransactionSummary {
+    return {
       transaction,
-      complete,
-      settled,
-      passes,
-      ...(failed ? { error: failed } : {}),
-      ...(failure ? { failure } : {}),
+      terminal: failed ?? terminal,
+      timingSource: timing.source,
+      ...(timing.elapsedMs !== undefined
+        ? { elapsedMs: timing.elapsedMs }
+        : {}),
+      ...(timing.solverElapsedMs !== undefined
+        ? { solverElapsedMs: timing.solverElapsedMs }
+        : {}),
+      passCount: passes.length,
+      ...(cacheSourceTransaction !== undefined
+        ? { cacheSourceTransaction }
+        : {}),
     };
-    if (JSON.stringify(candidate).length > LABEL_DIAGNOSTIC_MAX_BYTES)
-      failed = 'byte-bound';
-    // Never represent a partial/invalid fixture as complete; clear all passes.
-    snapshot = freeze(
-      failed
-        ? {
-            schema: 1,
-            transaction,
-            complete: false,
-            settled: false,
-            passes: [],
-            error: failed,
-          }
-        : structuredClone(candidate),
-    );
   }
-  function attempt(work: () => void) {
+  function forgetOldest() {
+    recentTransactions.shift();
+    omittedTransactions++;
+  }
+  function publish(cached = false, complete = false, settled = false) {
+    let candidate =
+      cached && retainedActual
+        ? { ...retainedActual }
+        : {
+            schema: 1 as const,
+            transaction,
+            complete: failed ? false : complete,
+            settled: failed ? false : settled,
+            passes: failed ? [] : passes,
+            ...(failed ? { error: failed } : {}),
+            ...(failure ? { failure } : {}),
+            runtime: { terminal: failed ?? terminal, timing },
+          };
+    const metadata = () => ({
+      recentTransactions,
+      omittedTransactions,
+      lastAttempt,
+    });
+    while (
+      recentTransactions.length &&
+      JSON.stringify({ ...candidate, ...metadata() }).length >
+        LABEL_DIAGNOSTIC_MAX_BYTES
+    )
+      forgetOldest();
+    if (
+      JSON.stringify({ ...candidate, ...metadata() }).length >
+      LABEL_DIAGNOSTIC_MAX_BYTES
+    ) {
+      failed = 'byte-bound';
+      terminal = failed;
+      // Never represent a partial/invalid fixture as complete; clear all passes.
+      candidate = {
+        schema: 1,
+        transaction,
+        complete: false,
+        settled: false,
+        passes: [],
+        error: failed,
+        runtime: { terminal, timing },
+      };
+      if (lastAttempt?.transaction === transaction) {
+        lastAttempt = summary();
+        if (recentTransactions.at(-1)?.transaction === transaction)
+          recentTransactions[recentTransactions.length - 1] = lastAttempt;
+      }
+    }
+    // Cached attempts share the already immutable actual detail, never retain a
+    // second historical fixture or recopy its potentially large pass payload.
+    snapshot =
+      cached && retainedActual && !failed
+        ? Object.freeze({
+            ...candidate,
+            ...freeze(structuredClone(metadata())),
+          })
+        : freeze(structuredClone({ ...candidate, ...metadata() }));
+  }
+  function attempt(work: () => void, emit = true) {
     if (failed) return;
     try {
       work();
-      publish();
+      if (emit) publish();
     } catch (error) {
       const code = error instanceof Error ? error.message : '';
       failed =
         code === 'entry-bound' || code === 'pass-bound' ? code : 'invalid-data';
       publish();
     }
+  }
+  function mark(
+    stage: TimingStage['stage'],
+    at: number,
+    pass?: number,
+    allowance?: LabelPackingBudget,
+  ) {
+    if (startedAt === undefined) return;
+    if (
+      ![
+        'initial-measurement-start',
+        'initial-measurement-end',
+        'pass-measurement-start',
+        'pass-measurement-end',
+        'solver-entry',
+        'solver-end',
+        'dom-application-start',
+        'dom-application-end',
+        'remeasurement-start',
+        'remeasurement-end',
+        'terminal',
+      ].includes(stage)
+    )
+      throw Error('invalid-data');
+    const elapsedMs = finite(finite(at) - startedAt);
+    if (
+      elapsedMs < (timing.stages.at(-1)?.elapsedMs ?? 0) ||
+      timing.stages.length >= 40
+    )
+      throw Error('invalid-data');
+    const event: TimingStage = { stage, elapsedMs };
+    if (pass !== undefined) {
+      if (!Number.isSafeInteger(pass) || pass < 1 || pass > 4)
+        throw Error('invalid-data');
+      event.pass = pass;
+    }
+    if (allowance !== undefined) {
+      keys(allowance, Object.keys(LABEL_PACKING_BUDGET));
+      if (stage !== 'solver-entry') throw Error('invalid-data');
+      event.remainingMilliseconds = finite(allowance.maxMilliseconds);
+      event.remainingOperations = finite(allowance.maxOperations);
+      event.remainingCandidates = finite(allowance.maxCandidates);
+      event.remainingNodes = finite(allowance.maxNodes);
+      event.remainingInputs = finite(allowance.maxInputs);
+      event.remainingCandidatesPerLabel = finite(
+        allowance.maxCandidatesPerLabel,
+      );
+    }
+    if (stage === 'solver-entry') solverStartedAt = at;
+    if (stage === 'solver-end') {
+      if (solverStartedAt === undefined) throw Error('invalid-data');
+      timing.solverElapsedMs = finite(
+        (timing.solverElapsedMs ?? 0) + at - solverStartedAt,
+      );
+      solverStartedAt = undefined;
+    }
+    timing.elapsedMs = elapsedMs;
+    timing.stages.push(event);
+  }
+  function end(
+    reason: TransactionTerminal,
+    at?: number,
+    cacheSourceTransaction?: number,
+  ) {
+    attempt(() => {
+      if (at !== undefined) mark('terminal', at);
+    }, false);
+    terminal = reason;
+    lastAttempt = summary(cacheSourceTransaction);
+    recentTransactions.push(lastAttempt);
+    if (recentTransactions.length > 12) forgetOldest();
   }
   try {
     Object.defineProperty(target, '__roomLabelLayoutSnapshot', {
@@ -413,14 +597,39 @@ export function createLabelLayoutDiagnostics(target?: Window) {
     return null;
   }
   return {
-    begin() {
+    begin(at?: number) {
+      retainedActual = snapshot;
       transaction++;
       passes = [];
       failed = undefined;
       failure = undefined;
-      publish();
+      terminal = 'pending';
+      startedAt = undefined;
+      solverStartedAt = undefined;
+      timing = { source: 'unavailable', stages: [] };
+      lastAttempt = undefined;
+      attempt(() => {
+        if (at !== undefined) {
+          startedAt = finite(at);
+          timing = {
+            source: 'runtime',
+            elapsedMs: 0,
+            solverElapsedMs: 0,
+            stages: [],
+          };
+        }
+      });
+    },
+    mark(
+      stage: TimingStage['stage'],
+      at: number,
+      pass?: number,
+      allowance?: LabelPackingBudget,
+    ) {
+      attempt(() => mark(stage, at, pass, allowance), false);
     },
     input(labels: LabelRect[], viewport: LabelArea, reserved: LabelArea[]) {
+      retainedActual = undefined;
       attempt(() => {
         if (passes.length >= 4) throw new Error('pass-bound');
         if (
@@ -456,7 +665,15 @@ export function createLabelLayoutDiagnostics(target?: Window) {
         pass.solver = solver(result);
       });
     },
-    abort(reason: AttemptFailure) {
+    cachedSuppression(at?: number) {
+      if (!retainedActual) {
+        failed = 'invalid-data';
+      }
+      end('cached-suppression', at, retainedActual?.transaction);
+      publish(!failed);
+      retainedActual = undefined;
+    },
+    abort(reason: AttemptFailure, at?: number) {
       attempt(() => {
         if (
           ![
@@ -464,18 +681,34 @@ export function createLabelLayoutDiagnostics(target?: Window) {
             'placement-budget',
             'unstable-dimensions',
             'unmeasured-viewport',
+            'missing-host',
           ].includes(reason)
         )
           throw Error('invalid-data');
         failure = reason;
-      });
+      }, false);
+      end(reason, at);
+      publish();
+      retainedActual = undefined;
     },
-    finish(settled: boolean) {
-      if (failed) return;
-      if (!passes.length || passes.some((pass) => !pass.output)) {
-        failed = 'invalid-data';
-        publish();
-      } else publish(true, settled);
+    finish(
+      settled: boolean,
+      at?: number,
+      status: LabelLayoutResult['status'] = 'complete',
+    ) {
+      attempt(() => {
+        if (
+          !passes.length ||
+          passes.some((pass) => !pass.output) ||
+          !['complete', 'candidate-infeasible', 'budget-exhausted'].includes(
+            status,
+          )
+        )
+          throw Error('invalid-data');
+      }, false);
+      end(status, at);
+      publish(false, true, settled);
+      retainedActual = undefined;
     },
   };
 }

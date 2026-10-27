@@ -409,3 +409,219 @@ it('fails explicitly on entry, reservation, pass and byte limits rather than tru
     JSON.stringify(bytes.target.__roomLabelLayoutSnapshot).length,
   ).toBeLessThanOrEqual(LABEL_DIAGNOSTIC_MAX_BYTES);
 });
+
+it('keeps timing unavailable without caller timestamps instead of borrowing solver timing', () => {
+  const { target, capture } = harness();
+  capture.begin();
+  capture.input([input()], viewport, []);
+  const result = layoutLabelsDetailed(
+    [input()],
+    viewport,
+    [],
+    undefined,
+    () => 0,
+  );
+  capture.solver({ ...result, stats: { ...result.stats, elapsedMs: 8 } });
+  capture.output(result.placements);
+  capture.finish(true);
+  expect(target.__roomLabelLayoutSnapshot!.runtime).toEqual({
+    terminal: 'complete',
+    timing: { source: 'unavailable', stages: [] },
+  });
+  expect(target.__roomLabelLayoutSnapshot!.lastAttempt).toEqual({
+    transaction: 1,
+    terminal: 'complete',
+    timingSource: 'unavailable',
+    passCount: 1,
+  });
+});
+it('retains only twelve scalar transaction summaries and makes omitted IDs explicit', () => {
+  const { target, capture } = harness();
+  for (let id = 1; id <= 16; id++) {
+    capture.begin(id * 100);
+    capture.abort('measurement-budget', id * 100 + id);
+  }
+  const snapshot = target.__roomLabelLayoutSnapshot!;
+  expect(snapshot.transaction).toBe(16);
+  expect(snapshot.omittedTransactions).toBe(4);
+  expect(
+    snapshot.recentTransactions!.map(({ transaction }) => transaction),
+  ).toEqual([5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]);
+  for (const summary of snapshot.recentTransactions!) {
+    expect(
+      Object.values(summary).every(
+        (value) =>
+          typeof value === 'number' ||
+          ['runtime', 'measurement-budget'].includes(value),
+      ),
+    ).toBe(true);
+    expect(Object.isFrozen(summary)).toBe(true);
+    expect(summary).not.toHaveProperty('passes');
+  }
+  expect(JSON.stringify(snapshot).length).toBeLessThanOrEqual(
+    LABEL_DIAGNOSTIC_MAX_BYTES,
+  );
+});
+it('publishes begin immediately and keeps cached attempt IDs distinct from retained actual detail', () => {
+  const { target, capture } = harness();
+  capture.begin(10);
+  capture.abort('measurement-budget', 30);
+  const actual = target.__roomLabelLayoutSnapshot!;
+  capture.begin(40);
+  expect(target.__roomLabelLayoutSnapshot).toMatchObject({
+    transaction: 2,
+    passes: [],
+    runtime: { terminal: 'pending' },
+  });
+  capture.mark('initial-measurement-start', 40);
+  capture.mark('initial-measurement-end', 42);
+  capture.cachedSuppression(43);
+  expect(target.__roomLabelLayoutSnapshot).toMatchObject({
+    transaction: 1,
+    failure: 'measurement-budget',
+    passes: [],
+    runtime: actual.runtime,
+    lastAttempt: {
+      transaction: 2,
+      terminal: 'cached-suppression',
+      cacheSourceTransaction: 1,
+      elapsedMs: 3,
+      solverElapsedMs: 0,
+      passCount: 0,
+    },
+  });
+  capture.begin(50);
+  capture.abort('unmeasured-viewport', 51);
+  expect(target.__roomLabelLayoutSnapshot).toMatchObject({
+    transaction: 3,
+    failure: 'unmeasured-viewport',
+    lastAttempt: { transaction: 3, terminal: 'unmeasured-viewport' },
+  });
+});
+it('rejects private or invalid timing data with the existing fail-closed fixture semantics', () => {
+  for (const corrupt of [
+    (capture: ReturnType<typeof harness>['capture']) =>
+      capture.mark('SECRET' as never, 2),
+    (capture: ReturnType<typeof harness>['capture']) =>
+      capture.mark('solver-entry', NaN),
+    (capture: ReturnType<typeof harness>['capture']) =>
+      capture.mark('solver-entry', 0),
+    (capture: ReturnType<typeof harness>['capture']) =>
+      capture.mark('solver-entry', 2, 5),
+    (capture: ReturnType<typeof harness>['capture']) =>
+      capture.mark('solver-entry', 2, 1, {
+        maxOperations: 1,
+        maxCandidates: 1,
+        maxNodes: 1,
+        maxMilliseconds: 1,
+        maxInputs: 1,
+        maxCandidatesPerLabel: 1,
+        privateText: 'SECRET',
+      } as never),
+    (capture: ReturnType<typeof harness>['capture']) =>
+      capture.mark('solver-end', 2),
+  ]) {
+    const { target, capture } = harness();
+    capture.begin(1);
+    capture.input([input()], viewport, []);
+    corrupt(capture);
+    capture.abort('measurement-budget', 3);
+    expect(target.__roomLabelLayoutSnapshot).toMatchObject({
+      complete: false,
+      passes: [],
+      error: 'invalid-data',
+      runtime: { terminal: 'invalid-data' },
+      lastAttempt: { terminal: 'invalid-data' },
+    });
+    expect(JSON.stringify(target.__roomLabelLayoutSnapshot)).not.toContain(
+      'SECRET',
+    );
+  }
+});
+it('evicts scalar history under byte pressure without increasing the fixture cap', () => {
+  // Construct a complete canonical fixture within 512-800 bytes of the cap.
+  // Twelve scalar summaries cannot all coexist with it, even though the exact
+  // four-pass fixture itself fits without truncation.
+  let labels: LabelRect[] = [],
+    reserved: (typeof viewport)[] = [];
+  let closestBytes = 0;
+  for (let count = 1; count <= 96; count++) {
+    const candidateLabels = Array.from({ length: count }, input);
+    const output = candidateLabels.map(({ id }) => ({
+      id,
+      visible: true,
+      dx: 0,
+      dy: 0,
+    }));
+    for (let masks = 0; masks <= 32; masks++) {
+      const candidateReserved = Array.from({ length: masks }, () => viewport);
+      const summary = {
+        transaction: 13,
+        terminal: 'complete',
+        timingSource: 'runtime',
+        elapsedMs: 2,
+        solverElapsedMs: 0,
+        passCount: 4,
+      };
+      const bytes = JSON.stringify({
+        schema: 1,
+        transaction: 13,
+        complete: true,
+        settled: true,
+        passes: Array.from({ length: 4 }, () => ({
+          labels: candidateLabels,
+          viewport,
+          reserved: candidateReserved,
+          output,
+        })),
+        runtime: {
+          terminal: 'complete',
+          timing: {
+            source: 'runtime',
+            elapsedMs: 2,
+            solverElapsedMs: 0,
+            stages: [{ stage: 'terminal', elapsedMs: 2 }],
+          },
+        },
+        recentTransactions: [summary],
+        omittedTransactions: 12,
+        lastAttempt: summary,
+      }).length;
+      if (bytes <= LABEL_DIAGNOSTIC_MAX_BYTES - 512 && bytes > closestBytes) {
+        closestBytes = bytes;
+        labels = candidateLabels;
+        reserved = candidateReserved;
+      }
+    }
+  }
+  expect(closestBytes).toBeGreaterThan(LABEL_DIAGNOSTIC_MAX_BYTES - 800);
+  const { target, capture } = harness();
+  for (let i = 0; i < 12; i++) {
+    capture.begin(0);
+    capture.abort('measurement-budget', 1);
+  }
+  capture.begin(0);
+  for (let pass = 0; pass < 4; pass++) {
+    capture.input(labels, viewport, reserved);
+    capture.output(
+      labels.map(({ id }) => ({ id, visible: true, dx: 0, dy: 0 })),
+    );
+  }
+  capture.finish(true, 2);
+  const snapshot = target.__roomLabelLayoutSnapshot!;
+  expect(snapshot.error).toBeUndefined();
+  expect(snapshot.complete).toBe(true);
+  expect(snapshot.passes).toHaveLength(4);
+  expect(
+    snapshot.passes.every(
+      (pass) =>
+        pass.labels.length === labels.length &&
+        pass.reserved.length === reserved.length,
+    ),
+  ).toBe(true);
+  expect(JSON.stringify(snapshot).length).toBeLessThanOrEqual(
+    LABEL_DIAGNOSTIC_MAX_BYTES,
+  );
+  expect(snapshot.recentTransactions!.length).toBeLessThan(12);
+  expect(snapshot.omittedTransactions).toBeGreaterThan(1);
+});

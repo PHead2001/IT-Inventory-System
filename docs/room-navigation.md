@@ -265,9 +265,12 @@ The separate Settings Storage locations tree opens below the first level collaps
 
 The populated 375px browser harness explicitly opts into read-only label-layout
 diagnostics before application loading. Ordinary sessions expose no snapshot.
-Only the latest actual placement attempt is retained; an unchanged failed
-measurement suppressed by the registry preserves that snapshot and does not
-invent a transaction or revision. Actual measurement, remeasurement, viewport or
+Only the latest actual placement detail is retained. Each runtime transaction
+publishes its own monotonic attempt ID at begin and at completion or abort.
+An unchanged failed measurement preserves the preceding actual root
+`transaction`, `passes`, `complete`, `settled` and `runtime`; `lastAttempt` names
+the newer `cached-suppression` attempt and its `cacheSourceTransaction`. It does
+not invent a solver pass or layout revision. Actual measurement, remeasurement, viewport or
 placement failures publish an incomplete attempt with a fixed failure code,
 rather than an empty successful capture or an ambiguous invalid-data error.
 There are at most four exact packing input/output passes, 96 labels and 32
@@ -277,6 +280,23 @@ status and its first fixed exhaustion reason/phase. These observations do not
 add work allowance or retry a failed layout. Snapshot `complete` means a fully
 captured attempt; the recorded solver status still distinguishes successful
 placement from exhausted work or candidate infeasibility.
+Optional `runtime` timing uses the registry's transaction clock, recording initial
+measurement, each solver entry's remaining time and counters, solver end, DOM
+application, remeasurement and the terminal stage. Whole `elapsedMs` and summed
+solver-entry/end interval `solverElapsedMs` are separate. Both solver boundaries
+are sampled before diagnostic collection, so collector overhead neither extends
+the solver allowance nor contributes to solver elapsed time. Timing is `unavailable` when the caller
+supplies no timestamps. Stage times include preceding diagnostic work but end
+before terminal snapshot serialization. Diagnostics add no clock reads, DOM
+measurements or solver calls when disabled, and never increase the shared 16 ms,
+2,000,000 operation, 50,000 candidate, 4096 node, 128 input or four-pass limits.
+`recentTransactions` holds at most twelve numeric/enum summaries, including
+suppression, with explicit `omittedTransactions`. Old summaries are also removed
+under the unchanged 112 KiB snapshot byte cap before an oversized detailed
+fixture fails closed. There is no history of full fixtures. Native polling can
+miss intermediate detailed snapshots; report observed IDs and gaps rather than
+claiming complete capture history. These fields are optional additions to schema
+1, so existing fixture inputs and solver-result parsing remain unchanged.
 The snapshot is deeply
 copied and frozen; only checked-in scene IDs, exact renderer opening-coordinate
 IDs, stable location codes, finite layout numbers and flags are allowed. It contains

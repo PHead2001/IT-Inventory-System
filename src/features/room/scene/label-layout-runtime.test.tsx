@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import userEvent from '@testing-library/user-event';
 import * as placement from './label-layout';
+import * as diagnosticModule from './label-layout-diagnostics';
 import { createRoomLabelRegistry } from './label-layout-runtime';
 
 const viewport = {
@@ -71,6 +72,325 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 describe('unified room label registry', () => {
+  it('keeps collector overhead outside the solver deadline and measured solver interval', () => {
+    window.__roomLayoutDiagnosticsEnabled = true;
+    let now = 0;
+    const createDiagnostics = diagnosticModule.createLabelLayoutDiagnostics;
+    vi.spyOn(
+      diagnosticModule,
+      'createLabelLayoutDiagnostics',
+    ).mockImplementation((target) => {
+      const capture = createDiagnostics(target)!;
+      return {
+        ...capture,
+        mark(...args) {
+          // A deterministic stand-in for diagnostic validation/allocation.
+          if (args[0] === 'solver-entry') now += 5;
+          capture.mark(...args);
+        },
+      };
+    });
+    const host = document.createElement('div'),
+      canvas = document.createElement('canvas');
+    host.append(canvas);
+    document.body.append(host);
+    vi.spyOn(canvas, 'getBoundingClientRect').mockReturnValue(viewport);
+    const item = label(host);
+    let actualSolverEntry = -1,
+      actualSolverDeadline = -1;
+    const packing = vi
+      .spyOn(placement, 'layoutLabelsDetailed')
+      .mockImplementation(
+        (labels, _viewport, _reserved, allowance, solverClock) => {
+          actualSolverEntry = solverClock!();
+          actualSolverDeadline =
+            actualSolverEntry + allowance!.maxMilliseconds!;
+          now += 3;
+          return {
+            placements: labels.map(({ id }) => ({
+              id,
+              visible: true,
+              dx: 0,
+              dy: 0,
+              compact: false,
+            })),
+            status: 'complete',
+            stats: {
+              operations: 1,
+              candidates: 1,
+              nodes: 0,
+              backtracks: 0,
+              elapsedMs: 3,
+              greedyComplete: true,
+            },
+          };
+        },
+      );
+    const registry = createRoomLabelRegistry(vi.fn(), undefined, undefined, {
+      clock: () => now,
+    });
+    const cleanup = registry.connect(canvas);
+    registry.register('shelf-1a', item.element, item.leader, { priority: 4 });
+    flush();
+    expect({
+      entry: actualSolverEntry,
+      deadline: actualSolverDeadline,
+      elapsed:
+        window.__roomLabelLayoutSnapshot!.runtime!.timing.solverElapsedMs,
+    }).toEqual({ entry: 0, deadline: 16, elapsed: 3 });
+    expect(packing).toHaveBeenCalledOnce();
+    expect(window.__roomLabelLayoutSnapshot!.runtime).toMatchObject({
+      terminal: 'complete',
+      timing: { elapsedMs: 8, solverElapsedMs: 3 },
+    });
+    expect(
+      window.__roomLabelLayoutSnapshot!.runtime!.timing.stages.filter(
+        ({ stage }) => stage === 'solver-entry' || stage === 'solver-end',
+      ),
+    ).toMatchObject([
+      { stage: 'solver-entry', elapsedMs: 0, remainingMilliseconds: 16 },
+      { stage: 'solver-end', elapsedMs: 3 },
+    ]);
+    expect(item.element.dataset.labelSuppressed).toBe('false');
+    cleanup();
+  });
+  it('records the whole runtime transaction and shared solver allowances across CSS passes', () => {
+    window.__roomLayoutDiagnosticsEnabled = true;
+    const host = document.createElement('div'),
+      canvas = document.createElement('canvas');
+    host.append(canvas);
+    document.body.append(host);
+    let now = 100;
+    vi.spyOn(canvas, 'getBoundingClientRect').mockImplementation(() => {
+      expect(window.__roomLabelLayoutSnapshot).toMatchObject({
+        transaction: 1,
+        passes: [],
+        complete: false,
+        runtime: {
+          terminal: 'pending',
+          timing: { source: 'runtime', elapsedMs: 0 },
+        },
+      });
+      return viewport;
+    });
+    const item = label(host),
+      full = document.createElement('span');
+    full.dataset.roomLabelFull = 'true';
+    item.element.append(full);
+    const rect = {
+      ...viewport,
+      left: 50,
+      top: 30,
+      right: 95,
+      bottom: 48,
+      width: 45,
+      height: 18,
+    };
+    vi.mocked(item.element.getBoundingClientRect).mockImplementation(() => {
+      now += 0.5;
+      const dx = Number(item.element.dataset.labelDx ?? 0),
+        dy = Number(item.element.dataset.labelDy ?? 0);
+      return {
+        ...rect,
+        left: 50 + dx,
+        right: 95 + dx,
+        top: 30 + dy,
+        bottom: 48 + dy,
+      };
+    });
+    vi.spyOn(full, 'getBoundingClientRect').mockImplementation(() => {
+      now += 0.5;
+      return { ...viewport, width: 27, height: 32 };
+    });
+    let calls = 0;
+    const packing = vi
+      .spyOn(placement, 'layoutLabelsDetailed')
+      .mockImplementation((labels) => {
+        now += ++calls === 1 ? 2 : 3;
+        return {
+          placements: labels.map(({ id }) => ({
+            id,
+            visible: true,
+            dx: 0,
+            dy: 0,
+            compact: true,
+          })),
+          status: 'complete',
+          stats: {
+            operations: calls === 1 ? 12 : 7,
+            candidates: calls === 1 ? 4 : 2,
+            nodes: 1,
+            backtracks: 0,
+            elapsedMs: calls === 1 ? 2 : 3,
+            greedyComplete: true,
+          },
+        };
+      });
+    const clock = vi.fn(() => now);
+    const registry = createRoomLabelRegistry(vi.fn(), undefined, undefined, {
+      clock,
+    });
+    const cleanup = registry.connect(canvas);
+    registry.register('shelf-1a', item.element, item.leader, {
+      priority: 4,
+      mandatory: true,
+      compact: true,
+      locationCode: 'ITC-S1A',
+    });
+    flush();
+    const snapshot = window.__roomLabelLayoutSnapshot!;
+    expect(packing).toHaveBeenCalledTimes(2);
+    expect(item.element.getBoundingClientRect).toHaveBeenCalledTimes(5);
+    expect(full.getBoundingClientRect).toHaveBeenCalledTimes(4);
+    expect(snapshot.runtime).toMatchObject({
+      terminal: 'complete',
+      timing: { source: 'runtime', elapsedMs: 9.5, solverElapsedMs: 5 },
+    });
+    const entries = snapshot.runtime!.timing.stages.filter(
+      ({ stage }) => stage === 'solver-entry',
+    );
+    expect(entries).toEqual([
+      {
+        stage: 'solver-entry',
+        pass: 1,
+        elapsedMs: 1,
+        remainingMilliseconds: 15,
+        remainingOperations: 1_999_997,
+        remainingCandidates: 50_000,
+        remainingNodes: 4096,
+        remainingInputs: 128,
+        remainingCandidatesPerLabel: 4096,
+      },
+      {
+        stage: 'solver-entry',
+        pass: 2,
+        elapsedMs: 5.5,
+        remainingMilliseconds: 10.5,
+        remainingOperations: 1_999_978,
+        remainingCandidates: 49_996,
+        remainingNodes: 4095,
+        remainingInputs: 128,
+        remainingCandidatesPerLabel: 4096,
+      },
+    ]);
+    entries.forEach((entry, index) =>
+      expect(packing.mock.calls[index][3]).toMatchObject({
+        maxMilliseconds: entry.remainingMilliseconds,
+        maxOperations: entry.remainingOperations,
+        maxCandidates: entry.remainingCandidates,
+        maxNodes: entry.remainingNodes,
+      }),
+    );
+    expect(snapshot.runtime!.timing.stages.map(({ stage }) => stage)).toEqual([
+      'initial-measurement-start',
+      'initial-measurement-end',
+      'solver-entry',
+      'solver-end',
+      'dom-application-start',
+      'dom-application-end',
+      'remeasurement-start',
+      'remeasurement-end',
+      'pass-measurement-start',
+      'pass-measurement-end',
+      'solver-entry',
+      'solver-end',
+      'dom-application-start',
+      'dom-application-end',
+      'remeasurement-start',
+      'remeasurement-end',
+      'terminal',
+    ]);
+    expect(snapshot.lastAttempt).toMatchObject({
+      transaction: 1,
+      terminal: 'complete',
+      elapsedMs: 9.5,
+      solverElapsedMs: 5,
+      passCount: 2,
+    });
+    cleanup();
+  });
+  it('adds no clock calls, DOM reads, or solver calls with diagnostics disabled', () => {
+    const host = document.createElement('div'),
+      canvas = document.createElement('canvas');
+    host.append(canvas);
+    document.body.append(host);
+    vi.spyOn(canvas, 'getBoundingClientRect').mockReturnValue(viewport);
+    const item = label(host),
+      clock = vi.fn(() => 0);
+    const packing = vi
+      .spyOn(placement, 'layoutLabelsDetailed')
+      .mockImplementation((labels) => ({
+        placements: labels.map(({ id }) => ({
+          id,
+          visible: true,
+          dx: 0,
+          dy: 0,
+          compact: false,
+        })),
+        status: 'complete',
+        stats: {
+          operations: 1,
+          candidates: 1,
+          nodes: 0,
+          backtracks: 0,
+          elapsedMs: 0,
+          greedyComplete: true,
+        },
+      }));
+    const registry = createRoomLabelRegistry(vi.fn(), undefined, undefined, {
+      clock,
+    });
+    const cleanup = registry.connect(canvas);
+    registry.register('shelf-1a', item.element, item.leader, { priority: 4 });
+    flush();
+    expect(clock).toHaveBeenCalledTimes(9);
+    expect(item.element.getBoundingClientRect).toHaveBeenCalledTimes(2);
+    expect(packing).toHaveBeenCalledOnce();
+    expect(window.__roomLabelLayoutSnapshot).toBeUndefined();
+    cleanup();
+  });
+  it.each(['missing-host', 'unmeasured-viewport'] as const)(
+    'publishes the %s terminal path from the runtime clock',
+    (reason) => {
+      window.__roomLayoutDiagnosticsEnabled = true;
+      const canvas = document.createElement('canvas');
+      if (reason === 'unmeasured-viewport') {
+        const host = document.createElement('div');
+        host.append(canvas);
+        document.body.append(host);
+      }
+      let now = 7;
+      vi.spyOn(canvas, 'getBoundingClientRect').mockImplementation(() => {
+        now += 3;
+        return reason === 'unmeasured-viewport'
+          ? { ...viewport, width: 0 }
+          : viewport;
+      });
+      const registry = createRoomLabelRegistry(vi.fn(), undefined, undefined, {
+        clock: () => now,
+      });
+      const cleanup = registry.connect(canvas);
+      flush();
+      expect(window.__roomLabelLayoutSnapshot).toMatchObject({
+        transaction: 1,
+        complete: false,
+        passes: [],
+        failure: reason,
+        runtime: {
+          terminal: reason,
+          timing: { source: 'runtime', elapsedMs: 3, solverElapsedMs: 0 },
+        },
+        lastAttempt: {
+          transaction: 1,
+          terminal: reason,
+          elapsedMs: 3,
+          passCount: 0,
+        },
+      });
+      cleanup();
+    },
+  );
+
   it('retains the last actual failed diagnostic attempt on suppressed keys and retries a changed obstruction', () => {
     window.__roomLayoutDiagnosticsEnabled = true;
     const host = document.createElement('div'),
@@ -132,7 +452,25 @@ describe('unified room label registry', () => {
       flush();
     }
     expect(packing).toHaveBeenCalledOnce();
-    expect(window.__roomLabelLayoutSnapshot).toBe(snapshot);
+    expect(window.__roomLabelLayoutSnapshot!.passes).toBe(snapshot!.passes);
+    expect(window.__roomLabelLayoutSnapshot!.runtime).toBe(snapshot!.runtime);
+    expect(window.__roomLabelLayoutSnapshot).toMatchObject({
+      transaction: 1,
+      passes: snapshot!.passes,
+      runtime: snapshot!.runtime,
+      lastAttempt: {
+        transaction: 4,
+        terminal: 'cached-suppression',
+        cacheSourceTransaction: 1,
+        passCount: 0,
+      },
+      recentTransactions: [
+        { transaction: 1, terminal: 'budget-exhausted' },
+        { transaction: 2, terminal: 'cached-suppression' },
+        { transaction: 3, terminal: 'cached-suppression' },
+        { transaction: 4, terminal: 'cached-suppression' },
+      ],
+    });
     expect(snapshot!.passes[0].solver).toMatchObject({
       status: 'budget-exhausted',
       stats: {
@@ -147,14 +485,14 @@ describe('unified room label registry', () => {
     registry.schedule();
     flush();
     expect(packing).toHaveBeenCalledTimes(2);
-    expect(window.__roomLabelLayoutSnapshot!.transaction).toBe(2);
+    expect(window.__roomLabelLayoutSnapshot!.transaction).toBe(5);
     expect(window.__roomLabelLayoutSnapshot!.passes[0].reserved[0].left).toBe(
       121,
     );
     registry.retry();
     flush();
     expect(packing).toHaveBeenCalledTimes(3);
-    expect(window.__roomLabelLayoutSnapshot!.transaction).toBe(3);
+    expect(window.__roomLabelLayoutSnapshot!.transaction).toBe(6);
     expect(queue).toHaveLength(0);
     cleanup();
   });
@@ -196,6 +534,19 @@ describe('unified room label registry', () => {
       settled: false,
       passes: [],
       failure: 'measurement-budget',
+      runtime: {
+        terminal: 'measurement-budget',
+        timing: {
+          source: 'runtime',
+          elapsedMs: 20,
+          solverElapsedMs: 0,
+          stages: [
+            { stage: 'initial-measurement-start', elapsedMs: 0 },
+            { stage: 'initial-measurement-end', elapsedMs: 20 },
+            { stage: 'terminal', elapsedMs: 20 },
+          ],
+        },
+      },
     });
     expect(window.__roomLabelLayoutSnapshot!.error).toBeUndefined();
     expect(canvas.dataset.labelLayoutRevision).toBe(revision);
@@ -205,6 +556,91 @@ describe('unified room label registry', () => {
     expect(queue).toHaveLength(0);
     cleanup();
   });
+
+  it.each(['placement-budget', 'measurement-budget'] as const)(
+    'records whole elapsed time at %s after solver work',
+    (reason) => {
+      window.__roomLayoutDiagnosticsEnabled = true;
+      const host = document.createElement('div'),
+        canvas = document.createElement('canvas');
+      host.append(canvas);
+      document.body.append(host);
+      vi.spyOn(canvas, 'getBoundingClientRect').mockReturnValue(viewport);
+      const item = label(host);
+      let now = 0,
+        reads = 0;
+      vi.mocked(item.element.getBoundingClientRect).mockImplementation(() => {
+        if (++reads > 1) now += 20;
+        return {
+          ...viewport,
+          left: 50,
+          top: 30,
+          right: 95,
+          bottom: 48,
+          width: 45,
+          height: 18,
+        };
+      });
+      const packing = vi
+        .spyOn(placement, 'layoutLabelsDetailed')
+        .mockImplementation((labels) => {
+          now += 1;
+          return {
+            placements:
+              reason === 'placement-budget'
+                ? []
+                : labels.map(({ id }) => ({
+                    id,
+                    visible: true,
+                    dx: 0,
+                    dy: 0,
+                    compact: false,
+                  })),
+            status: 'budget-exhausted',
+            stats: {
+              operations: 2,
+              candidates: 1,
+              nodes: 0,
+              backtracks: 0,
+              elapsedMs: 1,
+              greedyComplete: false,
+            },
+          };
+        });
+      const registry = createRoomLabelRegistry(vi.fn(), undefined, undefined, {
+        clock: () => now,
+      });
+      const cleanup = registry.connect(canvas);
+      registry.register('shelf-1a', item.element, item.leader, { priority: 4 });
+      flush();
+      const snapshot = window.__roomLabelLayoutSnapshot!;
+      expect(snapshot).toMatchObject({
+        complete: false,
+        settled: false,
+        failure: reason,
+        runtime: {
+          terminal: reason,
+          timing: {
+            source: 'runtime',
+            elapsedMs: reason === 'placement-budget' ? 1 : 21,
+            solverElapsedMs: 1,
+          },
+        },
+        lastAttempt: { transaction: 1, terminal: reason, passCount: 1 },
+      });
+      expect(snapshot.runtime!.timing.stages.at(-1)).toMatchObject({
+        stage: 'terminal',
+        elapsedMs: reason === 'placement-budget' ? 1 : 21,
+      });
+      expect(packing).toHaveBeenCalledOnce();
+      expect(item.element.getBoundingClientRect).toHaveBeenCalledTimes(
+        reason === 'placement-budget' ? 1 : 2,
+      );
+      expect(item.element).toHaveAttribute('aria-hidden', 'true');
+      expect(canvas.dataset.labelLayoutPending).toBe('false');
+      cleanup();
+    },
+  );
   it('physical pick reservation keeps its own label off the current exposed mesh point', () => {
     const host = document.createElement('div'),
       canvas = document.createElement('canvas');
@@ -1055,6 +1491,7 @@ describe('unified room label registry', () => {
     },
   );
   it('fails explicitly at the synchronous remeasurement bound instead of publishing unstable placement', () => {
+    window.__roomLayoutDiagnosticsEnabled = true;
     const host = document.createElement('div'),
       canvas = document.createElement('canvas');
     host.append(canvas);
@@ -1071,14 +1508,23 @@ describe('unified room label registry', () => {
       height: 18,
     }));
     const notify = vi.fn(),
-      registry = createRoomLabelRegistry(notify),
+      registry = createRoomLabelRegistry(notify, undefined, undefined, {
+        clock: () => 0,
+      }),
       cleanup = registry.connect(canvas);
-    registry.register('unstable', item.element, item.leader, {
+    registry.register('shelf-1a', item.element, item.leader, {
       priority: 4,
       mandatory: true,
     });
     flush();
     expect(reads).toBe(8);
+    expect(window.__roomLabelLayoutSnapshot).toMatchObject({
+      failure: 'unstable-dimensions',
+      lastAttempt: { passCount: 4 },
+    });
+    expect(
+      window.__roomLabelLayoutSnapshot!.runtime!.timing.stages,
+    ).toHaveLength(33);
     expect(canvas.dataset.labelLayoutPending).toBe('false');
     expect(canvas.dataset.labelLayoutStatus).toBe('budget-exhausted');
     expect(canvas.dataset.labelLayoutError).toMatch(/four placement passes/);
