@@ -137,6 +137,262 @@ function inside(area: LabelArea, viewport: LabelArea) {
   );
 }
 
+// One bounded geometric domain for equal unprotected compact footprints.
+// Shared by preferred recovery and heterogeneous fallback; neither may publish
+// an incomplete replacement or treat a failed row lattice as capacity proof.
+function sharedCompactLayout(
+  units: LabelRect[],
+  ordered: LabelRect[],
+  viewport: LabelArea,
+  protectedPins: LabelPlacement[],
+  obstacles: LabelArea[],
+  control: {
+    take(kind?: 'operations' | 'candidates' | 'nodes'): boolean;
+    checkpoint(): boolean;
+    stop(): void;
+    maxCandidatesPerLabel: number;
+    conflicts(area: LabelArea, others: LabelArea[]): boolean;
+  },
+): LabelPlacement[] | null {
+  const { take, checkpoint, conflicts } = control;
+  const pinnedIds = new Set<string>(),
+    remaining: LabelRect[] = [];
+  for (const pin of protectedPins) {
+    if (!take()) return null;
+    pinnedIds.add(pin.id);
+  }
+  let width = 0,
+    height = 0;
+  for (const label of units) {
+    if (!take()) return null;
+    if (pinnedIds.has(label.id)) continue;
+    const size = label.compact;
+    if (
+      !hasFiniteAnchor(label) ||
+      label.selected ||
+      label.focused ||
+      label.hovered ||
+      label.pointer ||
+      label.holdCompact ||
+      !size ||
+      !Number.isFinite(size.width) ||
+      !Number.isFinite(size.height) ||
+      size.width < 44 ||
+      size.height < 44 ||
+      (label.previous &&
+        (!Number.isFinite(label.previous.dx) ||
+          !Number.isFinite(label.previous.dy)))
+    )
+      return null;
+    if (!remaining.length) {
+      width = size.width;
+      height = size.height;
+    } else if (width !== size.width || height !== size.height) return null;
+    remaining.push(label);
+  }
+  if (
+    !remaining.length ||
+    ![viewport.left, viewport.top, viewport.right, viewport.bottom].every(
+      Number.isFinite,
+    )
+  )
+    return null;
+  const seeds = [viewport.top + EDGE, viewport.bottom - EDGE - height];
+  for (const obstacle of obstacles) {
+    if (!take()) return null;
+    if (
+      ![obstacle.left, obstacle.top, obstacle.right, obstacle.bottom].every(
+        Number.isFinite,
+      ) ||
+      obstacle.left >= obstacle.right ||
+      obstacle.top >= obstacle.bottom
+    )
+      return null;
+    seeds.push(obstacle.bottom + GAP, obstacle.top - GAP - height);
+  }
+  const stride = height + GAP,
+    tops = new Set<number>();
+  for (const seed of seeds) {
+    if (!take()) return null;
+    const first = Math.ceil((viewport.top + EDGE - seed) / stride),
+      last = Math.floor((viewport.bottom - EDGE - height - seed) / stride);
+    if (!Number.isSafeInteger(first) || !Number.isSafeInteger(last))
+      return null;
+    for (let offset = first; offset <= last; offset++) {
+      if (!take()) return null;
+      const top = seed + offset * stride;
+      if (!Number.isFinite(top) || tops.has(top)) continue;
+      if (tops.size >= control.maxCandidatesPerLabel) {
+        control.stop();
+        return null;
+      }
+      tops.add(top);
+    }
+  }
+  if (!checkpoint()) return null;
+  const orderedTops = [...tops].sort((a, b) => {
+    if (!take()) return 0;
+    return a - b;
+  });
+  if (!checkpoint()) return null;
+  const rows: { top: number; slots: LabelArea[] }[] = [];
+  let generated = 0;
+  for (const top of orderedTops) {
+    if (!take()) return null;
+    const slots: LabelArea[] = [];
+    const intervals: { low: number; high: number }[] = [];
+    for (const obstacle of obstacles) {
+      if (!take()) return null;
+      if (top < obstacle.bottom + GAP && top + height + GAP > obstacle.top) {
+        const low = obstacle.left - GAP - width,
+          high = obstacle.right + GAP;
+        if (!Number.isFinite(low) || !Number.isFinite(high)) return null;
+        intervals.push({ low, high });
+      }
+    }
+    if (!checkpoint()) return null;
+    intervals.sort((a, b) => {
+      if (!take()) return 0;
+      return a.low - b.low || a.high - b.high;
+    });
+    if (!checkpoint()) return null;
+    let interval = 0;
+    let left = viewport.left + EDGE;
+    while (left + width <= viewport.right - EDGE) {
+      if (!take()) return null;
+      const area = { left, top, right: left + width, bottom: top + height };
+      if (!inside(area, viewport)) break;
+      while (interval < intervals.length && left >= intervals[interval].high) {
+        if (!take()) return null;
+        interval++;
+      }
+      const blocked = intervals[interval];
+      // Raw OPEN forbidden intervals. A start clipped to the viewport would
+      // falsely permit a rectangle already inside an obstruction; equality
+      // at either raw endpoint remains a valid exact GAP boundary.
+      if (blocked && left > blocked.low && left < blocked.high) {
+        left = blocked.high;
+        continue;
+      }
+      if (generated >= control.maxCandidatesPerLabel) {
+        control.stop();
+        return null;
+      }
+      if (!take('candidates')) return null;
+      generated++;
+      slots.push(area);
+      const after = left + width + GAP;
+      if (!(after > left)) return null;
+      left = after;
+    }
+    if (slots.length) rows.push({ top, slots });
+  }
+  // Weighted interval scheduling over compatible rows. One state per row,
+  // bounded by the same node budget as heterogeneous geometric recovery.
+  const counts: number[] = [],
+    previous: number[] = [],
+    chosen: boolean[] = [];
+  for (let index = 0; index < rows.length; index++) {
+    if (!take('nodes')) return null;
+    let low = 0,
+      high = index;
+    while (low < high) {
+      if (!take()) return null;
+      const mid = Math.floor((low + high) / 2);
+      if (rows[mid].top + stride <= rows[index].top) low = mid + 1;
+      else high = mid;
+    }
+    const predecessor = low - 1;
+    const yes =
+        (predecessor < 0 ? 0 : counts[predecessor]) + rows[index].slots.length,
+      no = index ? counts[index - 1] : 0;
+    previous.push(predecessor);
+    chosen.push(yes > no);
+    counts.push(Math.max(yes, no));
+  }
+  if (!counts.length || counts.at(-1)! < remaining.length) return null;
+  const available: LabelArea[] = [];
+  for (let index = rows.length - 1; index >= 0;) {
+    if (!take()) return null;
+    if (!chosen[index]) {
+      index--;
+      continue;
+    }
+    for (const slot of rows[index].slots) {
+      if (!take()) return null;
+      available.push(slot);
+    }
+    index = previous[index];
+  }
+  const solved = new Map<string, LabelPlacement>(),
+    verified: LabelArea[] = [];
+  for (const pin of protectedPins) {
+    if (!take()) return null;
+    solved.set(pin.id, pin);
+  }
+  for (const label of remaining) {
+    if (!take('nodes')) return null;
+    const origin = label.previous ?? { dx: 0, dy: 0 };
+    let best = -1,
+      distance = Infinity,
+      horizontal = Infinity,
+      bestDy = Infinity,
+      bestDx = Infinity;
+    for (let index = 0; index < available.length; index++) {
+      if (!take()) return null;
+      const dx = available[index].left - label.left,
+        dy = available[index].top - label.top;
+      const deltaX = Math.abs(dx - origin.dx),
+        delta = deltaX + Math.abs(dy - origin.dy);
+      if (
+        best < 0 ||
+        delta < distance ||
+        (delta === distance &&
+          (deltaX < horizontal ||
+            (deltaX === horizontal &&
+              (dy < bestDy || (dy === bestDy && dx < bestDx)))))
+      ) {
+        best = index;
+        distance = delta;
+        horizontal = deltaX;
+        bestDy = dy;
+        bestDx = dx;
+      }
+    }
+    if (best < 0) return null;
+    const placement = {
+      id: label.id,
+      visible: true,
+      compact: true,
+      dx: bestDx,
+      dy: bestDy,
+    };
+    const area = areaOf(label, placement);
+    // Prove the actual anchor-relative rectangle, including cancellation
+    // rounding, before publishing any replacement of the verified greedy set.
+    if (
+      !inside(area, viewport) ||
+      conflicts(area, obstacles) ||
+      conflicts(area, verified)
+    )
+      return null;
+    verified.push(area);
+    solved.set(label.id, placement);
+    // Preference comparison includes both coordinates, so removing by swap
+    // cannot change any geometric tie and avoids a linear array shift.
+    available[best] = available[available.length - 1];
+    available.pop();
+  }
+  const result: LabelPlacement[] = [];
+  for (const label of ordered) {
+    if (!take()) return null;
+    result.push(
+      solved.get(label.id) ?? { id: label.id, visible: false, dx: 0, dy: 0 },
+    );
+  }
+  return checkpoint() ? result : null;
+}
+
 function preferredLayout(
   labels: LabelRect[],
   viewport: LabelArea,
@@ -689,10 +945,69 @@ function preferredLayout(
         consider(candidate.placements);
       }
     };
+    // A newly selected full label can leave a feasible compact region whose
+    // rows are offset by the measured full footprint and physical anchors.
+    // Solve that shared geometry before spending the remaining frame on many
+    // directional grids and selected-position trials. Keep the current verified
+    // full selected rectangle and every live focus/hover/pointer pin unchanged.
+    if (
+      protectedPlacements.some(
+        (pin) => sources.get(pin.id)!.selected && !pin.compact,
+      )
+    ) {
+      const units: LabelRect[] = [],
+        codes = new Set<string>();
+      for (const label of ordered) {
+        if (!take()) break;
+        if (
+          !(label.mandatory || label.selected) ||
+          codes.has(logicalKey(label))
+        )
+          continue;
+        const pinned = protectedPlacements.find(
+          (pin) => logicalKey(sources.get(pin.id)!) === logicalKey(label),
+        );
+        units.push(pinned ? sources.get(pinned.id)! : label);
+        codes.add(logicalKey(label));
+      }
+      const areas: LabelArea[] = [];
+      let validPins = true;
+      const conflicts = (area: LabelArea, others: LabelArea[]) =>
+        others.some((other) => !take() || overlaps(area, other));
+      for (const pin of protectedPlacements) {
+        if (!take()) {
+          validPins = false;
+          break;
+        }
+        const area = areaOf(pin);
+        if (
+          !inside(area, viewport) ||
+          conflicts(area, [...reserved, ...areas])
+        ) {
+          validPins = false;
+          break;
+        }
+        areas.push(area);
+      }
+      if (validPins && checkpoint()) {
+        const shared = sharedCompactLayout(
+          units,
+          ordered,
+          viewport,
+          protectedPlacements,
+          [...reserved, ...areas],
+          { ...control, conflicts },
+        );
+        if (shared && coverage(shared) === mandatoryCodes.size) {
+          placements = shared;
+          bestCoverage = mandatoryCodes.size;
+        }
+      }
+    }
     // Try the current pinned footprints first. Optional full hover text must
     // not consume the selected-position search budget before mandatory actions
     // can use its pointer-contained compact footprint.
-    consider(protectedPlacements);
+    if (bestCoverage < mandatoryCodes.size) consider(protectedPlacements);
     if (bestCoverage < mandatoryCodes.size)
       for (const prior of protectedPlacements) {
         if (!take()) break;
@@ -996,253 +1311,6 @@ export function layoutLabelsDetailed(
     // Equal unprotected footprints share one geometric domain. Solve occupancy
     // first, then assign identities; permutations cannot create additional room.
     // An unsuccessful row lattice says nothing about general feasibility.
-    const sharedCompactLayout = (
-      protectedPins: LabelPlacement[],
-      obstacles: LabelArea[],
-    ): LabelPlacement[] | null => {
-      phase = 'shared-slots';
-      const pinnedIds = new Set<string>(),
-        remaining: LabelRect[] = [];
-      for (const pin of protectedPins) {
-        if (!take()) return null;
-        pinnedIds.add(pin.id);
-      }
-      let width = 0,
-        height = 0;
-      for (const label of units) {
-        if (!take()) return null;
-        if (pinnedIds.has(label.id)) continue;
-        const size = label.compact;
-        if (
-          !hasFiniteAnchor(label) ||
-          label.selected ||
-          label.focused ||
-          label.hovered ||
-          label.pointer ||
-          label.holdCompact ||
-          !size ||
-          !Number.isFinite(size.width) ||
-          !Number.isFinite(size.height) ||
-          size.width < 44 ||
-          size.height < 44 ||
-          (label.previous &&
-            (!Number.isFinite(label.previous.dx) ||
-              !Number.isFinite(label.previous.dy)))
-        )
-          return null;
-        if (!remaining.length) {
-          width = size.width;
-          height = size.height;
-        } else if (width !== size.width || height !== size.height) return null;
-        remaining.push(label);
-      }
-      if (
-        !remaining.length ||
-        ![viewport.left, viewport.top, viewport.right, viewport.bottom].every(
-          Number.isFinite,
-        )
-      )
-        return null;
-      const seeds = [viewport.top + EDGE, viewport.bottom - EDGE - height];
-      for (const obstacle of obstacles) {
-        if (!take()) return null;
-        if (
-          ![obstacle.left, obstacle.top, obstacle.right, obstacle.bottom].every(
-            Number.isFinite,
-          ) ||
-          obstacle.left >= obstacle.right ||
-          obstacle.top >= obstacle.bottom
-        )
-          return null;
-        seeds.push(obstacle.bottom + GAP, obstacle.top - GAP - height);
-      }
-      const stride = height + GAP,
-        tops = new Set<number>();
-      for (const seed of seeds) {
-        if (!take()) return null;
-        const first = Math.ceil((viewport.top + EDGE - seed) / stride),
-          last = Math.floor((viewport.bottom - EDGE - height - seed) / stride);
-        if (!Number.isSafeInteger(first) || !Number.isSafeInteger(last))
-          return null;
-        for (let offset = first; offset <= last; offset++) {
-          if (!take()) return null;
-          const top = seed + offset * stride;
-          if (!Number.isFinite(top) || tops.has(top)) continue;
-          if (tops.size >= budget.maxCandidatesPerLabel) {
-            stop('per-label');
-            return null;
-          }
-          tops.add(top);
-        }
-      }
-      if (!checkpoint()) return null;
-      const orderedTops = [...tops].sort((a, b) => {
-        if (!take()) return 0;
-        return a - b;
-      });
-      if (!checkpoint()) return null;
-      const rows: { top: number; slots: LabelArea[] }[] = [];
-      let generated = 0;
-      for (const top of orderedTops) {
-        if (!take()) return null;
-        const slots: LabelArea[] = [];
-        const intervals: { low: number; high: number }[] = [];
-        for (const obstacle of obstacles) {
-          if (!take()) return null;
-          if (
-            top < obstacle.bottom + GAP &&
-            top + height + GAP > obstacle.top
-          ) {
-            const low = obstacle.left - GAP - width,
-              high = obstacle.right + GAP;
-            if (!Number.isFinite(low) || !Number.isFinite(high)) return null;
-            intervals.push({ low, high });
-          }
-        }
-        if (!checkpoint()) return null;
-        intervals.sort((a, b) => {
-          if (!take()) return 0;
-          return a.low - b.low || a.high - b.high;
-        });
-        if (!checkpoint()) return null;
-        let interval = 0;
-        let left = viewport.left + EDGE;
-        while (left + width <= viewport.right - EDGE) {
-          if (!take()) return null;
-          const area = { left, top, right: left + width, bottom: top + height };
-          if (!inside(area, viewport)) break;
-          while (
-            interval < intervals.length &&
-            left >= intervals[interval].high
-          ) {
-            if (!take()) return null;
-            interval++;
-          }
-          const blocked = intervals[interval];
-          // Raw OPEN forbidden intervals. A start clipped to the viewport would
-          // falsely permit a rectangle already inside an obstruction; equality
-          // at either raw endpoint remains a valid exact GAP boundary.
-          if (blocked && left > blocked.low && left < blocked.high) {
-            left = blocked.high;
-            continue;
-          }
-          if (generated >= budget.maxCandidatesPerLabel) {
-            stop('per-label');
-            return null;
-          }
-          if (!take('candidates')) return null;
-          generated++;
-          slots.push(area);
-          const after = left + width + GAP;
-          if (!(after > left)) return null;
-          left = after;
-        }
-        if (slots.length) rows.push({ top, slots });
-      }
-      // Weighted interval scheduling over compatible rows. One state per row,
-      // bounded by the same node budget as heterogeneous geometric recovery.
-      const counts: number[] = [],
-        previous: number[] = [],
-        chosen: boolean[] = [];
-      for (let index = 0; index < rows.length; index++) {
-        if (!take('nodes')) return null;
-        let low = 0,
-          high = index;
-        while (low < high) {
-          if (!take()) return null;
-          const mid = Math.floor((low + high) / 2);
-          if (rows[mid].top + stride <= rows[index].top) low = mid + 1;
-          else high = mid;
-        }
-        const predecessor = low - 1;
-        const yes =
-            (predecessor < 0 ? 0 : counts[predecessor]) +
-            rows[index].slots.length,
-          no = index ? counts[index - 1] : 0;
-        previous.push(predecessor);
-        chosen.push(yes > no);
-        counts.push(Math.max(yes, no));
-      }
-      if (!counts.length || counts.at(-1)! < remaining.length) return null;
-      const available: LabelArea[] = [];
-      for (let index = rows.length - 1; index >= 0;) {
-        if (!take()) return null;
-        if (!chosen[index]) {
-          index--;
-          continue;
-        }
-        for (const slot of rows[index].slots) {
-          if (!take()) return null;
-          available.push(slot);
-        }
-        index = previous[index];
-      }
-      const solved = new Map<string, LabelPlacement>(),
-        verified: LabelArea[] = [];
-      for (const pin of protectedPins) {
-        if (!take()) return null;
-        solved.set(pin.id, pin);
-      }
-      for (const label of remaining) {
-        if (!take('nodes')) return null;
-        const origin = label.previous ?? { dx: 0, dy: 0 };
-        let best = -1,
-          distance = Infinity,
-          horizontal = Infinity,
-          bestDy = Infinity,
-          bestDx = Infinity;
-        for (let index = 0; index < available.length; index++) {
-          if (!take()) return null;
-          const dx = available[index].left - label.left,
-            dy = available[index].top - label.top;
-          const deltaX = Math.abs(dx - origin.dx),
-            delta = deltaX + Math.abs(dy - origin.dy);
-          if (
-            best < 0 ||
-            delta < distance ||
-            (delta === distance &&
-              (deltaX < horizontal ||
-                (deltaX === horizontal &&
-                  (dy < bestDy || (dy === bestDy && dx < bestDx)))))
-          ) {
-            best = index;
-            distance = delta;
-            horizontal = deltaX;
-            bestDy = dy;
-            bestDx = dx;
-          }
-        }
-        if (best < 0) return null;
-        const placement = {
-          id: label.id,
-          visible: true,
-          compact: true,
-          dx: bestDx,
-          dy: bestDy,
-        };
-        const area = areaOf(label, placement);
-        // Prove the actual anchor-relative rectangle, including cancellation
-        // rounding, before publishing any replacement of the verified greedy set.
-        if (
-          !inside(area, viewport) ||
-          conflicts(area, obstacles) ||
-          conflicts(area, verified)
-        )
-          return null;
-        verified.push(area);
-        solved.set(label.id, placement);
-        // Preference comparison includes both coordinates, so removing by swap
-        // cannot change any geometric tie and avoids a linear array shift.
-        available[best] = available[available.length - 1];
-        available.pop();
-      }
-      const result: LabelPlacement[] = [];
-      for (const label of ordered) {
-        if (!take()) return null;
-        result.push(solved.get(label.id) ?? hidden(label));
-      }
-      return checkpoint() ? result : null;
-    };
     for (const protectedPins of variants) {
       if (exhausted) break;
       const protectedAreas: LabelArea[] = [];
@@ -1260,7 +1328,21 @@ export function layoutLabelsDetailed(
       }
       if (!validPins) continue;
       const obstacles = [...reserved, ...protectedAreas];
-      const shared = sharedCompactLayout(protectedPins, obstacles);
+      phase = 'shared-slots';
+      const shared = sharedCompactLayout(
+        units,
+        ordered,
+        viewport,
+        protectedPins,
+        obstacles,
+        {
+          take,
+          checkpoint,
+          stop: () => stop('per-label'),
+          maxCandidatesPerLabel: budget.maxCandidatesPerLabel,
+          conflicts,
+        },
+      );
       if (shared && coverage(shared) === mandatory.size) {
         placements = shared;
         status = 'complete';

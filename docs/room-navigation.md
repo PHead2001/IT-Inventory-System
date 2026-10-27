@@ -289,8 +289,12 @@ visibility, scheduling or the ordinary user flow; it does not establish a repair
 
 Failed preferred packing can use one shared geometric slot domain when every
 remaining unpinned mandatory action has the same finite compact footprint of at
-least 44px. Selected full text, unpinned focus/hover/pointer actions and mixed
-footprints retain the existing general fallback. Existing validated focus/hover
+least 44px. Preferred recovery first tries this domain around its currently
+verified full selected rectangle, before directional grids and selected-position
+trials. That rectangle uses this pass's measured full dimensions and remains an
+exact obstacle; it is never replaced by a compact selected variant. Unpinned
+selected/focus/hover/pointer actions and mixed footprints retain the existing
+general fallback. Existing validated focus/hover
 pins and physical/UI reservations remain exact obstacles. Obstacle-edge row
 seeds and raw open horizontal forbidden intervals generate separated slots once;
 weighted row scheduling chooses compatible rows without permuting identical
@@ -320,6 +324,16 @@ viewport containment and 3px separation from every reservation/placement under
 the unchanged count limits. Local replay timing does not certify the browser's
 shared DOM/solver 16ms window; new exact-candidate hosted off/on, all-angle,
 keyboard/touch and ordinary full validation/review remain required.
+
+The actual6cd selected fixture preserves all 28 mandatory identities and 29
+reservations from one recorded solver call in an incomplete transaction. Its
+`measurement-budget` abort is retained explicitly: the input is usable for solver
+regression, but does not prove settled DOM, complete physical geometry, synthetic
+long-text completion, or a successful hosted journey. An independently checked
+synthetic 238x118 full footprint cannot fit anywhere among these captured physical
+reservations and remains explicitly incomplete under the unchanged fallback.
+Those dimensions are not a captured CI or hosted long-text measurement. No
+partial shared candidate is published as a complete replacement.
 
 ## Session-owned glow and grounding
 
