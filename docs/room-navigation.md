@@ -287,6 +287,40 @@ layout telemetry) at `fit-open-selected-before-long-text` and rethrows the origi
 assertion. This supplies an observed replay fixture without changing placement,
 visibility, scheduling or the ordinary user flow; it does not establish a repair.
 
+Failed preferred packing can use one shared geometric slot domain when every
+remaining unpinned mandatory action has the same finite compact footprint of at
+least 44px. Selected full text, unpinned focus/hover/pointer actions and mixed
+footprints retain the existing general fallback. Existing validated focus/hover
+pins and physical/UI reservations remain exact obstacles. Obstacle-edge row
+seeds and raw open horizontal forbidden intervals generate separated slots once;
+weighted row scheduling chooses compatible rows without permuting identical
+location identities. Existing ordered identities then take the nearest remaining
+certified slot using the existing L1/horizontal/vertical/coordinate tie rules.
+This is a deterministic preference, not a global displacement or capacity optimum.
+Every actual anchor-relative assigned rectangle is checked against the viewport,
+reservations, protected pins and preceding assignments before publication, then
+the ordinary final proof and optional expansion still run.
+
+The shared path consumes the same 16ms deadline, 2,000,000 operations, 50,000
+candidates, 4,096 nodes, 128 combined inputs and 4,096 per-label candidate ceiling.
+Row coordinates and the common slot pool each respect that per-label ceiling;
+slot construction consumes candidate work, row scheduling/assignment consumes
+node work, and loops/sort comparisons/proofs consume operation/deadline work.
+An insufficient lattice falls through to general recovery; an unfinished or
+capped attempt remains budget-exhausted and never establishes infeasibility.
+The opt-in diagnostic phase enum includes `shared-slots`, with all prior privacy,
+copy/freeze and byte/entry/pass bounds preserved. Strict external capture readers
+must accept that fixed enum when preparing a new source-bound hosted run.
+
+The permanent regression fixture is the actual captured 80d below-scroll input:
+27 mandatory compact 44px actions and 28 reservations, with source receipt/hash
+provenance. It is distinct from the older inferred translated 28-label research
+case. Independent geometry checks prove full actual-input logical coverage,
+viewport containment and 3px separation from every reservation/placement under
+the unchanged count limits. Local replay timing does not certify the browser's
+shared DOM/solver 16ms window; new exact-candidate hosted off/on, all-angle,
+keyboard/touch and ordinary full validation/review remain required.
+
 ## Session-owned glow and grounding
 
 Fine-pointer hover lifts only the visual child by 0.1 inches and brightens its edge;

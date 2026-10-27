@@ -338,6 +338,7 @@ function solver(value: Pick<LabelLayoutResult, 'status' | 'stats'>) {
       ![
         'input',
         'preferred',
+        'shared-slots',
         'candidate-axes',
         'candidate-domain',
         'search',

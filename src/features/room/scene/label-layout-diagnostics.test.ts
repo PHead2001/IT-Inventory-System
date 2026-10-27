@@ -1,5 +1,10 @@
 import { expect, it } from 'vitest';
-import { layoutLabels, type LabelRect } from './label-layout';
+import {
+  layoutLabels,
+  layoutLabelsDetailed,
+  type LabelRect,
+} from './label-layout';
+import actualBelow from '../../../../tests/fixtures/room/actual-80d-more-below.json';
 import {
   createLabelLayoutDiagnostics,
   createRoomVisibilityDiagnostics,
@@ -133,6 +138,31 @@ function harness() {
   const target = { __roomLayoutDiagnosticsEnabled: true } as Window;
   return { target, capture: createLabelLayoutDiagnostics(target)! };
 }
+it('captures actual bounded shared-slot exhaustion through the existing opt-in schema', () => {
+  const { target, capture } = harness(),
+    { labels, viewport: bounds, reserved } = actualBelow.input;
+  const result = layoutLabelsDetailed(
+    labels,
+    bounds,
+    reserved,
+    { maxNodes: 0 },
+    () => 0,
+  );
+  expect(result.status).toBe('budget-exhausted');
+  expect(result.stats.exhaustion).toEqual({
+    reason: 'nodes',
+    phase: 'shared-slots',
+  });
+  capture.begin();
+  capture.input(labels, bounds, reserved);
+  capture.solver(result);
+  capture.output(result.placements);
+  capture.finish(true);
+  expect(target.__roomLabelLayoutSnapshot!.complete).toBe(true);
+  expect(
+    target.__roomLabelLayoutSnapshot!.passes[0].solver!.stats.exhaustion,
+  ).toEqual(result.stats.exhaustion);
+});
 it('copies bounded solver work and first exhaustion metadata without mutating or leaking extra fields', () => {
   const { target, capture } = harness();
   const result = {
