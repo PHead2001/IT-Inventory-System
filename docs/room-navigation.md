@@ -84,6 +84,23 @@ Another route's history event never becomes room selection.
 
 Use simple reusable geometry and restrained lighting, a capped device pixel ratio and demand rendering. Physical material colors are retained; accent edges/emissive feedback mark selection and other geometry dims slightly until clearing it. Full motion permits one bounded selection pulse; Reduced motion uses a static highlight. Standard adds cached contact shadows and lazy selective bloom; Low keeps contacts without bloom, and Off disables both. Static corner grounding and a clipped floor grid retain depth. Controls, relevant hover changes, bounded visibility/focus transitions, contact refreshes and the brief Full-motion pulse request finite extra frames. Nonessential pulses stop offscreen or in a hidden document; the camera stays idle at rest. The canvas exposes passive camera telemetry for real-interaction browser assertions; it cannot set camera state.
 
+Selected full location labels derive their maximum width from R3F's actual canvas
+CSS width before crossing the independent Html root. The outer cap is the canvas
+width minus 30px, bounded to 44–298px; its existing 18px inline padding/border leaves
+a text cap of 26–280px. A 315px canvas therefore permits 285px outer/267px text.
+The Html root, selected button (or noninteractive preview) and nested full span
+share that cap; nonselected labels and focused/hovered compact expansions retain
+their existing bounds. Selected buttons and noninteractive previews explicitly
+restore normal/anywhere wrapping despite the camera-facing Html parent’s nowrap;
+deselected previews retain their original inherited nowrap. Font sizes, complete
+names and exact count text are unchanged.
+Existing ResizeObserver/font remeasurement, physical-pick reservations, focus pins,
+four-pass packing and the shared 16ms/work limits remain authoritative. Component
+regressions prove width transfer/cascade, resize and deselection without claiming
+browser line wrapping or height. Frozen-clock geometry replay is separate evidence;
+the unchanged canonical 375px hosted journey must still prove actual reflow,
+complete placement and timing on the new candidate.
+
 ## Shared spatial composition and embedded maps
 
 Modeled selection uses one immutable scope/generation/request/code token for a
