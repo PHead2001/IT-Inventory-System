@@ -264,7 +264,7 @@ test('a template that grows after path stat is read within a fixed budget and re
   }
 });
 
-test('database start/reset prepare templates before CLI and permission failure blocks CLI', (t) => {
+test('database start/reset isolate port checks and block mutations or CLI on prerequisite failure', (t) => {
   const cwd = mkdtempSync(join(tmpdir(), 'local-auth-db-order-'));
   t.after(() => rmSync(cwd, { recursive: true, force: true }));
   const scripts = join(cwd, 'scripts');
@@ -278,42 +278,79 @@ test('database start/reset prepare templates before CLI and permission failure b
     `export const npm = args => console.log('cli:' + args.slice(3).join(' ')); export const localStatus = () => ({}); export const node = () => {}; export const localTestEnv = () => ({});`,
   );
   writeFileSync(
+    join(scripts, 'local-supabase-ports.mjs'),
+    `export const preflightLocalSupabasePorts = () => { console.log('preflight'); if (process.env.FIXTURE_REJECT_PORTS) throw new Error('fixture ports rejected'); };`,
+  );
+  writeFileSync(
     join(scripts, 'local-storage-version.mjs'),
-    `export const installLocalStorageVersion = () => {}; export const verifyLocalStorageRuntime = () => {};`,
+    `export const installLocalStorageVersion = () => console.log('storage:install'); export const verifyLocalStorageRuntime = () => console.log('storage:verify');`,
   );
   writeFileSync(
     join(scripts, 'local-auth-templates.mjs'),
     `export const prepareLocalAuthTemplates = () => { console.log('prepare'); if (process.env.FIXTURE_REJECT) throw new Error('fixture rejected'); }; export const verifyLocalAuthTemplates = async phase => console.log('verify:' + phase);`,
   );
+  const environment = { ...process.env };
+  delete environment.FIXTURE_REJECT;
+  delete environment.FIXTURE_REJECT_PORTS;
+  // This imports the real entrypoint with explicit local stubs for every tool
+  // boundary. Never copy the real port preflight into this isolated fixture:
+  // the same contract must not enumerate Windows ports or contact Docker.
   for (const [command, cli, phase] of [
     ['start', 'start', 'startup'],
     ['reset', 'db reset --local', 'reset'],
   ]) {
+    const beforePrepare =
+      command === 'start'
+        ? ['preflight', 'storage:install']
+        : ['storage:verify'];
     const output = execFileSync(
       process.execPath,
       [join(scripts, 'db.mjs'), command],
-      { encoding: 'utf8', cwd },
+      { env: environment, encoding: 'utf8', cwd, timeout: 10_000 },
     );
     assert.deepEqual(output.trim().split(/\r?\n/), [
+      ...beforePrepare,
       'prepare',
       'cli:' + cli,
+      ...(command === 'start' ? ['storage:verify'] : []),
       'verify:' + phase,
     ]);
     assert.throws(
       () =>
         execFileSync(process.execPath, [join(scripts, 'db.mjs'), command], {
-          env: { ...process.env, FIXTURE_REJECT: '1' },
+          env: { ...environment, FIXTURE_REJECT: '1' },
           encoding: 'utf8',
           stdio: 'pipe',
           cwd,
+          timeout: 10_000,
         }),
       (error) => {
-        assert.equal(error.stdout.trim(), 'prepare');
+        assert.deepEqual(error.stdout.trim().split(/\r?\n/), [
+          ...beforePrepare,
+          'prepare',
+        ]);
         assert.match(error.stderr, /fixture rejected/);
         return true;
       },
     );
   }
+  assert.throws(
+    () =>
+      execFileSync(process.execPath, [join(scripts, 'db.mjs'), 'start'], {
+        env: { ...environment, FIXTURE_REJECT_PORTS: '1' },
+        encoding: 'utf8',
+        stdio: 'pipe',
+        cwd,
+        timeout: 10_000,
+      }),
+    (error) => {
+      // A port conflict must stop before the version pin writes, template
+      // preparation, CLI startup and post-start service verification.
+      assert.equal(error.stdout.trim(), 'preflight');
+      assert.match(error.stderr, /fixture ports rejected/);
+      return true;
+    },
+  );
 });
 test('preserves configuration, mounts, health check, aliases and existing environment', () => {
   const original = snapshot();
