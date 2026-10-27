@@ -1330,6 +1330,11 @@ optional Sharp dependency resolve to 0.35.5. React and React DOM remain 19.3.0.
 Linux native Sharp loading, file inspection, the complete CI gate and authenticated
 fragment browser journeys remain required candidate evidence.
 
+The observed Next 16.4.1 preview CSS references bundled fonts under
+`/_next/static/immutable/media/`. Both label/font browser checks accept that path
+and the existing `/_next/static/media/` path while retaining same-origin,
+computed-family, loaded-face and two-distinct-WOFF2 requirements.
+
 The bounded Windows check for this upgrade omits
 `tests/unit/compiled-settings-contract.test.mjs`: its synthetic Flight renderer
 explicitly requests a 768 MiB child heap, above the local 512 MiB limit. The test
