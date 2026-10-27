@@ -16,30 +16,39 @@ function router(format) {
   const prefix = format === 'esm' ? 'dist/esm/client/' : 'dist/client/';
   let entry;
   const tree = { segment: 'inventory', slots: null };
+  const root = { tree, head: tree };
+  const render = () => ({
+    tree: { route: tree, node: tree },
+    head: { node: tree },
+  });
   const cache = {
     EntryStatus: { Fulfilled: 2 },
     segmentCacheMap: {},
-    convertRootFlightRouterStateToRouteTree: (_tree, _query, acc) => {
-      acc.metadataVaryPath = {};
-      return tree;
-    },
-    writeRouteIntoCache: (_now, _path, _search, _next, tree, meta, _i, url) => {
+    createRootRouteTree: (tree, head) => ({ tree, head }),
+    writeRouteIntoCache: (
+      _now,
+      _path,
+      _search,
+      _next,
+      root,
+      _i,
+      url,
+      search,
+    ) => {
       entry = {
         status: 2,
         canonicalUrl: url,
-        tree,
-        metadata: { varyPath: meta },
-        renderedSearch: '',
+        root,
+        renderedSearch: search,
       };
       return entry;
     },
-    fulfillRouteCacheEntry: (_now, pending, tree, meta, _i, url) => {
+    fulfillRouteCacheEntry: (_now, pending, root, _i, url, search) => {
       entry = Object.assign(pending, {
         status: 2,
         canonicalUrl: url,
-        tree,
-        metadata: { varyPath: meta },
-        renderedSearch: '',
+        root,
+        renderedSearch: search,
       });
       return entry;
     },
@@ -57,12 +66,24 @@ function router(format) {
       extractPathFromFlightRouterState: () => '/inventory',
       computeChangedPath: () => '/inventory',
     },
-    'flight-data-helpers': {
-      getFlightDataPartsFromPath: () => ({ tree, seedData: null, head: null }),
+    'rsc-transport': { transportNodeToFlightRouterState: () => tree },
+    'decode-server-response': {
+      createNavigationSeed: (
+        _now,
+        _base,
+        _data,
+        _vary,
+        _partial,
+        _path,
+        search,
+      ) => ({
+        root,
+        renderedSearch: search,
+      }),
     },
-    'ppr-navigations': {
-      createInitialCacheNodeForHydration: () => ({ route: tree, node: {} }),
-      startPPRNavigation: () => ({ route: tree, node: {} }),
+    'render-tree': {
+      createInitialRenderTreeForHydration: render,
+      startPPRNavigation: render,
       spawnDynamicRequests: () => {},
       FreshnessPolicy: { Gesture: 99 },
     },
@@ -100,12 +121,16 @@ function router(format) {
   const hydration = load(
     'components/router-reducer/create-initial-router-state.js',
   );
-  const navigation = load('components/segment-cache/navigation.js');
+  const navigation = load('components/app-router-state.js');
   return {
     hydrate: (href) =>
       hydration.createInitialRouterState({
         navigatedAt: 0,
-        initialRSCPayload: { c: ['', 'inventory'], f: [{}], q: '' },
+        initialRSCPayload: {
+          c: ['', 'inventory'],
+          t: { t: {} },
+          q: new URL(href, 'https://inventory.invalid').search,
+        },
         location: new URL(href, 'https://inventory.invalid'),
       }),
     learn: (href, pending) => {
@@ -116,15 +141,16 @@ function router(format) {
         url.search,
         null,
         pending,
-        tree,
-        {},
+        root,
         false,
         href,
+        url.search,
         false,
         false,
       );
     },
     cached: () => entry.canonicalUrl,
+    renderedSearch: () => entry.renderedSearch,
     navigate: (state, href) => {
       const current = new URL(
         '/inventory/quantity/cable',
@@ -135,7 +161,7 @@ function router(format) {
         new URL(href, current),
         current,
         '',
-        {},
+        root,
         tree,
         null,
         0,
@@ -167,6 +193,9 @@ describe.each(['cjs', 'esm'])('installed Next %s route cache', (format) => {
     // Exercise the actual cached navigation, not a reimplementation of its URL.
     expect(runtime.navigate(state, back).canonicalUrl).toBe(back);
     expect(runtime.cached()).toBe(initial.split('#', 1)[0]);
+    expect(runtime.renderedSearch()).toBe(
+      new URL(initial, 'https://inventory.invalid').search,
+    );
   });
 
   it.each([null, {}])(
@@ -181,12 +210,13 @@ describe.each(['cjs', 'esm'])('installed Next %s route cache', (format) => {
       const state = {
         tree: {},
         nextUrl: '/inventory/quantity/cable',
-        focusAndScrollRef: { scrollRef: null },
+        scrollRef: { scrollRef: null },
       };
       expect(
         runtime.navigate(state, '/inventory?q=Cable%23USB&type=quantity#b')
           .canonicalUrl,
       ).toBe('/inventory?q=Cable%23USB&type=quantity#b');
+      expect(runtime.renderedSearch()).toBe('?q=Cable%23USB&type=quantity');
     },
   );
 });

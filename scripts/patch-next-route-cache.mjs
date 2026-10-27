@@ -6,25 +6,25 @@ import { fileURLToPath } from 'node:url';
 // Next #96714/#96737: every learned route shares its cache entry across hashes.
 // Keep the document/router URL intact; normalize only the cache insertion input.
 const declaration =
-  'function discoverKnownRoute(now, pathname, search, nextUrl, pendingEntry, routeTree, metadataVaryPath, couldBeIntercepted, canonicalUrl, supportsPerSegmentPrefetching, hasDynamicRewrite) {';
+  'function discoverKnownRoute(now, pathname, search, nextUrl, pendingEntry, root, couldBeIntercepted, canonicalUrl, renderedSearch, supportsPerSegmentPrefetching, hasDynamicRewrite) {';
 const correctedDeclaration =
   declaration + "\n    canonicalUrl = canonicalUrl.split('#', 1)[0];";
 export const nextRouteCacheCorrection = Object.freeze({
-  version: '16.3.6',
+  version: '16.4.1',
   files: Object.freeze([
     Object.freeze({
       path: 'dist/client/components/segment-cache/optimistic-routes.js',
       original:
-        '8f97399f7df417fc086919388dab380eddd0d459e841254f7279331707db7235',
+        '850079e6252f707eea33a7f76ac3026b336be695bbe469296abe1cc2029cbf8f',
       corrected:
-        '77a54f6ff5006d218fef4eab741438a44d0d7021a5b96517dd0122483f6a141c',
+        '4e31ac6e0be53ca2c7938200d783340470edc780028364b754ac4317a07e5b43',
     }),
     Object.freeze({
       path: 'dist/esm/client/components/segment-cache/optimistic-routes.js',
       original:
-        '66dec328d6b9e8a92086347dc4d192b750b9d761fc16b33199c7f93121d74c99',
+        'dca57922923963447a768239952c0b99629db1a3f6596949c175d36bc4670ead',
       corrected:
-        '87b56daf93aac4b74257ba0c338c8876040859d932c866efda3b5965172207e7',
+        '3ef12ee7886d4aaae649f730020b6f28cbcb8af72f8e0b7680b06335b761d99d',
     }),
   ]),
 });
@@ -39,7 +39,7 @@ export function patchNextRouteCache({
   const installed = JSON.parse(read(resolve(nextRoot, 'package.json'), 'utf8'));
   if (installed.version !== nextRouteCacheCorrection.version)
     throw new Error(
-      'Next route-cache correction requires reviewed Next 16.3.6.',
+      'Next route-cache correction requires reviewed Next 16.4.1.',
     );
   // Read and validate both module formats before the first write. A changed or
   // upgraded dependency must be reviewed, never silently patched or accepted.
