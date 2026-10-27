@@ -6,15 +6,21 @@ import { isPrivacyGenerationRead } from './privacy-read-request';
  * Referrer cannot identify this request: the app sends no-referrer. */
 export async function holdTaskCleanupRead(page: Page, cleanHref: string) {
   const clean = new URL(cleanHref);
+  const record = /^\/inventory\/(assets|quantity)\/[0-9a-f-]{36}$/.exec(
+    clean.pathname,
+  );
   if (
     clean.origin !== new URL(page.url()).origin ||
     clean.search ||
     clean.hash ||
-    !/^\/inventory\/assets\/[0-9a-f-]{36}$/.test(clean.pathname)
+    !record
   )
-    throw new Error('Expected an exact clean owned asset URL.');
+    throw new Error('Expected an exact clean owned inventory URL.');
   const task = new URL(clean);
-  task.searchParams.set('task', 'asset_move');
+  task.searchParams.set(
+    'task',
+    record[1] === 'assets' ? 'asset_move' : 'quantity_move',
+  );
   let stage: 'task' | 'clean' | 'ready' | 'retired' = 'task';
   const observed = new WeakSet<Request>();
   let postCleanupReadObserved = false;
