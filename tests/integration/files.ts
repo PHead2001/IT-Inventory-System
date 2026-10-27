@@ -17,8 +17,8 @@ function local(value: string | undefined, port: number) {
   assert.equal(Number(url.port), port);
   return value;
 }
-const url = local(process.env.LOCAL_API_URL, 54321);
-const dbUrl = local(process.env.LOCAL_DB_URL, 54322);
+const url = local(process.env.LOCAL_API_URL, 45321);
+const dbUrl = local(process.env.LOCAL_DB_URL, 45322);
 const anonKey = process.env.LOCAL_ANON_KEY!;
 const adminKey = process.env.LOCAL_SERVICE_ROLE_KEY!;
 assert.ok(anonKey && adminKey);

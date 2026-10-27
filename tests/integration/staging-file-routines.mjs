@@ -36,7 +36,7 @@ export function localStorageFixture(
 ) {
   const target = new URL(environment.LOCAL_DB_URL);
   assert.ok(['localhost', '127.0.0.1', '[::1]'].includes(target.hostname));
-  assert.equal(target.port, '54322');
+  assert.equal(target.port, '45322');
   assert.equal(target.pathname, '/postgres');
   const container = 'supabase_db_it-inventory';
   const childEnv = { ...environment };
@@ -117,7 +117,7 @@ export function localStorageFixture(
   assert.ok(
     Array.isArray(ports) &&
       ports.length > 0 &&
-      ports.every((port) => port.HostPort === '54322'),
+      ports.every((port) => port.HostPort === '45322'),
   );
   const input = `set application_name='cp5-storage-binding-${randomUUID()}';
 begin;

@@ -18,7 +18,7 @@ export async function cleanupClockChecks(
 ) {
   const target = new URL(dbUrl);
   assert.ok(['localhost', '127.0.0.1', '[::1]'].includes(target.hostname));
-  assert.equal(target.port, '54322');
+  assert.equal(target.port, '45322');
   let checks = 0;
   const keyBefore = (
     await db.query(

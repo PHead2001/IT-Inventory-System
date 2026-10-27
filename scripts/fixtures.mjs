@@ -4,7 +4,7 @@ import authFixture from '../tests/fixtures/auth.json' with { type: 'json' };
 export const fixturePassword = authFixture.password;
 export const fixtureEmails = authFixture.emails;
 export async function seedUsers(status) {
-  assertLocalUrl(status.API_URL, 54321);
+  assertLocalUrl(status.API_URL, 45321);
   const admin = createClient(status.API_URL, status.SERVICE_ROLE_KEY, {
     auth: { persistSession: false, autoRefreshToken: false },
   });

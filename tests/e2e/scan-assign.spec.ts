@@ -85,7 +85,7 @@ async function generatedLabel(
 async function seedInactiveScanSource(itemId: string, suffix: string) {
   const target = new URL(process.env.LOCAL_DB_URL!);
   expect(['localhost', '127.0.0.1', '[::1]']).toContain(target.hostname);
-  expect(target.port).toBe('54322');
+  expect(target.port).toBe('45322');
   expect(target.pathname).toBe('/postgres');
   const parentId = randomUUID(),
     sourceId = randomUUID();

@@ -1,14 +1,14 @@
 project_id = "it-inventory"
 [api]
 enabled = true
-port = 54321
+port = 45321
 schemas = ["public"]
 extra_search_path = ["public", "extensions"]
 max_rows = 1000
 auto_expose_new_tables = false
 [db]
-port = 54322
-shadow_port = 54320
+port = 45322
+shadow_port = 45320
 major_version = 17
 [db.migrations]
 enabled = true
@@ -20,11 +20,11 @@ sql_paths = ["./seed.sql"]
 enabled = false
 [studio]
 enabled = true
-port = 54323
+port = 45323
 api_url = "http://127.0.0.1"
 [local_smtp]
 enabled = true
-port = 54324
+port = 45324
 [storage]
 enabled = true
 [auth]

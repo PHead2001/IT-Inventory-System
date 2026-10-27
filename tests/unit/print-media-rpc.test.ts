@@ -11,7 +11,7 @@ describe('print-media concurrency fixture dispatch', () => {
           release = resolve;
         }),
     );
-    const client = createClient('http://127.0.0.1:54321', 'offline-test-key', {
+    const client = createClient('http://127.0.0.1:45321', 'offline-test-key', {
       auth: {
         persistSession: false,
         autoRefreshToken: false,
@@ -31,7 +31,7 @@ describe('print-media concurrency fixture dispatch', () => {
     // it commits. Awaiting pending first would deadlock that test sequence.
     await vi.waitFor(() => expect(fetch).toHaveBeenCalledTimes(1));
     expect(fetch.mock.calls[0]).toEqual([
-      'http://127.0.0.1:54321/rest/v1/rpc/label_defaults_update',
+      'http://127.0.0.1:45321/rest/v1/rpc/label_defaults_update',
       expect.objectContaining({
         method: 'POST',
         body: JSON.stringify({ p_request_id: requestId, p_payload: payload }),

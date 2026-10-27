@@ -8,7 +8,7 @@ assert.ok(
   ['127.0.0.1', 'localhost', '[::1]'].includes(apiUrl.hostname),
   'Refusing nonlocal Auth test target',
 );
-assert.equal(apiUrl.port, '54321', 'Refusing unexpected Auth test port');
+assert.equal(apiUrl.port, '45321', 'Refusing unexpected Auth test port');
 assert.equal(apiUrl.pathname, '/', 'Refusing unexpected Auth test path');
 const url = apiUrl.origin;
 const anon = process.env.LOCAL_ANON_KEY!;

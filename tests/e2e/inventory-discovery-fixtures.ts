@@ -8,7 +8,7 @@ import fixture from '../fixtures/auth.json' with { type: 'json' };
 export async function discoveryFixture() {
   const endpoint = new URL(process.env.LOCAL_API_URL!);
   expect(['localhost', '127.0.0.1', '[::1]']).toContain(endpoint.hostname);
-  expect(endpoint.port).toBe('54321');
+  expect(endpoint.port).toBe('45321');
   const caller = createClient(
     endpoint.href,
     process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY!,

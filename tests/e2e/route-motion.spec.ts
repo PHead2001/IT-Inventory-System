@@ -840,7 +840,7 @@ async function withMotionActor(
 ) {
   const api = new URL(process.env.LOCAL_API_URL!);
   expect(['localhost', '127.0.0.1']).toContain(api.hostname);
-  expect(api.port).toBe('54321');
+  expect(api.port).toBe('45321');
   const admin = createClient(api.href, process.env.LOCAL_SERVICE_ROLE_KEY!, {
     auth: { persistSession: false, autoRefreshToken: false },
   });

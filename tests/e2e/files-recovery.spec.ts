@@ -11,7 +11,7 @@ import { chooseLocation } from './location-picker';
 function localDatabase() {
   const url = new URL(process.env.LOCAL_DB_URL ?? '');
   expect(['127.0.0.1', 'localhost']).toContain(url.hostname);
-  expect(url.port).toBe('54322');
+  expect(url.port).toBe('45322');
   return new Client({ connectionString: url.toString() });
 }
 
@@ -235,7 +235,7 @@ test('Next recovers after a real derived Storage guard rejection', async ({
     expect(restored.rowCount).toBe(1);
     const api = process.env.LOCAL_API_URL;
     const anon = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY;
-    expect(api).toMatch(/^http:\/\/(127\.0\.0\.1|localhost):54321$/);
+    expect(api).toMatch(/^http:\/\/(127\.0\.0\.1|localhost):45321$/);
     expect(anon).toBeTruthy();
     const actor = createClient(api!, anon!, {
       auth: { persistSession: false, autoRefreshToken: false },
@@ -368,7 +368,7 @@ test('Next recovers after a real derived Storage guard rejection', async ({
         if (state.rows[0] && state.rows[0].state !== 'ready') {
           const api = process.env.LOCAL_API_URL;
           const anon = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY;
-          expect(api).toMatch(/^http:\/\/(127\.0\.0\.1|localhost):54321$/);
+          expect(api).toMatch(/^http:\/\/(127\.0\.0\.1|localhost):45321$/);
           expect(anon).toBeTruthy();
           const actor = createClient(api!, anon!, {
             auth: { persistSession: false, autoRefreshToken: false },
