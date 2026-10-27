@@ -26,6 +26,28 @@ PR #47 also integrates the PR #46 merge at main `25d2140f11943036ff3f7f8b6975271
 
 ## Authority and evidence register
 
+The October 27 local D402/W12 integration on `assist/audit-four-theme-foundation`
+starts at `7febcf4a074ac5273407af6bbd2abc2aba26e3cf` and selectively reuses only
+the 37-path theme slice from `60f7f12bc8f3913ca136973ff3171c4ac91c3fb4`.
+Current route/command/readiness/privacy ownership and production scene code remain
+authoritative. Its native Windows cycle passes fresh normal install, 735 tests in
+33 suites and scoped lint/format against retained local manifest
+`b3fcab1b68c737ef8a5989430f1945d75a96a6de971b218ad070aaca57b98d38`.
+The subsequent three-document evidence update is separate from those test inputs.
+Full types/build/CI/fresh review and hosted/native theme acceptance remain pending;
+all 76 matrix rows and dispositions remain unchanged. See
+[theme preferences](theme-preferences.md#october-27-current-main-integration).
+
+The historical October 21 local D402/W12 reconciliation on `assist/audit-four-theme-oct21`
+starts at PR57 `ffd5165a935e03d463b5deb6ca41748e6920fdba` and selectively reuses
+bounded theme commit `dd71647541eae2b54b1080a1318b0bcbc339ac17`. Existing route,
+command, native-task, original-binding privacy and guarded scene authority remain
+in place. Focused source checks and independent boundary review are separate
+from runtime acceptance. All 76 matrix rows and dispositions remain unchanged;
+Dark/Light/System first paint, native reveal, rendered contrast, print/PDF and
+live GPU/media continuity remain pending. See
+[theme preferences](theme-preferences.md#october-21-local-reconciliation).
+
 - **S0 — source audit:** `Inventory Audit 4_2.md`, item headings, Product decisions, Verification notes and Test fixtures. Its reported staging revision is `fd1ac06e6d60f2a8b8f2c4d80684d58ad8ba2558` (`fd1ac06e` in the audit), at `https://it-inventory-system-git-staging-phead2002.vercel.app`, authenticated Staff. Reported viewports: approximately 696×897, 1100×900, 375×812; Audit 5 additions: 1180×757. These are source observations, not fresh reproductions. Audit 5 had no WebGL; its fallback observations cannot certify the scene. Missing linked figures and Audit 5 captures remain source-evidence limits.
 - **G0 — authorized goal:** `IT_Inventory_Goal_Audit_4_2_Complete_Implementation.md`, exhaustive index and sections 1–8. Its N01–N07 aliases map to the audit's seven Smaller nits in order. The goal explicitly authorizes the full feature/wow scope and supplies the more precise contracts summarized below; the source's former priority/defer language does not remove that scope.
 - **B0 — implementation baseline:** fetched main supplied by the lead; local worktree HEAD verified as `77ad0544ab68d59f7ea5642c80b147322da59c50`, branch `assist/audit-four-history`. B0 identifies the local Git baseline only; E1 separately records the lead's provider and browser observations of that same revision on staging. Neither the local Git check nor those limited observations establish candidate acceptance or future PR-backend write isolation.

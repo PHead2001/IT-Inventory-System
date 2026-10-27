@@ -30,6 +30,32 @@ repair removes a timing vulnerability; unavailable historical assertion details 
 not establish it as the cause of the prior failure. Exact-candidate canonical
 browser execution and full certification are required separately.
 
+## Theme foundation integration checkpoint
+
+The local D402/W12 foundation on `assist/audit-four-theme-foundation` selectively
+reuses only the 37-path theme slice from `60f7f12bc8f3913ca136973ff3171c4ac91c3fb4`
+against current-main baseline `7febcf4a074ac5273407af6bbd2abc2aba26e3cf`.
+Current route/command/native-task
+authority, original-binding privacy grants and the guarded, coalesced production
+ScenePalette remain authoritative. Joined ordering regressions require auxiliary
+capture withdrawal before navigation, pending or private theme cancellation.
+Historical test evidence remains bound to its earlier candidate; the current
+local results and pending checks are recorded in
+[theme preferences](theme-preferences.md#october-27-current-main-integration).
+
+The native Windows working-tree cycle passes fresh normal `npm ci` with both
+postinstall corrections, 735 tests in 33 disjoint suites, zero-warning lint for
+29 JavaScript/TypeScript paths and formatting for all 37 candidate paths. The
+512 MiB, one-worker batches preserve their exact 88 inputs and all 76 acceptance
+rows. Their retained manifest is
+`b3fcab1b68c737ef8a5989430f1945d75a96a6de971b218ad070aaca57b98d38`;
+the subsequent three-document evidence update is separate from those test inputs.
+
+Full types, build, database, exact-SHA CI and fresh review remain pending. Real
+Dark/Light/System first paint, native circle/System crossfade, rendered contrast,
+print/PDF and live media/GPU continuity require separate runtime proof. Authored
+browser probes are not execution evidence. No acceptance row is promoted here.
+
 ## Spatial composition source slice
 
 ### Occupancy snapshots and flight interruption witnesses

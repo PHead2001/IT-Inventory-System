@@ -8,6 +8,7 @@ import { MotionToggle } from '@/components/experience/motion-preference';
 import { BuildInfo } from '@/features/build-info/build-info';
 import { readBuildProvenance } from '@/features/build-info/read.server';
 import { ShortcutPreference } from '@/features/commands/command-provider';
+import { ThemeControl } from '@/components/experience/theme-preference';
 
 const sections = [
   {
@@ -76,6 +77,7 @@ export default async function SettingsPage({
               system&apos;s reduced-motion preference always applies.
             </p>
             <MotionToggle />
+            <ThemeControl />
             <ShortcutPreference />
             <RoomEffectsPreference />
           </section>

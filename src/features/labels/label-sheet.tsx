@@ -393,7 +393,7 @@ function LabelCard({
   ]);
   return (
     <article
-      className="label-card flex shrink-0 flex-col border border-slate-700 bg-white p-[2mm] text-black"
+      className="label-card flex shrink-0 flex-col border border-[var(--print-border)] bg-white p-[2mm] text-black"
       style={{ width: `${width}mm`, height: `${height}mm` }}
       data-sheet-generation={generation}
       data-text-measured={measuredGeneration === measurementKey}

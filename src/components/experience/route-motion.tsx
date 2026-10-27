@@ -1,4 +1,10 @@
 'use client';
+import {
+  bindPrivateSnapshotEligibility,
+  bindRouteSnapshotPending,
+  cancelThemeSnapshot,
+} from './native-transition-owner';
+import { useThemeScopeReset } from './theme-preference';
 
 import {
   createContext,
@@ -144,6 +150,9 @@ export function RouteMotionProvider({
 }) {
   const privacy = usePrivacyReadiness();
   const privacyRevision = usePrivacyRevocationRevision();
+  const resetThemeScope = useThemeScopeReset();
+  const initialThemeRevision = useRef(readPrivacyRevocationRevision());
+  const themeWithdrawn = useRef(false);
   const latestPrivacy = useRef(privacy);
   const [mountedActor] = useState(actorId);
   const liveScrollActor = useRef(actorId);
@@ -252,6 +261,7 @@ export function RouteMotionProvider({
         )
           return;
         const epoch = pending.snapshot().epoch;
+        cancelThemeSnapshot();
         const closeMotion = state.beginNavigation(href, epoch);
         const closeReturn = applicationReturn.beginNavigation(href, epoch);
         return {
@@ -273,6 +283,7 @@ export function RouteMotionProvider({
         )
           return;
         auxiliary.withdraw();
+        cancelThemeSnapshot();
         commands.navigation(commandDestination(href));
         applicationReturn.acceptNavigation(href, pending.snapshot().epoch);
         navigationObservers.forEach((observer) => {
@@ -483,6 +494,22 @@ export function RouteMotionProvider({
     const reconcileAuxiliary = () => auxiliary.reconcile();
     const unbindAuxiliaryState = state.subscribe(reconcileAuxiliary);
     const unbindAuxiliaryPending = pending.subscribe(reconcileAuxiliary);
+    const unbindThemeEligibility = bindPrivateSnapshotEligibility(
+      () =>
+        lifecycleRef.current &&
+        currentRouteProvider === providerToken &&
+        mountedActor === liveScrollActor.current &&
+        !suspended.current &&
+        state.valid() &&
+        latestPrivacy.current.generation !== 'unmanaged' &&
+        freshPresentationGrant(latestPrivacy.current),
+    );
+    const unbindThemePending = bindRouteSnapshotPending(
+      () => pending.snapshot().pending,
+    );
+    const unbindPendingTheme = pending.subscribe(() => {
+      if (pending.snapshot().pending) cancelThemeSnapshot();
+    });
     const readAuthority = () => {
       const value = latestPrivacy.current;
       if (
@@ -519,6 +546,9 @@ export function RouteMotionProvider({
       presentation.invalidate();
       latestPrivacy.current.navigation?.retire(providerToken);
       // Invalidate the store generation before cancellation can invoke apply.
+      auxiliary.withdraw();
+      themeWithdrawn.current = true;
+      resetThemeScope();
       state.suspend();
       loading.cancel();
       pending.suspend();
@@ -543,6 +573,9 @@ export function RouteMotionProvider({
         acceptedGrant.current = null;
         presentation.invalidate();
         latestPrivacy.current.navigation?.retire(providerToken);
+        auxiliary.withdraw();
+        themeWithdrawn.current = true;
+        resetThemeScope();
         loading.cancel();
         pending.cancel(true);
         readiness.close();
@@ -575,15 +608,23 @@ export function RouteMotionProvider({
     return () => {
       commands.retire(false);
       auxiliary.withdraw();
+      const ownsDocument = currentRouteProvider === providerToken;
+      lifecycleRef.current = false;
+      if (ownsDocument) {
+        document.documentElement.dataset.routeMotionPrivate = 'false';
+        themeWithdrawn.current = true;
+        resetThemeScope(false);
+      }
       unobserveAuxiliary();
       unbindAuxiliaryWithdrawal();
       unbindAuxiliaryState();
       unbindAuxiliaryPending();
       unbindPrivacy();
+      unbindThemeEligibility();
+      unbindThemePending();
+      unbindPendingTheme();
       unbindNavigation?.();
       unbind();
-      const ownsDocument = currentRouteProvider === providerToken;
-      lifecycleRef.current = false;
       navigationObservers.clear();
       nativeScroll.dispose();
       applicationReturn.dispose();
@@ -616,6 +657,7 @@ export function RouteMotionProvider({
     applicationReturn,
     navigationObservers,
     auxiliary,
+    resetThemeScope,
   ]);
   useLayoutEffect(() => {
     if (!lifecycleRef.current || currentRouteProvider !== providerToken) return;
@@ -644,12 +686,25 @@ export function RouteMotionProvider({
       state.valid() &&
       retainedPresentationGrantCurrent(privacy, acceptedGrant.current)
     )) {
+      // Keep parser paint only through this mount's initial verification. This
+      // supplies no private grant, readiness, or native snapshot capability.
+      const retainBootstrap =
+        mountedActor === actorId &&
+        !themeWithdrawn.current &&
+        acceptedGrant.current === null &&
+        initialThemeRevision.current === readPrivacyRevocationRevision() &&
+        !privacy.ready;
       commands.retire();
       document.documentElement.dataset.routeMotionPrivate = 'false';
       suspended.current = true;
       acceptedGrant.current = null;
       presentation.invalidate();
       latestPrivacy.current.navigation?.retire(providerToken);
+      auxiliary.withdraw();
+      if (!retainBootstrap) {
+        themeWithdrawn.current = true;
+        resetThemeScope();
+      }
       state.suspend();
       loading.cancel();
       pending.suspend();
@@ -674,6 +729,8 @@ export function RouteMotionProvider({
     commands,
     mountedActor,
     applicationReturn,
+    auxiliary,
+    resetThemeScope,
   ]);
   useEffect(() => {
     nativeScroll.attach();
@@ -756,6 +813,9 @@ export function RouteMotionProvider({
       loading.cancel();
       pending.cancel(true);
       readiness.close();
+      auxiliary.withdraw();
+      themeWithdrawn.current = true;
+      resetThemeScope();
       invalidateRouteMotion(state);
     };
     const {
@@ -809,6 +869,8 @@ export function RouteMotionProvider({
     commands,
     nativeScroll,
     applicationReturn,
+    auxiliary,
+    resetThemeScope,
   ]);
   useEffect(() => {
     // Next may redirect through its own router, without an accepted Link event.
@@ -862,6 +924,9 @@ export function RouteMotionProvider({
           suspended.current = true;
           acceptedGrant.current = null;
           presentation.invalidate();
+          auxiliary.withdraw();
+          themeWithdrawn.current = true;
+          resetThemeScope();
         },
         beginLogoutAttempt: () => {
           const current = () =>

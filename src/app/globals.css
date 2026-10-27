@@ -1,4 +1,6 @@
 @import 'tailwindcss';
+@import '../components/experience/theme-palette.css';
+@import '../components/experience/theme-controls.css';
 @theme inline {
   --font-sans: var(--font-ui), system-ui, sans-serif;
   --font-mono: var(--font-code), Consolas, monospace;
