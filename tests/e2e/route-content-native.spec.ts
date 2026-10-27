@@ -532,8 +532,13 @@ for (const change of ['shrink', 'grow'] as const) {
     const height = next.height + (change === 'shrink' ? -880 : 880);
     await mount(page, old, false, true);
     await begin(page, next);
+    const before = await page.locator('[data-hero]').boundingBox();
     await page.evaluate(
       (height) => window.routeGeometry.mutateTrailing(height),
+      height,
+    );
+    expect(await page.locator('[data-hero]').boundingBox()).toEqual(before);
+    expect((await page.locator('[data-body]').boundingBox())!.height).toBe(
       height,
     );
     const { png, styles } = await frame(

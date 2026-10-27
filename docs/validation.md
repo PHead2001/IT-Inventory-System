@@ -1340,6 +1340,15 @@ The bounded Windows check for this upgrade omits
 explicitly requests a 768 MiB child heap, above the local 512 MiB limit. The test
 and its assertions remain unchanged and mandatory in the complete Linux CI gate.
 
+The native route geometry negative controls now assert the forced incoming height
+and `object-fit: fill` before checking distorted pixels; the paired natural fixture
+checks unchanged live hero geometry and unscaled landmarks. The earlier negative
+control failed with 768 natural pixels. With explicit fixture preconditions, all
+60 standalone Windows cases passed without retries; Linux execution remains pending.
+The file chooser witness records bounded, structural diagnostics through chooser
+acquisition and preserves the original global keyboard Enter and native chooser.
+It supplies failure evidence, not a claimed chooser fix.
+
 Local port regressions in `tests/unit/local-supabase-ports.test.mjs` exercise TCP
 exclusions, conflicts and exact owned-service exceptions without changing host
 settings. Native Windows acceptance additionally requires ordinary startup against
