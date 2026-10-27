@@ -133,6 +133,96 @@ function harness() {
   const target = { __roomLayoutDiagnosticsEnabled: true } as Window;
   return { target, capture: createLabelLayoutDiagnostics(target)! };
 }
+it('copies bounded solver work and first exhaustion metadata without mutating or leaking extra fields', () => {
+  const { target, capture } = harness();
+  const result = {
+    status: 'budget-exhausted' as const,
+    stats: {
+      operations: 150,
+      candidates: 32,
+      nodes: 2,
+      backtracks: 1,
+      elapsedMs: 0.5,
+      greedyComplete: false,
+      exhaustion: { reason: 'nodes' as const, phase: 'search' as const },
+    },
+  };
+  capture.begin();
+  capture.input([input()], viewport, []);
+  capture.solver(result);
+  capture.output(layoutLabels([input()], viewport));
+  capture.finish(true);
+  const snapshot = target.__roomLabelLayoutSnapshot!;
+  expect(snapshot.passes[0].solver).toEqual(result);
+  result.stats.operations = 999;
+  expect(snapshot.passes[0].solver!.stats.operations).toBe(150);
+  expect(Object.isFrozen(snapshot.passes[0].solver!.stats.exhaustion)).toBe(
+    true,
+  );
+  expect(JSON.stringify(snapshot).length).toBeLessThan(
+    LABEL_DIAGNOSTIC_MAX_BYTES,
+  );
+});
+it('rejects unknown solver reasons, phases, private metadata and unbounded counters', () => {
+  const stats = {
+    operations: 1,
+    candidates: 0,
+    nodes: 0,
+    backtracks: 0,
+    elapsedMs: 0,
+    greedyComplete: false,
+  };
+  for (const invalid of [
+    { ...stats, operations: 2_000_001 },
+    { ...stats, candidates: -1 },
+    { ...stats, nodes: Infinity },
+    { ...stats, elapsedMs: NaN },
+    { ...stats, privateMessage: 'SECRET' },
+    { ...stats, exhaustion: { reason: 'SECRET', phase: 'search' } },
+    { ...stats, exhaustion: { reason: 'time', phase: 'SECRET' } },
+    {
+      ...stats,
+      exhaustion: { reason: 'time', phase: 'search', stack: 'SECRET' },
+    },
+  ]) {
+    const { target, capture } = harness();
+    capture.begin();
+    capture.input([input()], viewport, []);
+    capture.solver({ status: 'budget-exhausted', stats: invalid } as Parameters<
+      typeof capture.solver
+    >[0]);
+    expect(target.__roomLabelLayoutSnapshot).toMatchObject({
+      complete: false,
+      passes: [],
+      error: 'invalid-data',
+    });
+    expect(JSON.stringify(target.__roomLabelLayoutSnapshot)).not.toContain(
+      'SECRET',
+    );
+  }
+});
+it('records fixed actual measurement failures explicitly and rejects arbitrary failure text', () => {
+  const { target, capture } = harness();
+  capture.begin();
+  capture.abort('measurement-budget');
+  expect(target.__roomLabelLayoutSnapshot).toMatchObject({
+    transaction: 1,
+    complete: false,
+    settled: false,
+    passes: [],
+    failure: 'measurement-budget',
+  });
+  capture.begin();
+  capture.abort('SECRET' as Parameters<typeof capture.abort>[0]);
+  expect(target.__roomLabelLayoutSnapshot).toMatchObject({
+    complete: false,
+    passes: [],
+    error: 'invalid-data',
+  });
+  expect(JSON.stringify(target.__roomLabelLayoutSnapshot)).not.toContain(
+    'SECRET',
+  );
+});
 it('is disabled by default and adds no global snapshot or application mutation', () => {
   const target = {} as Window;
   expect(createLabelLayoutDiagnostics(target)).toBeNull();

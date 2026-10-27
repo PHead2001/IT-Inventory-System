@@ -117,6 +117,8 @@ export function createRoomLabelRegistry(
       viewport.width <= 0 ||
       viewport.height <= 0
     ) {
+      diagnostics?.begin();
+      diagnostics?.abort('unmeasured-viewport');
       const codes: string[] = [];
       for (const entry of entries.values()) {
         hideEntry(entry);
@@ -308,18 +310,26 @@ export function createRoomLabelRegistry(
       'complete';
     // CSS changes a centered Html wrapper immediately. Reflow/validate those
     // real dimensions before exposing a settled revision, without idle frames.
+    // Suppressed frames are not placement attempts: retain the last actual
+    // diagnostic transaction instead of replacing it with an empty failure.
+    const initialLabels = measure();
+    if (measurementExhausted) {
+      diagnostics?.begin();
+      hideUnverified('Label measurement work budget exhausted', initialLabels);
+      diagnostics?.abort('measurement-budget');
+      return;
+    }
+    if (failedMeasurement === measuredKey(initialLabels)) {
+      if (canvas) canvas.dataset.labelLayoutPending = 'false';
+      return;
+    }
     diagnostics?.begin();
     for (let pass = 0; pass < 4; pass++) {
-      const labels = measure();
+      const labels = pass === 0 ? initialLabels : measure();
       finalLabels = labels;
       if (measurementExhausted) {
         hideUnverified('Label measurement work budget exhausted', labels);
-        diagnostics?.finish(false);
-        return;
-      }
-      if (pass === 0 && failedMeasurement === measuredKey(labels)) {
-        if (canvas) canvas.dataset.labelLayoutPending = 'false';
-        diagnostics?.finish(false);
+        diagnostics?.abort('measurement-budget');
         return;
       }
       diagnostics?.input(labels, viewport, reserved);
@@ -336,6 +346,7 @@ export function createRoomLabelRegistry(
         clock,
       );
       const placements = outcome.placements;
+      diagnostics?.solver(outcome);
       finalStatus = outcome.status;
       remaining.maxOperations -= outcome.stats.operations;
       remaining.maxCandidates -= outcome.stats.candidates;
@@ -344,7 +355,7 @@ export function createRoomLabelRegistry(
       // remain exposed as if it had been checked against this measured view.
       if (placements.length !== labels.length) {
         hideUnverified('Label placement work budget exhausted', labels);
-        diagnostics?.finish(false);
+        diagnostics?.abort('placement-budget');
         return;
       }
       diagnostics?.output(placements);
@@ -428,8 +439,10 @@ export function createRoomLabelRegistry(
         break;
       }
     }
-    diagnostics?.finish(settled);
     if (!settled) {
+      diagnostics?.abort(
+        measurementExhausted ? 'measurement-budget' : 'unstable-dimensions',
+      );
       hideUnverified(
         measurementExhausted
           ? 'Label remeasurement work budget exhausted'
@@ -438,6 +451,7 @@ export function createRoomLabelRegistry(
       );
       return;
     }
+    diagnostics?.finish(true);
     if (canvas) canvas.dataset.labelLayoutStatus = finalStatus;
     if (finalStatus === 'complete') {
       failedMeasurement = '';

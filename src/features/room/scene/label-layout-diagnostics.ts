@@ -1,6 +1,12 @@
 import room from '../../../../data/rooms/it-closet.json';
 import { openingTransform } from './opening-transform';
-import type { LabelArea, LabelPlacement, LabelRect } from './label-layout';
+import {
+  LABEL_PACKING_BUDGET,
+  type LabelArea,
+  type LabelPlacement,
+  type LabelRect,
+  type LabelLayoutResult,
+} from './label-layout';
 import type { ExposedAnchorResult } from './exposed-anchor';
 
 export const LABEL_DIAGNOSTIC_MAX_BYTES = 112 * 1024;
@@ -34,7 +40,13 @@ type Pass = {
   viewport: LabelArea;
   reserved: LabelArea[];
   output?: LabelPlacement[];
+  solver?: Pick<LabelLayoutResult, 'status' | 'stats'>;
 };
+type AttemptFailure =
+  | 'measurement-budget'
+  | 'placement-budget'
+  | 'unstable-dimensions'
+  | 'unmeasured-viewport';
 export type LabelLayoutSnapshot = Readonly<{
   schema: 1;
   transaction: number;
@@ -42,6 +54,7 @@ export type LabelLayoutSnapshot = Readonly<{
   settled: boolean;
   passes: Pass[];
   error?: 'invalid-data' | 'entry-bound' | 'pass-bound' | 'byte-bound';
+  failure?: AttemptFailure;
 }>;
 declare global {
   interface Window {
@@ -270,6 +283,73 @@ function placement(value: LabelPlacement): LabelPlacement {
   if (value.yielded !== undefined) result.yielded = bool(value.yielded);
   return result;
 }
+function solver(value: Pick<LabelLayoutResult, 'status' | 'stats'>) {
+  if (
+    !['complete', 'candidate-infeasible', 'budget-exhausted'].includes(
+      value.status,
+    )
+  )
+    throw Error('invalid-data');
+  keys(value.stats, [
+    'operations',
+    'candidates',
+    'nodes',
+    'backtracks',
+    'elapsedMs',
+    'greedyComplete',
+    'exhaustion',
+  ]);
+  const count = (value: number, maximum: number) => {
+    if (!Number.isSafeInteger(value) || value < 0 || value > maximum)
+      throw Error('invalid-data');
+    return value;
+  };
+  const stats: LabelLayoutResult['stats'] = {
+    operations: count(
+      value.stats.operations,
+      LABEL_PACKING_BUDGET.maxOperations,
+    ),
+    candidates: count(
+      value.stats.candidates,
+      LABEL_PACKING_BUDGET.maxCandidates,
+    ),
+    nodes: count(value.stats.nodes, LABEL_PACKING_BUDGET.maxNodes),
+    backtracks: count(
+      value.stats.backtracks,
+      LABEL_PACKING_BUDGET.maxOperations,
+    ),
+    elapsedMs: finite(value.stats.elapsedMs),
+    greedyComplete: bool(value.stats.greedyComplete),
+  };
+  if (stats.elapsedMs < 0) throw Error('invalid-data');
+  if (value.stats.exhaustion) {
+    const { reason, phase } = value.stats.exhaustion;
+    keys(value.stats.exhaustion, ['reason', 'phase']);
+    if (
+      ![
+        'time',
+        'operations',
+        'candidates',
+        'nodes',
+        'inputs',
+        'per-label',
+        'validation',
+      ].includes(reason) ||
+      ![
+        'input',
+        'preferred',
+        'candidate-axes',
+        'candidate-domain',
+        'search',
+        'optional-expansion',
+        'final-proof',
+      ].includes(phase)
+    )
+      throw Error('invalid-data');
+    stats.exhaustion = { reason, phase };
+  }
+  return { status: value.status, stats };
+}
 function freeze<T>(value: T): T {
   if (value && typeof value === 'object') {
     Object.values(value).forEach(freeze);
@@ -284,6 +364,7 @@ export function createLabelLayoutDiagnostics(target?: Window) {
   let snapshot: LabelLayoutSnapshot;
   let passes: Pass[] = [];
   let failed: LabelLayoutSnapshot['error'];
+  let failure: AttemptFailure | undefined;
   function publish(complete = false, settled = false) {
     const candidate = {
       schema: 1 as const,
@@ -292,6 +373,7 @@ export function createLabelLayoutDiagnostics(target?: Window) {
       settled,
       passes,
       ...(failed ? { error: failed } : {}),
+      ...(failure ? { failure } : {}),
     };
     if (JSON.stringify(candidate).length > LABEL_DIAGNOSTIC_MAX_BYTES)
       failed = 'byte-bound';
@@ -334,6 +416,7 @@ export function createLabelLayoutDiagnostics(target?: Window) {
       transaction++;
       passes = [];
       failed = undefined;
+      failure = undefined;
       publish();
     },
     input(labels: LabelRect[], viewport: LabelArea, reserved: LabelArea[]) {
@@ -363,6 +446,27 @@ export function createLabelLayoutDiagnostics(target?: Window) {
         )
           throw new Error('invalid-data');
         pass.output = output.map(placement);
+      });
+    },
+    solver(result: Pick<LabelLayoutResult, 'status' | 'stats'>) {
+      attempt(() => {
+        const pass = passes.at(-1);
+        if (!pass) throw Error('invalid-data');
+        pass.solver = solver(result);
+      });
+    },
+    abort(reason: AttemptFailure) {
+      attempt(() => {
+        if (
+          ![
+            'measurement-budget',
+            'placement-budget',
+            'unstable-dimensions',
+            'unmeasured-viewport',
+          ].includes(reason)
+        )
+          throw Error('invalid-data');
+        failure = reason;
       });
     },
     finish(settled: boolean) {

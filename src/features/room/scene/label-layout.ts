@@ -70,6 +70,24 @@ export type LabelPackingStats = {
   backtracks: number;
   elapsedMs: number;
   greedyComplete: boolean;
+  exhaustion?: {
+    reason:
+      | 'time'
+      | 'operations'
+      | 'candidates'
+      | 'nodes'
+      | 'inputs'
+      | 'per-label'
+      | 'validation';
+    phase:
+      | 'input'
+      | 'preferred'
+      | 'candidate-axes'
+      | 'candidate-domain'
+      | 'search'
+      | 'optional-expansion'
+      | 'final-proof';
+  };
 };
 export type LabelLayoutResult = {
   placements: LabelPlacement[];
@@ -776,13 +794,20 @@ export function layoutLabelsDetailed(
     }),
   ) as LabelPackingBudget;
   let exhausted = false;
+  let phase: NonNullable<LabelPackingStats['exhaustion']>['phase'] = 'input';
+  const stop = (
+    reason: NonNullable<LabelPackingStats['exhaustion']>['reason'],
+  ) => {
+    stats.exhaustion ??= { reason, phase };
+    exhausted = true;
+  };
   let checksSinceClock = 0;
   // Cooperative watchdog: at most 32 primitive checks between clock samples.
   // Native work and trial boundaries are checked independently. This allows a
   // bounded overrun for that batch/native operation; it is not preemption.
   const checkpoint = () => {
     checksSinceClock = 0;
-    if (clock() - started >= budget.maxMilliseconds) exhausted = true;
+    if (clock() - started >= budget.maxMilliseconds) stop('time');
     return !exhausted;
   };
   const take = (kind: 'operations' | 'candidates' | 'nodes' = 'operations') => {
@@ -794,7 +819,7 @@ export function layoutLabelsDetailed(
           ? budget.maxCandidates
           : budget.maxNodes;
     if (stats[kind] >= maximum) {
-      exhausted = true;
+      stop(kind);
       return false;
     }
     stats[kind]++;
@@ -803,6 +828,7 @@ export function layoutLabelsDetailed(
   // Refuse oversized requests before copying/sorting; no partially allocated
   // result is advertised as a feasibility decision. Runtime's 27 actions fit.
   if (labels.length + reserved.length > budget.maxInputs) {
+    stop('inputs');
     return {
       placements: [],
       status: 'budget-exhausted',
@@ -887,6 +913,7 @@ export function layoutLabelsDetailed(
     pins.push(pin);
     pinAreas.push(area);
   }
+  phase = 'preferred';
   let placements = preferredLayout(
     labels,
     viewport,
@@ -896,7 +923,7 @@ export function layoutLabelsDetailed(
       checkpoint,
       exhausted: () => exhausted,
       stop: () => {
-        exhausted = true;
+        stop('per-label');
       },
       maxCandidatesPerLabel: budget.maxCandidatesPerLabel,
     },
@@ -982,6 +1009,7 @@ export function layoutLabelsDetailed(
       }
       if (!validPins) continue;
       const obstacles = [...reserved, ...protectedAreas];
+      phase = 'candidate-axes';
       if (!checkpoint()) break;
       const widths = [
         ...new Set(
@@ -1027,7 +1055,7 @@ export function layoutLabelsDetailed(
             for (let offset = first; offset <= last; offset++) {
               if (!take()) return [];
               if (values.size >= budget.maxCandidatesPerLabel) {
-                exhausted = true;
+                stop('per-label');
                 return [];
               }
               values.add(seed + offset * step);
@@ -1043,6 +1071,7 @@ export function layoutLabelsDetailed(
         return checkpoint() ? sorted : [];
       };
       for (const label of units) {
+        phase = 'candidate-axes';
         if (!hasFiniteAnchor(label)) {
           domains.set(label.id, []);
           continue;
@@ -1078,6 +1107,7 @@ export function layoutLabelsDetailed(
         );
         const candidates: Candidate[] = [],
           seen = new Set<string>();
+        phase = 'candidate-domain';
         for (const left of xs)
           for (const top of ys) {
             if (!take()) break;
@@ -1092,7 +1122,7 @@ export function layoutLabelsDetailed(
             if (!take()) break;
             if (seen.has(key)) continue;
             if (candidates.length >= budget.maxCandidatesPerLabel) {
-              exhausted = true;
+              stop('per-label');
               break;
             }
             if (!take('candidates')) break;
@@ -1165,6 +1195,7 @@ export function layoutLabelsDetailed(
         }
         return null;
       };
+      phase = 'search';
       const solution = search(remaining, domains, []);
       if (solution) {
         const solved = new Map<string, LabelPlacement>(
@@ -1194,6 +1225,7 @@ export function layoutLabelsDetailed(
   }
   // Optional text expands at the same anchor only after mandatory feasibility;
   // expansion never moves or displaces a neighboring action.
+  phase = 'optional-expansion';
   for (const placement of placements) {
     if (!take()) break;
     const label = byId.get(placement.id)!;
@@ -1220,6 +1252,7 @@ export function layoutLabelsDetailed(
   // than publish a half-constructed replacement or run an unbounded postpass.
   const checked: LabelPlacement[] = [],
     checkedAreas: LabelArea[] = [];
+  phase = 'final-proof';
   checkpoint();
   for (const placement of placements) {
     if (!take()) break;
@@ -1235,7 +1268,7 @@ export function layoutLabelsDetailed(
         (label) =>
           checked.find((entry) => entry.id === label.id) ?? hidden(label),
       );
-      exhausted = true;
+      stop('validation');
       break;
     }
     checked.push(placement);
@@ -1243,7 +1276,7 @@ export function layoutLabelsDetailed(
   }
   checkpoint();
   stats.elapsedMs = clock() - started;
-  if (stats.elapsedMs >= budget.maxMilliseconds) exhausted = true;
+  if (stats.elapsedMs >= budget.maxMilliseconds) stop('time');
   if (exhausted) status = 'budget-exhausted';
   return { placements, status, stats };
 }

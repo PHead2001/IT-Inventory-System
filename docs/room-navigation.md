@@ -265,8 +265,19 @@ The separate Settings Storage locations tree opens below the first level collaps
 
 The populated 375px browser harness explicitly opts into read-only label-layout
 diagnostics before application loading. Ordinary sessions expose no snapshot.
-Only the latest placement transaction is retained, with at most four exact packing
-input/output passes, 96 labels and 32 reserved rectangles. The snapshot is deeply
+Only the latest actual placement attempt is retained; an unchanged failed
+measurement suppressed by the registry preserves that snapshot and does not
+invent a transaction or revision. Actual measurement, remeasurement, viewport or
+placement failures publish an incomplete attempt with a fixed failure code,
+rather than an empty successful capture or an ambiguous invalid-data error.
+There are at most four exact packing input/output passes, 96 labels and 32
+reserved rectangles. Each attempted solver pass can include bounded numeric
+operation/candidate/node/backtrack counts, elapsed milliseconds, greedy coverage
+status and its first fixed exhaustion reason/phase. These observations do not
+add work allowance or retry a failed layout. Snapshot `complete` means a fully
+captured attempt; the recorded solver status still distinguishes successful
+placement from exhausted work or candidate infeasibility.
+The snapshot is deeply
 copied and frozen; only checked-in scene IDs, exact renderer opening-coordinate
 IDs, stable location codes, finite layout numbers and flags are allowed. It contains
 no display names, inventory content, summaries, DOM nodes or callbacks. Invalid or

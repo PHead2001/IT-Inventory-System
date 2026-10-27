@@ -71,6 +71,140 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 describe('unified room label registry', () => {
+  it('retains the last actual failed diagnostic attempt on suppressed keys and retries a changed obstruction', () => {
+    window.__roomLayoutDiagnosticsEnabled = true;
+    const host = document.createElement('div'),
+      canvas = document.createElement('canvas'),
+      obstruction = document.createElement('div');
+    host.dataset.roomSurface = 'true';
+    obstruction.dataset.roomObstruction = 'true';
+    host.append(canvas, obstruction);
+    document.body.append(host);
+    vi.spyOn(canvas, 'getBoundingClientRect').mockReturnValue(viewport);
+    let obstacle = { ...viewport, left: 120, top: 0, right: 150, bottom: 50 };
+    vi.spyOn(obstruction, 'getClientRects').mockImplementation(
+      () => [obstacle] as unknown as DOMRectList,
+    );
+    vi.spyOn(obstruction, 'getBoundingClientRect').mockImplementation(
+      () => obstacle,
+    );
+    const item = label(host);
+    const packing = vi
+      .spyOn(placement, 'layoutLabelsDetailed')
+      .mockImplementation((labels) => ({
+        placements: labels.map(({ id }) => ({
+          id,
+          visible: false,
+          dx: 0,
+          dy: 0,
+        })),
+        status: 'budget-exhausted',
+        stats: {
+          operations: 12,
+          candidates: 4,
+          nodes: 0,
+          backtracks: 0,
+          elapsedMs: 1,
+          greedyComplete: false,
+          exhaustion: { reason: 'per-label', phase: 'candidate-domain' },
+        },
+      }));
+    const registry = createRoomLabelRegistry(vi.fn(), undefined, undefined, {
+      clock: () => 0,
+    });
+    const cleanup = registry.connect(canvas);
+    registry.register('shelf-1a', item.element, item.leader, {
+      priority: 4,
+      locationCode: 'ITC-S1A',
+      mandatory: true,
+    });
+    flush();
+    const snapshot = window.__roomLabelLayoutSnapshot;
+    expect(snapshot).toMatchObject({
+      transaction: 1,
+      complete: true,
+      settled: true,
+      passes: [{}],
+    });
+    const revision = canvas.dataset.labelLayoutRevision;
+    for (let i = 0; i < 3; i++) {
+      registry.schedule();
+      flush();
+    }
+    expect(packing).toHaveBeenCalledOnce();
+    expect(window.__roomLabelLayoutSnapshot).toBe(snapshot);
+    expect(snapshot!.passes[0].solver).toMatchObject({
+      status: 'budget-exhausted',
+      stats: {
+        nodes: 0,
+        exhaustion: { reason: 'per-label', phase: 'candidate-domain' },
+      },
+    });
+    expect(canvas.dataset.labelLayoutRevision).toBe(revision);
+    expect(canvas.dataset.labelLayoutStatus).toBe('budget-exhausted');
+    expect(canvas.dataset.labelLayoutPending).toBe('false');
+    obstacle = { ...obstacle, left: 121 };
+    registry.schedule();
+    flush();
+    expect(packing).toHaveBeenCalledTimes(2);
+    expect(window.__roomLabelLayoutSnapshot!.transaction).toBe(2);
+    expect(window.__roomLabelLayoutSnapshot!.passes[0].reserved[0].left).toBe(
+      121,
+    );
+    registry.retry();
+    flush();
+    expect(packing).toHaveBeenCalledTimes(3);
+    expect(window.__roomLabelLayoutSnapshot!.transaction).toBe(3);
+    expect(queue).toHaveLength(0);
+    cleanup();
+  });
+  it('publishes an explicit actual measurement failure without a fabricated complete pass or revision', () => {
+    window.__roomLayoutDiagnosticsEnabled = true;
+    const host = document.createElement('div'),
+      canvas = document.createElement('canvas');
+    host.append(canvas);
+    document.body.append(host);
+    vi.spyOn(canvas, 'getBoundingClientRect').mockReturnValue(viewport);
+    const item = label(host),
+      full = document.createElement('span');
+    full.dataset.roomLabelFull = 'true';
+    item.element.append(full);
+    let now = 0,
+      slow = false;
+    vi.spyOn(full, 'getBoundingClientRect').mockImplementation(() => {
+      if (slow) now += 20;
+      return { ...viewport, width: 27, height: 32 };
+    });
+    const registry = createRoomLabelRegistry(vi.fn(), undefined, undefined, {
+      clock: () => now,
+    });
+    const cleanup = registry.connect(canvas);
+    registry.register('shelf-1a', item.element, item.leader, {
+      priority: 4,
+      mandatory: true,
+      locationCode: 'ITC-S1A',
+    });
+    flush();
+    expect(window.__roomLabelLayoutSnapshot!.complete).toBe(true);
+    const revision = canvas.dataset.labelLayoutRevision;
+    slow = true;
+    registry.schedule();
+    flush();
+    expect(window.__roomLabelLayoutSnapshot).toMatchObject({
+      transaction: 2,
+      complete: false,
+      settled: false,
+      passes: [],
+      failure: 'measurement-budget',
+    });
+    expect(window.__roomLabelLayoutSnapshot!.error).toBeUndefined();
+    expect(canvas.dataset.labelLayoutRevision).toBe(revision);
+    expect(canvas.dataset.labelLayoutStatus).toBe('budget-exhausted');
+    expect(item.element).toHaveAttribute('aria-hidden', 'true');
+    expect(item.element.tabIndex).toBe(-1);
+    expect(queue).toHaveLength(0);
+    cleanup();
+  });
   it('physical pick reservation keeps its own label off the current exposed mesh point', () => {
     const host = document.createElement('div'),
       canvas = document.createElement('canvas');
