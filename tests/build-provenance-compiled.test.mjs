@@ -70,7 +70,7 @@ test('compiled Settings retains the build snapshot across requests and fresh pro
     );
     const expected = JSON.parse(manifest.config.env.APP_BUILD_PROVENANCE);
     assertLocalBuildSnapshot(expected);
-    const api = assertLocalUrl(process.env.LOCAL_API_URL, 54321);
+    const api = assertLocalUrl(process.env.LOCAL_API_URL, 45321);
     localBackend(api);
     assert.equal(
       process.env.NEXT_PUBLIC_SUPABASE_URL,

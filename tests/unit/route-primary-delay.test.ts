@@ -3,8 +3,8 @@ import { e2eScheduling, parallelSpecs } from '../../scripts/e2e-scheduling';
 import { localPrimaryDelayTarget } from '../e2e/route-primary-delay';
 
 const local = {
-  db: 'postgresql://fixture:fixture@127.0.0.1:54322/postgres',
-  api: 'http://127.0.0.1:54321',
+  db: 'postgresql://fixture:fixture@127.0.0.1:45322/postgres',
+  api: 'http://127.0.0.1:45321',
   hosted: false,
   project: 'chromium',
   workers: 1,
@@ -14,7 +14,7 @@ const local = {
   projectNames: ['chromium'],
   canonicalConfig: true,
 };
-it('permits only the canonical local exclusive scheduling and default fixture endpoints', () => {
+it('permits only the canonical local exclusive scheduling and canonical fixture endpoints', () => {
   expect(localPrimaryDelayTarget(local)).toBe(local.db);
   const schedule = e2eScheduling(true);
   const exclusive = schedule.projects.find(
@@ -42,11 +42,13 @@ it('permits only the canonical local exclusive scheduling and default fixture en
   ).toBe(local.db);
 });
 it.each([
-  { db: 'postgresql://fixture:fixture@remote.example:54322/postgres' },
+  { db: 'postgresql://fixture:fixture@127.0.0.1:54322/postgres' },
+  { api: 'http://127.0.0.1:54321' },
+  { db: 'postgresql://fixture:fixture@remote.example:45322/postgres' },
   { api: 'https://remote.example' },
   { db: 'postgresql://fixture:fixture@127.0.0.1:5432/postgres' },
-  { db: 'postgresql://fixture:fixture@127.0.0.1:54322/other' },
-  { api: 'http://127.0.0.1:54320' },
+  { db: 'postgresql://fixture:fixture@127.0.0.1:45322/other' },
+  { api: 'http://127.0.0.1:45320' },
   { hosted: true },
   { fullyParallel: true },
   { workers: 2 },
@@ -57,11 +59,11 @@ it.each([
   { projectNames: ['chromium', 'other'] },
   { canonicalConfig: false },
   {
-    db: 'postgresql://fixture:fixture@127.0.0.1:54322/postgres?host=remote.example',
+    db: 'postgresql://fixture:fixture@127.0.0.1:45322/postgres?host=remote.example',
   },
-  { db: 'postgresql://fixture:fixture@127.0.0.1:54322/postgres?port=5432' },
-  { db: 'postgresql://fixture:fixture@127.0.0.1:54322/postgres#other' },
-  { api: 'http://127.0.0.1:54321?host=remote.example' },
+  { db: 'postgresql://fixture:fixture@127.0.0.1:45322/postgres?port=5432' },
+  { db: 'postgresql://fixture:fixture@127.0.0.1:45322/postgres#other' },
+  { api: 'http://127.0.0.1:45321?host=remote.example' },
 ])('rejects unsupported target/scheduling before SQL: %s', (change) => {
   expect(() => localPrimaryDelayTarget({ ...local, ...change })).toThrow();
 });

@@ -25,7 +25,7 @@ export async function auditLogin(page: Page) {
 export async function auditReadback() {
   const api = new URL(process.env.LOCAL_API_URL!);
   expect(['localhost', '127.0.0.1']).toContain(api.hostname);
-  expect(api.port).toBe('54321');
+  expect(api.port).toBe('45321');
   const client = createClient(
     api.href,
     process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY!,
@@ -139,7 +139,7 @@ export async function seedAuditCalendarEvents(
 ) {
   const target = new URL(process.env.LOCAL_DB_URL!);
   expect(['localhost', '127.0.0.1', '[::1]']).toContain(target.hostname);
-  expect(target.port).toBe('54322');
+  expect(target.port).toBe('45322');
   expect(target.pathname).toBe('/postgres');
   expect(categoryId).toMatch(/^[0-9a-f-]{36}$/);
   expect(siteCode).toMatch(/^A2-DATE-[A-F0-9]{8}$/);

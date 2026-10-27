@@ -37,20 +37,20 @@ export function localPrimaryDelayTarget(context: FixtureContext) {
   }
   assert(
     ['localhost', '127.0.0.1'].includes(db.hostname) &&
-      db.port === '54322' &&
+      db.port === '45322' &&
       db.pathname === '/postgres' &&
       !db.search &&
       !db.hash &&
       ['postgres:', 'postgresql:'].includes(db.protocol),
-    'Primary-delay fixture requires the default loopback local database.',
+    'Primary-delay fixture requires the canonical loopback local database.',
   );
   assert(
     ['localhost', '127.0.0.1'].includes(api.hostname) &&
-      api.port === '54321' &&
+      api.port === '45321' &&
       !api.search &&
       !api.hash &&
       api.protocol === 'http:',
-    'Primary-delay fixture requires the default loopback local API.',
+    'Primary-delay fixture requires the canonical loopback local API.',
   );
   assert(
     !new Set<string>(parallelSpecs).has('route-motion.spec.ts'),

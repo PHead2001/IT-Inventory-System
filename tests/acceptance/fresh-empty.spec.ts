@@ -78,7 +78,7 @@ test('fresh first-use, site availability and configured stock states stay truthf
   test.setTimeout(180_000);
   const api = new URL(process.env.LOCAL_API_URL!);
   expect(['localhost', '127.0.0.1']).toContain(api.hostname);
-  expect(api.port).toBe('54321');
+  expect(api.port).toBe('45321');
   const options = { auth: { persistSession: false, autoRefreshToken: false } };
   const reader = createClient(
     api.href,

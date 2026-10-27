@@ -159,7 +159,7 @@ async function noOverflow(page: Page) {
 async function withCancelPageFixture(query: string, run: () => Promise<void>) {
   const url = new URL(process.env.LOCAL_API_URL!);
   expect(['127.0.0.1', 'localhost']).toContain(url.hostname);
-  expect(url.port).toBe('54321');
+  expect(url.port).toBe('45321');
   const caller = createClient(
     url.href,
     process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY!,

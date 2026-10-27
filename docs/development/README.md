@@ -15,7 +15,31 @@ The requested IT Inventory Management folder is the working checkout. Diagnose O
 
 Local SMTP permits 100 captured messages/hour for repeatable email tests; this is not a hosted SMTP configuration recommendation.
 
-Local ports: app 3000, API 54321, PostgreSQL 54322, Studio 54323, email capture 54324. CLI status contains local administrative credentials: never publish its full output. The deployed application needs no service-role key.
+Local ports: app 3000, shadow database 45320, API 45321, PostgreSQL 45322, Studio 45323, email capture 45324. CLI status contains local administrative credentials: never publish its full output. The deployed application needs no service-role key.
+
+The canonical local ports avoid the former Supabase default range 54320–54324,
+which Windows may reserve for other components. On Windows, `db:start` performs
+bounded read-only checks of IPv4/IPv6 TCP exclusions and listeners before startup.
+Every listener address requires coverage by an exact local Docker project/service
+publication on that port. An IPv4 wildcard covers IPv4 addresses only; IPv6
+wildcard publication does not imply IPv4 coverage. These checks explain published
+bindings rather than proving listener PID ownership or future port availability.
+Listener enumeration uses only PowerShell engine syntax and .NET, so it does not
+load modules from an inherited `PSModulePath`. A present unhealthy healthcheck is refused; a service without a
+Docker healthcheck must still pass the other ownership checks. The preflight
+does not edit Windows reservations, firewall rules or Docker configuration.
+A reported conflict needs owner review; database reset does not repair bindings.
+
+For an existing local stack, run `npm run db:stop` and `npm run db:start` to apply
+the new bindings to its existing project and volume. Do not reset or delete volumes
+to migrate ports. In ignored `.env.local` (or an owner-managed runner `local.env`),
+change only a recognized old `NEXT_PUBLIC_SUPABASE_URL` loopback HTTP origin on
+54321 to the same host on 45321 through its existing local configuration workflow.
+Recognized hosts are `127.0.0.1`, `localhost` and `[::1]`, with no credentials,
+path beyond `/`, query or fragment. Confirm the local URL from CLI status without
+publishing keys. Preserve credentials and hosted/staging URLs. Runner installation
+and network configuration are separate owner actions. Restart the app and rebuild
+production-mode local artifacts because the public URL is a build input.
 
 Use the repository `db:start` command for a clean checkout. It writes the ignored local Supabase Storage version override (`v1.77.9`) before starting the pinned CLI and verifies that the running Storage container uses that exact tag from one of the CLI's official registries. Local reset and database tests fail before running against a different Storage image. If an older local stack is already running, use `npm run db:stop` followed by `npm run db:start`; this local image override does not change a linked or hosted Supabase project. A CLI `link` may refresh the ignored cache, so the next `db:start` restores the local override.
 

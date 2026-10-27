@@ -7,7 +7,7 @@ const target = new URL(process.env.LOCAL_DB_URL!);
 assert.ok(['localhost', '127.0.0.1', '[::1]'].includes(target.hostname));
 assert.equal(
   target.port,
-  '54322',
+  '45322',
   'Only the canonical local database is allowed',
 );
 const owner = new Client({

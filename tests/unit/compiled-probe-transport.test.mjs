@@ -21,7 +21,7 @@ it('classifies an actual Node redirect refusal without following another endpoin
     const origin = `http://127.0.0.1:${server.address().port}`;
     const guarded = guardedFetch(
       fetch,
-      localBackend('http://127.0.0.1:54321'),
+      localBackend('http://127.0.0.1:45321'),
       () => origin,
     );
     let failure;

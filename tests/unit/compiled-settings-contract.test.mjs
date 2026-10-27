@@ -380,8 +380,9 @@ it('bounds the raw streamed response before parsing and validates status/content
 it('refuses hosted, non-HTTP and wrong-port backends before transport', () => {
   for (const url of [
     'https://example.supabase.co',
-    'https://127.0.0.1:54321',
-    'http://localhost:54322',
+    'http://127.0.0.1:54321',
+    'https://127.0.0.1:45321',
+    'http://localhost:45322',
   ]) {
     expect(() => localBackend(url)).toThrow();
   }
@@ -390,10 +391,10 @@ it('allows only the guarded backend and owned server, including Request inputs',
   const transport = vi.fn();
   const guarded = guardedFetch(
     transport,
-    localBackend('http://127.0.0.1:54321'),
+    localBackend('http://127.0.0.1:45321'),
     () => 'http://127.0.0.1:40200',
   );
-  guarded('http://127.0.0.1:54321/auth/v1/token');
+  guarded('http://127.0.0.1:45321/auth/v1/token');
   guarded(new Request('http://127.0.0.1:40200/settings'));
   expect(transport).toHaveBeenCalledTimes(2);
   expect(() => guarded('https://example.supabase.co/auth/v1/token')).toThrow();
@@ -409,18 +410,18 @@ it('refuses redirect following and keeps caller cancellation active', async () =
   );
   const guarded = guardedFetch(
     transport,
-    localBackend('http://127.0.0.1:54321'),
+    localBackend('http://127.0.0.1:45321'),
     () => undefined,
   );
   await expect(
-    guarded('http://127.0.0.1:54321/auth/v1', { redirect: 'follow' }),
+    guarded('http://127.0.0.1:45321/auth/v1', { redirect: 'follow' }),
   ).rejects.toThrow('Redirect refused');
   await expect(
-    guarded('http://127.0.0.1:54321/auth/v1', { redirect: 'manual' }),
+    guarded('http://127.0.0.1:45321/auth/v1', { redirect: 'manual' }),
   ).resolves.toBe('Redirect response only');
   const caller = new AbortController();
   const aborted = guarded(
-    new Request('http://127.0.0.1:54321/auth/v1', { signal: caller.signal }),
+    new Request('http://127.0.0.1:45321/auth/v1', { signal: caller.signal }),
   );
   const signal = transport.mock.calls[2][1].signal;
   expect(signal.aborted).toBe(false);

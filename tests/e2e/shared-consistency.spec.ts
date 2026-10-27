@@ -155,7 +155,7 @@ function localApi() {
   const api = process.env.LOCAL_API_URL!;
   const url = new URL(api);
   expect(['localhost', '127.0.0.1', '[::1]']).toContain(url.hostname);
-  expect(url.port).toBe('54321');
+  expect(url.port).toBe('45321');
   return api;
 }
 async function options(page: Page) {

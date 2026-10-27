@@ -69,8 +69,8 @@ function local(value: string | undefined, port: number) {
   );
   return value;
 }
-const apiUrl = local(process.env.LOCAL_API_URL, 54321);
-const dbUrl = local(process.env.LOCAL_DB_URL, 54322);
+const apiUrl = local(process.env.LOCAL_API_URL, 45321);
+const dbUrl = local(process.env.LOCAL_DB_URL, 45322);
 assert.ok(process.env.LOCAL_ANON_KEY, 'local public key required');
 assert.ok(
   process.env.LOCAL_SERVICE_ROLE_KEY,

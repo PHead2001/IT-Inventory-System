@@ -8,6 +8,7 @@ import {
   prepareLocalAuthTemplates,
   verifyLocalAuthTemplates,
 } from './local-auth-templates.mjs';
+import { preflightLocalSupabasePorts } from './local-supabase-ports.mjs';
 const command = process.argv[2];
 const cli = (...args) => npm(['exec', '--', 'supabase', ...args]);
 const types = (check) => {
@@ -106,6 +107,7 @@ const test = () => {
 };
 try {
   if (command === 'start') {
+    preflightLocalSupabasePorts();
     installLocalStorageVersion();
     prepareLocalAuthTemplates();
     cli('start');

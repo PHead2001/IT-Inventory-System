@@ -37,7 +37,7 @@
     },
     {
       "name": "Image.Inputs.json",
-      "hash": "36C06664472E2D4EE74A79ECAED06F8FBB4F92D2482BACA49BA0732858700814"
+      "hash": "FE659C85818F26DE5FF36F95789D72882265C8E35E853B96731F0F95AB405393"
     },
     {
       "name": "Image.Package.json",
@@ -49,7 +49,7 @@
     },
     {
       "name": "Image.Supabase.toml",
-      "hash": "1F50521C49BC3A9D40D1E959B0452BBE3DCCF63867C09957FD661A42BF17EE19"
+      "hash": "B8039A6912A17FB970D594BD949B1972E7D4CB00AFBCB214D4EC6D8BD0490007"
     },
     {
       "name": "SetupMenu.ps1",
