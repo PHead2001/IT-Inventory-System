@@ -11,7 +11,7 @@ const localClient = (key: string) => {
   const url = new URL(process.env.LOCAL_API_URL!);
   if (
     !['127.0.0.1', 'localhost', '[::1]'].includes(url.hostname) ||
-    url.port !== '54321'
+    url.port !== '45321'
   )
     throw new Error('Refusing nonlocal Auth test target');
   return createClient(url.href, key, {
@@ -20,7 +20,7 @@ const localClient = (key: string) => {
 };
 const admin = () => localClient(process.env.LOCAL_SERVICE_ROLE_KEY!);
 async function capturedEmailLink(request: APIRequestContext, email: string) {
-  const mailpit = 'http://127.0.0.1:54324/api/v1';
+  const mailpit = 'http://127.0.0.1:45324/api/v1';
   let messageId: string | undefined;
   await expect
     .poll(

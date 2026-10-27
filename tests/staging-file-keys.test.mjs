@@ -133,7 +133,7 @@ test('local catalog drift produces a review artifact, fails and leaves expectati
     await compareLocalStagingRoutineManifest(
       structuredClone(expected),
       expected,
-      'postgresql://localhost:54322/postgres',
+      'postgresql://localhost:45322/postgres',
       artifact,
     );
     assert.equal(
@@ -149,7 +149,7 @@ test('local catalog drift produces a review artifact, fails and leaves expectati
       compareLocalStagingRoutineManifest(
         changed,
         expected,
-        'postgresql://127.0.0.1:54322/postgres',
+        'postgresql://127.0.0.1:45322/postgres',
         artifact,
       ),
       /manifest drift; review candidate/,
@@ -178,7 +178,7 @@ test('candidate diagnostics reject hosted targets and unexpected secret or ident
       compareLocalStagingRoutineManifest(
         changed,
         routineManifest,
-        'postgresql://example.invalid:54322/postgres',
+        'postgresql://example.invalid:45322/postgres',
         artifact,
       ),
       /Refusing nonlocal/,
@@ -190,7 +190,7 @@ test('candidate diagnostics reject hosted targets and unexpected secret or ident
         compareLocalStagingRoutineManifest(
           unsafe,
           routineManifest,
-          'postgresql://localhost:54322/postgres',
+          'postgresql://localhost:45322/postgres',
           artifact,
         ),
       );
@@ -619,7 +619,7 @@ test('local host plus overriding remote Docker context refuses before daemon ins
       localStorageFixture('select 1;', {
         environment: {
           LOCAL_DB_URL:
-            'postgresql://postgres:synthetic@localhost:54322/postgres',
+            'postgresql://postgres:synthetic@localhost:45322/postgres',
           DOCKER_HOST: 'unix:///var/run/docker.sock',
           DOCKER_CONTEXT: 'remote-fixture',
         },
@@ -660,7 +660,7 @@ test('local fixture refuses remote named-pipe/Unix authority and network endpoin
         localStorageFixture('select 1;', {
           environment: {
             LOCAL_DB_URL:
-              'postgresql://postgres:synthetic@localhost:54322/postgres',
+              'postgresql://postgres:synthetic@localhost:45322/postgres',
             DOCKER_HOST: endpoint,
           },
           execute: () => {
@@ -677,7 +677,7 @@ test('local fixture refuses remote named-pipe/Unix authority and network endpoin
 test('resolved local context is pinned identically for Docker inspect/exec with ambient overrides removed', () => {
   const endpoint = 'npipe:////./pipe/docker_engine';
   const environment = {
-    LOCAL_DB_URL: 'postgresql://postgres:synthetic@localhost:54322/postgres',
+    LOCAL_DB_URL: 'postgresql://postgres:synthetic@localhost:45322/postgres',
     DOCKER_CONTEXT: 'local-fixture',
     DOCKER_HOST: 'ssh://remote.example.invalid',
   };
@@ -695,7 +695,7 @@ test('resolved local context is pinned identically for Docker inspect/exec with 
         return JSON.stringify({
           name: '/supabase_db_it-inventory',
           labels: { 'com.supabase.cli.project': 'it-inventory' },
-          ports: { '5432/tcp': [{ HostPort: '54322' }] },
+          ports: { '5432/tcp': [{ HostPort: '45322' }] },
           running: true,
         });
       assert.equal(args[2], 'exec');

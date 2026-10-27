@@ -269,7 +269,7 @@ test('Spaces links follow location ancestry even when codes omit or spoof a root
   // Code-managed structure is prepared only in the disposable loopback fixture.
   const fixtureUrl = new URL(process.env.LOCAL_API_URL!);
   expect(['localhost', '127.0.0.1']).toContain(fixtureUrl.hostname);
-  expect(fixtureUrl.port).toBe('54321');
+  expect(fixtureUrl.port).toBe('45321');
   const fixtureAdmin = createClient(
     fixtureUrl.href,
     process.env.LOCAL_SERVICE_ROLE_KEY!,

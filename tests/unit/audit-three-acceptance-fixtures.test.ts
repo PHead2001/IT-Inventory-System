@@ -85,7 +85,7 @@ function client() {
 
 describe('owned Audit3 browser fixture partial setup', () => {
   beforeEach(() => {
-    vi.stubEnv('LOCAL_API_URL', 'http://127.0.0.1:54321');
+    vi.stubEnv('LOCAL_API_URL', 'http://127.0.0.1:45321');
     vi.stubEnv('APP_ORIGIN', 'http://127.0.0.1:3000');
   });
   afterEach(() => vi.unstubAllEnvs());

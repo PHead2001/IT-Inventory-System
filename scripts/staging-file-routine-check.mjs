@@ -16,7 +16,7 @@ export async function compareLocalStagingRoutineManifest(
   databaseUrl,
   artifactPath = STAGING_ROUTINE_CANDIDATE,
 ) {
-  assertLocalUrl(databaseUrl, 54322);
+  assertLocalUrl(databaseUrl, 45322);
   assert.equal(new URL(databaseUrl).pathname, '/postgres');
   assertStagingRoutineManifest(observed);
   assertStagingRoutineManifest(expected);

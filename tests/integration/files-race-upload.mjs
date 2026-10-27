@@ -9,7 +9,7 @@ process.on('message', async (message) => {
       const url = new URL(process.env.LOCAL_API_URL);
       if (
         !['localhost', '127.0.0.1', '[::1]'].includes(url.hostname) ||
-        Number(url.port) !== 54321
+        Number(url.port) !== 45321
       )
         throw new Error('Nonlocal Storage target');
       client = createClient(url.toString(), process.env.LOCAL_ANON_KEY, {

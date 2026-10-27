@@ -39,7 +39,7 @@ test.beforeAll(async ({}, testInfo) => {
   const url = new URL(process.env.LOCAL_API_URL!);
   if (
     !['127.0.0.1', 'localhost', '[::1]'].includes(url.hostname) ||
-    url.port !== '54321'
+    url.port !== '45321'
   ) {
     throw new Error('Refusing a nonlocal room test fixture target');
   }
@@ -162,7 +162,7 @@ test.afterAll(async () => {
   const url = new URL(process.env.LOCAL_API_URL!);
   if (
     !['127.0.0.1', 'localhost', '[::1]'].includes(url.hostname) ||
-    url.port !== '54321'
+    url.port !== '45321'
   )
     throw new Error('Refusing nonlocal occupancy cleanup');
   const client = createClient(

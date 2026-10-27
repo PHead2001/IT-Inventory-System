@@ -554,7 +554,7 @@ async function localAssetSnapshot(name: string) {
   const target = new URL(apiURL);
   if (
     !['127.0.0.1', 'localhost', '[::1]'].includes(target.hostname) ||
-    target.port !== '54321'
+    target.port !== '45321'
   )
     throw new Error('Refusing nonlocal create recovery evidence.');
   const caller = createClient(apiURL, publicKey, {

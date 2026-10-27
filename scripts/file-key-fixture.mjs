@@ -3,8 +3,8 @@ import { Client } from 'pg';
 import { assertLocalUrl } from './runtime.mjs';
 
 export async function installLocalFileKey(status) {
-  assertLocalUrl(status.DB_URL, 54322);
-  assertLocalUrl(status.API_URL, 54321);
+  assertLocalUrl(status.DB_URL, 45322);
+  assertLocalUrl(status.API_URL, 45321);
   const keyId = 'e2e' + randomBytes(8).toString('hex');
   const secret = randomBytes(32).toString('hex');
   const db = new Client({
@@ -33,7 +33,7 @@ export async function installLocalFileKey(status) {
 }
 
 export async function retireLocalFileKey(status, keyId) {
-  assertLocalUrl(status.DB_URL, 54322);
+  assertLocalUrl(status.DB_URL, 45322);
   const db = new Client({
     connectionString: status.DB_URL,
     application_name: 'files-e2e-key-retire',

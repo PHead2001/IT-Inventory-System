@@ -6,7 +6,7 @@ import { Client } from 'pg';
 // This suite is part of the canonical local database gate, via audit-three-contracts.
 const target = new URL(process.env.LOCAL_DB_URL!);
 assert.ok(['localhost', '127.0.0.1', '[::1]'].includes(target.hostname));
-assert.equal(target.port, '54322');
+assert.equal(target.port, '45322');
 const owner = new Client({ connectionString: target.href });
 const connections: Client[] = [];
 const suffix = uid().replaceAll('-', '').slice(0, 12).toUpperCase();

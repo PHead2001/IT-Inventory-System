@@ -16,7 +16,7 @@ const db = process.env.LOCAL_DB_URL;
 assert.ok(db, 'LOCAL_DB_URL required');
 const url = new URL(db);
 assert.ok(['localhost', '127.0.0.1', '[::1]'].includes(url.hostname));
-assert.equal(Number(url.port), 54322);
+assert.equal(Number(url.port), 45322);
 const owner = new Client({
   connectionString: db,
   application_name: 'custody-forward-upgrade',

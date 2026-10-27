@@ -62,7 +62,7 @@ export async function withOwnedLabelDefaults(
 ) {
   const api = new URL(process.env.LOCAL_API_URL!);
   expect(['localhost', '127.0.0.1']).toContain(api.hostname);
-  expect(api.port).toBe('54321');
+  expect(api.port).toBe('45321');
   const caller = createClient(
     api.href,
     process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY!,
