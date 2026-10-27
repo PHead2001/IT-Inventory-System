@@ -1,5 +1,9 @@
 # Validation
 
+## CI job budget
+
+The required Foundation CI job has a 45-minute execution ceiling for the combined application, database and browser gates. Every gate remains required; the configured timeout is an operational budget, not a promised runtime or latency target.
+
 ## Browser scheduling and interruption diagnostics
 
 The room spec is named `00-room.spec.ts` to start its unchanged sequential file
