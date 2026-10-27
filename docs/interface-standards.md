@@ -221,6 +221,25 @@ keeps its unique result-anchor repair. Unpaired/plain detail links and links wit
 a destination hash retain ordinary Next scroll handling; no global readiness
 notification, search update, refresh or native history restore creates this intent.
 
+A fresh inventory document can receive its `inventory-row-N` fragment before
+private results are admitted. A separate document-lifetime attempt may restore
+that original fragment once after the original actor has a fresh privacy grant
+and the canonical primary exposes the unique registered inventory source row.
+The original document URL and navigation timing must match an initial navigate
+or reload; full-document history traversal/BFCache remains browser-owned. URL or
+hash equality alone grants no readiness or row identity. A provider remount,
+search update or later same-URL return cannot create another attempt.
+
+The initial-fragment attempt waits through initial not-ready state, but retires
+permanently on explicit revocation, authority replacement, accepted navigation,
+traversal, hash change, pagehide or user scroll intent. An admitted primary with
+a missing, duplicate, unregistered, hidden or outside-primary row is terminal.
+After the layout commit and any active capture, it rechecks authority, complete
+URL, primary and the exact registered element, consumes the attempt, then uses
+an instant viewport-clamped scroll respecting scroll margin/padding. It changes
+no focus/history and creates no animation. Existing App Back and native-history
+checkpoint ownership remain separate.
+
 Privacy checks can temporarily collapse the destination document and clamp the
 browser's restored scroll to zero. A provider-local scroll coordinator retains at
 most 50 finite, nonnegative offset checkpoints, bound to the browser history entry

@@ -10,6 +10,7 @@ import {
   type TitleTarget,
 } from './route-motion-state';
 import { routeKey } from './route-key';
+import { createInitialInventoryAnchor } from './initial-inventory-anchor';
 
 type Authority = { key: string; ready: boolean } | null;
 type Source = Extract<TitleTarget, { source: { kind: 'inventory' } }>;
@@ -29,6 +30,7 @@ export function createApplicationReturn(
     ReturnType<typeof createRouteReadiness>,
     'currentPrimary' | 'subscribePrimary'
   >,
+  initialActorId?: string,
 ) {
   const sources = new Map<symbol, { target: Source; element: HTMLElement }>();
   let authority: () => Authority = () => null;
@@ -47,6 +49,8 @@ export function createApplicationReturn(
     | undefined;
   let disposed = false;
   let detach: (() => void) | undefined;
+  let initialAnchor:
+    ReturnType<typeof createInitialInventoryAnchor> | undefined;
   const cancel = () => {
     pending = undefined;
     scheduled?.();
@@ -54,7 +58,8 @@ export function createApplicationReturn(
     stopAbort?.();
     stopAbort = undefined;
   };
-  const invalidate = () => {
+  const invalidate = (retireInitial = true) => {
+    if (retireInitial) initialAnchor?.invalidate();
     cancel();
     origin = undefined;
     transaction = undefined;
@@ -62,7 +67,7 @@ export function createApplicationReturn(
   const grant = () => {
     const value = disposed ? null : authority();
     if (!value || value.key !== owner) {
-      invalidate();
+      invalidate(false);
       owner = value?.key;
     }
     return value;
@@ -114,7 +119,26 @@ export function createApplicationReturn(
     );
     return headings.length === 1 ? headings[0] : undefined;
   };
+  if (initialActorId)
+    initialAnchor = createInitialInventoryAnchor(
+      readiness,
+      initialActorId,
+      () => (disposed ? null : authority()),
+      (anchor, rawRouteKey) => {
+        const matches = [...sources.values()].filter(
+          ({ target, element }) =>
+            target.anchor === anchor &&
+            matchesTitleListRoute(target, rawRouteKey) &&
+            visibleSource(target) === element,
+        );
+        return matches.length === 1
+          ? (matches[0].element.closest<HTMLElement>(`[id="${anchor}"]`) ??
+              undefined)
+          : undefined;
+      },
+    );
   const reconcile = () => {
+    initialAnchor?.reconcile();
     const value = grant();
     const operation = pending;
     if (!operation || !value?.ready || operation.authority !== value.key)
@@ -237,6 +261,7 @@ export function createApplicationReturn(
         transaction.stage = { kind: 'back', source: origin };
     },
     acceptNavigation: (href: string, epoch: number) => {
+      initialAnchor?.invalidate();
       const value = grant();
       const accepted = transaction;
       transaction = undefined;
@@ -303,6 +328,7 @@ export function createApplicationReturn(
     cancel,
     attach: () => {
       if (detach || disposed) return;
+      initialAnchor?.attach();
       const interrupt = () => cancel();
       const keydown = (event: KeyboardEvent) => {
         if (
@@ -368,6 +394,7 @@ export function createApplicationReturn(
         window.addEventListener(type, interrupt, { passive: true });
       window.addEventListener('keydown', keydown);
       detach = () => {
+        initialAnchor?.detach();
         off();
         try {
           navigation?.removeEventListener('navigate', navigate);
@@ -389,6 +416,7 @@ export function createApplicationReturn(
     },
     detach: () => detach?.(),
     dispose: () => {
+      initialAnchor?.dispose();
       disposed = true;
       detach?.();
       invalidate();
