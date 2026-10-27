@@ -55,6 +55,8 @@ const inventoryName =
 const locationNames = new Map<string, string>();
 const roomContract = roomSchema.parse(rawRoom);
 const bindingBounds = buildRoomBindings(roomContract);
+let navigationFixtureId: string | null = null;
+let navigationFixtureJournal: string | null = null;
 let occupancyFixtureId: string | null = null;
 let occupancyFixtureJournal: string | null = null;
 
@@ -107,6 +109,23 @@ test.beforeAll(async ({}, testInfo) => {
       },
     });
     if (created.error) throw created.error;
+    navigationFixtureId = created.data.entity_id;
+    navigationFixtureJournal = testInfo.outputPath(
+      'owned-room-navigation-fixture.json',
+    );
+    writeFileSync(
+      navigationFixtureJournal,
+      JSON.stringify(
+        {
+          origin: url.origin,
+          itemId: navigationFixtureId,
+          locationCodes: ['ITC-S1A', 'ITC-D01'],
+          cleanup: 'pending',
+        },
+        null,
+        2,
+      ),
+    );
     const received = await client.rpc('quantity_receive', {
       p_request_id: crypto.randomUUID(),
       p_payload: {
@@ -181,13 +200,13 @@ test.beforeAll(async ({}, testInfo) => {
 });
 
 test.afterAll(async () => {
-  if (!occupancyFixtureId) return;
+  if (!navigationFixtureId && !occupancyFixtureId) return;
   const url = new URL(process.env.LOCAL_API_URL!);
   if (
     !['127.0.0.1', 'localhost', '[::1]'].includes(url.hostname) ||
     url.port !== '45321'
   )
-    throw new Error('Refusing nonlocal occupancy cleanup');
+    throw new Error('Refusing nonlocal room fixture cleanup');
   const client = createClient(
     url.href,
     process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY!,
@@ -199,37 +218,66 @@ test.afterAll(async () => {
   });
   if (session.error) throw session.error;
   try {
-    const item = await client
-      .from('quantity_items')
-      .select('version,archived')
-      .eq('id', occupancyFixtureId)
-      .single();
-    if (item.error) throw item.error;
-    if (!item.data.archived) {
-      const cleanup = await client.rpc('quantity_archive_and_clear', {
-        p_request_id: crypto.randomUUID(),
-        p_payload: {
-          item_id: occupancyFixtureId,
-          expected_version: String(item.data.version),
-          confirm_clear_stock: true,
-          reason: 'Clean owned room occupancy browser fixture',
-        },
-      });
-      if (cleanup.error) throw cleanup.error;
+    const errors: unknown[] = [];
+    for (const [itemId, journal] of [
+      [navigationFixtureId, navigationFixtureJournal],
+      [occupancyFixtureId, occupancyFixtureJournal],
+    ]) {
+      if (!itemId) continue;
+      try {
+        const item = await client
+          .from('quantity_items')
+          .select('version,archived')
+          .eq('id', itemId)
+          .single();
+        if (item.error) throw item.error;
+        if (!item.data.archived) {
+          const cleanup = await client.rpc('quantity_archive_and_clear', {
+            p_request_id: crypto.randomUUID(),
+            p_payload: {
+              item_id: itemId,
+              expected_version: String(item.data.version),
+              confirm_clear_stock: true,
+              reason: 'Clean owned room browser fixture',
+            },
+          });
+          if (cleanup.error) throw cleanup.error;
+        }
+        const verified = await client
+          .from('quantity_items')
+          .select('version,archived')
+          .eq('id', itemId)
+          .single();
+        if (verified.error) throw verified.error;
+        expect(verified.data.archived).toBe(true);
+        const balances = await client
+          .from('stock_balances')
+          .select('quantity')
+          .eq('item_id', itemId)
+          .gt('quantity', 0);
+        if (balances.error) throw balances.error;
+        expect(balances.data).toHaveLength(0);
+        if (journal)
+          writeFileSync(
+            journal,
+            JSON.stringify(
+              {
+                origin: url.origin,
+                itemId,
+                version: String(verified.data.version),
+                positiveBalanceCount: 0,
+                cleanup: 'archived and cleared through audited RPC',
+              },
+              null,
+              2,
+            ),
+          );
+      } catch (error) {
+        errors.push(error);
+      }
     }
-    if (occupancyFixtureJournal)
-      writeFileSync(
-        occupancyFixtureJournal,
-        JSON.stringify(
-          {
-            origin: url.origin,
-            itemId: occupancyFixtureId,
-            cleanup: 'archived and cleared through audited RPC',
-          },
-          null,
-          2,
-        ),
-      );
+    if (errors.length)
+      throw new AggregateError(errors, 'Owned room fixture cleanup failed');
   } finally {
     await client.auth.signOut({ scope: 'local' });
   }
@@ -282,6 +330,120 @@ async function recenterMap(page: Page) {
   await expect(more).toHaveAttribute('aria-expanded', 'false');
   await expect(more).toBeFocused();
 }
+// Passive, bounded evidence for native pointer delivery and focus ownership.
+async function withRoomDragWitness(
+  page: Page,
+  run: (snapshot: (x: number, y: number) => Promise<void>) => Promise<void>,
+) {
+  const witness = await page.evaluateHandle(() => {
+    const canvas = document.querySelector('canvas');
+    const surface = canvas?.closest('[data-room-surface]');
+    const category = (target: EventTarget | null) => {
+      if (!target) return 'none';
+      if (target === canvas) return 'canvas';
+      if (!(target instanceof Element)) return 'outside';
+      if (target.closest('[role="toolbar"], [aria-label="More map controls"]'))
+        return 'toolbar';
+      return surface?.contains(target) ? 'room-overlay' : 'outside';
+    };
+    const state = () => {
+      const rect = canvas?.getBoundingClientRect();
+      return {
+        active: canvas?.getAttribute('data-map-active') === 'true',
+        focused: document.activeElement === canvas,
+        focusOwner: category(document.activeElement),
+        bounds: rect
+          ? { x: rect.x, y: rect.y, width: rect.width, height: rect.height }
+          : null,
+      };
+    };
+    const events: object[] = [];
+    let omitted = 0;
+    let start: object | null = null;
+    const observe = (event: Event) => {
+      if (events.length === 16) {
+        omitted++;
+        return;
+      }
+      events.push({
+        type: event.type,
+        trusted: event.isTrusted,
+        target: category(event.target),
+        point:
+          event instanceof PointerEvent
+            ? { x: event.clientX, y: event.clientY }
+            : null,
+        ...state(),
+      });
+    };
+    const types = ['pointerdown', 'focusin', 'focusout'];
+    for (const type of types)
+      document.addEventListener(type, observe, {
+        capture: true,
+        passive: true,
+      });
+    return {
+      snapshot(x: number, y: number) {
+        start = {
+          x,
+          y,
+          hit: category(document.elementFromPoint(x, y)),
+          ...state(),
+        };
+      },
+      read() {
+        return { start, events, omitted, final: state() };
+      },
+      cleanup() {
+        for (const type of types)
+          document.removeEventListener(type, observe, true);
+      },
+    };
+  });
+  let failed = false;
+  try {
+    await run(async (x, y) => {
+      await witness.evaluate(
+        (value, point) => value.snapshot(point.x, point.y),
+        {
+          x,
+          y,
+        },
+      );
+    });
+  } catch (error) {
+    failed = true;
+    try {
+      const evidence = await witness.evaluate((value) => value.read());
+      console.error('room-native-drag-focus ' + JSON.stringify(evidence));
+      await test.info().attach('room-native-drag-focus', {
+        body: JSON.stringify(evidence),
+        contentType: 'application/json',
+      });
+    } catch {
+      // Preserve the original failure if the page or attachment is unavailable.
+    }
+    throw error;
+  } finally {
+    const cleanupErrors: unknown[] = [];
+    try {
+      await witness.evaluate((value) => value.cleanup());
+    } catch (error) {
+      cleanupErrors.push(error);
+    }
+    try {
+      await witness.dispose();
+    } catch (error) {
+      cleanupErrors.push(error);
+    }
+    if (!failed && cleanupErrors.length)
+      throw new AggregateError(
+        cleanupErrors,
+        'Room drag witness cleanup failed',
+      );
+  }
+}
+
 async function activateMap(page: Page) {
   if (await page.locator('canvas[data-map-active="true"]').count()) return;
   const more = page.getByRole('button', {
@@ -2846,23 +3008,33 @@ test('real controls orbit through both complete turns and preserve selection acr
   await toolbar
     .getByRole('button', { name: 'More map controls', exact: true })
     .click();
-  await viewer.locator('canvas').scrollIntoViewIfNeeded();
-  const bounds = await viewer.locator('canvas').boundingBox();
-  expect(bounds).toBeTruthy();
-  const y = bounds!.y + bounds!.height * 0.48;
-  await page.mouse.move(bounds!.x + bounds!.width * 0.72, y);
-  await activateMap(page);
-  await page.mouse.down();
-  await expect(viewer.locator('canvas')).toHaveAttribute(
-    'data-map-active',
-    'true',
-  );
-  await expect(viewer.locator('canvas')).toBeFocused();
-  await page.mouse.move(bounds!.x + bounds!.width * 0.28, y, { steps: 12 });
-  await page.mouse.up();
-  expect(
-    Math.abs((await camera(page)).unwrapped - counterclockwise.unwrapped),
-  ).toBeGreaterThan(0.1);
+  await withRoomDragWitness(page, async (snapshot) => {
+    // Complete activation before measuring and placing the native drag pointer.
+    await activateMap(page);
+    await viewer.locator('canvas').scrollIntoViewIfNeeded();
+    const bounds = await viewer.locator('canvas').boundingBox();
+    expect(bounds).toBeTruthy();
+    const y = bounds!.y + bounds!.height * 0.48;
+    await page.mouse.move(bounds!.x + bounds!.width * 0.72, y);
+    await snapshot(bounds!.x + bounds!.width * 0.72, y);
+    expect(
+      await viewer
+        .locator('canvas')
+        .evaluate((element) => element.matches(':hover')),
+      'The final drag pointer must hit the canvas at the intended drag start',
+    ).toBe(true);
+    await page.mouse.down();
+    await expect(viewer.locator('canvas')).toHaveAttribute(
+      'data-map-active',
+      'true',
+    );
+    await expect(viewer.locator('canvas')).toBeFocused();
+    await page.mouse.move(bounds!.x + bounds!.width * 0.28, y, { steps: 12 });
+    await page.mouse.up();
+    expect(
+      Math.abs((await camera(page)).unwrapped - counterclockwise.unwrapped),
+    ).toBeGreaterThan(0.1);
+  });
   await page.reload();
   await ready(page);
   expect((await camera(page)).mode).toBe('free');
@@ -3000,24 +3172,32 @@ test('Free Orbit tilts to both poles and below the horizon while Guided clamps b
     .click();
   await chooseMapMode(page, 'Free Orbit');
   const canvas = viewer.locator('canvas');
-  await canvas.scrollIntoViewIfNeeded();
-  const frame = await canvas.boundingBox();
-  expect(frame).toBeTruthy();
-  const beforeDrag = await camera(page);
-  const x = frame!.x + frame!.width * 0.5;
-  await page.mouse.move(x, frame!.y + frame!.height * 0.4);
-  await activateMap(page);
-  await page.mouse.down();
-  await expect(viewer.locator('canvas')).toHaveAttribute(
-    'data-map-active',
-    'true',
-  );
-  await expect(viewer.locator('canvas')).toBeFocused();
-  await page.mouse.move(x, frame!.y + frame!.height * 0.75, { steps: 12 });
-  await page.mouse.up();
-  expect(
-    Math.abs((await camera(page)).elevation - beforeDrag.elevation),
-  ).toBeGreaterThan(0.1);
+  await withRoomDragWitness(page, async (snapshot) => {
+    // Complete activation before measuring and placing the native drag pointer.
+    await activateMap(page);
+    await canvas.scrollIntoViewIfNeeded();
+    const frame = await canvas.boundingBox();
+    expect(frame).toBeTruthy();
+    const beforeDrag = await camera(page);
+    const x = frame!.x + frame!.width * 0.5;
+    await page.mouse.move(x, frame!.y + frame!.height * 0.4);
+    await snapshot(x, frame!.y + frame!.height * 0.4);
+    expect(
+      await canvas.evaluate((element) => element.matches(':hover')),
+      'The final drag pointer must hit the canvas at the intended drag start',
+    ).toBe(true);
+    await page.mouse.down();
+    await expect(viewer.locator('canvas')).toHaveAttribute(
+      'data-map-active',
+      'true',
+    );
+    await expect(viewer.locator('canvas')).toBeFocused();
+    await page.mouse.move(x, frame!.y + frame!.height * 0.75, { steps: 12 });
+    await page.mouse.up();
+    expect(
+      Math.abs((await camera(page)).elevation - beforeDrag.elevation),
+    ).toBeGreaterThan(0.1);
+  });
   await expect(viewer).toHaveAttribute('data-selected-code', 'ITC-S1A');
 });
 
