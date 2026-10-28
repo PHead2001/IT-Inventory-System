@@ -1597,7 +1597,7 @@ application Back/anchor journey, phone geometry, actual context loss with the
 retained quantity draft, complete validation and exact-SHA CI remain integration
 gates; the focused native fixture does not certify them.
 
-## Next 16.3.6 learned-route fragment correction
+## Next 16.4.1 learned-route fragment correction
 
 Reloading an anchored results URL poisoned Next's learned route cache with the
 fragment. A later **Back to results** then appended the requested fragment again,
@@ -1606,7 +1606,7 @@ responses all write through `discoverKnownRoute`; the shared cache entry must
 exclude fragments while the document and router state retain their complete URL.
 
 `npm ci` automatically runs `scripts/patch-next-route-cache.mjs`. For pinned Next
-16.3.6 only, it removes the first literal `#` and following fragment from the local
+16.4.1 only, it removes the first literal `#` and following fragment from the local
 cache-insertion argument in both CJS and ESM `optimistic-routes.js`. Encoded `%23`,
 path and query bytes are preserved. Both whole-file original/corrected SHA256
 values and the package version are checked before writes; unknown bytes or a
@@ -1628,6 +1628,34 @@ and readback failure. These tests prove the dependency URL contract; the four
 existing Reduced-motion browser journeys remain unchanged and require execution
 on the final candidate. The runner image recipe still caches package tarballs
 with `--ignore-scripts`; actual PR jobs run fresh `npm ci` and apply the correction.
+
+The 16.4.1 rebase uses the integrity-verified public release tarball, its new
+root-tree/rendered-search arguments and `app-router-state.js` cached navigation.
+The exact CJS/ESM hashes are pinned in the patcher; the fixture also checks that
+rendered search bytes survive both hydration and ordinary/pending learning.
+Next and eslint-config-next are pinned together at 16.4.1; direct and Next's
+optional Sharp dependency resolve to 0.35.5. React and React DOM remain 19.3.0.
+Linux native Sharp loading, file inspection, the complete CI gate and authenticated
+fragment browser journeys remain required candidate evidence.
+
+The observed Next 16.4.1 preview CSS references bundled fonts under
+`/_next/static/immutable/media/`. Both label/font browser checks accept that path
+and the existing `/_next/static/media/` path while retaining same-origin,
+computed-family, loaded-face and two-distinct-WOFF2 requirements.
+
+The bounded Windows check for this upgrade omits
+`tests/unit/compiled-settings-contract.test.mjs`: its synthetic Flight renderer
+explicitly requests a 768 MiB child heap, above the local 512 MiB limit. The test
+and its assertions remain unchanged and mandatory in the complete Linux CI gate.
+
+The native route geometry negative controls now assert the forced incoming height
+and `object-fit: fill` before checking distorted pixels; the paired natural fixture
+checks unchanged live hero geometry and unscaled landmarks. The earlier negative
+control failed with 768 natural pixels. With explicit fixture preconditions, all
+60 standalone Windows cases passed without retries; Linux execution remains pending.
+The file chooser witness records bounded, structural diagnostics through chooser
+acquisition and preserves the original global keyboard Enter and native chooser.
+It supplies failure evidence, not a claimed chooser fix.
 
 Local port regressions in `tests/unit/local-supabase-ports.test.mjs` exercise TCP
 exclusions, conflicts and exact owned-service exceptions without changing host

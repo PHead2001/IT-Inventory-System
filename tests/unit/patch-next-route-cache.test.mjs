@@ -28,7 +28,7 @@ function fixture() {
   temporary.push(nextRoot);
   writeFileSync(
     join(nextRoot, 'package.json'),
-    JSON.stringify({ version: '16.3.6' }),
+    JSON.stringify({ version: '16.4.1' }),
   );
   for (const file of nextRouteCacheCorrection.files) {
     const installed = readFileSync(join(installedNext, file.path));
@@ -74,9 +74,9 @@ it('rejects a dependency version change before touching either module', () => {
   const before = f.hashes();
   writeFileSync(
     join(f.nextRoot, 'package.json'),
-    JSON.stringify({ version: '16.3.8' }),
+    JSON.stringify({ version: '16.4.2' }),
   );
-  expect(() => patchNextRouteCache(f)).toThrow('requires reviewed Next 16.3.6');
+  expect(() => patchNextRouteCache(f)).toThrow('requires reviewed Next 16.4.1');
   expect(f.hashes()).toEqual(before);
 });
 
