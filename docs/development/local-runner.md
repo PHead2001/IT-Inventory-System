@@ -505,3 +505,26 @@ Before enabling active pickup on the live host, security evidence must establish
 Source contract validation performs no host provisioning, elevation, credential creation, VM/WSL/NAT/task creation, or GitHub registration. Windows PowerShell 5.1 syntax and non-mutating contract checks cover native argument fidelity, lifecycle readback, provisional cleanup, serialized recovery, synthetic network drift and inspection failure, cancelled boot, converter retirement, menu activation order, real-process claim/suspension races, fail-fast concurrent owner controls, abrupt claim-process loss, and every final setup publication interruption. Offline checks do not substitute for real Hyper-V networking, disk creation, guest boot, shutdown recovery or a working runner job. Preserve exact-revision runtime pilot evidence separately, complete independent review, and apply the security and workload gates above. A new installation leaves pickup disabled until the operator explicitly enables it. Installed activation or a passing pilot does not waive the complete normal-workload gate. Record real reboot recovery separately from synthetic interruption/recovery checks; do not infer reboot proof from those checks or from configured boot tasks.
 
 Official references: [GitHub repository JIT runner API](https://docs.github.com/en/rest/actions/self-hosted-runners), [GitHub workflow job API](https://docs.github.com/en/rest/actions/workflow-jobs), [Ubuntu cloud-init NoCloud](https://docs.cloud-init.io/en/latest/reference/datasources/nocloud.html), [Microsoft Hyper-V NAT](https://learn.microsoft.com/en-us/windows-server/virtualization/hyper-v/setup-nat-network), and [Microsoft Hyper-V extended ACLs](https://learn.microsoft.com/en-us/windows-server/virtualization/hyper-v/create-security-policies-extended-port-access-control-lists).
+
+## Recovery probe outcome diagnostics
+
+Recovery failure observations retain optional fixed probe outcome and worker-stage
+codes, attempt/failure counts (maximum 1,000,000), and elapsed milliseconds
+(maximum 86,400,000). Outcome codes distinguish passed, timeout, child exit,
+missing/invalid result and Boolean probe failure. Worker codes identify listener,
+isolation-command or GitHub-command stages. They do not identify a transport,
+HTTP, hardware or outage root cause. Elapsed fields retain episode maxima and
+need not describe the last attempt. Legacy records without these fields remain
+readable; unknown fields and malformed projected values are rejected. Raw
+exceptions, commands, endpoints, output, credentials and tokens are excluded.
+
+This is diagnostic instrumentation. The Boolean success policy, generation/nonce
+checks, native commands, timeouts, isolation rules and outage deadline are unchanged.
+Offline worker, recovery and failure-observation contracts prove mocked behavior;
+they do not prove installed delivery or real network continuity. Regenerate the
+source bundle with the canonical Write-Bundle.ps1 after integration, then install
+that reviewed bundle through Update.ps1 while idle. Update refuses an active
+session or owned VM, waits only for graceful idle-supervisor suspension, preserves
+registration/configuration evidence, and leaves pickup stopped. Record installed
+bundle identity separately. Capture tooling must accept the optional fields using
+the installed reviewed validators before a later incident can provide new evidence.

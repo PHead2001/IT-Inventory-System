@@ -490,4 +490,49 @@ Check 'sealed liveness releases publication lock before storage and VM provider 
         Require ($script:depth -eq 0 -and $script:sealedCalls -eq 1)
     }
 }
+Check 'optional probe diagnostics roundtrip with legacy compatibility and strict unknown or overlong projected fields' {
+    Reset-Fixture
+    $r = $script:state.networkRecovery
+    $r | Add-Member diagnostics ([pscustomobject]@{
+        trigger = 'fingerprint-change'; lastTransition = 'probing'; refusal = ''
+        observationUnavailableCount = 0; fingerprintChangeCount = 1; staleAdmissionCount = 2; applyCount = 3
+        observationElapsedMs = 254; preflightElapsedMs = 2348; applyElapsedMs = 4426
+        probeOutcome = 'probe-failed'; probeWorker = 'github-command-failed'
+        probeCount = 1000000; probeFailureCount = 1000000; probeElapsedMs = 86400000; probeWorkerElapsedMs = 86400000
+        rawOutput = 'SECRET credential URL'
+    })
+    $record = New-RunnerFailureObservation 'session-guardian' 'recovery-expiry' $script:state $script:now
+    Require ($record.capture -ceq 'complete' -and $record.recoveryDiagnostic.probeWorker -ceq 'github-command-failed')
+    $json = $record | ConvertTo-Json -Depth 4 -Compress
+    Require ($json -cnotmatch 'SECRET|credential|rawOutput' -and [Text.Encoding]::UTF8.GetByteCount($json) -le 2048)
+    Assert-RunnerFailureRecord ($json | ConvertFrom-Json)
+    $legacy = $json | ConvertFrom-Json
+    foreach ($name in @('probeOutcome', 'probeWorker', 'probeCount', 'probeFailureCount', 'probeElapsedMs', 'probeWorkerElapsedMs')) { $legacy.recoveryDiagnostic.PSObject.Properties.Remove($name) }
+    Assert-RunnerFailureRecord $legacy
+    foreach ($bad in @('SECRET', ('x' * 2000), $true, $null)) {
+        $r.diagnostics.probeWorker = $bad
+        $safe = New-RunnerFailureObservation 'session-guardian' 'recovery-expiry' $script:state $script:now
+        Require ($safe.capture -ceq 'complete' -and $safe.recoveryDiagnostic.probeWorker -ceq 'other')
+        $invalid = $json | ConvertFrom-Json; $invalid.recoveryDiagnostic.probeWorker = $bad
+        $refused = $false; try { Assert-RunnerFailureRecord $invalid } catch { $refused = $true }; Require $refused
+    }
+    $r.diagnostics.probeWorker = 'github-command-failed'
+    foreach ($name in @('probeCount', 'probeFailureCount', 'probeElapsedMs', 'probeWorkerElapsedMs')) {
+        $original = $r.diagnostics.$name
+        foreach ($bad in @(-1, 1.5, $true, [double]::NaN, [double]::PositiveInfinity, 86400001)) {
+            $r.diagnostics.$name = $bad
+            $safe = New-RunnerFailureObservation 'session-guardian' 'recovery-expiry' $script:state $script:now
+            Require ($safe.capture -ceq 'unavailable')
+        }
+        $r.diagnostics.$name = $original
+    }
+    $invalid = $json | ConvertFrom-Json; $invalid.recoveryDiagnostic | Add-Member unknownProbeField 'SECRET'
+    $refused = $false; try { Assert-RunnerFailureRecord $invalid } catch { $refused = $true }; Require $refused
+    Write-RunnerCleanupObservation 'session-guardian' 'recovery-expiry' $script:state $script:now '' 'outage-deadline'
+    $first = $script:journal.first | ConvertTo-Json -Depth 4 -Compress
+    Write-RunnerCleanupObservation 'recovery-plan' 'recovery-cleanup' $script:state $script:now.AddSeconds(1)
+    Require (($script:journal.first | ConvertTo-Json -Depth 4 -Compress) -ceq $first)
+    Require ([Text.Encoding]::UTF8.GetByteCount(($script:journal | ConvertTo-Json -Depth 6 -Compress)) -le 4096)
+    Assert-RunnerCleanupJournal $script:journal
+}
 Write-Host "Failure observation passed: $script:checks pure guard/capture regressions. No host providers or files touched."

@@ -909,6 +909,48 @@ try {
         $failed = Get-RunnerLaunchDecision $j 'runner-exited' 123 ('c' * 32) 1; Assert-Equal $failed.phase 'runner-failed' 'Nonzero exit ignored.'
         $j = Get-RunnerLaunchDecision $j 'runner-exited' 123 ('c' * 32); Assert-Equal $j.phase 'runner-exited' 'Exit receipt implied workflow success.'
     }
+    Check 'probe terminal diagnostics distinguish timeout exit missing invalid legacy and worker failure without changing success correlation' {
+        foreach ($case in @('timeout', 'child-exit', 'result-missing', 'result-invalid', 'probe-failed', 'passed', 'legacy', 'untrusted-detail')) {
+            New-Fixture; $r = $script:state.networkRecovery; $r.operation = 'probe'; $r.phase = 'probing'
+            [void][IO.Directory]::CreateDirectory($script:state.instancePath)
+            $script:RunnerRecoveryProbe = Start-RunnerRecoveryProbe $script:state ([pscustomobject]@{ guestIp = '172.30.240.2'; gatewayIp = '172.30.240.1' }) 0
+            $probe = $script:RunnerRecoveryProbe; $probe.job.Completed = $true
+            if ($case -ceq 'timeout') { $script:clock = $script:clock.AddSeconds(25) }
+            elseif ($case -ceq 'child-exit') { $probe.job.ExitCode = 1 }
+            elseif ($case -cne 'result-missing') {
+                $value = [ordered]@{ generation = 0; probeId = $probe.probeId; success = $case -cin @('passed', 'legacy', 'untrusted-detail') }
+                if ($case -ceq 'result-invalid') { $value.probeId = 'f' * 32 }
+                if ($case -cin @('probe-failed', 'passed')) { $value.detail = @{ code = if ($case -ceq 'passed') { 'passed' } else { 'github-command-failed' }; elapsedMs = 12 } }
+                if ($case -ceq 'untrusted-detail') { $value.detail = @{ code = 'SECRET raw URL credential'; elapsedMs = -1; rawOutput = 'SECRET' } }
+                [IO.File]::WriteAllText($probe.resultPath, ($value | ConvertTo-Json -Depth 4 -Compress))
+            }
+            $outcome = Get-RunnerRecoveryProbeOutcome
+            Assert-Equal $outcome.success ($case -cin @('passed', 'legacy', 'untrusted-detail')) 'Diagnostic detail changed the existing Boolean success policy.'
+            Assert-Equal $outcome.diagnostic.outcome $(if ($case -cin @('legacy', 'untrusted-detail')) { 'passed' } else { $case }) 'Terminal probe reason collapsed.'
+            if ($case -ceq 'probe-failed') { Assert-Equal $outcome.diagnostic.worker 'github-command-failed' 'Worker stage lost.' }
+            if ($case -ceq 'untrusted-detail') { Assert-Equal $outcome.diagnostic.worker 'other' 'Untrusted detail persisted.' }
+            if (($outcome | ConvertTo-Json -Depth 4 -Compress) -cmatch 'SECRET|credential|rawOutput') { throw 'Raw worker data escaped sanitization.' }
+            Assert-Equal $script:effects @('probe-start', 'probe-cancel', 'probe-remove') 'Probe diagnostics changed lifetime actions.'
+            Assert-Equal $script:RunnerRecoveryProbe $null 'Probe diagnostics retained a worker.'
+        }
+    }
+    Check 'probe evidence cannot change any core action generation binding or deadline and stale outcomes are not counted' {
+        foreach ($success in @($false, $true)) {
+            foreach ($condition in @('current', 'drift', 'expired', 'stale')) {
+                New-Fixture; Isolate; $r = $script:recovery; $r.phase = 'probing'; $r.operation = 'probe'; $r.candidateFingerprint = $script:observation.fingerprint
+                $now = if ($condition -ceq 'expired') { $script:now.AddSeconds(120) } else { $script:now.AddSeconds(2) }
+                $observation = if ($condition -ceq 'drift') { [pscustomobject]@{ fingerprint = 'c' * 64; rules = @() } } else { $script:observation }
+                $outcome = [pscustomobject]@{ generation = if ($condition -ceq 'stale') { $r.generation - 1 } else { $r.generation }; operation = 'probe'; success = $success; diagnostic = [pscustomobject]@{ outcome = if ($success) { 'passed' } else { 'timeout' }; worker = ''; elapsedMs = 25000; workerElapsedMs = 0 } }
+                $core = Get-RunnerNetworkRecoveryPlanCore $r $observation $now 'Running' $outcome
+                $rich = Get-RunnerNetworkRecoveryPlan $r $observation $now 'Running' $outcome
+                Assert-Equal $rich.action $core.action 'Probe evidence changed core action.'
+                if ($condition -ceq 'stale') { Assert-Equal $rich.recovery.diagnostics.probeCount 0 'Stale probe evidence counted.' }
+                else { Assert-Equal $rich.recovery.diagnostics.probeCount 1 'Correlated probe evidence missing.'; Assert-Equal $rich.recovery.diagnostics.probeFailureCount $(if ($success) { 0 } else { 1 }) 'Probe failure count differs.' }
+                $core.recovery.PSObject.Properties.Remove('diagnostics'); $rich.recovery.PSObject.Properties.Remove('diagnostics')
+                Assert-Equal $rich.recovery $core.recovery 'Probe evidence changed core state/generation/deadline/binding.'
+            }
+        }
+    }
     Write-Host "Network recovery offline regressions passed: $script:count cases. No live network/provider containment or GitHub continuity proof."
 } finally {
     # One checked TEMP directory, same shell end-to-end; no host state cleanup.

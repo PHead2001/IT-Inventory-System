@@ -128,6 +128,7 @@ function New-RunnerRecoveryEpisodeDiagnostic {
         observationUnavailableCount = 0; fingerprintChangeCount = 0; staleAdmissionCount = 0; applyCount = 0
         observationElapsedMs = 0; preflightElapsedMs = 0; applyElapsedMs = 0
         admissionOperation = ''; observationAgeMs = 0; quarantineElapsedMs = 0; connectElapsedMs = 0; resumeElapsedMs = 0
+        probeOutcome = ''; probeWorker = ''; probeCount = 0; probeFailureCount = 0; probeElapsedMs = 0; probeWorkerElapsedMs = 0
     }
 }
 
@@ -138,12 +139,12 @@ function Set-RunnerRecoveryDiagnostic($Recovery, [string] $Name, $Value) {
     if ($Recovery.PSObject.Properties.Name -notcontains 'diagnostics') {
         $Recovery | Add-Member -NotePropertyName diagnostics -NotePropertyValue (New-RunnerRecoveryEpisodeDiagnostic)
     }
-    if ($Name -cin @('trigger', 'lastTransition', 'refusal', 'lastFingerprint', 'operation', 'operationStartedUtc', 'admissionOperation')) {
+    if ($Name -cin @('trigger', 'lastTransition', 'refusal', 'lastFingerprint', 'operation', 'operationStartedUtc', 'admissionOperation', 'probeOutcome', 'probeWorker')) {
         if ($Recovery.diagnostics.PSObject.Properties.Name -notcontains $Name) { $Recovery.diagnostics | Add-Member -NotePropertyName $Name -NotePropertyValue $Value }
         else { $Recovery.diagnostics.$Name = $Value }
         return
     }
-    if ($Name -cnotin @('observationUnavailableCount', 'fingerprintChangeCount', 'staleAdmissionCount', 'applyCount', 'observationElapsedMs', 'preflightElapsedMs', 'applyElapsedMs', 'observationAgeMs', 'quarantineElapsedMs', 'connectElapsedMs', 'resumeElapsedMs')) { return }
+    if ($Name -cnotin @('observationUnavailableCount', 'fingerprintChangeCount', 'staleAdmissionCount', 'applyCount', 'observationElapsedMs', 'preflightElapsedMs', 'applyElapsedMs', 'observationAgeMs', 'quarantineElapsedMs', 'connectElapsedMs', 'resumeElapsedMs', 'probeCount', 'probeFailureCount', 'probeElapsedMs', 'probeWorkerElapsedMs')) { return }
     if ($Recovery.diagnostics.PSObject.Properties.Name -notcontains $Name) { $Recovery.diagnostics | Add-Member -NotePropertyName $Name -NotePropertyValue 0 }
     if ($Name -ceq 'observationAgeMs') {
         # Last actual retained-capture age, including a future-clock refusal.
@@ -204,6 +205,24 @@ function Get-RunnerNetworkRecoveryPlan($Recovery, $Observation, [DateTime] $NowU
     $plan = Get-RunnerNetworkRecoveryPlanCore $Recovery $Observation $NowUtc $VmState $Outcome -Stop:$Stop -OwnerDead:$OwnerDead -IdentityChanged:$IdentityChanged -ConnectivityLost:$ConnectivityLost
     $next = $plan.recovery
     try {
+    # Correlate evidence to the same input generation/operation, never to a new
+    # action. The core reducer above remains the sole authority for decisions.
+    if ($null -ne $Outcome -and $Recovery.operation -ceq 'probe' -and $Outcome.operation -ceq 'probe' -and $Outcome.generation -eq $Recovery.generation) {
+        Set-RunnerRecoveryDiagnostic $next 'probeCount' 1
+        if (-not $Outcome.success) { Set-RunnerRecoveryDiagnostic $next 'probeFailureCount' 1 }
+        $d = if ($Outcome.PSObject.Properties.Name -contains 'diagnostic') { $Outcome.diagnostic } else { $null }
+        $outcomeCode = if ($null -ne $d -and $d.PSObject.Properties.Name -contains 'outcome' -and $d.outcome -cin @('passed', 'timeout', 'child-exit', 'result-missing', 'result-invalid', 'probe-failed')) { $d.outcome } elseif ($null -eq $d) { if ($Outcome.success) { 'passed' } else { 'probe-failed' } } else { 'other' }
+        $workerCode = if ($null -ne $d -and $d.PSObject.Properties.Name -contains 'worker' -and $d.worker -cin @('', 'passed', 'listener-error', 'isolation-error', 'isolation-command-failed', 'isolation-open', 'github-error', 'github-command-failed', 'other')) { $d.worker } elseif ($null -eq $d) { '' } else { 'other' }
+        Set-RunnerRecoveryDiagnostic $next 'probeOutcome' $outcomeCode
+        Set-RunnerRecoveryDiagnostic $next 'probeWorker' $workerCode
+        if ($null -ne $d) {
+            foreach ($pair in @(@('elapsedMs', 'probeElapsedMs'), @('workerElapsedMs', 'probeWorkerElapsedMs'))) {
+                if ($d.PSObject.Properties.Name -contains $pair[0]) {
+                    try { $number = Get-RunnerRecoveryDiagnosticNumber $d.($pair[0]); Set-RunnerRecoveryDiagnostic $next $pair[1] $number } catch { }
+                }
+            }
+        }
+    }
     if ($Recovery.phase -ceq 'healthy' -and $next.episodeStartedUtc -and $next.episodeStartedUtc -cne $Recovery.episodeStartedUtc) {
         if ($next.PSObject.Properties.Name -notcontains 'diagnostics') { $next | Add-Member -NotePropertyName diagnostics -NotePropertyValue (New-RunnerRecoveryEpisodeDiagnostic) }
         else { $next.diagnostics = New-RunnerRecoveryEpisodeDiagnostic }
@@ -502,18 +521,39 @@ function Get-RunnerRecoveryProbeOutcome {
     $probe = $script:RunnerRecoveryProbe
     $current = Get-RunnerState
     if (-not (Test-RunnerRecoveryGeneration $current $probe.binding $probe.generation 'probe')) { Stop-RunnerRecoveryProbe; return $null }
-    $expired = ((Get-RunnerRecoveryNow) - [DateTime]::Parse($probe.startedUtc).ToUniversalTime()).TotalSeconds -ge 25
+    $elapsed = (Get-RunnerRecoveryNow) - [DateTime]::Parse($probe.startedUtc).ToUniversalTime()
+    $expired = $elapsed.TotalSeconds -ge 25
     if (-not $expired -and -not $probe.job.Completed) { return $null }
     $success = $false
-    if (-not $expired -and $probe.job.ExitCode -eq 0 -and (Test-Path -LiteralPath $probe.resultPath -PathType Leaf)) {
+    $outcomeCode = if ($expired) { 'timeout' } else { 'child-exit' }
+    $received = $null; $correlated = $false
+    if (-not $expired -and $probe.job.ExitCode -eq 0) {
+        $outcomeCode = 'result-missing'
+        if (Test-Path -LiteralPath $probe.resultPath -PathType Leaf) {
+        $outcomeCode = 'result-invalid'
         try {
             Assert-RunnerProtectedPath $probe.resultPath
             if ((Get-Item -LiteralPath $probe.resultPath).Length -gt 256) { throw 'Probe result exceeded protocol bound.' }
             $received = Read-RunnerJson $probe.resultPath
             $success = $received.generation -eq $probe.generation -and $received.probeId -ceq $probe.probeId -and $received.success -is [bool] -and $received.success -eq $true
+            $correlated = $received.generation -eq $probe.generation -and $received.probeId -ceq $probe.probeId -and $received.success -is [bool]
+            if ($correlated) { $outcomeCode = if ($success) { 'passed' } else { 'probe-failed' } }
         } catch { $success = $false }
+        }
     }
-    $outcome = [pscustomobject]@{ generation = $probe.generation; operation = 'probe'; success = $success }
+    $worker = ''; $workerElapsed = 0
+    if ($correlated -and $null -ne $received -and $received.PSObject.Properties.Name -contains 'detail') {
+        # Never copy worker dictionaries or errors into state; select fixed enums.
+        $worker = 'other'
+        try {
+            if ($received.detail.code -is [string] -and $received.detail.code -cin @('passed', 'listener-error', 'isolation-error', 'isolation-command-failed', 'isolation-open', 'github-error', 'github-command-failed')) {
+                $workerElapsed = Get-RunnerRecoveryDiagnosticNumber $received.detail.elapsedMs
+                $worker = $received.detail.code
+            }
+        } catch { $workerElapsed = 0; $worker = 'other' }
+    }
+    $elapsedMs = [long][Math]::Min(86400000, [Math]::Max(0, [Math]::Truncate($elapsed.TotalMilliseconds)))
+    $outcome = [pscustomobject]@{ generation = $probe.generation; operation = 'probe'; success = $success; diagnostic = [pscustomobject]@{ outcome = $outcomeCode; worker = $worker; elapsedMs = $elapsedMs; workerElapsedMs = $workerElapsed } }
     Stop-RunnerRecoveryProbe
     return $outcome
 }

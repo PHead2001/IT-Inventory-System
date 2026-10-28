@@ -46,7 +46,9 @@ function Assert-RunnerRecoveryDiagnostic($Diagnostic) {
     # these fixed optional diagnostics; unknown fields remain invalid.
     if ($Diagnostic -is [pscustomobject]) {
         if ($Diagnostic.PSObject.Properties.Name -contains 'admissionOperation') { $enums.admissionOperation = @('', 'connect', 'resume', 'other') }
-        foreach ($name in @('observationAgeMs', 'quarantineElapsedMs', 'connectElapsedMs', 'resumeElapsedMs')) {
+        if ($Diagnostic.PSObject.Properties.Name -contains 'probeOutcome') { $enums.probeOutcome = @('', 'passed', 'timeout', 'child-exit', 'result-missing', 'result-invalid', 'probe-failed', 'other') }
+        if ($Diagnostic.PSObject.Properties.Name -contains 'probeWorker') { $enums.probeWorker = @('', 'passed', 'listener-error', 'isolation-error', 'isolation-command-failed', 'isolation-open', 'github-error', 'github-command-failed', 'other') }
+        foreach ($name in @('observationAgeMs', 'quarantineElapsedMs', 'connectElapsedMs', 'resumeElapsedMs', 'probeCount', 'probeFailureCount', 'probeElapsedMs', 'probeWorkerElapsedMs')) {
             if ($Diagnostic.PSObject.Properties.Name -contains $name) { $numbers += $name }
         }
     }
@@ -69,6 +71,7 @@ function New-RunnerRecoveryDiagnostic($Recovery, [DateTime] $NowUtc) {
         observationUnavailableCount = 0; fingerprintChangeCount = 0; staleAdmissionCount = 0; applyCount = 0
         observationElapsedMs = 0; preflightElapsedMs = 0; applyElapsedMs = 0
         admissionOperation = ''; observationAgeMs = 0; quarantineElapsedMs = 0; connectElapsedMs = 0; resumeElapsedMs = 0
+        probeOutcome = ''; probeWorker = ''; probeCount = 0; probeFailureCount = 0; probeElapsedMs = 0; probeWorkerElapsedMs = 0
     }
     if ($Recovery.PSObject.Properties.Name -contains 'operation') { $value.operation = if ($Recovery.operation -cin @('', 'quarantine', 'apply', 'connect', 'resume', 'probe')) { $Recovery.operation } else { 'other' } }
     if ($Recovery.PSObject.Properties.Name -contains 'diagnostics') {
@@ -80,6 +83,11 @@ function New-RunnerRecoveryDiagnostic($Recovery, [DateTime] $NowUtc) {
             if ($d.PSObject.Properties.Name -contains $name) { $value[$name] = Get-RunnerRecoveryDiagnosticNumber $d.$name 86400000 -Signed:($name -ceq 'observationAgeMs') }
         }
         if ($d.PSObject.Properties.Name -contains 'admissionOperation') { $value.admissionOperation = if ($d.admissionOperation -cin @('', 'connect', 'resume')) { $d.admissionOperation } else { 'other' } }
+        foreach ($name in @('probeCount', 'probeFailureCount', 'probeElapsedMs', 'probeWorkerElapsedMs')) {
+            if ($d.PSObject.Properties.Name -contains $name) { $value[$name] = Get-RunnerRecoveryDiagnosticNumber $d.$name $(if ($name -clike '*Count') { 1000000 } else { 86400000 }) }
+        }
+        if ($d.PSObject.Properties.Name -contains 'probeOutcome') { $value.probeOutcome = if ($d.probeOutcome -is [string] -and $d.probeOutcome -cin @('', 'passed', 'timeout', 'child-exit', 'result-missing', 'result-invalid', 'probe-failed')) { $d.probeOutcome } else { 'other' } }
+        if ($d.PSObject.Properties.Name -contains 'probeWorker') { $value.probeWorker = if ($d.probeWorker -is [string] -and $d.probeWorker -cin @('', 'passed', 'listener-error', 'isolation-error', 'isolation-command-failed', 'isolation-open', 'github-error', 'github-command-failed')) { $d.probeWorker } else { 'other' } }
         $value.trigger = if ($d.trigger -cin @('', 'observation-unavailable', 'fingerprint-change', 'connectivity-lost')) { $d.trigger } else { 'other' }
         $value.lastTransition = if ($d.lastTransition -cin $phases) { $d.lastTransition } else { 'other' }
         $refusals = @('', 'stale-observation', 'dispatch-deadline', 'provider-uncertain', 'operation-uncertain', 'stop', 'owner-dead', 'identity-changed', 'hard-deadline', 'outage-deadline', 'guardian-progress-expired', 'clock-regressed', 'vm-state-uncertain', 'connectivity-state-uncertain', 'watchdog-expired')
