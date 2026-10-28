@@ -18,11 +18,13 @@ async function signIn(page: Page) {
 }
 
 async function noHorizontalOverflow(page: Page) {
-  const dimensions = await page.evaluate(() => ({
-    viewport: document.documentElement.clientWidth,
-    content: document.documentElement.scrollWidth,
-  }));
-  expect(dimensions.content).toBeLessThanOrEqual(dimensions.viewport + 1);
+  await withFailureGeometry(page, 'inventory-horizontal-overflow', async () => {
+    const dimensions = await page.evaluate(() => ({
+      viewport: document.documentElement.clientWidth,
+      content: document.documentElement.scrollWidth,
+    }));
+    expect(dimensions.content).toBeLessThanOrEqual(dimensions.viewport + 1);
+  });
 }
 
 async function headerControlsFit(page: Page) {
