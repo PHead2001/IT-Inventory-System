@@ -1,5 +1,23 @@
 # Validation
 
+## Deferred-hydration browser probes
+
+The first-styled-paint and initial motion Settings probes share
+`tests/e2e/deferred-hydration.ts`. Only the exact same-origin
+`/theme-bootstrap.v1.js` may run before the barrier releases: this synchronous
+head script must complete for the parser to reach server-rendered body content.
+Every other external script remains held. The probes retain their privacy,
+pre-hydration motion, saved-choice and first-keyboard-activation assertions.
+Focused unit coverage rejects foreign/query variants of the bootstrap exception
+and leaves non-script requests unchanged. Deliberately JavaScript-disabled or
+other negative-capability cases do not adopt this helper automatically.
+
+The Free Orbit pole/clamp journey keeps its real activation, fresh canvas bounds,
+35%-height vertical drag and native-pointer/focus/elevation assertions. Its start
+uses the existing `uncoveredCanvasGesture` helper, which requires all nine
+sampled path points to hit the actual canvas. An overlay covering the old fixed
+start is not forced through or hidden; absence of a valid path remains a failure.
+
 ## CI job budget
 
 The required Foundation CI job has a 45-minute execution ceiling for the combined application, database and browser gates. Every gate remains required; the configured timeout is an operational budget, not a promised runtime or latency target.

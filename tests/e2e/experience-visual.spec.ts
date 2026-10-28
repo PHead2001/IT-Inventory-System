@@ -1,3 +1,4 @@
+import { holdHydrationScripts } from './deferred-hydration';
 import { openRecordTask } from './record-task-controls';
 import { auditCreateRecord, auditReadback } from './audit-two-controls';
 import { expect, test, type Page, type TestInfo } from '@playwright/test';
@@ -703,28 +704,16 @@ test('the first styled paint is reduced before hydration and the saved preferenc
     );
     const probe = await context.newPage();
     await probe.emulateMedia({ reducedMotion: 'no-preference' });
-    let release!: () => void;
-    const scripts = new Promise<void>((resolve) => {
-      release = resolve;
-    });
-    const bootstrapUrl = new URL('/theme-bootstrap.v1.js', page.url()).href;
-    let heldHydrationScripts = 0;
-    await probe.route('**/*', async (route) => {
-      if (
-        route.request().resourceType() === 'script' &&
-        route.request().url() !== bootstrapUrl
-      ) {
-        heldHydrationScripts += 1;
-        await scripts;
-      }
-      await route.continue();
-    });
+    const { release, heldScriptCount } = await holdHydrationScripts(
+      probe,
+      page.url(),
+    );
     try {
       await probe.goto('/dashboard', { waitUntil: 'commit' });
       await probe.waitForFunction(
         () => document.body !== null && document.styleSheets.length > 0,
       );
-      await expect.poll(() => heldHydrationScripts).toBeGreaterThan(0);
+      await expect.poll(() => heldScriptCount()).toBeGreaterThan(0);
       const before = await probe.evaluate(() => {
         const element = document.createElement('div');
         element.style.animation = 'first-paint-probe 2s linear';

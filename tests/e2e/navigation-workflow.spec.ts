@@ -1,3 +1,4 @@
+import { holdHydrationScripts } from './deferred-hydration';
 import { randomUUID } from 'node:crypto';
 import { expectCategoryAdded } from './configuration-assertions';
 import { expectPrivateTitleExcluded } from '../helpers/private-title';
@@ -630,16 +631,16 @@ test('motion Settings waits for the browser choice before the first keyboard act
     );
     const probe = await context.newPage();
     await probe.emulateMedia({ reducedMotion: 'no-preference' });
-    let release!: () => void;
-    const scripts = new Promise<void>((resolve) => {
-      release = resolve;
-    });
-    await probe.route('**/*', async (route) => {
-      if (route.request().resourceType() === 'script') await scripts;
-      await route.continue();
-    });
+    const { release, heldScriptCount } = await holdHydrationScripts(
+      probe,
+      page.url(),
+    );
     try {
       await probe.goto('/settings', { waitUntil: 'commit' });
+      await expect.poll(() => heldScriptCount()).toBeGreaterThan(0);
+      await expect
+        .poll(() => probe.evaluate(() => !!window.inventoryTheme))
+        .toBe(true);
       // Settings is withheld by the protected privacy gate until its scripts
       // can verify restoration. The standalone toggle's SSR loading state is
       // covered at the component layer; this route must expose no control yet.

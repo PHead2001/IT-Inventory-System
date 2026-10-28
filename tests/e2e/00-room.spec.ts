@@ -3272,9 +3272,10 @@ test('Free Orbit tilts to both poles and below the horizon while Guided clamps b
     const frame = await canvas.boundingBox();
     expect(frame).toBeTruthy();
     const beforeDrag = await camera(page);
-    const x = frame!.x + frame!.width * 0.5;
-    await page.mouse.move(x, frame!.y + frame!.height * 0.4);
-    await snapshot(x, frame!.y + frame!.height * 0.4);
+    const dy = frame!.height * 0.35;
+    const start = await uncoveredCanvasGesture(page, 0, dy);
+    await page.mouse.move(start.x, start.y);
+    await snapshot(start.x, start.y);
     expect(
       await canvas.evaluate((element) => element.matches(':hover')),
       'The final drag pointer must hit the canvas at the intended drag start',
@@ -3285,7 +3286,7 @@ test('Free Orbit tilts to both poles and below the horizon while Guided clamps b
       'true',
     );
     await expect(viewer.locator('canvas')).toBeFocused();
-    await page.mouse.move(x, frame!.y + frame!.height * 0.75, { steps: 12 });
+    await page.mouse.move(start.x, start.y + dy, { steps: 12 });
     await page.mouse.up();
     expect(
       Math.abs((await camera(page)).elevation - beforeDrag.elevation),
