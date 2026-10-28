@@ -24,7 +24,7 @@ The required Foundation CI job has a 45-minute execution ceiling for the combine
 
 ## Browser scheduling and interruption diagnostics
 
-The room spec is named `00-room.spec.ts` to start its unchanged sequential file
+The room spec is named `00-room.spec.ts` to start its remaining sequential file
 journeys early in the existing two-worker parallel phase. Pinned Playwright's
 collector sorts files lexically and dispatches those file groups in order. Shared
 fixtures retain the exclusive phase; focused runs retain one worker. Discovery
@@ -32,9 +32,30 @@ regressions require identical test coverage in both modes and room-first orderin
 This targets the observed late single-worker tail; it does not establish a measured
 end-to-end saving or a pass within the existing job deadline.
 
+The three global occupancy snapshot journeys live in
+`room-occupancy-exclusive.spec.ts`: multi-pose reveal/picking, optional counts
+reconciliation, and the populated 375 px label/action journey. Their expected
+snapshots and later rendered labels or contents require a stable global inventory
+between observations. Unique records owned by another parallel spec can still
+legitimately change those shared physical-location totals. The new file remains
+outside the parallel allowlist and completes in the existing exclusive phase;
+all remaining `00-room.spec.ts` journeys retain room-first parallel scheduling.
+This isolates the fixture contract; it does not prove temporal overlap caused a
+historical CI mismatch.
+
+Both specs explicitly call `registerRoomTestSupport` from the non-spec
+`room-test-support.ts` module. Each invocation owns its fixture identities,
+cleanup journals and failure-diagnostic maps, retains the local-target guard,
+and archives/clears its own stock through the audited RPC. Importing that module
+registers no hooks. The moved cases and their occupied-witness helpers preserve
+their assertions. Scheduling regressions require exactly those three titles in
+the exclusive file, matching focused/full discovery without duplicates or loss,
+and no spec-to-spec imports. Source and collection checks do not replace actual
+focused browser execution or final-candidate CI.
+
 Failed attempts publish bounded source coordinates immediately, before final
 reporting, so process cancellation and unavailable artifact uploads still leave
-an assertion-site pointer. Only this known test file's source coordinates are
+an assertion-site pointer. Only the fixed room spec/support files' source coordinates are
 retained from at most three errors per attempt and twenty attempts. Test titles,
 assertion messages, expected/actual values, requests and attachments are excluded.
 The final report retains its existing bounded summary and omission count.

@@ -81,12 +81,18 @@ function discover(
   const report = JSON.parse(result.stdout.slice(result.stdout.indexOf('{')));
   if (report.errors?.length)
     throw new Error('Browser discovery reported errors.');
-  const entries: { key: string; project: string; file: string }[] = [];
+  const entries: {
+    key: string;
+    project: string;
+    file: string;
+    title: string;
+  }[] = [];
   const visit = (suite: DiscoveredSuite) => {
     for (const spec of suite.specs ?? [])
       for (const test of spec.tests)
         entries.push({
           key: `${spec.file}:${spec.line}:${spec.column}:${spec.title}`,
+          title: spec.title,
           project: test.projectName,
           file: spec.file,
         });
@@ -111,6 +117,8 @@ describe('browser scheduling', () => {
       ...parallelSpecs,
       'interface-fixtures.ts',
       'inventory-discovery-fixtures.ts',
+      'room-test-support.ts',
+      'room-occupancy-exclusive.spec.ts',
     ])
       expect(
         unsafeFixtureSignOuts(readFileSync('tests/e2e/' + spec, 'utf8')),
@@ -160,6 +168,113 @@ describe('browser scheduling', () => {
       new Set(['chromium']),
     );
   }, 60_000);
+  it('keeps exactly the three global occupancy snapshot journeys exclusive', () => {
+    const titles = [
+      'spatial reveal endpoints retain actual picking and labels across oblique, overhead, underside and panned views',
+      'optional room counts reconcile with active leaf contents and refresh as uncached snapshots',
+      '375px populated room gives every independently witnessed opaque target an action with More and selected long text',
+    ];
+    const files = [
+      'tests/e2e/00-room.spec.ts',
+      'tests/e2e/room-occupancy-exclusive.spec.ts',
+    ];
+    const focused = discover(false, files);
+    // Scheduled discovery also expands the exclusive dependency project.
+    // Compare the requested room cases; the full-suite parity check covers all files.
+    const scheduled = discover(true, files).filter((entry) =>
+      files.includes('tests/e2e/' + entry.file),
+    );
+    expect(focused.map((entry) => entry.key).sort()).toEqual(
+      scheduled.map((entry) => entry.key).sort(),
+    );
+    const exclusive = scheduled.filter(
+      (entry) => entry.file === 'room-occupancy-exclusive.spec.ts',
+    );
+    expect(exclusive).toHaveLength(titles.length);
+    for (const title of titles) {
+      const matches = scheduled.filter((entry) => entry.title === title);
+      expect(matches, title).toHaveLength(1);
+      expect(matches[0].file).toBe('room-occupancy-exclusive.spec.ts');
+      expect(matches[0].project).toBe('chromium-exclusive');
+    }
+    const remaining = scheduled.filter(
+      (entry) => entry.file === '00-room.spec.ts',
+    );
+    expect(remaining.length).toBeGreaterThan(0);
+    for (const entry of remaining)
+      expect(entry.project).toBe('chromium-parallel');
+    expect(new Set(focused.map((entry) => entry.project))).toEqual(
+      new Set(['chromium']),
+    );
+    expect(parallelSpecs).not.toContain('room-occupancy-exclusive.spec.ts');
+    const [exclusiveProject, parallelProject] = e2eScheduling(true).projects;
+    expect(parallelProject.dependencies).toContain(exclusiveProject.name);
+  }, 60_000);
+
+  it('registers room hooks explicitly with invocation-local fixture state and no spec imports', () => {
+    const support = ts.createSourceFile(
+      'room-test-support.ts',
+      readFileSync('tests/e2e/room-test-support.ts', 'utf8'),
+      ts.ScriptTarget.Latest,
+      true,
+    );
+    // Importing support must not register hooks or allocate shared mutable state.
+    expect(
+      support.statements.every(
+        (statement) =>
+          ts.isImportDeclaration(statement) ||
+          ts.isTypeAliasDeclaration(statement) ||
+          ts.isFunctionDeclaration(statement),
+      ),
+    ).toBe(true);
+    const registration = support.statements.find(
+      (statement) =>
+        ts.isFunctionDeclaration(statement) &&
+        statement.name?.text === 'registerRoomTestSupport',
+    );
+    expect(
+      registration &&
+        ts.isFunctionDeclaration(registration) &&
+        registration.body,
+    ).toBeTruthy();
+    for (const file of [
+      '00-room.spec.ts',
+      'room-occupancy-exclusive.spec.ts',
+      'room-test-support.ts',
+    ]) {
+      const source = ts.createSourceFile(
+        file,
+        readFileSync('tests/e2e/' + file, 'utf8'),
+        ts.ScriptTarget.Latest,
+        true,
+      );
+      const imports = source.statements.filter(ts.isImportDeclaration);
+      for (const declaration of imports)
+        expect(
+          (declaration.moduleSpecifier as ts.StringLiteral).text,
+          file,
+        ).not.toMatch(/\.spec(?:\.[cm]?[jt]s)?$/);
+      if (file === 'room-test-support.ts') continue;
+      const calls: ts.CallExpression[] = [];
+      const visit = (node: ts.Node) => {
+        if (
+          ts.isCallExpression(node) &&
+          ts.isIdentifier(node.expression) &&
+          node.expression.text === 'registerRoomTestSupport'
+        )
+          calls.push(node);
+        ts.forEachChild(node, visit);
+      };
+      visit(source);
+      expect(calls, file).toHaveLength(1);
+      expect(ts.isVariableDeclaration(calls[0].parent), file).toBe(true);
+      expect(ts.isVariableStatement(calls[0].parent.parent.parent), file).toBe(
+        true,
+      );
+      expect(calls[0].parent.parent.parent.parent, file).toBe(source);
+    }
+  });
+
   it('keeps focused invocations in one project without dependency expansion', () => {
     expect(e2eScheduling(false)).toEqual({
       workers: 1,
@@ -234,6 +349,7 @@ describe('browser scheduling', () => {
         'locations-reference.spec.ts',
         'inventory-search.spec.ts',
         'metadata-designer.spec.ts',
+        'room-occupancy-exclusive.spec.ts',
       ]),
     );
     const scheduling = e2eScheduling(true);
