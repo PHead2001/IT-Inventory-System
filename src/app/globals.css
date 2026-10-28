@@ -1208,10 +1208,11 @@ html[data-motion='full'] .experience-auth-panel {
   .experience-search-top > button {
     grid-column: 1 / -1;
   }
+  /* Keep all six controls within 320px throughout mobile viewport resizing. */
   .experience-header-inner {
-    padding: 11px 20px;
+    padding: 11px 12px;
     align-items: flex-start;
-    gap: 12px;
+    gap: 8px;
   }
   .experience-header .experience-brand,
   .experience-header .experience-brand > span:last-child {
@@ -1231,7 +1232,7 @@ html[data-motion='full'] .experience-auth-panel {
   }
   .experience-account {
     position: relative;
-    gap: 7px;
+    gap: 4px;
     flex-wrap: nowrap;
     flex-shrink: 0;
     max-width: none;
@@ -1271,16 +1272,6 @@ html[data-motion='full'] .experience-auth-panel {
   .experience-attention-metrics {
     grid-column: 1 / -1;
     grid-row: 2;
-  }
-}
-/* Six header controls retain their 44px targets within a 320px viewport. */
-@media (max-width: 360px) {
-  .experience-header-inner {
-    padding-inline: 12px;
-    gap: 8px;
-  }
-  .experience-account {
-    gap: 4px;
   }
 }
 @media (max-width: 320px) {
