@@ -1273,6 +1273,16 @@ html[data-motion='full'] .experience-auth-panel {
     grid-row: 2;
   }
 }
+/* Six header controls retain their 44px targets within a 320px viewport. */
+@media (max-width: 360px) {
+  .experience-header-inner {
+    padding-inline: 12px;
+    gap: 8px;
+  }
+  .experience-account {
+    gap: 4px;
+  }
+}
 @media (max-width: 320px) {
   .experience-stat-grid {
     grid-template-columns: 1fr;

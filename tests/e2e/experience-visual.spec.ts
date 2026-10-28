@@ -28,6 +28,7 @@ async function headerControlsFit(page: Page) {
   const header = page.locator('.experience-header');
   const controls = [
     header.getByRole('link', { name: 'IT Inventory overview' }),
+    header.getByRole('button', { name: /^Switch to (Light|Dark) theme$/ }),
     header.getByRole('button', { name: 'Search and commands' }),
     header.getByRole('button', { name: 'Keyboard shortcuts' }),
     header.getByLabel('Account: Test staff, staff', { exact: true }),
@@ -685,10 +686,20 @@ test('the first styled paint is reduced before hydration and the saved preferenc
   await page.emulateMedia({ reducedMotion: 'no-preference' });
 
   async function inspect(saved: boolean) {
-    await page.evaluate(
-      (value) =>
-        localStorage.setItem('it-inventory-reduce-motion', String(value)),
-      saved,
+    const savedTheme = saved ? 'light' : 'dark';
+    const scope = await page.evaluate(
+      ({ motion, theme }) => {
+        localStorage.setItem('it-inventory-reduce-motion', String(motion));
+        const scope = document.documentElement.dataset.themeScope;
+        if (!scope || !window.inventoryTheme)
+          throw new Error('The signed-in theme bootstrap must be available');
+        localStorage.setItem(
+          window.inventoryTheme.key(scope),
+          JSON.stringify({ version: 1, preference: theme }),
+        );
+        return scope;
+      },
+      { motion: saved, theme: savedTheme },
     );
     const probe = await context.newPage();
     await probe.emulateMedia({ reducedMotion: 'no-preference' });
@@ -696,8 +707,16 @@ test('the first styled paint is reduced before hydration and the saved preferenc
     const scripts = new Promise<void>((resolve) => {
       release = resolve;
     });
+    const bootstrapUrl = new URL('/theme-bootstrap.v1.js', page.url()).href;
+    let heldHydrationScripts = 0;
     await probe.route('**/*', async (route) => {
-      if (route.request().resourceType() === 'script') await scripts;
+      if (
+        route.request().resourceType() === 'script' &&
+        route.request().url() !== bootstrapUrl
+      ) {
+        heldHydrationScripts += 1;
+        await scripts;
+      }
       await route.continue();
     });
     try {
@@ -705,6 +724,7 @@ test('the first styled paint is reduced before hydration and the saved preferenc
       await probe.waitForFunction(
         () => document.body !== null && document.styleSheets.length > 0,
       );
+      await expect.poll(() => heldHydrationScripts).toBeGreaterThan(0);
       const before = await probe.evaluate(() => {
         const element = document.createElement('div');
         element.style.animation = 'first-paint-probe 2s linear';
@@ -714,10 +734,20 @@ test('the first styled paint is reduced before hydration and the saved preferenc
         return {
           motion: document.documentElement.dataset.motion,
           duration: Number.parseFloat(duration),
+          bootstrapReady: !!window.inventoryTheme,
+          scope: document.documentElement.dataset.themeScope,
+          theme: document.documentElement.dataset.theme,
+          preference: document.documentElement.dataset.themePreference,
+          scheme: getComputedStyle(document.documentElement).colorScheme,
         };
       });
       expect(before.motion).toBe('reduced');
       expect(before.duration).toBeLessThan(0.001);
+      expect(before.bootstrapReady).toBe(true);
+      expect(before.scope).toBe(scope);
+      expect(before.theme).toBe(savedTheme);
+      expect(before.preference).toBe(savedTheme);
+      expect(before.scheme).toBe(savedTheme);
       release();
       await expect(
         probe.getByRole('heading', { name: 'Low-stock overview' }),
@@ -726,12 +756,24 @@ test('the first styled paint is reduced before hydration and the saved preferenc
         'data-motion',
         saved ? 'reduced' : 'full',
       );
+      await expect(probe.locator('html')).toHaveAttribute(
+        'data-theme',
+        savedTheme,
+      );
       await probe.goto('/settings');
       await expect(
         probe.getByRole('switch', {
           name: 'Reduce motion in this browser',
         }),
       ).toHaveAttribute('aria-checked', String(saved));
+      await expect(
+        probe
+          .getByRole('group', { name: 'Theme in this browser' })
+          .getByRole('radio', {
+            name: savedTheme === 'light' ? 'Light' : 'Dark',
+            exact: true,
+          }),
+      ).toBeChecked();
     } finally {
       release();
       await probe.close();
