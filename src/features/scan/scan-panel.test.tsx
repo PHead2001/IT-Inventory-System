@@ -177,7 +177,9 @@ it('a saturated result never claims a unique match and offers ordinary inventory
   expect(
     screen.getByRole('link', { name: 'Search inventory' }),
   ).toHaveAttribute('href', '/inventory');
-  expect(screen.getByRole('link', { name: 'Laptop' })).toHaveFocus();
+  await waitFor(() =>
+    expect(screen.getByRole('link', { name: 'Laptop' })).toHaveFocus(),
+  );
   expect(mocks.push).not.toHaveBeenCalled();
 });
 it('reports changed scope when an earlier sibling guard invalidates during mount before Scan subscribes', () => {
