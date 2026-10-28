@@ -1473,7 +1473,9 @@ interfaceTest(
           const url = new URL(resource);
           return (
             url.origin === new URL(page.url()).origin &&
-            /^\/_next\/static\/media\/[^/]+\.woff2$/.test(url.pathname)
+            /^\/_next\/static\/(?:immutable\/)?media\/[^/]+\.woff2$/.test(
+              url.pathname,
+            )
           );
         }),
       ).size,
@@ -1547,7 +1549,9 @@ interfaceTest(
           const url = new URL(resource);
           return (
             url.origin === new URL(page.url()).origin &&
-            /^\/_next\/static\/media\/[^/]+\.woff2$/.test(url.pathname)
+            /^\/_next\/static\/(?:immutable\/)?media\/[^/]+\.woff2$/.test(
+              url.pathname,
+            )
           );
         }),
       ).size,
