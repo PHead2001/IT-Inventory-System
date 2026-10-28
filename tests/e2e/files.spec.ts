@@ -1,7 +1,14 @@
 import { custodyButtons, custodyReceiptTitle } from './custody-controls';
 import { openRecordTask } from './record-task-controls';
 import { metadataReviewButton, metadataSaveButton } from './metadata-controls';
-import { expect, test, type Page, type Locator } from '@playwright/test';
+import {
+  expect,
+  test,
+  type Page,
+  type Locator,
+  type FileChooser,
+  type ConsoleMessage,
+} from '@playwright/test';
 import { createHash, randomUUID } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { mkdirSync } from 'node:fs';
@@ -21,6 +28,116 @@ function richStatePath(name: string) {
   const directory = resolve('.local-tools/experience-visual/rich-states');
   mkdirSync(directory, { recursive: true });
   return join(directory, name + '.png');
+}
+function installChooserWitness(element: HTMLElement | SVGElement) {
+  if (!(element instanceof HTMLButtonElement)) return;
+  const button = element;
+  const prefix = 'FILE_CHOOSER_DIAG ';
+  const host = window as unknown as {
+    __codexFileChooserWitness?: { dispose(): void };
+  };
+  host.__codexFileChooserWitness?.dispose();
+  const input = button
+    .closest('section')
+    ?.querySelector<HTMLInputElement>('input[type="file"]');
+  const ancestors: HTMLElement[] = [];
+  for (
+    let node: HTMLElement | null = button;
+    node && ancestors.length < 16;
+    node = node.parentElement
+  )
+    ancestors.push(node);
+  const started = performance.now();
+  let events = 0;
+  let characters = 0;
+  let stopped = false;
+  const classify = (node: EventTarget | null) =>
+    node === button
+      ? 'button'
+      : node === input
+        ? 'input'
+        : node === document.body
+          ? 'body'
+          : 'other';
+  const flags = (node: HTMLElement) => [
+    Number(node.isConnected),
+    Number(node.matches(':disabled')),
+    Number(node.hidden),
+    Number(node.inert),
+  ];
+  const emit = (type: string, event?: Event, attributes?: string[]) => {
+    if (stopped) return;
+    // Structure only: never names, values, file contents, text, URLs or IDs.
+    const line =
+      prefix +
+      JSON.stringify({
+        type,
+        ms: Math.round(performance.now() - started),
+        target: event ? classify(event.target) : undefined,
+        active: classify(document.activeElement),
+        trusted: event?.isTrusted,
+        activation: navigator.userActivation?.isActive ?? null,
+        button: flags(button),
+        input: input ? flags(input) : null,
+        ancestors: ancestors.map((node) => [
+          node.tagName,
+          ...flags(node),
+          Number(node.getAttribute('aria-busy') === 'true'),
+        ]),
+        attributes,
+      });
+    const truncated = prefix + '{"type":"truncated"}';
+    // Reserve the final event/characters for an explicit truncation marker.
+    if (events >= 31 || characters + line.length + truncated.length > 10_000) {
+      stopped = true;
+      console.info(truncated);
+      return;
+    }
+    events++;
+    characters += line.length;
+    console.info(line);
+  };
+  const observe = (event: Event) => {
+    if (
+      (event.type === 'keydown' || event.type === 'keyup') &&
+      (event as KeyboardEvent).key !== 'Enter'
+    )
+      return;
+    if (
+      event.type === 'click' &&
+      event.target !== button &&
+      event.target !== input
+    )
+      return;
+    emit(event.type, event);
+  };
+  const types = ['focusin', 'focusout', 'keydown', 'keyup', 'click'];
+  for (const type of types)
+    document.addEventListener(type, observe, { capture: true, passive: true });
+  const observer = new MutationObserver((records) =>
+    emit(
+      'boundary-mutation',
+      undefined,
+      [...new Set(records.map((record) => record.attributeName))].filter(
+        (name): name is string => name !== null,
+      ),
+    ),
+  );
+  for (const node of new Set([...ancestors, ...(input ? [input] : [])]))
+    observer.observe(node, {
+      attributes: true,
+      attributeFilter: ['disabled', 'inert', 'hidden', 'aria-busy'],
+    });
+  host.__codexFileChooserWitness = {
+    dispose() {
+      stopped = true;
+      observer.disconnect();
+      for (const type of types)
+        document.removeEventListener(type, observe, true);
+      delete host.__codexFileChooserWitness;
+    },
+  };
+  emit('installed');
 }
 async function confirmNamedRemoval(files: Locator, filename: string) {
   const page = files.page();
@@ -233,6 +350,18 @@ test('quantity recognition photo uploads, previews for viewers, replaces and rem
     exact: true,
   });
   await expect(browse).toHaveCount(1);
+  const forwardChooserDiagnostic = (message: ConsoleMessage) => {
+    if (
+      message.type() === 'info' &&
+      message.text().startsWith('FILE_CHOOSER_DIAG ')
+    )
+      console.log(message.text());
+  };
+  page.on('console', forwardChooserDiagnostic);
+  await browse.evaluate(installChooserWitness).catch(() => {
+    console.log('FILE_CHOOSER_DIAG {"type":"installation-unavailable"}');
+  });
+  let chooser: FileChooser;
   try {
     // Native capture temporarily disables/inerts the page fieldset. A one-shot
     // focus before release is ignored; waiting for focus alone cannot replay it.
@@ -260,13 +389,89 @@ test('quantity recognition photo uploads, previews for viewers, replaces and rem
       .toBe(true);
     await browse.focus();
     await expect(browse).toBeFocused();
+    await browse.evaluate((button) => {
+      const observed = { click: false, trusted: false };
+      Object.defineProperty(button, '__browseClickObservation', {
+        value: observed,
+        configurable: true,
+      });
+      button.addEventListener(
+        'click',
+        (event) => {
+          observed.click = true;
+          observed.trusted = event.isTrusted;
+        },
+        { capture: true, once: true },
+      );
+    });
+    const chooserEvent = page.waitForEvent('filechooser');
+    try {
+      await page.keyboard.press('Enter');
+      chooser = await chooserEvent;
+      console.log('FILE_CHOOSER_DIAG {"type":"chooser-open"}');
+    } catch (error) {
+      const diagnostics = await browse
+        .evaluate((button) => {
+          const ready = (element: Element) => ({
+            connected: element.isConnected,
+            hidden:
+              (element instanceof HTMLElement && element.hidden) ||
+              element.hasAttribute('hidden'),
+            inert:
+              (element instanceof HTMLElement && element.inert) ||
+              element.hasAttribute('inert'),
+            disabled: element.matches(':disabled'),
+          });
+          const active = document.activeElement;
+          const inputs = Array.from(
+            document.querySelectorAll<HTMLInputElement>('input[type="file"]'),
+          ).slice(0, 10);
+          const observed = (
+            button as HTMLButtonElement & {
+              __browseClickObservation?: { click: boolean; trusted: boolean };
+            }
+          ).__browseClickObservation;
+          return {
+            button: {
+              ...ready(button),
+              focused: active === button,
+            },
+            activeElement: {
+              tag: active?.tagName ?? null,
+              isButton: active === button,
+              isFileInput:
+                active instanceof HTMLInputElement && active.type === 'file',
+            },
+            fileInputs: {
+              count: document.querySelectorAll('input[type="file"]').length,
+              readiness: inputs.map((input) => ({
+                ...ready(input),
+                focused: active === input,
+              })),
+            },
+            click: observed ?? { click: false, trusted: false },
+          };
+        })
+        .catch(() => ({ unavailable: true }));
+      await testInfo
+        .attach('browse-chooser-admission', {
+          body: JSON.stringify(diagnostics),
+          contentType: 'application/json',
+        })
+        .catch(() => {});
+      throw error;
+    }
   } catch (error) {
     // The original CI trace was unavailable. Capture structure/state only,
     // without filenames, record text, URLs or user-entered values.
     const diagnostics = await browse
       .evaluate((button) => {
         const ancestors = [];
-        for (let node: Element | null = button; node; node = node.parentElement)
+        for (
+          let node: Element | null = button;
+          node && ancestors.length < 16;
+          node = node.parentElement
+        )
           ancestors.push({
             tag: node.tagName,
             hidden:
@@ -285,81 +490,28 @@ test('quantity recognition photo uploads, previews for viewers, replaces and rem
         };
       })
       .catch(() => ({ unavailable: true }));
-    await testInfo.attach('browse-focus-admission', {
-      body: JSON.stringify(diagnostics),
-      contentType: 'application/json',
-    });
-    throw error;
-  }
-  await browse.evaluate((button) => {
-    const observed = { click: false, trusted: false };
-    Object.defineProperty(button, '__browseClickObservation', {
-      value: observed,
-      configurable: true,
-    });
-    button.addEventListener(
-      'click',
-      (event) => {
-        observed.click = true;
-        observed.trusted = event.isTrusted;
-      },
-      { capture: true, once: true },
+    console.log(
+      'FILE_CHOOSER_DIAG ' + JSON.stringify({ failure: diagnostics }),
     );
-  });
-  const chooserEvent = page.waitForEvent('filechooser');
-  let chooser: Awaited<typeof chooserEvent>;
-  try {
-    await page.keyboard.press('Enter');
-    chooser = await chooserEvent;
-  } catch (error) {
-    const diagnostics = await browse
-      .evaluate((button) => {
-        const ready = (element: Element) => ({
-          connected: element.isConnected,
-          hidden:
-            (element instanceof HTMLElement && element.hidden) ||
-            element.hasAttribute('hidden'),
-          inert:
-            (element instanceof HTMLElement && element.inert) ||
-            element.hasAttribute('inert'),
-          disabled: element.matches(':disabled'),
-        });
-        const active = document.activeElement;
-        const inputs = Array.from(
-          document.querySelectorAll<HTMLInputElement>('input[type="file"]'),
-        ).slice(0, 10);
-        const observed = (
-          button as HTMLButtonElement & {
-            __browseClickObservation?: { click: boolean; trusted: boolean };
-          }
-        ).__browseClickObservation;
-        return {
-          button: {
-            ...ready(button),
-            focused: active === button,
-          },
-          activeElement: {
-            tag: active?.tagName ?? null,
-            isButton: active === button,
-            isFileInput:
-              active instanceof HTMLInputElement && active.type === 'file',
-          },
-          fileInputs: {
-            count: document.querySelectorAll('input[type="file"]').length,
-            readiness: inputs.map((input) => ({
-              ...ready(input),
-              focused: active === input,
-            })),
-          },
-          click: observed ?? { click: false, trusted: false },
-        };
+    await testInfo
+      .attach('browse-focus-admission', {
+        body: JSON.stringify(diagnostics),
+        contentType: 'application/json',
       })
-      .catch(() => ({ unavailable: true }));
-    await testInfo.attach('browse-chooser-admission', {
-      body: JSON.stringify(diagnostics),
-      contentType: 'application/json',
-    });
+      .catch(() => {});
     throw error;
+  } finally {
+    await page
+      .evaluate(() => {
+        const host = window as unknown as {
+          __codexFileChooserWitness?: { dispose(): void };
+        };
+        host.__codexFileChooserWitness?.dispose();
+      })
+      .catch(() => {
+        console.log('FILE_CHOOSER_DIAG {"type":"cleanup-unavailable"}');
+      });
+    page.off('console', forwardChooserDiagnostic);
   }
   await chooser.setFiles({
     name: 'browse.png',
