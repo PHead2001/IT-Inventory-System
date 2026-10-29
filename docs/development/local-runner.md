@@ -145,6 +145,20 @@ configuration and guest isolation retain their existing behavior. This bounded
 tolerance change requires a real guest download and verification before claiming
 recovery or any runtime improvement.
 
+Every guest seed sets the matched `runner0` Netplan interface to the fixed MTU
+1400, including generic jobs, preparation builders and fresh prepared-image
+verifiers across all resource profiles. This overrides inherited image settings.
+The diagnostic on this host measured a 1420-byte VPN tunnel and packet-size-sensitive
+TLS/download behavior; 1400 is a bounded guest default, not a guarantee for every
+network or proof of a particular PMTUD/ICMP cause. Host MTU, VPN, DNS, routes,
+firewall, isolation and resource profiles are unchanged. Readiness checks the
+effective `/sys/class/net/runner0/mtu` after cloud-init and refuses missing or
+different values before accepting the guest, preserving the existing readiness
+timeouts. Fresh clone proofs record the verified `guestMtu`; current-image admission
+and publication require integer 1400 in both successive children. Historical
+proofs missing that field remain readable for status/upgrade/pruning, while
+malformed present fields fail and stale inputs retain the generic-image fallback.
+
 Storage is pulled once from an available official mirror. The builder adds the
 four exact-version runtime mirror aliases to that verified local image ID, checks
 each alias resolves to the same ID, and records this proof in the bounded receipt.

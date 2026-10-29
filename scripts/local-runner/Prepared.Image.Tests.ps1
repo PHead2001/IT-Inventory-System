@@ -21,6 +21,7 @@ function Assert-Rejected([scriptblock] $Work, [string] $Case) {
     $rejected = $false; try { & $Work } catch { $rejected = $true }
     if (-not $rejected) { throw "Prepared-image fixture accepted $Case." }
 }
+$script:missingMtuProof = $false
 $script:blocked = ''; $script:interrupt = ''; $script:attached = $false; $script:vms = @()
 $script:RunnerGuardOutcome = $null; $script:RunnerRecoveryProbe = $null
 $script:binding = [pscustomobject]@{ hash = ('A' * 64); recipeId = ('B' * 64); bundleHash = ('F' * 64) }
@@ -107,7 +108,7 @@ function New-FixtureVerification($Candidate) {
     $receipt = Read-RunnerJson $Candidate.receiptPath
     return [pscustomobject]@{ schema = 1; candidateId = $Candidate.id; diskHash = $receipt.diskHash; bindingHash = $receipt.bindingHash; recipeId = $receipt.recipeId; bundleHash = $receipt.bundleHash
         purpose = 'verify-image'; diskType = 'Differencing'; parentLease = 'read-only-same-handle'; parentIdentity = '00000001:0000000000000001'; markerProof = 'absent-then-written'; sessionSeconds = 1; cleanupVerified = $true; vmName = ('ITIR-' + [guid]::NewGuid().ToString('N')); vmId = [guid]::NewGuid().ToString(); guestMac = ('02' + [guid]::NewGuid().ToString('N').Substring(0,10).ToUpperInvariant())
-        sshPublicKeyHash = (([guid]::NewGuid().ToString('N') * 2).ToUpperInvariant()); networkFingerprint = ('a' * 64); readiness = 'cloud-init-and-runner-prerequisites'; readyUtc = [DateTime]::UtcNow.ToString('o'); readinessSeconds = 1 }
+        sshPublicKeyHash = (([guid]::NewGuid().ToString('N') * 2).ToUpperInvariant()); networkFingerprint = ('a' * 64); readiness = 'cloud-init-and-runner-prerequisites'; guestMtu = (Get-RunnerGuestMtu); readyUtc = [DateTime]::UtcNow.ToString('o'); readinessSeconds = 1 }
 }
 function Publish-FixtureImage($State, $Config, $Binding, $Guest) {
     $candidate = $null
@@ -121,6 +122,7 @@ function Publish-FixtureImage($State, $Config, $Binding, $Guest) {
         Close-RunnerImageLeases
         $proof = New-FixtureVerification $candidate
         $proof | Add-Member successiveChild (New-FixtureVerification $candidate)
+        if ($script:missingMtuProof) { $proof.successiveChild.PSObject.Properties.Remove('guestMtu') }
         Publish-RunnerPreparedImage $candidate $Config $proof
     } finally { if ($null -ne $candidate) { Remove-RunnerImageCandidate $candidate } }
 }
@@ -283,6 +285,23 @@ try {
     $legacyProof.PSObject.Properties.Remove('successiveChild')
     Assert-RunnerImageCloneProof $initial.receipt $legacyProof # Legacy proof remains valid for full-copy only.
     $verificationBytes = ConvertTo-Json -InputObject $initial.receipt.cloneVerification -Depth 8
+    # Legacy missing MTU remains readable, never usable as a current/fresh proof.
+    $withoutMtu = $verificationBytes | ConvertFrom-Json
+    $withoutMtu.PSObject.Properties.Remove('guestMtu')
+    $withoutMtu.successiveChild.PSObject.Properties.Remove('guestMtu')
+    Assert-RunnerImageCloneProof $initial.receipt $withoutMtu
+    Assert-Rejected { Assert-RunnerImageCloneProof $initial.receipt $withoutMtu -RequireGuestMtu } 'missing measured guest MTU'
+    $childWithoutMtu = $verificationBytes | ConvertFrom-Json
+    $childWithoutMtu.successiveChild.PSObject.Properties.Remove('guestMtu')
+    Assert-Rejected { Assert-RunnerImageCloneProof $initial.receipt $childWithoutMtu -RequireGuestMtu } 'successive child missing measured MTU'
+    foreach ($badMtu in @($null,1500,'1400',[long]1400,@(1400))) {
+        foreach ($child in @($false,$true)) {
+            $proof = $verificationBytes | ConvertFrom-Json
+            if ($child) { $proof.successiveChild.guestMtu=$badMtu } else { $proof.guestMtu=$badMtu }
+            Assert-Rejected { Assert-RunnerImageCloneProof $initial.receipt $proof } 'malformed MTU is invalid even for legacy readback'
+            Assert-Rejected { Assert-RunnerImageCloneProof $initial.receipt $proof -RequireGuestMtu } 'malformed MTU cannot qualify fresh proof'
+        }
+    }
     foreach ($bad in @('job-purpose', 'not-cleaned', 'wrong-candidate', 'wrong-bundle', 'builder-vm', 'builder-mac', 'builder-key', 'wrong-readiness')) {
         $proof = $verificationBytes | ConvertFrom-Json
         switch ($bad) {
@@ -324,6 +343,24 @@ try {
         Write-RunnerJson $initialSelectorPath $legacySelector
         $legacySelection = Get-RunnerImageSelection $config
         if (-not $legacySelection.prepared -or $legacySelection.differencing) { throw 'Legacy clone proof must select only the existing prepared full-copy path.' }
+        $legacyReceipt.cloneVerification=$withoutMtu
+        Write-RunnerJson $initialReceiptPath $legacyReceipt
+        $legacySelector.receiptHash=(Get-FileHash -LiteralPath $initialReceiptPath).Hash
+        Write-RunnerJson $initialSelectorPath $legacySelector
+        [void](Get-RunnerImageRecord)
+        Assert-Rejected { Get-RunnerImageSelection $config } 'current-binding legacy image has no measured MTU'
+        $legacyReceipt.bindingHash=('E'*64)
+        Write-RunnerJson $initialReceiptPath $legacyReceipt
+        $legacySelector.receiptHash=(Get-FileHash -LiteralPath $initialReceiptPath).Hash
+        Write-RunnerJson $initialSelectorPath $legacySelector
+        Assert-Rejected { Get-RunnerImageRecord } 'inconsistent stale receipt and clone binding cannot become a cache miss'
+        $legacyReceipt.cloneVerification.bindingHash=$legacyReceipt.bindingHash
+        $legacyReceipt.cloneVerification.successiveChild.bindingHash=$legacyReceipt.bindingHash
+        Write-RunnerJson $initialReceiptPath $legacyReceipt
+        $legacySelector.receiptHash=(Get-FileHash -LiteralPath $initialReceiptPath).Hash
+        Write-RunnerJson $initialSelectorPath $legacySelector
+        if ((Get-RunnerImageSelection $config).reason -cne 'stale-inputs') { throw 'Legacy stale inputs lost the generic fallback.' }
+        $legacyReceipt.bindingHash=$initial.receipt.bindingHash
         $legacyReceipt.PSObject.Properties.Remove('cloneVerification')
         Write-RunnerJson $initialReceiptPath $legacyReceipt
         $legacySelector = (ConvertTo-Json -InputObject $initial.selector) | ConvertFrom-Json
@@ -332,6 +369,9 @@ try {
         Assert-Rejected { Get-RunnerImageSelection $config } 'matching image with no clone verification cannot qualify'
     } finally { [IO.File]::WriteAllBytes($initialReceiptPath, $savedReceipt); [IO.File]::WriteAllBytes($initialSelectorPath, $savedSelector) }
     $initialSelectorHash = (Get-FileHash -LiteralPath (Join-Path $base 'prepared-image.json')).Hash
+    $script:missingMtuProof = $true
+    try { Assert-Rejected { Publish-FixtureImage (New-SealedState) $config $script:binding $script:guest } 'fresh publication missing successive MTU proof' } finally { $script:missingMtuProof = $false }
+    if ((Get-FileHash -LiteralPath (Join-Path $base 'prepared-image.json')).Hash -cne $initialSelectorHash) { throw 'Missing MTU publication changed image selection.' }
     # Recoverable interruption keeps old selection; selector is always the last commit.
     foreach ($point in @('image-copy', 'image-receipt')) {
         $state = New-SealedState; $script:interrupt = $point
@@ -437,6 +477,8 @@ try {
     function Wait-Guest($State) {
         $script:readiness++
         if ($State.purpose -ceq 'verify-image') {
+            if ($script:verifyFailure -ceq 'mtu') { return 1500 }
+            if ($script:verifyFailure -ceq 'missing-mtu') { return }
             if ($script:verifyFailure -in @('cloud-init', 'docker')) { throw "Fixture $($script:verifyFailure) readiness refused." }
             [IO.File]::AppendAllText((Join-Path $State.instancePath 'guest.vhdx'), 'booted-clone-marker')
             if ($script:verifyFailure -ceq 'guardian') {
@@ -448,6 +490,7 @@ try {
             }
             if ($script:verifyFailure -ceq 'candidate-tamper') { [IO.File]::AppendAllText((Join-Path (Join-Path $base 'prepared-images') ($State.imageCandidate.id + '.vhdx')), 'unexpected-write') }
         }
+        return Get-RunnerGuestMtu
     }
     function New-RunnerSshKey([string] $Path) { [IO.File]::WriteAllText(($Path + '.pub'), ('key-' + [guid]::NewGuid().ToString('N'))) }
     function New-SeedDisk($Path, $PublicKey, $Mac, $Config, $ProfileLabel, $Prepared) {
@@ -527,7 +570,7 @@ try {
         $verifiedImage.receipt.cloneVerification.successiveChild.markerProof -cne 'absent-then-written' -or
         $verifiedImage.receipt.cloneVerification.successiveChild.parentIdentity -cne $verifiedImage.receipt.cloneVerification.parentIdentity) { throw 'Prepared owner gate omitted successive child isolation under the same parent lease.' }
     $before = (Get-FileHash -LiteralPath $selectorPath).Hash
-    foreach ($failure in @('cloud-init', 'docker', 'guardian', 'guardian-after-ready', 'cleanup', 'candidate-tamper')) {
+    foreach ($failure in @('cloud-init', 'docker', 'mtu', 'missing-mtu', 'guardian', 'guardian-after-ready', 'cleanup', 'candidate-tamper')) {
         $script:verifyFailure = $failure
         Assert-Rejected { Invoke-RunnerPrepareImageCore } "clone-$failure"
         if ((Get-FileHash -LiteralPath $selectorPath).Hash -cne $before -or -not (Test-Path (Join-Path $base 'stop.requested'))) { throw 'Failed clone changed selector or resumed pickup.' }

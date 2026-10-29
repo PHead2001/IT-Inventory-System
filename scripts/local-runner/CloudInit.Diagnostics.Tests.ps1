@@ -3,7 +3,7 @@ param([string] $CapturedProjectionsPath = '')
 Set-StrictMode -Version Latest
 $ErrorActionPreference='Stop'
 trap { Write-Host ('CLOUD_INIT_TEST_FAILURE '+(($_.ScriptStackTrace -split '\r?\n' | ForEach-Object { if ($_ -match 'line (\d+)') { $Matches[1] } }) -join ',')+' '+$_.Exception.GetType().Name); exit 1 }
-$functions=@('Assert-RunnerCloudInitFields','Assert-RunnerCloudInitDiagnostic','ConvertFrom-RunnerCloudInitCapture','Test-RunnerCloudInitTerminal','Assert-RunnerCloudInitArtifact','Assert-RunnerCloudInitPreparationIdentity','Invoke-RunnerCloudInitPreparationCapture','Write-RunnerJson','Get-SshArgs','Get-RunnerGuestReadinessCommand','Get-RunnerGuestPrerequisites','Get-RunnerResourceProfile','Get-RunnerGuestReadinessStage','Assert-RunnerGuestReadinessDiagnostic','Add-RunnerGuestReadinessAttempt','Set-RunnerGuestReadinessEvidence')
+$functions=@('Assert-RunnerCloudInitFields','Assert-RunnerCloudInitDiagnostic','ConvertFrom-RunnerCloudInitCapture','Test-RunnerCloudInitTerminal','Assert-RunnerCloudInitArtifact','Assert-RunnerCloudInitPreparationIdentity','Invoke-RunnerCloudInitPreparationCapture','Write-RunnerJson','Get-SshArgs','Get-RunnerGuestMtu','Get-RunnerGuestReadinessCommand','Get-RunnerGuestPrerequisites','Get-RunnerResourceProfile','Get-RunnerGuestReadinessStage','Assert-RunnerGuestReadinessDiagnostic','Add-RunnerGuestReadinessAttempt','Set-RunnerGuestReadinessEvidence')
 $runner=$null
 foreach ($file in @('Common.ps1','Runner.ps1')) {
     $errors=$null; $ast=[Management.Automation.Language.Parser]::ParseFile((Join-Path $PSScriptRoot $file),[ref]$null,[ref]$errors)
@@ -122,11 +122,11 @@ try {
             function Invoke-RunnerNative { $value=$script:case.codes[$script:attempts]; $script:attempts++; return $value }
             function Invoke-RunnerCloudInitPreparationCapture { $script:captures++; return $script:case.terminal }
             function Start-Sleep([int]$Seconds) { Require ($Seconds -eq 10); $script:now=$script:now.AddSeconds(10) }
-            try { Wait-Guest ([pscustomobject]@{purpose=$script:case.purpose;instancePath=$script:RunnerRoot}) ([pscustomobject]@{guestIp='192.0.2.1'}) 'it-inventory-heavy' } catch { $script:failure=$_ }
+            try { $script:readyMtu=Wait-Guest ([pscustomobject]@{purpose=$script:case.purpose;instancePath=$script:RunnerRoot}) ([pscustomobject]@{guestIp='192.0.2.1'}) 'it-inventory-heavy' } catch { $script:failure=$_ }
         }
         Require ($script:captures -eq $case.captures -and $script:attempts -eq $case.calls)
         if ($case.purpose -ceq 'prepare' -and $case.terminal -and $case.captures -eq 1) { Require ($null -ne $script:failure -and $script:failure.Exception.Data['runnerGuestReadiness'].lastNativeExit -eq 72) }
-        else { Require ($null -eq $script:failure) }
+        else { Require ($null -eq $script:failure -and $script:readyMtu -is [int] -and $script:readyMtu -eq 1400) }
     }
     Write-Host "PASS cloud-init diagnostic $script:checks assertions"
 } finally {

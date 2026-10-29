@@ -66,6 +66,25 @@ foreach ($case in @(
     $runner.labels += [pscustomobject]@{ name = 'it-inventory-ephemeral' }
     Assert-Rejected { Assert-RunnerJitLabels $cfg $runner $case.label } 'extra generic JIT label'
 }
+# Exercise the actual shared seed-data path for every generic/prepared profile.
+$seedConfig = [pscustomobject]@{ guestIp='192.0.2.2'; prefixLength=29; gatewayIp='192.0.2.1' }
+$seedCases = 0
+foreach ($label in @('it-inventory-light','it-inventory-mid','it-inventory-heavy','it-inventory-ephemeral',$pilot.pilotLabel)) {
+    foreach ($prepared in @($false,$true)) {
+        $seedData = Get-GuestSeedData 'fixture-key' '02:11:22:33:44:55' $seedConfig $label $prepared
+        if ((Get-RunnerGuestMtu) -isnot [int] -or (Get-RunnerGuestMtu) -ne 1400 -or
+            @([regex]::Matches($seedData.networkConfig, '(?m)^    mtu: 1400$')).Count -ne 1 -or
+            @([regex]::Matches($seedData.networkConfig, 'mtu:')).Count -ne 1 -or
+            -not $seedData.networkConfig.Contains('  runner0:') -or -not $seedData.networkConfig.Contains('      macaddress: 02:11:22:33:44:55') -or
+            -not $seedData.networkConfig.Contains('    set-name: runner0') -or -not $seedData.networkConfig.Contains('    addresses: [192.0.2.2/29]') -or
+            -not $seedData.networkConfig.Contains('        via: 192.0.2.1') -or -not $seedData.networkConfig.Contains('      addresses: [1.1.1.1, 8.8.8.8]') -or
+            -not $seedData.userData.Contains('      - fixture-key') -or
+            -not $seedData.userData.Contains($(if ($prepared) { 'package_update: false' } else { 'package_update: true' }))) { throw 'Shared guest seed MTU/network/profile contract changed.' }
+        $seedCases++
+    }
+}
+$seedDefinition = $ast.Find({param($node) $node -is [Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -ceq 'New-SeedDisk'},$false)
+if ($seedCases -ne 10 -or -not $seedDefinition.Extent.Text.Contains('Get-GuestSeedData $PublicKey $Mac $Config $ProfileLabel $Prepared')) { throw 'Actual seed disk path bypassed shared profile seed generation.' }
 if ((Get-RunnerSessionProfile $config).memoryBytes -ne 8GB) { throw 'Legacy caller resource compatibility changed.' }
 Assert-Rejected { Get-RunnerResourceProfile 'it-inventory-tiny' } 'unsupported profile'
 Assert-Rejected { Get-RunnerSessionProfile $pilot 'it-inventory-light' } 'small pilot profile'

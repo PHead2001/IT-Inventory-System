@@ -212,6 +212,7 @@ function Get-RunnerImageRecord {
         $receipt.diskHash -cnotmatch '^[0-9A-F]{64}$' -or $receipt.bindingHash -cnotmatch '^[0-9A-F]{64}$' -or
         $receipt.recipeId -cnotmatch '^[0-9A-F]{64}$' -or $receipt.scrubbed -ne $true -or
         @($receipt.capabilities) -cnotcontains 'os-prerequisites') { throw 'Prepared image receipt is invalid.' }
+    if ($receipt.PSObject.Properties.Name -contains 'cloneVerification') { Assert-RunnerImageCloneProof $receipt $receipt.cloneVerification }
     return [pscustomobject]@{ selector = $selector; receipt = $receipt; path = $disk }
 }
 
@@ -235,7 +236,7 @@ function Get-RunnerImageSelection($Config) {
         Write-Host 'Prepared image inputs differ from the installed trusted bundle/base; using the generic base. Prepare image explicitly to refresh.'
         return [pscustomobject]@{ path = $Config.baseVhdx; prepared = $false; reason = 'stale-inputs' }
     }
-    Assert-RunnerImageCloneProof $record.receipt $record.receipt.cloneVerification
+    Assert-RunnerImageCloneProof $record.receipt $record.receipt.cloneVerification -RequireGuestMtu
     Assert-RunnerImageDiskUnreferenced $record.path
     $differencing = $record.receipt.cloneVerification.PSObject.Properties.Name -contains 'diskType' -and
         $record.receipt.cloneVerification.diskType -ceq 'Differencing' -and $record.receipt.cloneVerification.parentLease -ceq 'read-only-same-handle' -and
@@ -590,7 +591,7 @@ function Assert-RunnerImageCandidate($Candidate, $Config, [switch] $Rehash) {
     return $receipt
 }
 
-function Assert-RunnerImageCloneProof($Receipt, $Verification) {
+function Assert-RunnerImageCloneProof($Receipt, $Verification, [switch] $RequireGuestMtu) {
     if ($null -eq $Verification -or $Verification.schema -ne 1 -or $Verification.purpose -cne 'verify-image' -or
         $Verification.candidateId -cne $Receipt.id -or $Verification.diskHash -cne $Receipt.diskHash -or
         $Verification.bindingHash -cne $Receipt.bindingHash -or $Verification.recipeId -cne $Receipt.recipeId -or
@@ -602,13 +603,16 @@ function Assert-RunnerImageCloneProof($Receipt, $Verification) {
         $Verification.sshPublicKeyHash -cnotmatch '^[0-9A-F]{64}$' -or $Verification.sshPublicKeyHash -ceq $Receipt.builder.sshPublicKeyHash -or
         $Verification.readinessSeconds -lt 0 -or [double]::IsNaN($Verification.readinessSeconds) -or [double]::IsInfinity($Verification.readinessSeconds) -or
         [DateTime]::Parse($Verification.readyUtc).ToUniversalTime() -gt [DateTime]::UtcNow.AddMinutes(1)) { throw 'Fresh clone readiness/cleanup proof is invalid.' }
+    if ($Verification.PSObject.Properties.Name -contains 'guestMtu') {
+        if ($Verification.guestMtu -isnot [int] -or $Verification.guestMtu -ne (Get-RunnerGuestMtu)) { throw 'Fresh clone guest MTU proof is invalid.' }
+    } elseif ($RequireGuestMtu) { throw 'Fresh clone guest MTU proof is missing.' }
     if ($Verification.PSObject.Properties.Name -contains 'diskType' -or $Verification.PSObject.Properties.Name -contains 'parentLease') {
         if ($Verification.diskType -cne 'Differencing' -or $Verification.parentLease -cne 'read-only-same-handle') { throw 'Clone disk/parent lease proof is invalid.' }
     }
     if ($Verification.PSObject.Properties.Name -contains 'successiveChild') {
         $next = $Verification.successiveChild
         if ($null -eq $next -or $next.PSObject.Properties.Name -contains 'successiveChild') { throw 'Successive clone proof must contain exactly one next child.' }
-        Assert-RunnerImageCloneProof $Receipt $next
+        Assert-RunnerImageCloneProof $Receipt $next -RequireGuestMtu:$RequireGuestMtu
         if ($Verification.diskType -cne 'Differencing' -or $next.diskType -cne 'Differencing' -or
             $Verification.parentLease -cne 'read-only-same-handle' -or $next.parentLease -cne 'read-only-same-handle' -or
             $Verification.parentIdentity -cnotmatch '^[0-9A-F]{8}:[0-9A-F]{16}$' -or $next.parentIdentity -cne $Verification.parentIdentity -or
@@ -623,7 +627,7 @@ function Publish-RunnerPreparedImage($Candidate, $Config, $Verification) {
     Assert-RunnerPreparationAuthorized
     Assert-RunnerControlIdle
     $receipt = Assert-RunnerImageCandidate $Candidate $Config -Rehash
-    Assert-RunnerImageCloneProof $receipt $Verification
+    Assert-RunnerImageCloneProof $receipt $Verification -RequireGuestMtu
     if ((Get-RunnerNetworkObservation).fingerprint -cne $Verification.networkFingerprint) { throw 'Host network changed after clone verification; publication refused.' }
     $receipt | Add-Member -NotePropertyName cloneVerification -NotePropertyValue $Verification -Force
     Write-RunnerJson $Candidate.receiptPath $receipt

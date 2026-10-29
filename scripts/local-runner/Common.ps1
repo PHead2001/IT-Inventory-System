@@ -334,12 +334,14 @@ function Assert-RunnerIsolationProbeDiagnostic($Probe) {
         ($null -ne $Probe.exitCode -and $Probe.exitCode -isnot [int])) { throw 'Invalid isolation probe diagnostic value.' }
 }
 
+function Get-RunnerGuestMtu { return 1400 }
+
 function Get-RunnerGuestReadinessStage($ExitCode) {
     if ($ExitCode -isnot [int]) { return 'unknown' }
     switch ($ExitCode) {
         0 { return '' }; 71 { return 'cloud-init-timeout' }; 72 { return 'cloud-init-nonzero' }
         73 { return 'wrong-user' }; 74 { return 'missing-curl' }; 75 { return 'missing-git' }; 76 { return 'missing-unzip' }
-        77 { return 'missing-docker-socket' }; 78 { return 'docker-timeout' }; 79 { return 'docker-nonzero' }
+        77 { return 'missing-docker-socket' }; 78 { return 'docker-timeout' }; 79 { return 'docker-nonzero' }; 80 { return 'guest-mtu-unverified' }
         255 { return 'ssh-transport' }; default { return 'unknown' }
     }
 }
@@ -352,7 +354,7 @@ function Assert-RunnerGuestReadinessDiagnostic($Diagnostic) {
         ($Diagnostic.elapsedMs -isnot [int] -and $Diagnostic.elapsedMs -isnot [long]) -or $Diagnostic.elapsedMs -lt 0 -or $Diagnostic.elapsedMs -gt 86400000 -or
         $Diagnostic.anySshCompleted -isnot [bool] -or ($null -ne $Diagnostic.lastNativeExit -and $Diagnostic.lastNativeExit -isnot [int])) { throw 'Invalid guest readiness diagnostic value.' }
     foreach ($name in @('firstFailureStage','lastFailureStage')) {
-        if ($Diagnostic.$name -isnot [string] -or $Diagnostic.$name -cnotin @('','cloud-init-timeout','cloud-init-nonzero','wrong-user','missing-curl','missing-git','missing-unzip','missing-docker-socket','docker-timeout','docker-nonzero','ssh-transport','unknown')) { throw 'Invalid guest readiness diagnostic stage.' }
+        if ($Diagnostic.$name -isnot [string] -or $Diagnostic.$name -cnotin @('','cloud-init-timeout','cloud-init-nonzero','wrong-user','missing-curl','missing-git','missing-unzip','missing-docker-socket','docker-timeout','docker-nonzero','guest-mtu-unverified','ssh-transport','unknown')) { throw 'Invalid guest readiness diagnostic stage.' }
     }
 }
 

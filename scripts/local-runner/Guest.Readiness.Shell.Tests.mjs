@@ -60,10 +60,10 @@ foreach ($file in @('Common.ps1','Runner.ps1')) {
   $ast=[Management.Automation.Language.Parser]::ParseFile((Join-Path ${psLiteral(sourceRoot)} $file),[ref]$null,[ref]$errors)
   if ($errors.Count) { throw 'READINESS_SOURCE_PARSE' }
   foreach ($node in $ast.FindAll({param($node) $node -is [Management.Automation.Language.FunctionDefinitionAst]},$false)) {
-    if ($node.Name -cin @('Get-RunnerResourceProfile','Get-RunnerGuestPrerequisites','Get-RunnerGuestReadinessCommand')) { . ([scriptblock]::Create($node.Extent.Text)) }
+    if ($node.Name -cin @('Get-RunnerResourceProfile','Get-RunnerGuestMtu','Get-RunnerGuestPrerequisites','Get-RunnerGuestReadinessCommand')) { . ([scriptblock]::Create($node.Extent.Text)) }
   }
 }
-$commands=[ordered]@{light=(Get-RunnerGuestReadinessCommand 'it-inventory-light');mid=(Get-RunnerGuestReadinessCommand 'it-inventory-mid');heavy=(Get-RunnerGuestReadinessCommand 'it-inventory-heavy');legacy=(Get-RunnerGuestReadinessCommand 'it-inventory-ephemeral')}
+$commands=[ordered]@{light=(Get-RunnerGuestReadinessCommand 'it-inventory-light');mid=(Get-RunnerGuestReadinessCommand 'it-inventory-mid');heavy=(Get-RunnerGuestReadinessCommand 'it-inventory-heavy');legacy=(Get-RunnerGuestReadinessCommand 'it-inventory-ephemeral');pilot=(Get-RunnerGuestReadinessCommand ('it-inventory-pilot-'+('a'*40)))}
 [IO.File]::WriteAllText(${psLiteral(generated)},(ConvertTo-Json -InputObject $commands -Compress),[Text.UTF8Encoding]::new($false))
 `,
     );
@@ -99,7 +99,11 @@ $commands=[ordered]@{light=(Get-RunnerGuestReadinessCommand 'it-inventory-light'
     )
       throw Error('READINESS_GENERATION_FAILED');
     const commands = JSON.parse(await readFile(generated, 'utf8'));
-    if (commands.light !== commands.mid || commands.heavy !== commands.legacy)
+    if (
+      commands.light !== commands.mid ||
+      commands.heavy !== commands.legacy ||
+      commands.heavy !== commands.pilot
+    )
       throw Error('READINESS_PROFILE_FAMILY_CHANGED');
     const stages = [
       'cloud25',
@@ -107,6 +111,7 @@ $commands=[ordered]@{light=(Get-RunnerGuestReadinessCommand 'it-inventory-light'
       'curl',
       'git',
       'unzip',
+      'mtu',
       'socket',
       'docker10',
     ];
@@ -117,12 +122,18 @@ $commands=[ordered]@{light=(Get-RunnerGuestReadinessCommand 'it-inventory-light'
       ['missing-curl', 74, stages.slice(0, 3)],
       ['missing-git', 75, stages.slice(0, 4)],
       ['missing-unzip', 76, stages.slice(0, 5)],
-      ['missing-socket', 77, stages.slice(0, 6)],
+      ['missing-mtu', 80, stages.slice(0, 6)],
+      ['wrong-mtu', 80, stages.slice(0, 6)],
+      ['malformed-mtu', 80, stages.slice(0, 6)],
+      ['empty-mtu', 80, stages.slice(0, 6)],
+      ['light-missing-mtu', 80, stages.slice(0, 6)],
+      ['missing-socket', 77, stages.slice(0, 7)],
       ['docker-timeout', 78, stages],
       ['docker-nonzero', 79, stages],
       ['heavy-passed', 0, stages],
-      ['light-passed', 0, stages.slice(0, 5)],
-      ['light-no-docker', 0, stages.slice(0, 5)],
+      ['pilot-passed', 0, stages],
+      ['light-passed', 0, stages.slice(0, 6)],
+      ['light-no-docker', 0, stages.slice(0, 6)],
     ];
     for (const [mode, expectedExit, expectedStages] of cases) {
       if (onlyCases && !onlyCases.includes(mode)) continue;
@@ -130,7 +141,9 @@ $commands=[ordered]@{light=(Get-RunnerGuestReadinessCommand 'it-inventory-light'
       const fixture = join(root, `${mode}.sh`);
       const command = mode.startsWith('light-')
         ? commands.light
-        : commands.heavy;
+        : mode.startsWith('pilot-')
+          ? commands.pilot
+          : commands.heavy;
       await writeFile(
         fixture,
         `set +e
@@ -158,6 +171,14 @@ command() {
   builtin printf '%s\\n' "$2" >> "$trace"
   [[ "$mode" = "missing-$2" ]] && return 1
   builtin printf 'PRIVATE_SENTINEL\\n'; return 0
+}
+cat() {
+  [[ "$#:$1" = '1:/sys/class/net/runner0/mtu' ]] || return 99
+  builtin printf 'mtu\\n' >> "$trace"
+  builtin printf 'PRIVATE_SENTINEL\\n' >&2
+  [[ "$mode" = missing-mtu || "$mode" = light-missing-mtu ]] && return 1
+  [[ "$mode" = empty-mtu ]] && return 0
+  if [[ "$mode" = wrong-mtu ]]; then builtin printf '1500\\n'; elif [[ "$mode" = malformed-mtu ]]; then builtin printf '14O0\\n'; else builtin printf '1400\\n'; fi
 }
 test() { if [[ "$#:$1:$2" = '2:-S:/var/run/docker.sock' ]]; then builtin printf 'socket\\n' >> "$trace"; [[ "$mode" != missing-socket && "$mode" != light-no-docker ]]; else builtin test "$@"; fi; }
 ${command}

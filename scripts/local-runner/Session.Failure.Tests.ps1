@@ -4,7 +4,7 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 $common = [Management.Automation.Language.Parser]::ParseFile((Join-Path $PSScriptRoot 'Common.ps1'), [ref]$null, [ref]$null)
 foreach ($definition in $common.FindAll({ param($node) $node -is [Management.Automation.Language.FunctionDefinitionAst] }, $false)) {
-    if ($definition.Name -cin @('New-RunnerExecutionFailure', 'New-RunnerIsolationProbeFailure', 'Assert-RunnerIsolationProbeDiagnostic', 'Get-RunnerGuestReadinessStage', 'Assert-RunnerGuestReadinessDiagnostic', 'Add-RunnerGuestReadinessAttempt', 'Set-RunnerGuestReadinessEvidence', 'Get-RunnerResourceProfile', 'Get-RunnerSessionFailureEnums', 'New-RunnerSessionFailureRecord', 'Assert-RunnerSessionFailureJournal', 'Write-RunnerSessionFailure', 'Write-RunnerJson', 'Read-RunnerJson')) { Invoke-Expression $definition.Extent.Text }
+    if ($definition.Name -cin @('New-RunnerExecutionFailure', 'New-RunnerIsolationProbeFailure', 'Assert-RunnerIsolationProbeDiagnostic', 'Get-RunnerGuestMtu', 'Get-RunnerGuestReadinessStage', 'Assert-RunnerGuestReadinessDiagnostic', 'Add-RunnerGuestReadinessAttempt', 'Set-RunnerGuestReadinessEvidence', 'Get-RunnerResourceProfile', 'Get-RunnerSessionFailureEnums', 'New-RunnerSessionFailureRecord', 'Assert-RunnerSessionFailureJournal', 'Write-RunnerSessionFailure', 'Write-RunnerJson', 'Read-RunnerJson')) { Invoke-Expression $definition.Extent.Text }
 }
 $script:RunnerRoot = Join-Path $env:TEMP ('ITIR-session-failure-' + [guid]::NewGuid().ToString('N'))
 $script:path = Join-Path $script:RunnerRoot 'session-failures.json'
@@ -134,6 +134,7 @@ try {
         foreach ($case in @(
             @{ codes=@(255); first='ssh-transport'; last='ssh-transport'; completed=$false },
             @{ codes=@(72); first='cloud-init-nonzero'; last='cloud-init-nonzero'; completed=$true },
+            @{ codes=@(80); first='guest-mtu-unverified'; last='guest-mtu-unverified'; completed=$true },
             @{ codes=@(255,72); first='ssh-transport'; last='cloud-init-nonzero'; completed=$true },
             @{ codes=@(1); first='unknown'; last='unknown'; completed=$true },
             @{ codes=@(-1073741515); first='unknown'; last='unknown'; completed=$false },
@@ -177,12 +178,14 @@ try {
             function Assert-SessionAlive {}
             function Start-Sleep([int] $Seconds) { Require ($Seconds -eq 10); $script:readinessSleeps++; $script:readinessNow=$script:readinessNow.AddMinutes(1) }
             function Invoke-RunnerNative { $script:readinessCalls++; if ($script:readinessCalls -eq 1) { return 255 }; return 0 }
-            Wait-Guest ([pscustomobject]@{instancePath=$script:RunnerRoot;purpose='verify-image'}) ([pscustomobject]@{guestIp='192.0.2.1'}) 'it-inventory-light'
+            $readinessMtu=Wait-Guest ([pscustomobject]@{instancePath=$script:RunnerRoot;purpose='verify-image'}) ([pscustomobject]@{guestIp='192.0.2.1'}) 'it-inventory-light'
+            Require ($readinessMtu -is [int] -and $readinessMtu -eq 1400)
         }
         Require ($script:readinessCalls -eq 2 -and $script:readinessSleeps -eq 1 -and -not (Test-Path -LiteralPath $script:path))
     }
     Check 'readiness mapping bounds legacy journal compatibility and malformed evidence preserve privacy' {
-        foreach ($code in 71..79) { Require ((Get-RunnerGuestReadinessStage ([int]$code)) -cne 'unknown') }
+        foreach ($code in 71..80) { Require ((Get-RunnerGuestReadinessStage ([int]$code)) -cne 'unknown') }
+        Require ((Get-RunnerGuestReadinessStage 80) -ceq 'guest-mtu-unverified')
         Require ((Get-RunnerGuestReadinessStage 255) -ceq 'ssh-transport' -and (Get-RunnerGuestReadinessStage 2) -ceq 'unknown')
         $summary=[pscustomobject]@{purpose='job';attemptCount=999999;elapsedMs=[long]0;firstFailureStage='';lastFailureStage='';lastNativeExit=$null;anySshCompleted=$false}
         Add-RunnerGuestReadinessAttempt $summary 72 ([long]::MaxValue)

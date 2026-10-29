@@ -96,6 +96,25 @@ resize_rootfs: true
 "@
 }
 
+function Get-GuestSeedData([string] $PublicKey, [string] $Mac, $Config, [string] $ProfileLabel = 'it-inventory-ephemeral', [bool] $Prepared = $false) {
+    $network = @"
+version: 2
+ethernets:
+  runner0:
+    match:
+      macaddress: $Mac
+    set-name: runner0
+    mtu: $(Get-RunnerGuestMtu)
+    addresses: [$($Config.guestIp)/$($Config.prefixLength)]
+    routes:
+      - to: default
+        via: $($Config.gatewayIp)
+    nameservers:
+      addresses: [1.1.1.1, 8.8.8.8]
+"@
+    return [pscustomobject]@{ userData = (Get-GuestCloudConfig $PublicKey $ProfileLabel $Prepared); networkConfig = $network }
+}
+
 function New-SeedDisk([string] $Path, [string] $PublicKey, [string] $Mac, $Config, [string] $ProfileLabel = 'it-inventory-ephemeral', [bool] $Prepared = $false) {
     [void](Assert-OwnedPath $Path)
     New-VHD -Path $Path -SizeBytes 64MB -Dynamic | Out-Null
@@ -111,24 +130,11 @@ function New-SeedDisk([string] $Path, [string] $PublicKey, [string] $Mac, $Confi
         $partition | Format-Volume -FileSystem FAT32 -NewFileSystemLabel CIDATA -Confirm:$false | Out-Null
         $letter = $partition.DriveLetter
         $root = "$($letter):\"
-        $userData = Get-GuestCloudConfig $PublicKey $ProfileLabel $Prepared
-        $network = @"
-version: 2
-ethernets:
-  runner0:
-    match:
-      macaddress: $Mac
-    set-name: runner0
-    addresses: [$($Config.guestIp)/$($Config.prefixLength)]
-    routes:
-      - to: default
-        via: $($Config.gatewayIp)
-    nameservers:
-      addresses: [1.1.1.1, 8.8.8.8]
-"@
-        [IO.File]::WriteAllText((Join-Path $root 'user-data'), $userData, [Text.UTF8Encoding]::new($false))
+        $seedData = Get-GuestSeedData $PublicKey $Mac $Config $ProfileLabel $Prepared
+
+        [IO.File]::WriteAllText((Join-Path $root 'user-data'), $seedData.userData, [Text.UTF8Encoding]::new($false))
         [IO.File]::WriteAllText((Join-Path $root 'meta-data'), "instance-id: $([guid]::NewGuid().ToString('N'))`nlocal-hostname: itir-guest`n", [Text.UTF8Encoding]::new($false))
-        [IO.File]::WriteAllText((Join-Path $root 'network-config'), $network, [Text.UTF8Encoding]::new($false))
+        [IO.File]::WriteAllText((Join-Path $root 'network-config'), $seedData.networkConfig, [Text.UTF8Encoding]::new($false))
     } finally {
         Dismount-VHD -Path $Path -ErrorAction Stop
     }
@@ -505,6 +511,7 @@ function Get-SshArgs($State) {
 function Get-RunnerGuestReadinessCommand([string] $ProfileLabel) {
     $prerequisites = Get-RunnerGuestPrerequisites $ProfileLabel
     $command = 'timeout 25 cloud-init status --wait >/dev/null 2>&1; readiness_code=$?; if test "$readiness_code" -eq 124; then exit 71; elif test "$readiness_code" -ne 0; then exit 72; fi; test "$(id -un)" = runner || exit 73; command -v curl >/dev/null || exit 74; command -v git >/dev/null || exit 75; command -v unzip >/dev/null || exit 76'
+    $command += '; readiness_mtu=$(cat /sys/class/net/runner0/mtu 2>/dev/null) || exit 80; test "$readiness_mtu" = ' + (Get-RunnerGuestMtu) + ' || exit 80'
     if ($prerequisites.docker) { $command += '; test -S /var/run/docker.sock || exit 77; timeout 10 docker info >/dev/null 2>&1; readiness_code=$?; if test "$readiness_code" -eq 124; then exit 78; elif test "$readiness_code" -ne 0; then exit 79; fi' }
     return $command + '; exit 0'
 }
@@ -725,7 +732,7 @@ function Wait-Guest($State, $Config, [string] $ProfileLabel = 'it-inventory-ephe
         try { $exitCode = Invoke-RunnerNative 'ssh.exe' ($args + @("runner@$($Config.guestIp)", $command)) }
         catch { Add-RunnerGuestReadinessAttempt $diagnostic $null $watch.ElapsedMilliseconds; throw }
         Add-RunnerGuestReadinessAttempt $diagnostic $exitCode $watch.ElapsedMilliseconds
-        if ($exitCode -eq 0) { return }
+        if ($exitCode -eq 0) { return Get-RunnerGuestMtu }
         if ($purpose -ceq 'prepare' -and $exitCode -eq 72 -and -not $cloudInitCaptureAttempted) {
             $cloudInitCaptureAttempted = $true
             if (Invoke-RunnerCloudInitPreparationCapture $State $Config) { throw 'Guest cloud-init reported a terminal preparation failure.' }
@@ -946,8 +953,9 @@ function Invoke-RunnerSession($Config, $PilotAttempt = $null, [string] $ProfileL
             Assert-RunnerGuestMac -VmName $name -ExpectedMac $guestMac.rawMac
             $script:RunnerOperationStage = 'guest-readiness'
             $readinessWatch = [Diagnostics.Stopwatch]::StartNew()
-            Wait-Guest $state $Config $profile.label
-            Write-Host ('Guest prerequisites ready in {0:N1}s for {1}.' -f $readinessWatch.Elapsed.TotalSeconds, $profile.label)
+            $guestMtu = Wait-Guest $state $Config $profile.label
+            if ($guestMtu -isnot [int] -or $guestMtu -ne (Get-RunnerGuestMtu)) { throw 'Guest MTU readiness readback is invalid.' }
+            Write-Host ('Guest prerequisites ready in {0:N1}s for {1}; verified MTU {2}.' -f $readinessWatch.Elapsed.TotalSeconds, $profile.label, $guestMtu)
             Assert-SessionAlive $state
             Assert-CurrentRunnerNetworkRules $state
             Test-GuestIsolation $state $Config
@@ -977,7 +985,7 @@ function Invoke-RunnerSession($Config, $PilotAttempt = $null, [string] $ProfileL
                     preflightSeconds = $preflightSeconds; childCreationSeconds = $childWatch.Elapsed.TotalSeconds; sessionSeconds = $sessionWatch.Elapsed.TotalSeconds; vmName = $verified.vmName; vmId = $verified.vmId; guestMac = $verified.guestMac
                     networkFingerprint = $verified.networkFingerprint
                     sshPublicKeyHash = (Get-FileHash -LiteralPath (Join-Path $instance 'id_ed25519.pub') -Algorithm SHA256).Hash
-                    readiness = 'cloud-init-and-runner-prerequisites'; readyUtc = [DateTime]::UtcNow.ToString('o'); readinessSeconds = $readinessWatch.Elapsed.TotalSeconds }
+                    readiness = 'cloud-init-and-runner-prerequisites'; guestMtu = $guestMtu; readyUtc = [DateTime]::UtcNow.ToString('o'); readinessSeconds = $readinessWatch.Elapsed.TotalSeconds }
             }
             if ($preparing) {
                 $script:RunnerOperationStage = 'image-preparation'
