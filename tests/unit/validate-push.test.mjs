@@ -18,9 +18,9 @@ describe('bounded local push validation', () => {
       ['run', 'format:check'],
       ['run', 'test', '--', '--maxWorkers=1', '--no-file-parallelism'],
     ]);
-    for (const [, options] of run.mock.calls)
+    for (const [args, options] of run.mock.calls)
       expect(options.env).toEqual({
-        NODE_OPTIONS: '--trace-warnings --max-old-space-size=1024',
+        NODE_OPTIONS: `--trace-warnings --max-old-space-size=${args[1] === 'typecheck' ? 2048 : 1024}`,
         FIXTURE: 'retained',
       });
     expect(env.NODE_OPTIONS).toBe('--trace-warnings --max-old-space-size=512');
@@ -49,6 +49,16 @@ describe('bounded local push validation', () => {
     'replaces inherited heap flags with the fixed local budget: %s',
     (options) => {
       expect(pushNodeOptions(options)).toBe('--max-old-space-size=1024');
+      expect(pushNodeOptions(options, 2048)).toBe('--max-old-space-size=2048');
+    },
+  );
+
+  it.each([0, 512, 4096, '2048', null, NaN, Infinity])(
+    'refuses arbitrary heap budgets: %s',
+    (heapMiB) => {
+      expect(() => pushNodeOptions('', heapMiB)).toThrow(
+        'Unsupported local push heap budget',
+      );
     },
   );
 

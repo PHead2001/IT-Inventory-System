@@ -87,7 +87,8 @@ Package installation, CI, Vercel builds and clones do not enable the hook.
 
 The hook runs `npm run validate:push`: typecheck, zero-warning lint, formatting and
 the full Vitest suite, sequentially. The local wrapper replaces inherited Node
-old-space limits with a 1 GiB limit for each child tool and uses one Vitest worker
+old-space limits with a 2 GiB limit for the canonical typecheck stage and a 1 GiB
+limit for lint, formatting and Vitest. It uses one Vitest worker
 with file parallelism disabled. Other Node options are preserved. This limits
 old-space, not total process/host memory, and does not alter the full CI commands.
 Every nondeleted pushed ref must point at the checked-out

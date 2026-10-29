@@ -23,7 +23,9 @@ function nodeOptionTokens(value) {
   return tokens;
 }
 
-export function pushNodeOptions(value = '') {
+export function pushNodeOptions(value = '', heapMiB = 1024) {
+  if (![1024, 2048].includes(heapMiB))
+    throw new Error('Unsupported local push heap budget.');
   const tokens = nodeOptionTokens(value);
   const retained = [];
   for (let index = 0; index < tokens.length; index += 1) {
@@ -41,18 +43,21 @@ export function pushNodeOptions(value = '') {
       }
     } else retained.push(tokens[index]);
   }
-  return [...retained, '--max-old-space-size=1024'].join(' ');
+  return [...retained, `--max-old-space-size=${heapMiB}`].join(' ');
 }
 
 export function runPushValidation({ env = process.env, run = npm } = {}) {
-  const childEnv = { ...env, NODE_OPTIONS: pushNodeOptions(env.NODE_OPTIONS) };
   for (const args of [
     ['run', 'typecheck'],
     ['run', 'lint'],
     ['run', 'format:check'],
     ['run', 'test', '--', '--maxWorkers=1', '--no-file-parallelism'],
-  ])
-    run(args, { env: childEnv });
+  ]) {
+    const heapMiB = args[1] === 'typecheck' ? 2048 : 1024;
+    run(args, {
+      env: { ...env, NODE_OPTIONS: pushNodeOptions(env.NODE_OPTIONS, heapMiB) },
+    });
+  }
 }
 
 if (
