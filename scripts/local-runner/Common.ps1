@@ -827,6 +827,24 @@ function Invoke-RunnerNative([string] $Executable, [string[]] $Arguments, [strin
     } finally { $process.Dispose() }
 }
 
+function Get-RunnerImageFailureStages {
+    return @('unknown','bootstrap','inputs','os-packages','node','npm','npm-cache','browser-install','browser-verify','image-cache','receipt','scrub','shutdown','cleanup')
+}
+
+function Assert-RunnerImageFailureArtifact($Record) {
+    Assert-RunnerCloudInitFields $Record @('schema','sessionId','vmId','purpose','bundleHash','atUtc','stage','exitCode','receiptBytes','stderr','truncated')
+    if ($Record.schema -isnot [int] -or $Record.schema -ne 1 -or $Record.sessionId -isnot [string] -or $Record.sessionId -cnotmatch '^[0-9a-f]{32}$' -or [guid]$Record.sessionId -eq [guid]::Empty -or
+        $Record.vmId -isnot [string] -or $Record.vmId -cnotmatch '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' -or [guid]$Record.vmId -eq [guid]::Empty -or
+        $Record.purpose -isnot [string] -or $Record.purpose -cne 'prepare' -or $Record.bundleHash -isnot [string] -or $Record.bundleHash -cnotmatch '^[0-9A-F]{64}$' -or
+        $Record.atUtc -isnot [string] -or $Record.atUtc -cnotmatch '^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{7}Z$' -or
+        $Record.stage -isnot [string] -or $Record.stage -cnotin (Get-RunnerImageFailureStages) -or $Record.exitCode -isnot [int] -or
+        $Record.receiptBytes -isnot [int] -or $Record.receiptBytes -lt 0 -or $Record.receiptBytes -gt 65540 -or ($Record.exitCode -eq 0 -and $Record.receiptBytes -le 16384) -or
+        $Record.stderr -isnot [string] -or $Record.stderr.Length -gt 4096 -or $Record.truncated -isnot [bool] -or
+        $Record.stderr -cmatch '[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]' -or $Record.stderr -cne (ConvertTo-RunnerDiagnosticText $Record.stderr)) { throw 'Invalid image preparation failure artifact.' }
+    [void][DateTime]::ParseExact($Record.atUtc,'o',[Globalization.CultureInfo]::InvariantCulture,[Globalization.DateTimeStyles]::RoundtripKind)
+    if ([Text.Encoding]::UTF8.GetByteCount((ConvertTo-Json -InputObject $Record -Depth 4 -Compress)) -gt 8192) { throw 'Image preparation failure artifact bound.' }
+}
+
 function ConvertTo-RunnerDiagnosticText([string] $Text) {
     # WSL may mix UTF-16 diagnostics with UTF-8 guest output. Remove embedded
     # NUL/control characters and bound only the visible diagnostic, never log JIT.

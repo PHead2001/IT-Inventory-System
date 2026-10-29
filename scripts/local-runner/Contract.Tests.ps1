@@ -115,6 +115,10 @@ if ($LASTEXITCODE -ne 0) { throw 'Network.Integration.Tests.ps1 failed.' }
 if ($LASTEXITCODE -ne 0) { throw 'Failure.Observation.Tests.ps1 failed.' }
 & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'Session.Failure.Tests.ps1')
 if ($LASTEXITCODE -ne 0) { throw 'Session.Failure.Tests.ps1 failed.' }
+& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'Prepared.Failure.Tests.ps1')
+if ($LASTEXITCODE -ne 0) { throw 'Prepared.Failure.Tests.ps1 failed.' }
+& node.exe (Join-Path $PSScriptRoot 'Prepared.Stage.Tests.mjs')
+if ($LASTEXITCODE -ne 0) { throw 'Prepared.Stage.Tests.mjs failed.' }
 & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'CloudInit.Diagnostics.Tests.ps1')
 if ($LASTEXITCODE -ne 0) { throw 'CloudInit.Diagnostics.Tests.ps1 failed.' }
 & node.exe (Join-Path $PSScriptRoot 'Guest.Readiness.Shell.Tests.mjs')

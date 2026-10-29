@@ -351,6 +351,38 @@ function Assert-RunnerImageStorageReceipt($Guest) {
     }
 }
 
+function Write-RunnerImagePreparationFailure($State, [string] $BundleHash, $Detail) {
+    # Private local evidence only. The sanitizer is not a general secret scrubber;
+    # never copy stderr into generic journals, owner receipts or public output.
+    try {
+        Assert-RunnerCloudInitPreparationIdentity $State
+        if ((Get-CoherentInstalledRunnerBundle).hash -cne $BundleHash) { throw 'Image failure bundle changed.' }
+        if ($Detail.exitCode -isnot [int] -or $Detail.receiptBytes -isnot [int] -or $Detail.receiptBytes -lt 0 -or $Detail.receiptBytes -gt 65540 -or
+            $Detail.stderr -isnot [string] -or $Detail.stderr.Length -gt 4096) { throw 'Image failure detail is invalid.' }
+        $text=ConvertTo-RunnerDiagnosticText $Detail.stderr
+        $stage='unknown'
+        foreach($match in [regex]::Matches($text,'(?m)^ITIR_IMAGE_FAILURE_STAGE=([a-z-]+)\r?$')) {
+            if ($match.Groups[1].Value -cin (Get-RunnerImageFailureStages)) { $stage=$match.Groups[1].Value }
+        }
+        $record=[pscustomobject][ordered]@{schema=1;sessionId=$State.vmName.Substring(5);vmId=$State.vmId;purpose='prepare';bundleHash=$BundleHash;atUtc=[DateTime]::UtcNow.ToString('o');stage=$stage;exitCode=$Detail.exitCode;receiptBytes=$Detail.receiptBytes;stderr=$text;truncated=([Text.Encoding]::UTF8.GetByteCount($text) -ge 4096)}
+        # JSON escaping/UTF-8 can expand text. Preserve the decisive tail while
+        # bounding the complete serialized artifact before any filesystem write.
+        while ($record.stderr.Length -gt 4096 -or [Text.Encoding]::UTF8.GetByteCount((ConvertTo-Json -InputObject $record -Depth 4 -Compress)) -gt 8192) {
+            $record.stderr=$record.stderr.Substring([Math]::Min(128,$record.stderr.Length)).Trim();$record.truncated=$true
+        }
+        Assert-RunnerImageFailureArtifact $record
+        $mutex=Enter-RunnerLock
+        try {
+            Assert-RunnerCloudInitPreparationIdentity $State
+            if ((Get-CoherentInstalledRunnerBundle).hash -cne $BundleHash) { throw 'Image failure bundle changed.' }
+            $path=Assert-OwnedPath (Join-Path $script:RunnerRoot 'preparation-image.json')
+            if (Test-Path -LiteralPath $path) { Assert-RunnerProtectedPath $path }
+            Write-RunnerJson $path $record
+            Assert-RunnerProtectedPath $path
+        } finally { Exit-RunnerLock $mutex }
+    } catch { } # Evidence failure must not replace the builder failure/cleanup.
+}
+
 function Invoke-RunnerImageBuild($State, $Config) {
     Assert-RunnerPreparationAuthorized
     $binding = Get-RunnerImageBinding $Config
@@ -367,7 +399,8 @@ function Invoke-RunnerImageBuild($State, $Config) {
         $diagnostics = ConvertTo-RunnerDiagnosticText $result.ErrorOutput
         $diagnostics = $diagnostics.Substring(0, [Math]::Min(4096, $diagnostics.Length))
         $failure = [InvalidOperationException]::new('IMAGE_PREPARATION_COMMAND_FAILED')
-        $failure.Data['runnerImagePreparation'] = [ordered]@{ exitCode = $result.ExitCode; stderr = $diagnostics; receiptBytes = $result.Output.Length }
+        $failure.Data['runnerImagePreparation'] = [ordered]@{ exitCode = $result.ExitCode; stderr = $diagnostics; receiptBytes = [Text.Encoding]::UTF8.GetByteCount($result.Output) }
+        Write-RunnerImagePreparationFailure $State $binding.bundleHash $failure.Data['runnerImagePreparation']
         throw $failure
     }
     $guest = $result.Output | ConvertFrom-Json

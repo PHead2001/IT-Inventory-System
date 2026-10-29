@@ -575,6 +575,12 @@ file not writable by group or others. A matched fixed summary may carry
 `source=cloud-init-output-tail`; this identifies the diagnostic source, not a
 proven cause. Raw log text is not retained or transmitted.
 
+Image-preparation failures may also leave a protected local
+`preparation-image.json` artifact, limited to 8 KiB. It records the builder's
+fixed stage marker (or `unknown`), exit code, receipt length, and bounded,
+sanitized stderr; that detail remains local and is not copied to generic
+failure records or public output.
+
 This is diagnostic instrumentation. The Boolean success policy, generation/nonce
 checks, native commands, timeouts, isolation rules and outage deadline are unchanged.
 Offline worker, recovery and failure-observation contracts prove mocked behavior;

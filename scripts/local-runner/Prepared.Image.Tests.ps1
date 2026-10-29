@@ -70,7 +70,7 @@ function Get-Acl([string] $LiteralPath) {
     return $acl
 }
 function Get-RunnerImageBinding { return $script:binding }
-function Get-CoherentInstalledRunnerBundle { return [pscustomobject]@{ fixture = $true } }
+function Get-CoherentInstalledRunnerBundle { return [pscustomobject]@{ fixture = $true; hash = ('F'*64) } }
 function Get-RunnerVmInventory { return $script:vms }
 $script:childParents = @{}
 function Get-VHD($Path) {
@@ -506,6 +506,9 @@ try {
     if ($null -eq $failureDetail -or $failureDetail.exitCode -ne 1 -or $failureDetail.stderr.Length -gt 4096 -or
         $failureDetail.stderr -match '[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]') { throw 'Credential-free builder failure lost bounded/control-cleaned native diagnostics.' }
     if ((Get-FileHash -LiteralPath $selectorPath).Hash -cne $before -or (Get-RunnerState) -or $script:vms.Count -gt 0) { throw 'Failed builder published or bypassed cleanup.' }
+    $retainedFailure=Read-RunnerJson (Join-Path $base 'preparation-image.json')
+    Assert-RunnerImageFailureArtifact $retainedFailure
+    if ($retainedFailure.exitCode -ne 1 -or $retainedFailure.bundleHash -cne ('F'*64) -or -not $retainedFailure.stderr.StartsWith('fixture prepare error')) { throw 'Builder evidence did not survive cleanup.' }
     $script:buildFails = $false
     function Get-RunnerConfig { return $config }
     function Get-RunnerMemoryAdmission { return [pscustomobject]@{ ready = $true } }
