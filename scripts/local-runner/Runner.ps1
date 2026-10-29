@@ -174,9 +174,18 @@ function Test-GuestIsolation($State, $Config) {
         if ($endpoint -isnot [Net.IPEndPoint] -or -not $endpoint.Address.Equals($gateway) -or $endpoint.Port -lt 1 -or $endpoint.Port -gt 65535) { throw 'Isolation listener endpoint readback differs.' }
         $port = $endpoint.Port
         $command = 'timeout 4 bash -c "echo probe >/dev/tcp/{0}/{1}" >/dev/null 2>&1; test $? -ne 0' -f $gateway.ToString(), $port
-        $exitCode = Invoke-RunnerNative 'ssh.exe' ($args + @("runner@$($Config.guestIp)", $command))
-        if ($exitCode -ne 0 -or $listener.Pending()) {
-            throw 'Guest-to-host isolation probe failed.'
+        $exitCode = $null
+        $listenerStatus = 'unavailable'
+        try {
+            $observedExit = Invoke-RunnerNative 'ssh.exe' ($args + @("runner@$($Config.guestIp)", $command))
+            if ($observedExit -is [int]) { $exitCode = $observedExit }
+        } catch { } # An unavailable SSH observation never authorizes continuation.
+        try {
+            $pending = $listener.Pending()
+            if ($pending -is [bool]) { $listenerStatus = if ($pending) { 'pending' } else { 'clear' } }
+        } catch { } # Observe independently even when SSH failed or was unavailable.
+        if ($null -eq $exitCode -or $exitCode -ne 0 -or $listenerStatus -cne 'clear') {
+            throw (New-RunnerIsolationProbeFailure $exitCode $listenerStatus)
         }
     } finally { $listener.Stop() }
     $exitCode = Invoke-RunnerNative 'ssh.exe' ($args + @("runner@$($Config.guestIp)", 'curl --head --fail --silent --show-error --max-time 10 https://api.github.com >/dev/null'))

@@ -304,6 +304,22 @@ function New-RunnerExecutionFailure([ValidateSet('runner-exit')][string] $Class,
     return $failure
 }
 
+function New-RunnerIsolationProbeFailure($ExitCode, [string] $Listener) {
+    $failure = [Management.Automation.RuntimeException]::new('Guest-to-host isolation probe failed.')
+    $code = if ($ExitCode -is [int]) { $ExitCode } else { $null }
+    $status = if ($Listener -cin @('pending', 'clear', 'unavailable')) { $Listener } else { 'unavailable' }
+    $failure.Data['runnerIsolationProbe'] = [pscustomobject]@{ kind = 'guest-to-host'; exitCode = $code; listener = $status }
+    return $failure
+}
+
+function Assert-RunnerIsolationProbeDiagnostic($Probe) {
+    if ($Probe -isnot [pscustomobject] -or (@($Probe.PSObject.Properties.Name | Sort-Object) -join ',') -cne 'exitCode,kind,listener' -or
+        @($Probe.PSObject.Properties | Where-Object { $_.MemberType -ne 'NoteProperty' }).Count -ne 0) { throw 'Invalid isolation probe diagnostic shape.' }
+    if ($Probe.kind -isnot [string] -or $Probe.kind -cne 'guest-to-host' -or
+        $Probe.listener -isnot [string] -or $Probe.listener -cnotin @('pending', 'clear', 'unavailable') -or
+        ($null -ne $Probe.exitCode -and $Probe.exitCode -isnot [int])) { throw 'Invalid isolation probe diagnostic value.' }
+}
+
 function Get-RunnerSessionFailureEnums {
     return @{
         stage = @('idle', 'preflight', 'disk-copy', 'disk-clone', 'key-generation', 'vm-creation', 'vm-configuration', 'network-isolation', 'vm-boot', 'guest-readiness', 'image-clone-readiness', 'image-preparation', 'runner-download', 'runner-transfer', 'jit-registration', 'job-execution', 'memory-admission', 'queue-inspection', 'pilot-consumption', 'pilot-verification', 'cleanup', 'other')
@@ -338,6 +354,11 @@ function New-RunnerSessionFailureRecord($Failure, [string] $Stage) {
             $exit = $Failure.Exception.Data['runnerFailureExitCode']
             if ($class -ceq 'runner-exit' -and $exit -is [int]) { $record.exitCode = $exit }
         }
+        $probe = $Failure.Exception.Data['runnerIsolationProbe']
+        if ($null -ne $probe) {
+            Assert-RunnerIsolationProbeDiagnostic $probe
+            $record.isolationProbe = [ordered]@{ kind = $probe.kind; exitCode = $probe.exitCode; listener = $probe.listener }
+        }
         $record.capture = 'complete'
     } catch { $record.capture = 'unavailable' }
     return $record
@@ -353,11 +374,14 @@ function Assert-RunnerSessionFailureJournal($Journal) {
         $seen[$session.sessionId] = $true
         if ($null -ne $session.vmId -and ($session.vmId -isnot [string] -or $session.vmId -cnotmatch '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' -or [guid]$session.vmId -eq [guid]::Empty)) { throw 'Invalid session failure VM identity.' }
         foreach ($record in @($session.first, $session.latest)) {
-            if ($record -isnot [pscustomobject] -or (@($record.PSObject.Properties.Name | Sort-Object) -join ',') -cne 'atUtc,capture,category,errorId,exceptionType,exitCode,failureClass,hResult,line,source,stage' -or
+            $fields = @('atUtc','capture','category','errorId','exceptionType','exitCode','failureClass','hResult','line','source','stage')
+            if ($null -ne $record -and $record.PSObject.Properties.Name -contains 'isolationProbe') { $fields += 'isolationProbe' }
+            if ($record -isnot [pscustomobject] -or (@($record.PSObject.Properties.Name | Sort-Object) -join ',') -cne (@($fields | Sort-Object) -join ',') -or
                 $record.atUtc -isnot [string] -or [DateTime]::Parse($record.atUtc).ToUniversalTime().ToString('o') -cne $record.atUtc) { throw 'Invalid session failure projection.' }
             foreach ($key in $enums.Keys) { if ($record.$key -isnot [string] -or $record.$key -cnotin $enums[$key]) { throw 'Invalid session failure enum.' } }
             if ($record.line -isnot [int] -or $record.line -lt 0 -or $record.line -gt 100000 -or $record.hResult -isnot [int] -or
                 ($null -ne $record.exitCode -and ($record.exitCode -isnot [int] -or $record.failureClass -cne 'runner-exit'))) { throw 'Invalid session failure number.' }
+            if ($record.PSObject.Properties.Name -contains 'isolationProbe') { Assert-RunnerIsolationProbeDiagnostic $record.isolationProbe }
         }
     }
     if ([Text.Encoding]::UTF8.GetByteCount((ConvertTo-Json -InputObject $Journal -Depth 6 -Compress)) -gt 16384) { throw 'Session failure journal bound.' }

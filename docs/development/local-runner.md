@@ -536,6 +536,13 @@ need not describe the last attempt. Legacy records without these fields remain
 readable; unknown fields and malformed projected values are rejected. Raw
 exceptions, commands, endpoints, output, credentials and tokens are excluded.
 
+An optional `isolationProbe` observation records the fixed `guest-to-host` kind,
+the SSH command's numeric exit code (or `null` when unavailable), and whether the
+host listener had a connection pending (`pending`), no connection pending
+(`clear`), or could not be observed (`unavailable`). These fields are bounded
+observations only: they do not establish the packet's source, prove that a
+network repair succeeded, or retain raw SSH output.
+
 This is diagnostic instrumentation. The Boolean success policy, generation/nonce
 checks, native commands, timeouts, isolation rules and outage deadline are unchanged.
 Offline worker, recovery and failure-observation contracts prove mocked behavior;

@@ -4,7 +4,7 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 $common = [Management.Automation.Language.Parser]::ParseFile((Join-Path $PSScriptRoot 'Common.ps1'), [ref]$null, [ref]$null)
 foreach ($definition in $common.FindAll({ param($node) $node -is [Management.Automation.Language.FunctionDefinitionAst] }, $false)) {
-    if ($definition.Name -cin @('New-RunnerExecutionFailure', 'Get-RunnerSessionFailureEnums', 'New-RunnerSessionFailureRecord', 'Assert-RunnerSessionFailureJournal', 'Write-RunnerSessionFailure', 'Write-RunnerJson', 'Read-RunnerJson')) { Invoke-Expression $definition.Extent.Text }
+    if ($definition.Name -cin @('New-RunnerExecutionFailure', 'New-RunnerIsolationProbeFailure', 'Assert-RunnerIsolationProbeDiagnostic', 'Get-RunnerSessionFailureEnums', 'New-RunnerSessionFailureRecord', 'Assert-RunnerSessionFailureJournal', 'Write-RunnerSessionFailure', 'Write-RunnerJson', 'Read-RunnerJson')) { Invoke-Expression $definition.Extent.Text }
 }
 $script:RunnerRoot = Join-Path $env:TEMP ('ITIR-session-failure-' + [guid]::NewGuid().ToString('N'))
 $script:path = Join-Path $script:RunnerRoot 'session-failures.json'
@@ -76,6 +76,50 @@ try {
             $record = (Read-RunnerJson $script:path).sessions[0].latest
             Require ($record.failureClass -ceq $class)
             if ($class -ceq 'runner-exit') { Require ($record.exitCode -eq 27) } else { Require ($null -eq $record.exitCode) }
+        }
+    }
+    Check 'optional isolation probe evidence survives durable first/latest publication and old records remain valid' {
+        Reset-Case
+        Write-RunnerSessionFailure $script:state.vmName (Get-Failure { throw 'SECRET_OLD' }) 'guest-readiness'
+        $old = (Read-RunnerJson $script:path).sessions[0].first | ConvertTo-Json -Compress
+        foreach ($case in @(@{ code=1; listener='clear' },@{ code=0; listener='pending' },@{ code=27; listener='pending' },@{ code=$null; listener='unavailable' })) {
+            $failure = Get-Failure { throw (New-RunnerIsolationProbeFailure $case.code $case.listener) }
+            Write-RunnerSessionFailure $script:state.vmName $failure 'guest-readiness'
+            $journal = Read-RunnerJson $script:path; Assert-RunnerSessionFailureJournal $journal
+            Require (($journal.sessions[0].first | ConvertTo-Json -Compress) -ceq $old)
+            $probe = $journal.sessions[0].latest.isolationProbe
+            Require ($probe.kind -ceq 'guest-to-host' -and $probe.exitCode -eq $case.code -and $probe.listener -ceq $case.listener)
+            Require ($journal.sessions[0].vmId -ceq $script:state.vmId -and $journal.sessions[0].latest.stage -ceq 'guest-readiness')
+            Require (([IO.File]::ReadAllText($script:path)) -cnotmatch 'SECRET|172\.30|ssh.exe|stderr|stdout')
+        }
+    }
+    Check 'malformed optional probe fields are rejected without leaking data or evaluating getters' {
+        foreach ($case in @('null','array','unknown-kind','array-kind','unknown-listener','array-listener','string-exit','wide-exit','array-exit','extra','getter')) {
+            Reset-Case
+            Write-RunnerSessionFailure $script:state.vmName (Get-Failure { throw (New-RunnerIsolationProbeFailure 1 'clear') }) 'guest-readiness'
+            $journal = Read-RunnerJson $script:path
+            $probe = $journal.sessions[0].first.isolationProbe
+            switch ($case) {
+                'null' { $journal.sessions[0].first.isolationProbe = $null }
+                'array' { $journal.sessions[0].first.isolationProbe = @($probe) }
+                'unknown-kind' { $probe.kind = 'SECRET_KIND' }
+                'array-kind' { $probe.kind = @('guest-to-host') }
+                'unknown-listener' { $probe.listener = 'SECRET_LISTENER' }
+                'array-listener' { $probe.listener = @('clear') }
+                'string-exit' { $probe.exitCode = '1' }
+                'wide-exit' { $probe.exitCode = [long]::MaxValue }
+                'array-exit' { $probe.exitCode = @(1) }
+                'extra' { $probe | Add-Member secret 'SECRET_EXTRA' }
+                'getter' { $probe.PSObject.Properties.Remove('exitCode'); $probe | Add-Member ScriptProperty exitCode { $script:getterEvaluated=$true; throw 'SECRET_GETTER' } }
+            }
+            $script:getterEvaluated=$false
+            $refused=$false; try { Assert-RunnerSessionFailureJournal $journal } catch { $refused=$true }
+            Require ($refused -and -not $script:getterEvaluated)
+            $failure = New-FixtureFailure
+            $failure.Exception.Data['runnerIsolationProbe'] = $journal.sessions[0].first.isolationProbe
+            $projected = New-RunnerSessionFailureRecord $failure 'guest-readiness'
+            Require (($projected | ConvertTo-Json -Compress) -cnotmatch 'SECRET|stderr|stdout')
+            Require (-not $script:getterEvaluated)
         }
     }
     Check 'real detached receipt monitor classifies malformed identity and nonzero exit without retaining guest output' {
