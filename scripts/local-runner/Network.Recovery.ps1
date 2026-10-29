@@ -18,23 +18,49 @@ function Get-RunnerNetworkCapture {
     $routes = @(Get-NetRoute -ErrorAction Stop)
     $records = @(
         foreach ($ip in $addresses) {
-            'address|{0}|{1}|{2}|{3}' -f $ip.AddressFamily, $ip.IPAddress, $ip.PrefixLength, $ip.InterfaceIndex
+            'address|{0}|{1}|{2}|{3}' -f $ip.AddressFamily, $ip.IPAddress, $ip.PrefixLength, (ConvertTo-Json -InputObject $ip.InterfaceIndex -Compress)
         }
         foreach ($route in $routes) {
-            'route|{0}|{1}|{2}|{3}' -f $route.AddressFamily, $route.DestinationPrefix, $route.NextHop, $route.InterfaceIndex
+            $metric = if ($route.PSObject.Properties.Name -contains 'RouteMetric') { ConvertTo-Json -InputObject $route.RouteMetric -Compress } else { 'missing' }
+            'route|{0}|{1}|{2}|{3}|{4}' -f $route.AddressFamily, $route.DestinationPrefix, $route.NextHop, (ConvertTo-Json -InputObject $route.InterfaceIndex -Compress), $metric
         }
     )
     if ($addresses.Count -eq 0 -or $routes.Count -eq 0) { throw 'Network observation is incomplete.' }
     return [pscustomobject]@{
         addresses = $addresses; routes = $routes; observedUtc = $observedUtc
-        fingerprint = Get-RunnerRecoveryHash (@($records | Sort-Object -Unique) -join "`n")
+        # Multiplicity matters: a duplicate /1 makes the transport ambiguous.
+        fingerprint = Get-RunnerRecoveryHash (@($records | Sort-Object) -join "`n")
     }
+}
+
+function Test-RunnerRouteInteger($Value, [long] $Minimum, [long] $Maximum) {
+    return ($null -ne $Value -and $Value.GetType().FullName -cin @('System.Byte','System.SByte','System.Int16','System.UInt16','System.Int32','System.UInt32','System.Int64','System.UInt64') -and
+        [decimal]$Value -ge $Minimum -and [decimal]$Value -le $Maximum)
+}
+
+function Test-RunnerSplitDefaultTransport($Capture) {
+    # A unique complementary pair is the same IPv4 transport scope as /0.
+    # Ambiguous/malformed pairs remain ordinary protected routes (fail closed).
+    $pair=@($Capture.routes | Where-Object { [string]$_.AddressFamily -in @('IPv4','InterNetwork','2') -and $_.DestinationPrefix -cin @('0.0.0.0/1','128.0.0.0/1') })
+    if ($pair.Count -ne 2 -or @($pair.DestinationPrefix | Sort-Object -Unique).Count -ne 2) { return $false }
+    foreach ($route in $pair) {
+        if ($route.PSObject.Properties.Name -notcontains 'InterfaceIndex' -or $route.PSObject.Properties.Name -notcontains 'NextHop' -or $route.PSObject.Properties.Name -notcontains 'RouteMetric' -or
+            -not (Test-RunnerRouteInteger $route.InterfaceIndex 1 4294967295) -or -not (Test-RunnerRouteInteger $route.RouteMetric 0 65535)) { return $false }
+        $parsed=$null
+        if ($route.NextHop -isnot [string] -or -not [Net.IPAddress]::TryParse($route.NextHop,[ref]$parsed) -or
+            $parsed.AddressFamily -ne [Net.Sockets.AddressFamily]::InterNetwork -or $parsed.ToString() -cne $route.NextHop) { return $false }
+    }
+    if ($pair[0].InterfaceIndex -ne $pair[1].InterfaceIndex -or $pair[0].NextHop -cne $pair[1].NextHop -or $pair[0].RouteMetric -ne $pair[1].RouteMetric) { return $false }
+    return @($Capture.addresses | Where-Object { [string]$_.AddressFamily -in @('IPv4','InterNetwork','2') -and
+        $_.PSObject.Properties.Name -contains 'InterfaceIndex' -and (Test-RunnerRouteInteger $_.InterfaceIndex 1 4294967295) -and $_.InterfaceIndex -eq $pair[0].InterfaceIndex }).Count -gt 0
 }
 
 function New-RunnerNetworkPolicy($Capture) {
     $privatePrefixes = @('0.0.0.0/8', '10.0.0.0/8', '100.64.0.0/10', '127.0.0.0/8', '169.254.0.0/16', '172.16.0.0/12', '192.168.0.0/16', '198.18.0.0/15', '224.0.0.0/4')
     $hostIps = @($Capture.addresses | Where-Object { [string]$_.AddressFamily -in @('IPv4', 'InterNetwork', '2') } | ForEach-Object { [string]$_.IPAddress } | Sort-Object -Unique)
-    $routes = @($Capture.routes | Where-Object { [string]$_.AddressFamily -in @('IPv4', 'InterNetwork', '2') -and $_.DestinationPrefix -cne '0.0.0.0/0' } | ForEach-Object { [string]$_.DestinationPrefix } | Sort-Object -Unique)
+    $splitDefault = Test-RunnerSplitDefaultTransport $Capture
+    $routes = @($Capture.routes | Where-Object { [string]$_.AddressFamily -in @('IPv4', 'InterNetwork', '2') -and $_.DestinationPrefix -cne '0.0.0.0/0' -and
+        -not ($splitDefault -and $_.DestinationPrefix -cin @('0.0.0.0/1','128.0.0.0/1')) } | ForEach-Object { [string]$_.DestinationPrefix } | Sort-Object -Unique)
     if ($hostIps.Count -eq 0) { throw 'Network observation has no host IPv4 addresses.' }
     foreach ($ip in $hostIps) {
         $parsed = $null

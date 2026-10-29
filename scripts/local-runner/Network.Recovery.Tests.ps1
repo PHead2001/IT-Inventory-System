@@ -26,6 +26,11 @@ function New-Capture([string] $Ip = '192.168.4.12', [string] $Route = '192.168.4
     }
 }
 function Get-NetIPAddress { $script:readIndex++; if ($script:fail -ceq 'slow-network') { $script:clock = $script:clock.AddSeconds(3) }; return $script:captures[[Math]::Min($script:readIndex, $script:captures.Count - 1)].addresses }
+function New-SplitCapture {
+    $capture=New-Capture
+    $capture.routes+=@('0.0.0.0/1','128.0.0.0/1') | ForEach-Object { [pscustomobject]@{AddressFamily='IPv4';DestinationPrefix=$_;NextHop='0.0.0.0';InterfaceIndex=3;RouteMetric=0} }
+    return $capture
+}
 function Get-NetRoute { return $script:captures[[Math]::Min($script:readIndex, $script:captures.Count - 1)].routes }
 function Get-RunnerState { if ($script:serializeState) { return ($script:serializedState | ConvertFrom-Json) }; return $script:state }
 function Write-RunnerJson($Path, $Value) { if ($script:serializeState) { if (-not $script:locked) { throw 'Serialized fixture write escaped state lock.' }; $script:serializedState = $Value | ConvertTo-Json -Depth 30 -Compress; $script:stateWrites++ }; $script:state = $Value }
@@ -403,6 +408,74 @@ try {
         Assert-Equal @($rules | Where-Object { $_.PSObject.Properties.Name -contains 'RemoteIPAddress' -and $_.RemoteIPAddress -ceq '::/0' }).Count 1 'IPv6 deny lost.'
         Assert-Equal @($rules | Where-Object { $_.PSObject.Properties.Name -contains 'RemoteIPAddress' -and $_.RemoteIPAddress -ceq '0.0.0.0/1' }).Count 1 'Split-default deny lost.'
         Assert-Equal @($rules.Weight | Sort-Object -Unique).Count $rules.Count 'Rule priority collided.'
+    }
+    Check 'paired split default only removes transport denies and preserves exact allow scope' {
+        New-Fixture; $capture=New-SplitCapture
+        $capture.routes += [pscustomobject]@{AddressFamily='IPv4';DestinationPrefix='203.0.113.0/24';NextHop='0.0.0.0';InterfaceIndex=3;RouteMetric=0}
+        $rules=@(New-RunnerNetworkPolicy $capture)
+        $ordinary=Copy-Fixture $capture; $ordinary.routes=@($ordinary.routes | Where-Object DestinationPrefix -notin @('0.0.0.0/1','128.0.0.0/1'))
+        Assert-Equal @($rules | ForEach-Object {Get-RunnerRecoveryRuleKey $_}) @((New-RunnerNetworkPolicy $ordinary) | ForEach-Object {Get-RunnerRecoveryRuleKey $_}) 'Pair changed any non-transport rule or weight.'
+        Assert-Equal @($rules | Where-Object Action -eq Allow).Count 8 'Pair expanded allowed endpoints or ports.'
+        foreach($hop in @('0.0.0.0','192.168.4.1')) {
+            foreach($metric in @([uint16]0,[uint16]65535)) {
+                $valid=New-SplitCapture
+                foreach($route in $valid.routes[-2..-1]) {$route.NextHop=$hop;$route.RouteMetric=$metric;$route.InterfaceIndex=[uint32]3}
+                if(-not (Test-RunnerSplitDefaultTransport $valid)){throw 'Valid native-typed pair refused.'}
+            }
+        }
+    }
+    Check 'single ambiguous malformed or unmatched split defaults stay denied' {
+        New-Fixture
+        foreach ($case in @('single','duplicate','different-interface','different-hop','different-metric','missing-metric','string-metric','negative-metric','large-metric','array-metric','missing-index','zero-index','string-index','large-index','missing-hop','noncanonical-hop','ipv6-hop','missing-host-interface','host-string-index','ipv6-host')) {
+            $capture=New-SplitCapture
+            switch ($case) {
+                single {$capture.routes=@($capture.routes | Where-Object DestinationPrefix -ne '128.0.0.0/1')}
+                duplicate {$capture.routes+=Copy-Fixture $capture.routes[-1]}
+                different-interface {$capture.routes[-1].InterfaceIndex=4}
+                different-hop {$capture.routes[-1].NextHop='192.168.4.1'}
+                different-metric {$capture.routes[-1].RouteMetric=1}
+                missing-metric {$capture.routes[-1].PSObject.Properties.Remove('RouteMetric')}
+                string-metric {$capture.routes[-1].RouteMetric='0'}
+                negative-metric {$capture.routes[-1].RouteMetric=-1}
+                large-metric {$capture.routes[-1].RouteMetric=65536}
+                array-metric {$capture.routes[-1].RouteMetric=@(0)}
+                missing-index {$capture.routes[-1].PSObject.Properties.Remove('InterfaceIndex')}
+                zero-index {$capture.routes[-1].InterfaceIndex=0}
+                string-index {$capture.routes[-1].InterfaceIndex='3'}
+                large-index {$capture.routes[-1].InterfaceIndex=[long]4294967296}
+                missing-hop {$capture.routes[-1].PSObject.Properties.Remove('NextHop')}
+                noncanonical-hop {$capture.routes[-1].NextHop='127.1'}
+                ipv6-hop {$capture.routes[-1].NextHop='::1'}
+                missing-host-interface {$capture.addresses[0].InterfaceIndex=4}
+                host-string-index {$capture.addresses[0].InterfaceIndex='3'}
+                ipv6-host {$capture.addresses[0].AddressFamily='IPv6';$capture.addresses+=[pscustomobject]@{AddressFamily='IPv4';IPAddress='192.168.5.2';InterfaceIndex=4}}
+            }
+            $rules=@(New-RunnerNetworkPolicy $capture)
+            Assert-Equal @($rules | Where-Object { $_.PSObject.Properties.Name -contains 'RemoteIPAddress' -and $_.RemoteIPAddress -ceq '0.0.0.0/1' }).Count 1 ('Unsafe pair exemption: '+$case)
+        }
+    }
+    Check 'metric and duplicate pair drift change the coherent fingerprint and quarantine' {
+        New-Fixture; $script:captures=@(New-SplitCapture);$script:readIndex=-1
+        $first=Get-RunnerNetworkObservation
+        foreach($case in @('metric','duplicate','metric-type','host-index-type')) {
+            $changed=New-SplitCapture
+            switch($case) { metric {$changed.routes[-1].RouteMetric=1}; duplicate {$changed.routes+=Copy-Fixture $changed.routes[-1]}; metric-type {$changed.routes[-1].RouteMetric='0'}; host-index-type {$changed.addresses[0].InterfaceIndex='3'} }
+            $script:captures=@($changed);$script:readIndex=-1
+            $next=Get-RunnerNetworkObservation
+            if($first.fingerprint -ceq $next.fingerprint){throw ('Pair drift hidden: '+$case)}
+            $script:recovery.fingerprint=$first.fingerprint
+            Assert-Equal (Plan 0 $next).action 'quarantine' 'Pair drift bypassed recovery.'
+            $script:captures=@((New-SplitCapture),$changed);$script:readIndex=-1
+            Assert-Refused {Get-RunnerNetworkObservation} 'Mixed pair snapshots accepted.'
+        }
+    }
+    Check 'paired split default enumeration is deterministic' {
+        New-Fixture; $script:captures=@(New-SplitCapture);$script:readIndex=-1
+        $first=Get-RunnerNetworkObservation
+        [Array]::Reverse($script:captures[0].routes)
+        $next=Get-RunnerNetworkObservation
+        Assert-Equal $first.fingerprint $next.fingerprint 'Pair enumeration changed fingerprint.'
+        Assert-Equal @($first.rules | ForEach-Object {Get-RunnerRecoveryRuleKey $_}) @($next.rules | ForEach-Object {Get-RunnerRecoveryRuleKey $_}) 'Pair enumeration changed rules.'
     }
     Check 'malformed or oversized captured policy is refused' {
         New-Fixture; Assert-Refused { New-RunnerNetworkPolicy (New-Capture '999.1.1.1') } 'Invalid IP accepted.'
