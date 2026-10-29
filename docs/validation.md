@@ -8,7 +8,7 @@ and the complete Vitest suite) before pushing. It performs no fresh install,
 build, database reset or Playwright execution. Its sequential local wrapper sets
 a 2 GiB Node old-space limit for the canonical typecheck stage and 1 GiB for lint,
 formatting and Vitest, replacing inherited heap flags. It runs
-Vitest with one worker and no file parallelism. The full CI commands remain
+Vitest with at most two workers, retaining default file parallelism and isolation. The full CI commands remain
 unchanged; the heap limit is not a total process/host memory bound. Reuse a trusted install while
 dependency inputs are unchanged. The optional repository-local pre-push hook
 enforces this gate on the exact current clean HEAD; see

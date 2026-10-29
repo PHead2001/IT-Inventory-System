@@ -5,7 +5,7 @@ import {
 } from '../../scripts/validate-push.mjs';
 
 describe('bounded local push validation', () => {
-  it('runs only canonical cheap checks sequentially with one Vitest worker', () => {
+  it('runs only canonical cheap checks sequentially with two Vitest workers', () => {
     const run = vi.fn();
     const env = {
       NODE_OPTIONS: '--trace-warnings --max-old-space-size=512',
@@ -16,7 +16,7 @@ describe('bounded local push validation', () => {
       ['run', 'typecheck'],
       ['run', 'lint'],
       ['run', 'format:check'],
-      ['run', 'test', '--', '--maxWorkers=1', '--no-file-parallelism'],
+      ['run', 'test', '--', '--maxWorkers=2'],
     ]);
     for (const [args, options] of run.mock.calls)
       expect(options.env).toEqual({

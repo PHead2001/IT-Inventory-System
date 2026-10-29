@@ -51,7 +51,7 @@ export function runPushValidation({ env = process.env, run = npm } = {}) {
     ['run', 'typecheck'],
     ['run', 'lint'],
     ['run', 'format:check'],
-    ['run', 'test', '--', '--maxWorkers=1', '--no-file-parallelism'],
+    ['run', 'test', '--', '--maxWorkers=2'],
   ]) {
     const heapMiB = args[1] === 'typecheck' ? 2048 : 1024;
     run(args, {
