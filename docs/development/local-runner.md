@@ -550,6 +550,31 @@ host listener had a connection pending (`pending`), no connection pending
 observations only: they do not establish the packet's source, prove that a
 network repair succeeded, or retain raw SSH output.
 
+Guest-readiness failures may also include a bounded `guestReadiness` observation:
+purpose, attempt count (maximum 1,000,000), elapsed milliseconds (maximum
+86,400,000), first and last recognized failure stage, last native exit code, and
+whether any SSH exit code below 255 was observed. Stages classify cloud-init,
+guest identity and prerequisite checks, Docker readiness, or SSH transport;
+unrecognized outcomes map to `unknown`. These fields localize an observed
+readiness step but do not prove the underlying cause. Raw commands and output
+are omitted.
+
+For a generic image-preparation session, a guest cloud-init readiness exit code
+of 72 triggers at most one read-only pre-JIT status capture. It stores normalized
+status, per-stage counts, and at most eight fixed-template reasons; unmatched or
+sensitive details are withheld. Fixed reason categories cover network and
+TLS, package repository and installation, disk space, permissions, cloud-config
+schema, and filesystem-resize failures. The latest artifact is protected at
+`preparation-cloud-init.json` and is limited to 8 KiB. A complete capture that
+confirms a terminal nonzero cloud-init result fails readiness immediately;
+unavailable or inconclusive capture does not change the existing retry policy.
+For a terminal cloud-init package-update error with only a generic package
+manager reason, the inspector may conditionally read the last 64 KiB of the
+fixed `/var/log/cloud-init-output.log`, and only when it is a root-owned regular
+file not writable by group or others. A matched fixed summary may carry
+`source=cloud-init-output-tail`; this identifies the diagnostic source, not a
+proven cause. Raw log text is not retained or transmitted.
+
 This is diagnostic instrumentation. The Boolean success policy, generation/nonce
 checks, native commands, timeouts, isolation rules and outage deadline are unchanged.
 Offline worker, recovery and failure-observation contracts prove mocked behavior;

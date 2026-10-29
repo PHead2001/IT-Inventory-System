@@ -1,15 +1,15 @@
 {
   "schema": 1,
   "tag": "it-inventory-local-runner-v1",
-  "version": "2026-10-29.3",
+  "version": "2026-10-29.7",
   "files": [
     {
       "name": "Common.ps1",
-      "hash": "220A00AE51F532E2C797B6B5089031B34F2D3AFE3A835A38A627DCB293D758C9"
+      "hash": "5377093432650D624D27B119988E10AEEBEC9E29B6E4B2FF461DB4C9D8262869"
     },
     {
       "name": "Runner.ps1",
-      "hash": "6F3CEF5306876989A3203E9C59990C56E500F84C96B0C93D3B4AA44A8E064C8C"
+      "hash": "E9123E9224E72FC48DC28AD8A0A8126A42DB8069B387CF0DBDAB2F2C2FFC1718"
     },
     {
       "name": "Guest.Network.ps1",

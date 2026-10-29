@@ -334,6 +334,48 @@ function Assert-RunnerIsolationProbeDiagnostic($Probe) {
         ($null -ne $Probe.exitCode -and $Probe.exitCode -isnot [int])) { throw 'Invalid isolation probe diagnostic value.' }
 }
 
+function Get-RunnerGuestReadinessStage($ExitCode) {
+    if ($ExitCode -isnot [int]) { return 'unknown' }
+    switch ($ExitCode) {
+        0 { return '' }; 71 { return 'cloud-init-timeout' }; 72 { return 'cloud-init-nonzero' }
+        73 { return 'wrong-user' }; 74 { return 'missing-curl' }; 75 { return 'missing-git' }; 76 { return 'missing-unzip' }
+        77 { return 'missing-docker-socket' }; 78 { return 'docker-timeout' }; 79 { return 'docker-nonzero' }
+        255 { return 'ssh-transport' }; default { return 'unknown' }
+    }
+}
+
+function Assert-RunnerGuestReadinessDiagnostic($Diagnostic) {
+    if ($Diagnostic -isnot [pscustomobject] -or (@($Diagnostic.PSObject.Properties.Name | Sort-Object) -join ',') -cne 'anySshCompleted,attemptCount,elapsedMs,firstFailureStage,lastFailureStage,lastNativeExit,purpose' -or
+        @($Diagnostic.PSObject.Properties | Where-Object { $_.MemberType -ne 'NoteProperty' }).Count -ne 0) { throw 'Invalid guest readiness diagnostic shape.' }
+    if ($Diagnostic.purpose -isnot [string] -or $Diagnostic.purpose -cnotin @('job','prepare','verify-image','other') -or
+        $Diagnostic.attemptCount -isnot [int] -or $Diagnostic.attemptCount -lt 0 -or $Diagnostic.attemptCount -gt 1000000 -or
+        ($Diagnostic.elapsedMs -isnot [int] -and $Diagnostic.elapsedMs -isnot [long]) -or $Diagnostic.elapsedMs -lt 0 -or $Diagnostic.elapsedMs -gt 86400000 -or
+        $Diagnostic.anySshCompleted -isnot [bool] -or ($null -ne $Diagnostic.lastNativeExit -and $Diagnostic.lastNativeExit -isnot [int])) { throw 'Invalid guest readiness diagnostic value.' }
+    foreach ($name in @('firstFailureStage','lastFailureStage')) {
+        if ($Diagnostic.$name -isnot [string] -or $Diagnostic.$name -cnotin @('','cloud-init-timeout','cloud-init-nonzero','wrong-user','missing-curl','missing-git','missing-unzip','missing-docker-socket','docker-timeout','docker-nonzero','ssh-transport','unknown')) { throw 'Invalid guest readiness diagnostic stage.' }
+    }
+}
+
+function Add-RunnerGuestReadinessAttempt($Diagnostic, $ExitCode, [long] $ElapsedMs) {
+    $Diagnostic.attemptCount = [int][Math]::Min([long]1000000, ([long]$Diagnostic.attemptCount + 1))
+    $Diagnostic.elapsedMs = [Math]::Min([long]86400000, [Math]::Max([long]0, $ElapsedMs))
+    $Diagnostic.lastNativeExit = if ($ExitCode -is [int]) { $ExitCode } else { $null }
+    if ($ExitCode -is [int] -and $ExitCode -ge 0 -and $ExitCode -lt 255) { $Diagnostic.anySshCompleted = $true }
+    $stage = Get-RunnerGuestReadinessStage $ExitCode
+    if ($stage) {
+        if (-not $Diagnostic.firstFailureStage) { $Diagnostic.firstFailureStage = $stage }
+        $Diagnostic.lastFailureStage = $stage
+    }
+}
+
+function Set-RunnerGuestReadinessEvidence($Failure, $Diagnostic, [long] $ElapsedMs) {
+    try {
+        $Diagnostic.elapsedMs = [Math]::Min([long]86400000, [Math]::Max([long]0, $ElapsedMs))
+        Assert-RunnerGuestReadinessDiagnostic $Diagnostic
+        $Failure.Exception.Data['runnerGuestReadiness'] = $Diagnostic
+    } catch { } # Diagnostic capture cannot replace the original failure.
+}
+
 function Get-RunnerSessionFailureEnums {
     return @{
         stage = @('idle', 'preflight', 'disk-copy', 'disk-clone', 'key-generation', 'vm-creation', 'vm-configuration', 'network-isolation', 'vm-boot', 'guest-readiness', 'image-clone-readiness', 'image-preparation', 'runner-download', 'runner-transfer', 'jit-registration', 'job-execution', 'memory-admission', 'queue-inspection', 'pilot-consumption', 'pilot-verification', 'cleanup', 'other')
@@ -373,6 +415,12 @@ function New-RunnerSessionFailureRecord($Failure, [string] $Stage) {
             Assert-RunnerIsolationProbeDiagnostic $probe
             $record.isolationProbe = [ordered]@{ kind = $probe.kind; exitCode = $probe.exitCode; listener = $probe.listener }
         }
+        $readiness = $Failure.Exception.Data['runnerGuestReadiness']
+        if ($null -ne $readiness) {
+            Assert-RunnerGuestReadinessDiagnostic $readiness
+            $record.guestReadiness = [ordered]@{}
+            foreach ($name in @('purpose','attemptCount','elapsedMs','firstFailureStage','lastFailureStage','lastNativeExit','anySshCompleted')) { $record.guestReadiness[$name] = $readiness.$name }
+        }
         $record.capture = 'complete'
     } catch { $record.capture = 'unavailable' }
     return $record
@@ -390,12 +438,14 @@ function Assert-RunnerSessionFailureJournal($Journal) {
         foreach ($record in @($session.first, $session.latest)) {
             $fields = @('atUtc','capture','category','errorId','exceptionType','exitCode','failureClass','hResult','line','source','stage')
             if ($null -ne $record -and $record.PSObject.Properties.Name -contains 'isolationProbe') { $fields += 'isolationProbe' }
+            if ($null -ne $record -and $record.PSObject.Properties.Name -contains 'guestReadiness') { $fields += 'guestReadiness' }
             if ($record -isnot [pscustomobject] -or (@($record.PSObject.Properties.Name | Sort-Object) -join ',') -cne (@($fields | Sort-Object) -join ',') -or
                 $record.atUtc -isnot [string] -or [DateTime]::Parse($record.atUtc).ToUniversalTime().ToString('o') -cne $record.atUtc) { throw 'Invalid session failure projection.' }
             foreach ($key in $enums.Keys) { if ($record.$key -isnot [string] -or $record.$key -cnotin $enums[$key]) { throw 'Invalid session failure enum.' } }
             if ($record.line -isnot [int] -or $record.line -lt 0 -or $record.line -gt 100000 -or $record.hResult -isnot [int] -or
                 ($null -ne $record.exitCode -and ($record.exitCode -isnot [int] -or $record.failureClass -cne 'runner-exit'))) { throw 'Invalid session failure number.' }
             if ($record.PSObject.Properties.Name -contains 'isolationProbe') { Assert-RunnerIsolationProbeDiagnostic $record.isolationProbe }
+            if ($record.PSObject.Properties.Name -contains 'guestReadiness') { Assert-RunnerGuestReadinessDiagnostic $record.guestReadiness }
         }
     }
     if ([Text.Encoding]::UTF8.GetByteCount((ConvertTo-Json -InputObject $Journal -Depth 6 -Compress)) -gt 16384) { throw 'Session failure journal bound.' }
@@ -1404,4 +1454,81 @@ function Invoke-RunnerReceiptNative([string] $Executable, [string[]] $Arguments,
         if (-not $process.HasExited) { $process.Kill() }
         $process.Dispose()
     }
+}
+
+function Assert-RunnerCloudInitFields($Value, [string[]] $Fields) {
+    if ($Value -isnot [pscustomobject] -or @($Value.PSObject.Properties).Count -ne $Fields.Count) { throw 'Invalid cloud-init diagnostic shape.' }
+    foreach ($property in $Value.PSObject.Properties) {
+        if ($property.MemberType -ne 'NoteProperty' -or $property.Name -cnotin $Fields) { throw 'Invalid cloud-init diagnostic field.' }
+    }
+}
+
+function Assert-RunnerCloudInitDiagnostic($Value) {
+    Assert-RunnerCloudInitFields $Value @('schema','capture','cloudInitExit','status','extendedStatus','stages','reasons','sshExit')
+    if ($Value.schema -isnot [int] -or $Value.schema -ne 1 -or $Value.capture -isnot [string] -or
+        $Value.capture -cnotin @('complete','status-timeout','status-overflow','status-invalid','unavailable') -or
+        ($null -ne $Value.cloudInitExit -and $Value.cloudInitExit -isnot [int]) -or
+        ($null -ne $Value.sshExit -and $Value.sshExit -isnot [int]) -or
+        $Value.status -isnot [string] -or $Value.status -cnotin @('not started','running','done','disabled','error','unknown') -or
+        $Value.extendedStatus -isnot [string] -or $Value.extendedStatus -cnotin @('not started','running','done','disabled','error - running','error - done','degraded running','degraded done','unknown') -or
+        $Value.stages -isnot [array] -or $Value.stages.Count -ne 5 -or $Value.reasons -isnot [array] -or $Value.reasons.Count -gt 8) { throw 'Invalid cloud-init diagnostic scalar.' }
+    $stages = @('top-level','init-local','init','modules-config','modules-final')
+    for ($index=0; $index -lt $stages.Count; $index++) {
+        $entry=$Value.stages[$index]
+        Assert-RunnerCloudInitFields $entry @('stage','errorCount','recoverableCount')
+        if ($entry.stage -isnot [string] -or $entry.stage -cne $stages[$index] -or $entry.errorCount -isnot [int] -or $entry.errorCount -lt 0 -or $entry.errorCount -gt 1024 -or
+            $entry.recoverableCount -isnot [int] -or $entry.recoverableCount -lt 0 -or $entry.recoverableCount -gt 1024) { throw 'Invalid cloud-init diagnostic stage.' }
+    }
+    foreach ($entry in $Value.reasons) {
+        $fields=@('stage','kind','module','exception','reason','redacted','truncated')
+        $hasSource=$entry.PSObject.Properties.Name -ccontains 'source'
+        if ($hasSource) { $fields+= 'source' }
+        Assert-RunnerCloudInitFields $entry $fields
+        if ($hasSource -and ($entry.source -isnot [string] -or $entry.source -cne 'cloud-init-output-tail' -or
+            $entry.kind -cne 'error' -or $entry.redacted -ne $true -or $Value.status -cne 'error' -or $Value.extendedStatus -cne 'error - done' -or $Value.cloudInitExit -eq 0 -or
+            $entry.reason -cin @('reason-withheld','Package manager exited with an error.','Group already exists.','Permission was denied.','Cloud configuration schema was invalid.','Filesystem resize failed.'))) { throw 'Invalid cloud-init diagnostic source.' }
+        if ($entry.stage -isnot [string] -or $entry.stage -cnotin $stages -or $entry.kind -isnot [string] -or $entry.kind -cnotin @('error','recoverable') -or
+            $entry.module -isnot [string] -or $entry.module -cnotin @('users-groups','package-update-upgrade-install','runcmd','scripts-user','resizefs','growpart','ssh','set-passwords','apt-configure','other') -or
+            $entry.exception -isnot [string] -or $entry.exception -cnotin @('ProcessExecutionError','RuntimeError','ValueError','TypeError','KeyError','OSError','PermissionError','FileNotFoundError','TimeoutExpired','SchemaValidationError','other') -or
+            $entry.reason -isnot [string] -or $entry.reason.Length -lt 1 -or $entry.reason.Length -gt 256 -or $entry.redacted -isnot [bool] -or $entry.truncated -isnot [bool]) { throw 'Invalid cloud-init diagnostic reason.' }
+        # Repeat the guest privacy boundary: fixed useful templates only, never
+        # arbitrary prose containing an error word, unmatched captures or tails.
+        if ($entry.reason -cnotin @('reason-withheld','Group already exists.','DNS resolution failed.','Network was unreachable.','Connection timed out.','Connection was refused.','Connection failed.','TLS validation or handshake failed.','Package repository signature verification failed.','Package repository Release file was unavailable.','Package hash verification failed.','Disk space was exhausted.','Package manager was interrupted.','Package dependencies could not be satisfied.','Package fetch failed.','Package manager exited with an error.','Package has no installation candidate.','Package was not found.','Package manager lock was unavailable.','Permission was denied.','Cloud configuration schema was invalid.','Filesystem resize failed.')) { throw 'Unsafe cloud-init diagnostic reason.' }
+    }
+    if ($Value.capture -ceq 'complete' -and ($null -eq $Value.cloudInitExit -or $Value.sshExit -ne 0)) { throw 'Incomplete cloud-init diagnostic transport.' }
+    if ($Value.capture -cne 'complete' -and ($Value.status -cne 'unknown' -or $Value.extendedStatus -cne 'unknown' -or $Value.reasons.Count -ne 0)) { throw 'Unavailable cloud-init diagnostic carried status.' }
+    if ([Text.Encoding]::UTF8.GetByteCount((ConvertTo-Json -InputObject $Value -Depth 6 -Compress)) -gt 6144) { throw 'Cloud-init diagnostic bound.' }
+}
+
+function ConvertFrom-RunnerCloudInitCapture($Transport) {
+    $empty = [pscustomobject]@{schema=1;capture='unavailable';cloudInitExit=$null;status='unknown';extendedStatus='unknown';stages=@(@('top-level','init-local','init','modules-config','modules-final') | ForEach-Object { [pscustomobject]@{stage=$_;errorCount=0;recoverableCount=0} });reasons=@();sshExit=$null}
+    try {
+        if ($null -eq $Transport -or $Transport.ExitCode -isnot [int]) { return $empty }
+        $empty.sshExit=$Transport.ExitCode
+        if ($Transport.ExitCode -ne 0) { return $empty }
+        if ($Transport.Output -isnot [string] -or $Transport.Output.Length -gt 4096 -or $Transport.Output -cmatch '[^\x20-\x7e]') { return $empty }
+        $value = $Transport.Output | ConvertFrom-Json
+        Assert-RunnerCloudInitFields $value @('schema','capture','cloudInitExit','status','extendedStatus','stages','reasons')
+        $value | Add-Member NoteProperty sshExit $Transport.ExitCode
+        Assert-RunnerCloudInitDiagnostic $value
+        return $value
+    } catch { return $empty }
+}
+
+function Test-RunnerCloudInitTerminal($Diagnostic) {
+    Assert-RunnerCloudInitDiagnostic $Diagnostic
+    return $Diagnostic.capture -ceq 'complete' -and $Diagnostic.sshExit -eq 0 -and $Diagnostic.cloudInitExit -in @(1,2) -and
+        (($Diagnostic.status -ceq 'error' -and $Diagnostic.extendedStatus -ceq 'error - done') -or
+        ($Diagnostic.status -ceq 'done' -and $Diagnostic.extendedStatus -ceq 'degraded done'))
+}
+
+function Assert-RunnerCloudInitArtifact($Record) {
+    Assert-RunnerCloudInitFields $Record @('schema','sessionId','vmId','purpose','bundleHash','atUtc','diagnostic')
+    if ($Record.schema -isnot [int] -or $Record.schema -ne 1 -or $Record.sessionId -isnot [string] -or $Record.sessionId -cnotmatch '^[0-9a-f]{32}$' -or [guid]$Record.sessionId -eq [guid]::Empty -or
+        $Record.vmId -isnot [string] -or $Record.vmId -cnotmatch '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' -or [guid]$Record.vmId -eq [guid]::Empty -or
+        $Record.purpose -isnot [string] -or $Record.purpose -cne 'prepare' -or $Record.bundleHash -isnot [string] -or $Record.bundleHash -cnotmatch '^[0-9A-F]{64}$' -or
+        $Record.atUtc -isnot [string] -or $Record.atUtc -cnotmatch '^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{7}Z$') { throw 'Invalid cloud-init artifact identity.' }
+    [void][DateTime]::ParseExact($Record.atUtc, 'o', [Globalization.CultureInfo]::InvariantCulture, [Globalization.DateTimeStyles]::RoundtripKind)
+    Assert-RunnerCloudInitDiagnostic $Record.diagnostic
+    if ([Text.Encoding]::UTF8.GetByteCount((ConvertTo-Json -InputObject $Record -Depth 7 -Compress)) -gt 8192) { throw 'Cloud-init artifact bound.' }
 }
