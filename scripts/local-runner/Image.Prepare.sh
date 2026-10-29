@@ -86,7 +86,7 @@ cd "$work/project"
 timeout 900 runuser -u runner -- env HOME="$HOME" PATH="$PATH" npm_config_cache="$npm_config_cache" npm ci --ignore-scripts --prefer-offline --no-audit --no-fund
 [[ $(node node_modules/supabase/dist/supabase.js --version) == 2.116.0 ]] || exit 1
 image_stage=browser-install
-timeout 900 node node_modules/playwright/cli.js install --with-deps --only-shell chromium
+PLAYWRIGHT_DOWNLOAD_CONNECTION_TIMEOUT=120000 timeout 900 node node_modules/playwright/cli.js install --with-deps --only-shell chromium
 chown -R runner:runner /home/runner/.cache
 # Verify the eventual job user can traverse the cache and launch its browser.
 image_stage=browser-verify

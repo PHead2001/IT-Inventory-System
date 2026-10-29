@@ -43,6 +43,11 @@ export async function runPreparedStageTests({
     (m) => m[1],
   );
   if (new Set(stages).size !== 12) throw Error('IMAGE_STAGE_COVERAGE');
+  const browserInstall = source.match(
+    /^image_stage=browser-install\n([^\n]+)$/m,
+  )?.[1];
+  if (!browserInstall?.includes('node_modules/playwright/cli.js install'))
+    throw Error('IMAGE_BROWSER_INSTALL_COMMAND');
   const root = join(fixtureRoot, `ITIR-stage-${randomUUID()}`);
   await mkdir(root);
   let cleanupSafe = true;
@@ -87,6 +92,29 @@ export async function runPreparedStageTests({
         stage: 'inputs',
       },
     );
+    for (const [prior, code] of [
+      [null, 0],
+      ['30000', 0],
+      ['30000', 23],
+      [null, 124],
+    ]) {
+      cases.push({
+        name: `browser-command-${prior ?? 'unset'}-${code}`,
+        body: `${prior === null ? 'unset PLAYWRIGHT_DOWNLOAD_CONNECTION_TIMEOUT' : 'export PLAYWRIGHT_DOWNLOAD_CONNECTION_TIMEOUT=' + prior}
+timeout() { [[ $1 == 900 ]] || return 81; shift; "$@"; }
+node() {
+  [[ \${PLAYWRIGHT_DOWNLOAD_CONNECTION_TIMEOUT-unset} == 120000 ]] || return 82
+  [[ $# == 5 && $1 == node_modules/playwright/cli.js && $2 == install && $3 == --with-deps && $4 == --only-shell && $5 == chromium ]] || return 83
+  return ${code}
+}
+image_stage=browser-install
+${browserInstall}
+[[ \${PLAYWRIGHT_DOWNLOAD_CONNECTION_TIMEOUT-unset} == ${prior ?? 'unset'} ]] || exit 84
+exit 0`,
+        code,
+        stage: code === 0 ? null : 'browser-install',
+      });
+    }
     for (const test of cases) {
       const path = join(root, `${test.name}.sh`);
       await writeFile(path, `${prefix}\n${test.body}\n`);

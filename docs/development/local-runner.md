@@ -1,6 +1,6 @@
 # Local GitHub Actions runner
 
-The repository routes normal CI jobs to fixed self-hosted resource labels described below. Foundation CI keeps the stable `required` job: every PR and main fallback runs full application/database/browser validation on heavy; a main-only light evidence probe can select light `required` only for verified identical-tree PR validation, with a fresh fail-closed recheck. See [validation](../validation.md) for the evidence and trust contract. Production database delivery and the two trusted preview-access jobs remain light. The separate diagnostic `Local runner pilot` remains restricted to its exact reviewed SHA through the `it-inventory-pilot-<headSha>` label. Repository routing records the intended job labels; it does not activate or certify an installation. Activation state, installed bundle version, owner acceptance of the residual detection window, pilot/recovery receipts and normal-workload results are installation-specific evidence recorded with the PR. A successful one-job pilot and recovery check apply only to their recorded revision and installation; they do not certify the full Supabase/Playwright workload or authorize automatic activation. Record transient job IDs and host evidence with the PR; follow the security and workload gates below.
+The repository routes normal CI jobs to fixed self-hosted resource labels described below. Draft PRs use light CI for iteration and are not certified; marking a PR ready runs full application/database/browser validation on heavy. A main-branch push can use verified identical-tree evidence on light. See [validation](../validation.md) for the evidence and trust contract. One trusted-main workflow reconciles preview staff access on PR open, reopen, or ready-for-review, and by manual dispatch; it does not run on synchronize, and its changes activate only after merge to main. The separate diagnostic `Local runner pilot` remains restricted to its exact reviewed SHA through the `it-inventory-pilot-<headSha>` label. Repository routing records the intended job labels; it does not activate or certify an installation. Activation state, installed bundle version, owner acceptance of the residual detection window, pilot/recovery receipts and normal-workload results are installation-specific evidence recorded with the PR. A successful one-job pilot and recovery check apply only to their recorded revision and installation; they do not certify the full Supabase/Playwright workload or authorize automatic activation. Record transient job IDs and host evidence with the PR; follow the security and workload gates below.
 
 Pilot workflow runs share a concurrency group by PR number, while manual dispatches
 use their ref. A newer event cancels an older run in that group, including a run
@@ -133,6 +133,17 @@ to remove generated network configuration and reset the machine ID, then require
 the builder's `50-cloud-init.yaml` to be absent and the systemd machine ID to be
 `uninitialized`. The fresh-clone gate verifies the resulting boot behavior. No job
 disk is ever retained as an image.
+
+The browser install command sets `PLAYWRIGHT_DOWNLOAD_CONNECTION_TIMEOUT=120000`
+only for that command. In pinned Playwright 1.62.1 this is a 120-second request
+socket inactivity timeout, not a total download deadline or evidence of a failed
+initial TCP connection. The builder's outer 900-second phase limit and Playwright's
+existing five download attempts remain unchanged. CI's cold-browser fallback uses
+the same child-only value; its existing enclosing job deadline is unchanged.
+Shell-only installation, cache verification, TLS/certificate validation, proxy
+configuration and guest isolation retain their existing behavior. This bounded
+tolerance change requires a real guest download and verification before claiming
+recovery or any runtime improvement.
 
 Storage is pulled once from an available official mirror. The builder adds the
 four exact-version runtime mirror aliases to that verified local image ID, checks
