@@ -32,13 +32,15 @@ Require ($null -ne $isolation) 'Canonical guest isolation function is required.'
 $realIsolation = [ScriptBlock]::Create($isolation.Extent.Text)
 . ([ScriptBlock]::Create((Replace-ListenerConstructor $isolation $isolation.Extent.Text)))
 $workerAst = Get-SourceAst 'Network.Recovery.Probe.ps1'
-$statements = @($workerAst.EndBlock.Statements)
+$outer = $workerAst.Find({ param($node) $node -is [Management.Automation.Language.TryStatementAst] -and $node.Body.Extent.Text.Contains(". (Join-Path `$PSScriptRoot 'Common.ps1')") }, $false)
+Require ($null -ne $outer) 'Fixed worker must retain its outer stage catch.'
+$statements = @($outer.Body.Statements)
 $start = -1
 for ($i = 0; $i -lt $statements.Count; $i++) {
     if ($statements[$i] -is [Management.Automation.Language.AssignmentStatementAst] -and $statements[$i].Left.Extent.Text -ceq '$success') { $start = $i; break }
 }
-Require ($start -ge 0 -and $statements[-1] -is [Management.Automation.Language.ExitStatementAst]) 'Fixed worker must retain its result publication and terminal exit.'
-$workerBody = ($statements[$start..($statements.Count - 2)] | ForEach-Object { $_.Extent.Text }) -join [Environment]::NewLine
+Require ($start -ge 0 -and $workerAst.EndBlock.Statements[-1] -is [Management.Automation.Language.ExitStatementAst]) 'Fixed worker must retain its result publication and terminal exit.'
+$workerBody = ($statements[$start..($statements.Count - 1)] | ForEach-Object { $_.Extent.Text }) -join [Environment]::NewLine
 $worker = [ScriptBlock]::Create((Replace-ListenerConstructor $workerAst $workerBody))
 function Get-SshArgs($State) { return @('-o', 'fixture-ssh-arguments') }
 function New-FixtureIsolationListener([ipaddress] $Address, [int] $Port) {

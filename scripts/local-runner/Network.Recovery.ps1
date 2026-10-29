@@ -129,6 +129,7 @@ function New-RunnerRecoveryEpisodeDiagnostic {
         observationElapsedMs = 0; preflightElapsedMs = 0; applyElapsedMs = 0
         admissionOperation = ''; observationAgeMs = 0; quarantineElapsedMs = 0; connectElapsedMs = 0; resumeElapsedMs = 0
         probeOutcome = ''; probeWorker = ''; probeCount = 0; probeFailureCount = 0; probeElapsedMs = 0; probeWorkerElapsedMs = 0
+        probeExitCode = $null; probeExitStage = ''
     }
 }
 
@@ -139,7 +140,13 @@ function Set-RunnerRecoveryDiagnostic($Recovery, [string] $Name, $Value) {
     if ($Recovery.PSObject.Properties.Name -notcontains 'diagnostics') {
         $Recovery | Add-Member -NotePropertyName diagnostics -NotePropertyValue (New-RunnerRecoveryEpisodeDiagnostic)
     }
-    if ($Name -cin @('trigger', 'lastTransition', 'refusal', 'lastFingerprint', 'operation', 'operationStartedUtc', 'admissionOperation', 'probeOutcome', 'probeWorker')) {
+    if ($Name -ceq 'probeExitCode') {
+        $code = if ($null -eq $Value) { $null } else { Get-RunnerProbeExitCode $Value }
+        if ($Recovery.diagnostics.PSObject.Properties.Name -notcontains $Name) { $Recovery.diagnostics | Add-Member -NotePropertyName $Name -NotePropertyValue $code }
+        else { $Recovery.diagnostics.$Name = $code }
+        return
+    }
+    if ($Name -cin @('trigger', 'lastTransition', 'refusal', 'lastFingerprint', 'operation', 'operationStartedUtc', 'admissionOperation', 'probeOutcome', 'probeWorker', 'probeExitStage')) {
         if ($Recovery.diagnostics.PSObject.Properties.Name -notcontains $Name) { $Recovery.diagnostics | Add-Member -NotePropertyName $Name -NotePropertyValue $Value }
         else { $Recovery.diagnostics.$Name = $Value }
         return
@@ -216,11 +223,19 @@ function Get-RunnerNetworkRecoveryPlan($Recovery, $Observation, [DateTime] $NowU
         Set-RunnerRecoveryDiagnostic $next 'probeOutcome' $outcomeCode
         Set-RunnerRecoveryDiagnostic $next 'probeWorker' $workerCode
         if ($null -ne $d) {
+            $childExit = $null
+            if ($d.PSObject.Properties.Name -contains 'exitCode' -and $null -ne $d.exitCode) { try { $childExit = Get-RunnerProbeExitCode $d.exitCode } catch { } }
+            Set-RunnerRecoveryDiagnostic $next 'probeExitCode' $childExit
+            $exitStage = if ($d.PSObject.Properties.Name -notcontains 'exitStage') { '' } elseif ($d.exitStage -is [string] -and $d.exitStage -cin @('', 'common-import', 'instance-containment', 'instance-identity', 'instance-acl', 'result-precondition', 'result-publication', 'other')) { $d.exitStage } else { 'other' }
+            Set-RunnerRecoveryDiagnostic $next 'probeExitStage' $exitStage
             foreach ($pair in @(@('elapsedMs', 'probeElapsedMs'), @('workerElapsedMs', 'probeWorkerElapsedMs'))) {
                 if ($d.PSObject.Properties.Name -contains $pair[0]) {
                     try { $number = Get-RunnerRecoveryDiagnosticNumber $d.($pair[0]); Set-RunnerRecoveryDiagnostic $next $pair[1] $number } catch { }
                 }
             }
+        } else {
+            Set-RunnerRecoveryDiagnostic $next 'probeExitCode' $null
+            Set-RunnerRecoveryDiagnostic $next 'probeExitStage' ''
         }
     }
     if ($Recovery.phase -ceq 'healthy' -and $next.episodeStartedUtc -and $next.episodeStartedUtc -cne $Recovery.episodeStartedUtc) {
@@ -527,7 +542,19 @@ function Get-RunnerRecoveryProbeOutcome {
     $success = $false
     $outcomeCode = if ($expired) { 'timeout' } else { 'child-exit' }
     $received = $null; $correlated = $false
-    if (-not $expired -and $probe.job.ExitCode -eq 0) {
+    $exitCode = $null; $exitStage = ''
+    if (-not $expired) {
+        $exitStage = 'other'
+        try {
+            $exitCode = Get-RunnerProbeExitCode $probe.job.ExitCode
+            $exitStage = switch ($exitCode) {
+                0 { '' }; 61 { 'common-import' }; 62 { 'instance-containment' }; 63 { 'instance-identity' }
+                64 { 'instance-acl' }; 65 { 'result-precondition' }; 66 { 'result-publication' }
+                default { 'other' }
+            }
+        } catch { $exitCode = $null }
+    }
+    if (-not $expired -and $null -ne $exitCode -and $exitCode -eq 0) {
         $outcomeCode = 'result-missing'
         if (Test-Path -LiteralPath $probe.resultPath -PathType Leaf) {
         $outcomeCode = 'result-invalid'
@@ -553,7 +580,7 @@ function Get-RunnerRecoveryProbeOutcome {
         } catch { $workerElapsed = 0; $worker = 'other' }
     }
     $elapsedMs = [long][Math]::Min(86400000, [Math]::Max(0, [Math]::Truncate($elapsed.TotalMilliseconds)))
-    $outcome = [pscustomobject]@{ generation = $probe.generation; operation = 'probe'; success = $success; diagnostic = [pscustomobject]@{ outcome = $outcomeCode; worker = $worker; elapsedMs = $elapsedMs; workerElapsedMs = $workerElapsed } }
+    $outcome = [pscustomobject]@{ generation = $probe.generation; operation = 'probe'; success = $success; diagnostic = [pscustomobject]@{ outcome = $outcomeCode; worker = $worker; elapsedMs = $elapsedMs; workerElapsedMs = $workerElapsed; exitCode = $exitCode; exitStage = $exitStage } }
     Stop-RunnerRecoveryProbe
     return $outcome
 }

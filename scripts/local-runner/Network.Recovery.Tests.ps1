@@ -934,6 +934,45 @@ try {
             Assert-Equal $script:RunnerRecoveryProbe $null 'Probe diagnostics retained a worker.'
         }
     }
+    Check 'unsigned child exit diagnostics preserve native values and classify only reserved worker stages' {
+        $cases = @(
+            @{ code=[uint32]0; stage=''; success=$true },
+            @{ code=[uint32]61; stage='common-import' }, @{ code=[uint32]62; stage='instance-containment' },
+            @{ code=[uint32]63; stage='instance-identity' }, @{ code=[uint32]64; stage='instance-acl' },
+            @{ code=[uint32]65; stage='result-precondition' }, @{ code=[uint32]66; stage='result-publication' },
+            @{ code=[uint32]1; stage='other' }, @{ code=[uint32]3221225781; stage='other' },
+            @{ code=[uint32]::MaxValue; stage='other' }
+        )
+        foreach ($case in $cases) {
+            New-Fixture; $r=$script:state.networkRecovery; $r.operation='probe'; $r.phase='probing'
+            [void][IO.Directory]::CreateDirectory($script:state.instancePath)
+            $script:RunnerRecoveryProbe=Start-RunnerRecoveryProbe $script:state ([pscustomobject]@{guestIp='172.30.240.2';gatewayIp='172.30.240.1'}) 0
+            $probe=$script:RunnerRecoveryProbe; $probe.job.Completed=$true; $probe.job.ExitCode=$case.code
+            $success=$case.ContainsKey('success') -and $case.success
+            if ($success) { [IO.File]::WriteAllText($probe.resultPath,([ordered]@{generation=0;probeId=$probe.probeId;success=$true}|ConvertTo-Json -Compress)) }
+            $outcome=Get-RunnerRecoveryProbeOutcome
+            Assert-Equal $outcome.success $success 'Unsigned exit changed fail-closed result admission.'
+            Assert-Equal $outcome.diagnostic.exitCode ([long]$case.code) 'Unsigned native exit was lost or overflowed.'
+            Assert-Equal $outcome.diagnostic.exitStage $case.stage 'Unknown native exit manufactured a reserved stage.'
+            $plan=Get-RunnerNetworkRecoveryPlan $r $script:observation $script:clock 'Running' $outcome
+            Assert-Equal $plan.recovery.diagnostics.probeExitCode ([long]$case.code) 'Reducer lost exact child exit.'
+            Assert-Equal $plan.recovery.diagnostics.probeExitStage $case.stage 'Reducer lost mapped child stage.'
+            $projected=New-RunnerRecoveryDiagnostic $plan.recovery $script:clock | ConvertTo-Json -Depth 4 -Compress | ConvertFrom-Json
+            Assert-RunnerRecoveryDiagnostic $projected
+            Assert-Equal $projected.probeExitCode ([long]$case.code) 'Failure projection lost high unsigned exit.'
+        }
+    }
+    Check 'malformed negative or overflowing child exits stay unavailable and fail closed' {
+        foreach ($bad in @(-1,[long]4294967296,'61',[double]61,$true,@([uint32]61),$null)) {
+            New-Fixture; $script:state.networkRecovery.operation='probe'; $script:state.networkRecovery.phase='probing'
+            $script:RunnerRecoveryProbe=Start-RunnerRecoveryProbe $script:state ([pscustomobject]@{guestIp='172.30.240.2';gatewayIp='172.30.240.1'}) 0
+            $script:RunnerRecoveryProbe.job.Completed=$true; $script:RunnerRecoveryProbe.job.ExitCode=$bad
+            $outcome=Get-RunnerRecoveryProbeOutcome
+            Assert-Equal $outcome.success $false 'Malformed child exit authorized continuation.'
+            Assert-Equal $outcome.diagnostic.exitCode $null 'Malformed child exit was fabricated as numeric evidence.'
+            Assert-Equal $outcome.diagnostic.exitStage 'other' 'Malformed child exit acquired a trusted stage.'
+        }
+    }
     Check 'probe evidence cannot change any core action generation binding or deadline and stale outcomes are not counted' {
         foreach ($success in @($false, $true)) {
             foreach ($condition in @('current', 'drift', 'expired', 'stale')) {

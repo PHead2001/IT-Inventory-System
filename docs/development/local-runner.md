@@ -536,6 +536,13 @@ need not describe the last attempt. Legacy records without these fields remain
 readable; unknown fields and malformed projected values are rejected. Raw
 exceptions, commands, endpoints, output, credentials and tokens are excluded.
 
+Probe worker exit codes 61–66 map to the fixed stages `common-import`,
+`instance-containment`, `instance-identity`, `instance-acl`,
+`result-precondition`, and `result-publication`, respectively. The exact
+unsigned 32-bit exit code is retained; an unrecognized code maps to stage
+`other`. A stage identifies where the probe worker reported exiting, not the
+underlying cause of failure.
+
 An optional `isolationProbe` observation records the fixed `guest-to-host` kind,
 the SSH command's numeric exit code (or `null` when unavailable), and whether the
 host listener had a connection pending (`pending`), no connection pending

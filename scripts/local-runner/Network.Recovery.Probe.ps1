@@ -5,12 +5,19 @@ param([Parameter(Mandatory)][string] $InstancePath,
     [Parameter(Mandatory)][ValidateRange(0, [long]::MaxValue)][long] $Generation)
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
+$failureExitCode = 61 # common-import
+try {
 . (Join-Path $PSScriptRoot 'Common.ps1')
+$failureExitCode = 62 # instance-containment
 $InstancePath = Assert-OwnedPath $InstancePath
+$failureExitCode = 63 # instance-identity
 if ([IO.Path]::GetDirectoryName($InstancePath) -ine (Join-Path $script:RunnerRoot 'instances') -or [IO.Path]::GetFileName($InstancePath) -cnotmatch '^ITIR-[0-9a-f]{32}$') { throw 'Probe instance identity differs.' }
+$failureExitCode = 64 # instance-acl
 Assert-RunnerProtectedPath $InstancePath
+$failureExitCode = 65 # result-precondition
 $resultPath = Assert-OwnedPath (Join-Path $InstancePath ("probe-$ProbeId.json"))
 if (Test-Path -LiteralPath $resultPath) { throw 'Probe result already exists.' }
+$failureExitCode = 1 # Unexpected non-bootstrap failures remain unclassified.
 $args = @('-o', 'BatchMode=yes', '-o', 'ConnectTimeout=5', '-o', 'ServerAliveInterval=15', '-o', 'ServerAliveCountMax=2',
     '-o', 'StrictHostKeyChecking=accept-new', '-o', "UserKnownHostsFile=$InstancePath\known_hosts", '-i', "$InstancePath\id_ed25519")
 $success = $false
@@ -35,5 +42,10 @@ try {
 } catch { $success = $false } finally { $probeWatch.Stop(); $listener.Stop() }
 # Additive bounded evidence only. No exception, command, endpoint or output data.
 $workerElapsedMs = [long][Math]::Min(86400000, [Math]::Max(0, $probeWatch.ElapsedMilliseconds))
+$failureExitCode = 66 # result-publication
 Write-RunnerJson $resultPath ([ordered]@{ generation = $Generation; probeId = $ProbeId; success = $success; detail = [ordered]@{ code = $workerCode; elapsedMs = $workerElapsedMs } })
+} catch {
+    # Fixed numeric evidence only. Never emit caught errors, paths or output.
+    exit $failureExitCode
+}
 exit 0

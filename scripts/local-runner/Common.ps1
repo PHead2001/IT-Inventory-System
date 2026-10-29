@@ -34,6 +34,13 @@ function Get-RunnerRecoveryDiagnosticNumber($Value, [long] $Maximum = 86400000, 
     return [long]$Value
 }
 
+function Get-RunnerProbeExitCode($Value) {
+    # GetExitCodeProcess supplies UInt32; JSON roundtrips use Int32/Int64.
+    if (($Value -isnot [uint32] -and $Value -isnot [int] -and $Value -isnot [long]) -or
+        $Value -lt 0 -or $Value -gt 4294967295) { throw 'Invalid probe process exit code.' }
+    return [long]$Value
+}
+
 function Assert-RunnerRecoveryDiagnostic($Diagnostic) {
     $enums = @{
         operation = @('', 'quarantine', 'apply', 'connect', 'resume', 'probe', 'other')
@@ -48,11 +55,15 @@ function Assert-RunnerRecoveryDiagnostic($Diagnostic) {
         if ($Diagnostic.PSObject.Properties.Name -contains 'admissionOperation') { $enums.admissionOperation = @('', 'connect', 'resume', 'other') }
         if ($Diagnostic.PSObject.Properties.Name -contains 'probeOutcome') { $enums.probeOutcome = @('', 'passed', 'timeout', 'child-exit', 'result-missing', 'result-invalid', 'probe-failed', 'other') }
         if ($Diagnostic.PSObject.Properties.Name -contains 'probeWorker') { $enums.probeWorker = @('', 'passed', 'listener-error', 'isolation-error', 'isolation-command-failed', 'isolation-open', 'github-error', 'github-command-failed', 'other') }
+        if ($Diagnostic.PSObject.Properties.Name -contains 'probeExitStage') { $enums.probeExitStage = @('', 'common-import', 'instance-containment', 'instance-identity', 'instance-acl', 'result-precondition', 'result-publication', 'other') }
         foreach ($name in @('observationAgeMs', 'quarantineElapsedMs', 'connectElapsedMs', 'resumeElapsedMs', 'probeCount', 'probeFailureCount', 'probeElapsedMs', 'probeWorkerElapsedMs')) {
             if ($Diagnostic.PSObject.Properties.Name -contains $name) { $numbers += $name }
         }
     }
-    if ($Diagnostic -isnot [pscustomobject] -or (@($Diagnostic.PSObject.Properties.Name | Sort-Object) -join ',') -cne (@(@($enums.Keys) + $numbers | Sort-Object) -join ',')) { throw 'Invalid recovery diagnostic fields.' }
+    $fields = @($enums.Keys) + $numbers
+    if ($null -ne $Diagnostic -and $Diagnostic.PSObject.Properties.Name -contains 'probeExitCode') { $fields += 'probeExitCode' }
+    if ($Diagnostic -isnot [pscustomobject] -or (@($Diagnostic.PSObject.Properties.Name | Sort-Object) -join ',') -cne (@($fields | Sort-Object) -join ',')) { throw 'Invalid recovery diagnostic fields.' }
+    if ($Diagnostic.PSObject.Properties.Name -contains 'probeExitCode' -and $null -ne $Diagnostic.probeExitCode) { [void](Get-RunnerProbeExitCode $Diagnostic.probeExitCode) }
     foreach ($name in $enums.Keys) {
         if ($Diagnostic.$name -isnot [string] -or $Diagnostic.$name -cnotin $enums[$name]) { throw 'Invalid recovery diagnostic enum.' }
     }
@@ -72,6 +83,7 @@ function New-RunnerRecoveryDiagnostic($Recovery, [DateTime] $NowUtc) {
         observationElapsedMs = 0; preflightElapsedMs = 0; applyElapsedMs = 0
         admissionOperation = ''; observationAgeMs = 0; quarantineElapsedMs = 0; connectElapsedMs = 0; resumeElapsedMs = 0
         probeOutcome = ''; probeWorker = ''; probeCount = 0; probeFailureCount = 0; probeElapsedMs = 0; probeWorkerElapsedMs = 0
+        probeExitCode = $null; probeExitStage = ''
     }
     if ($Recovery.PSObject.Properties.Name -contains 'operation') { $value.operation = if ($Recovery.operation -cin @('', 'quarantine', 'apply', 'connect', 'resume', 'probe')) { $Recovery.operation } else { 'other' } }
     if ($Recovery.PSObject.Properties.Name -contains 'diagnostics') {
@@ -88,6 +100,8 @@ function New-RunnerRecoveryDiagnostic($Recovery, [DateTime] $NowUtc) {
         }
         if ($d.PSObject.Properties.Name -contains 'probeOutcome') { $value.probeOutcome = if ($d.probeOutcome -is [string] -and $d.probeOutcome -cin @('', 'passed', 'timeout', 'child-exit', 'result-missing', 'result-invalid', 'probe-failed')) { $d.probeOutcome } else { 'other' } }
         if ($d.PSObject.Properties.Name -contains 'probeWorker') { $value.probeWorker = if ($d.probeWorker -is [string] -and $d.probeWorker -cin @('', 'passed', 'listener-error', 'isolation-error', 'isolation-command-failed', 'isolation-open', 'github-error', 'github-command-failed')) { $d.probeWorker } else { 'other' } }
+        if ($d.PSObject.Properties.Name -contains 'probeExitCode' -and $null -ne $d.probeExitCode) { $value.probeExitCode = Get-RunnerProbeExitCode $d.probeExitCode }
+        if ($d.PSObject.Properties.Name -contains 'probeExitStage') { $value.probeExitStage = if ($d.probeExitStage -is [string] -and $d.probeExitStage -cin @('', 'common-import', 'instance-containment', 'instance-identity', 'instance-acl', 'result-precondition', 'result-publication')) { $d.probeExitStage } else { 'other' } }
         $value.trigger = if ($d.trigger -cin @('', 'observation-unavailable', 'fingerprint-change', 'connectivity-lost')) { $d.trigger } else { 'other' }
         $value.lastTransition = if ($d.lastTransition -cin $phases) { $d.lastTransition } else { 'other' }
         $refusals = @('', 'stale-observation', 'dispatch-deadline', 'provider-uncertain', 'operation-uncertain', 'stop', 'owner-dead', 'identity-changed', 'hard-deadline', 'outage-deadline', 'guardian-progress-expired', 'clock-regressed', 'vm-state-uncertain', 'connectivity-state-uncertain', 'watchdog-expired')

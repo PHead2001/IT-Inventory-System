@@ -2,12 +2,17 @@
 param([string] $CandidateRoot = $PSScriptRoot)
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
-$source = [IO.File]::ReadAllText((Join-Path $CandidateRoot 'Network.Recovery.Probe.ps1'))
-$start = $source.IndexOf('$success = $false', [StringComparison]::Ordinal)
-$end = $source.LastIndexOf("`nexit 0", [StringComparison]::Ordinal)
+$ast = [Management.Automation.Language.Parser]::ParseFile((Join-Path $CandidateRoot 'Network.Recovery.Probe.ps1'), [ref]$null, [ref]$null)
+$outer = $ast.Find({ param($node) $node -is [Management.Automation.Language.TryStatementAst] -and $node.Body.Extent.Text.Contains(". (Join-Path `$PSScriptRoot 'Common.ps1')") }, $false)
+if ($null -eq $outer) { throw 'Worker outer stage guard is missing.' }
+$statements = @($outer.Body.Statements)
+$start = -1
+for ($i = 0; $i -lt $statements.Count; $i++) { if ($statements[$i] -is [Management.Automation.Language.AssignmentStatementAst] -and $statements[$i].Left.Extent.Text -ceq '$success') { $start = $i; break } }
 $factory = '$listener = [Net.Sockets.TcpListener]::new($gateway, 0)'
-if ($start -lt 0 -or $end -le $start -or ([regex]::Matches($source, [regex]::Escape($factory))).Count -ne 1) { throw 'Worker source witness changed.' }
-$body = $source.Substring($start, $end - $start).Replace($factory, '$listener = $script:listener')
+if ($start -lt 0) { throw 'Worker source witness changed.' }
+$body = ($statements[$start..($statements.Count-1)] | ForEach-Object { $_.Extent.Text }) -join [Environment]::NewLine
+if (([regex]::Matches($body, [regex]::Escape($factory))).Count -ne 1) { throw 'Worker listener source witness changed.' }
+$body = $body.Replace($factory, '$listener = $script:listener')
 $worker = [scriptblock]::Create($body)
 $script:checks = 0
 function Require([bool] $Value) { if (-not $Value) { throw 'Probe diagnostic regression failed.' } }

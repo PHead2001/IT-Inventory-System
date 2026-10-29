@@ -1,11 +1,11 @@
 {
   "schema": 1,
   "tag": "it-inventory-local-runner-v1",
-  "version": "2026-10-29.2",
+  "version": "2026-10-29.3",
   "files": [
     {
       "name": "Common.ps1",
-      "hash": "D6D9B5D8CB4DE39DE0B57ADBA3596BF2D5EE859D89D3EBF5733B1D5D3D557F14"
+      "hash": "220A00AE51F532E2C797B6B5089031B34F2D3AFE3A835A38A627DCB293D758C9"
     },
     {
       "name": "Runner.ps1",
@@ -17,11 +17,11 @@
     },
     {
       "name": "Network.Recovery.ps1",
-      "hash": "6507313497AC6C0E8F7AA2413CAEC1A90DAB4EAC4BCE0304D16789F8E4B43DC4"
+      "hash": "C15CC51250436DC7CBE3D92F9C3FF6E6E7773DCBC1EA313094EA722F5126BB05"
     },
     {
       "name": "Network.Recovery.Probe.ps1",
-      "hash": "C0576266881CB44B12DA9A70BE30077BC8754046A786041B3DC88536DB19A95C"
+      "hash": "6205FFE9331A8A84C25C53B078AFB7A426AA7F13ED8B7DDA8791C08F13208359"
     },
     {
       "name": "Probe.Job.ps1",

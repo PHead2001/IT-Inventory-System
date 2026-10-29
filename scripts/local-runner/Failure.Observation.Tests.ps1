@@ -5,7 +5,7 @@ $ErrorActionPreference = 'Stop'
 foreach ($file in @('Common.ps1', 'Runner.ps1', 'Network.Recovery.ps1')) {
     $ast = [Management.Automation.Language.Parser]::ParseFile((Join-Path $PSScriptRoot $file), [ref]$null, [ref]$null)
     foreach ($definition in $ast.FindAll({ param($node) $node -is [Management.Automation.Language.FunctionDefinitionAst] }, $false)) {
-        if ($definition.Name -cin @('Get-RunnerRecoveryDiagnosticNumber', 'Assert-RunnerRecoveryDiagnostic', 'New-RunnerRecoveryDiagnostic', 'New-RunnerFailureObservation', 'New-RunnerObservedFailure', 'Write-RunnerCleanupObservation', 'Write-RunnerSessionFailureObservation', 'Assert-RunnerFailureRecord', 'Assert-RunnerCleanupJournal',
+        if ($definition.Name -cin @('Get-RunnerRecoveryDiagnosticNumber', 'Get-RunnerProbeExitCode', 'Assert-RunnerRecoveryDiagnostic', 'New-RunnerRecoveryDiagnostic', 'New-RunnerFailureObservation', 'New-RunnerObservedFailure', 'Write-RunnerCleanupObservation', 'Write-RunnerSessionFailureObservation', 'Assert-RunnerFailureRecord', 'Assert-RunnerCleanupJournal',
             'Test-RunnerSessionStopRequested', 'Assert-SessionAlive', 'Get-RunnerRecoveryExpiry', 'Invoke-Watchdog')) {
             Invoke-Expression $definition.Extent.Text
         }
@@ -499,15 +499,16 @@ Check 'optional probe diagnostics roundtrip with legacy compatibility and strict
         observationElapsedMs = 254; preflightElapsedMs = 2348; applyElapsedMs = 4426
         probeOutcome = 'probe-failed'; probeWorker = 'github-command-failed'
         probeCount = 1000000; probeFailureCount = 1000000; probeElapsedMs = 86400000; probeWorkerElapsedMs = 86400000
+        probeExitCode = [long]3221225781; probeExitStage = 'other'
         rawOutput = 'SECRET credential URL'
     })
     $record = New-RunnerFailureObservation 'session-guardian' 'recovery-expiry' $script:state $script:now
-    Require ($record.capture -ceq 'complete' -and $record.recoveryDiagnostic.probeWorker -ceq 'github-command-failed')
+    Require ($record.capture -ceq 'complete' -and $record.recoveryDiagnostic.probeWorker -ceq 'github-command-failed' -and $record.recoveryDiagnostic.probeExitCode -eq 3221225781)
     $json = $record | ConvertTo-Json -Depth 4 -Compress
     Require ($json -cnotmatch 'SECRET|credential|rawOutput' -and [Text.Encoding]::UTF8.GetByteCount($json) -le 2048)
     Assert-RunnerFailureRecord ($json | ConvertFrom-Json)
     $legacy = $json | ConvertFrom-Json
-    foreach ($name in @('probeOutcome', 'probeWorker', 'probeCount', 'probeFailureCount', 'probeElapsedMs', 'probeWorkerElapsedMs')) { $legacy.recoveryDiagnostic.PSObject.Properties.Remove($name) }
+    foreach ($name in @('probeOutcome', 'probeWorker', 'probeCount', 'probeFailureCount', 'probeElapsedMs', 'probeWorkerElapsedMs', 'probeExitCode', 'probeExitStage')) { $legacy.recoveryDiagnostic.PSObject.Properties.Remove($name) }
     Assert-RunnerFailureRecord $legacy
     foreach ($bad in @('SECRET', ('x' * 2000), $true, $null)) {
         $r.diagnostics.probeWorker = $bad
@@ -517,6 +518,14 @@ Check 'optional probe diagnostics roundtrip with legacy compatibility and strict
         $refused = $false; try { Assert-RunnerFailureRecord $invalid } catch { $refused = $true }; Require $refused
     }
     $r.diagnostics.probeWorker = 'github-command-failed'
+    foreach ($bad in @(-1,[long]4294967296,'61',[double]61,$true,@(61))) {
+        $invalid=$json | ConvertFrom-Json; $invalid.recoveryDiagnostic.probeExitCode=$bad
+        $refused=$false; try { Assert-RunnerFailureRecord $invalid } catch { $refused=$true }; Require $refused
+    }
+    foreach ($bad in @('SECRET',@('common-import'),$true,$null)) {
+        $invalid=$json | ConvertFrom-Json; $invalid.recoveryDiagnostic.probeExitStage=$bad
+        $refused=$false; try { Assert-RunnerFailureRecord $invalid } catch { $refused=$true }; Require $refused
+    }
     foreach ($name in @('probeCount', 'probeFailureCount', 'probeElapsedMs', 'probeWorkerElapsedMs')) {
         $original = $r.diagnostics.$name
         foreach ($bad in @(-1, 1.5, $true, [double]::NaN, [double]::PositiveInfinity, 86400001)) {
