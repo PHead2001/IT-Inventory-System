@@ -1,7 +1,7 @@
 {
   "schema": 1,
   "tag": "it-inventory-local-runner-v1",
-  "version": "2026-10-28.2",
+  "version": "2026-10-29.1",
   "files": [
     {
       "name": "Common.ps1",
@@ -9,7 +9,7 @@
     },
     {
       "name": "Runner.ps1",
-      "hash": "7D8B448622594800B00B56D05269124C4A452C78C7478DD9B8A1FEA072012C23"
+      "hash": "2139C8990CD3F1A3D87F1D8838B28219DC3D1C41FB7292DB7994F74C5980DB94"
     },
     {
       "name": "Guest.Network.ps1",
@@ -37,11 +37,11 @@
     },
     {
       "name": "Image.Inputs.json",
-      "hash": "F8A999965D35EFA5BDE3DD31710CD71EE039D25C20788222C3D0CD396E5D8BDE"
+      "hash": "2AF4474E38D0B84F476F88921EB8393074D5A8AF58E473DEAFEAD82F02951EE2"
     },
     {
       "name": "Image.Package.json",
-      "hash": "F378338B27719B2A51B76B1808CAF408D044C537938E24E5A53A2DDF1D34B00C"
+      "hash": "DBC580D588FFB60E6530B12A31C09BDB9FA03BD9C2B8655EA132A8077E572D36"
     },
     {
       "name": "Image.PackageLock.json",

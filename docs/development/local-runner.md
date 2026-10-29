@@ -52,8 +52,8 @@ Queue inspection collects both `queued` and `in_progress` workflow-run snapshots
 before inspecting jobs: a run already executing can have a queued continuation.
 Each snapshot remains capped at 100 runs, with no pagination; overflow fails
 closed before job lookup. Positive numeric run IDs are validated and deduplicated
-across snapshots (at most 200 distinct runs). Runs are inspected oldest `created_at`
-first using the UTC instant, then numeric run ID for ties. A duplicate uses its
+across snapshots (at most 200 distinct runs). Runs are inspected by effective UTC
+creation time, then original UTC creation time and numeric run ID for ties. A duplicate uses its
 oldest valid observed timestamp. Missing or invalid timestamps remain eligible
 after all dated runs, ordered by numeric ID; this compatibility policy does not
 invent an age from provider response order. Each job view remains capped at 100.
@@ -61,7 +61,25 @@ Unsupported labels, nonfitting capacity and mismatched session profiles are stil
 skipped, and exact pilot workflow/SHA/job binding and Stop checks remain required.
 This orders provisioning demand; GitHub assigns the actual job to a compatible
 JIT runner, so selecting a run does not force that runner to take its job. It
-adds no special main/production routing or authorization bypass.
+adds no authorization bypass.
+
+Only a verified `push` to `main` for `PHead2001/IT-Inventory-System`'s Foundation
+CI workflow at `.github/workflows/ci.yml` receives a 30-minute creation-time
+boost, clamped at the minimum timestamp. Both run repository and head repository
+must identify that canonical repository, with a valid workflow ID. A matching
+display name or branch alone is insufficient. When the run omits its workflow
+path, one workflow metadata read per distinct ID, cached only within that
+inspection, must verify the same ID and canonical path. Missing, mismatched or
+unknown identity keeps ordinary eligibility without the boost; transport errors
+retain fail-closed inspection. Conflicting duplicate observations also deny the
+boost. Undated runs remain after every dated run. PR demand older than the boost
+still precedes newer release demand, including at the exact 30-minute tie.
+The preference applies only to choosing fitting provisioning demand: it does
+not preempt a running job, change resource admission, pilot binding, JIT labels,
+privileges or session deadlines, or create another VM. GitHub still assigns a
+job to a generic matching runner, so this does not guarantee release execution
+order. Offline queue regressions establish selection and bounded metadata calls;
+installed pickup and real GitHub execution order need separate host evidence.
 
 Status reports current available physical memory and guest/reserve/admission for
 every applicable fixed profile, so an idle controller does not imply capacity for

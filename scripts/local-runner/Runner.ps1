@@ -902,6 +902,45 @@ function Get-PilotEvidence($Config, $Binding, [string] $Token, [switch] $PickupI
     return [pscustomobject]@{ run = $run; workflow = $workflow; job = $job }
 }
 
+function Test-RunnerReleaseQueuePriority($Config, $Run, [string] $Base, [string] $Token, [hashtable] $WorkflowCache) {
+    # This is provisioning preference only, never an authorization or assignment
+    # predicate. Legacy/incomplete metadata keeps ordinary queue eligibility.
+    $repository = 'PHead2001/IT-Inventory-System'
+    if ($Config.activation -cne 'active' -or $Config.repo -cne $repository -or $null -eq $Run) { return $false }
+    foreach ($field in @('event', 'head_branch', 'repository', 'head_repository', 'workflow_id')) {
+        if ($Run.PSObject.Properties.Name -notcontains $field) { return $false }
+    }
+    if ($Run.event -isnot [string] -or $Run.head_branch -isnot [string] -or
+        $Run.event -cne 'push' -or $Run.head_branch -cne 'main') { return $false }
+    foreach ($field in @('repository', 'head_repository')) {
+        $identity = $Run.$field
+        if ($null -eq $identity -or $identity.PSObject.Properties.Name -notcontains 'full_name' -or
+            $identity.full_name -isnot [string] -or $identity.full_name -cne $repository) { return $false }
+    }
+    $workflowId = [uint64]0
+    if ($Run.workflow_id -is [array] -or [string]$Run.workflow_id -cnotmatch '^[1-9][0-9]*$' -or
+        -not [uint64]::TryParse([string]$Run.workflow_id, [ref]$workflowId)) { return $false }
+    $path = '.github/workflows/ci.yml'
+    if ($Run.PSObject.Properties.Name -contains 'path' -and -not [string]::IsNullOrEmpty([string]$Run.path)) {
+        return $Run.path -is [string] -and $Run.path -ceq $path
+    }
+    # At most one metadata request per workflow ID in the two bounded snapshots.
+    # Unknown metadata denies preference; API errors still fail this inspection
+    # closed rather than being mistaken for trustworthy release evidence.
+    $key = [string]$workflowId
+    if (-not $WorkflowCache.ContainsKey($key)) {
+        Assert-RunnerPickupInspectionActive
+        $WorkflowCache[$key] = Invoke-GitHub "$Base/workflows/$key" 'GET' $null $Token
+        Assert-RunnerPickupInspectionActive
+    }
+    $workflow = $WorkflowCache[$key]
+    if ($null -eq $workflow -or $workflow.PSObject.Properties.Name -notcontains 'id' -or
+        $workflow.PSObject.Properties.Name -notcontains 'path' -or
+        $workflow.id -is [array] -or [string]$workflow.id -cne $key -or
+        $workflow.path -isnot [string] -or $workflow.path -cne $path) { return $false }
+    return $true
+}
+
 function Get-QueuedRunnerJob($Config, [string] $Token, [decimal] $AvailableBytes = [decimal]::MaxValue, [string] $SessionProfileLabel = '') {
     Assert-RunnerPickupInspectionActive
     $script:RunnerQueueObservation = @{}
@@ -912,7 +951,8 @@ function Get-QueuedRunnerJob($Config, [string] $Token, [decimal] $AvailableBytes
     $base = "https://api.github.com/repos/$($parts[0])/$($parts[1])/actions"
     # Runs can already be in progress while a continuation waits for this runner.
     # Collect both bounded views before selection; API newest-first/status order
-    # must not give new previews priority over older continuations.
+    # must not give new previews priority over older continuations. A verified
+    # main Foundation push receives only a bounded 30-minute age preference.
     $candidates = @{}
     foreach ($runStatus in @('queued', 'in_progress')) {
         Assert-RunnerPickupInspectionActive
@@ -940,12 +980,27 @@ function Get-QueuedRunnerJob($Config, [string] $Token, [decimal] $AvailableBytes
                 # Status can change between snapshots. Inspect one run only and
                 # retain its oldest valid timestamp from either bounded view.
                 $candidates[$key].createdTicks = [Math]::Min($candidates[$key].createdTicks, $createdTicks)
+                $candidates[$key].observations.Add($run)
             } else {
-                $candidates[$key] = [pscustomobject]@{ run = $run; id = $runId; createdTicks = $createdTicks }
+                $observations = [Collections.Generic.List[object]]::new()
+                $observations.Add($run)
+                $candidates[$key] = [pscustomobject]@{ run = $run; id = $runId; createdTicks = $createdTicks; effectiveTicks = $createdTicks; observations = $observations }
             }
         }
     }
-    foreach ($candidate in @($candidates.Values | Sort-Object createdTicks, id)) {
+    $workflowCache = @{}
+    $boostTicks = [TimeSpan]::FromMinutes(30).Ticks
+    foreach ($candidate in $candidates.Values) {
+        $candidate.effectiveTicks = $candidate.createdTicks
+        # Invalid/unknown dates stay after every dated run, even for main.
+        if ($candidate.createdTicks -eq [long]::MaxValue) { continue }
+        $preferred = $true
+        foreach ($observation in $candidate.observations) {
+            if (-not (Test-RunnerReleaseQueuePriority $Config $observation $base $Token $workflowCache)) { $preferred = $false; break }
+        }
+        if ($preferred) { $candidate.effectiveTicks = [Math]::Max([long]0, ($candidate.createdTicks - $boostTicks)) }
+    }
+    foreach ($candidate in @($candidates.Values | Sort-Object effectiveTicks, createdTicks, id)) {
         $run = $candidate.run
         $workflow = $null
         if ($Config.activation -eq 'pilot') {

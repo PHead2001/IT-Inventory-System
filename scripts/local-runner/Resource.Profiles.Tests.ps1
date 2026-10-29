@@ -136,10 +136,33 @@ if ((Get-QueuedRunnerJob $config 'dummy' 4GB).id -ne 3 -or (Get-QueuedRunnerJob 
 }
 # Consolidated validation must preserve exact-SHA and trusted main/environment gates.
 $root = Split-Path (Split-Path $PSScriptRoot -Parent) -Parent
-$expected = @{ required = 'dynamic'; reuse_evidence = 'light'; production_database = 'light'; discover = 'light'; provision = 'light' }
+$expected = @{ required = 'dynamic'; reuse_evidence = 'light'; production_database = 'light'; provision = 'light' }
 $reuseLabel = @'
-${{ needs.reuse_evidence.result == 'success' && needs.reuse_evidence.outputs.reuse == 'true' && 'it-inventory-light' || 'it-inventory-heavy' }}
+${{ ((github.event_name == 'pull_request' && (toJSON(github.event.pull_request.draft) != 'false' || github.event.pull_request.state != 'open')) || (needs.reuse_evidence.result == 'success' && needs.reuse_evidence.outputs.reuse == 'true')) && 'it-inventory-light' || 'it-inventory-heavy' }}
 '@
+# Evaluate the reviewed routing condition for ready/full, reuse and fail-closed PR states.
+$routingCondition = $reuseLabel.Substring(4, $reuseLabel.IndexOf(" && 'it-inventory-light'") - 4).
+    Replace('toJSON(github.event.pull_request.draft)', '$draftJson').
+    Replace('github.event_name', '$eventName').
+    Replace('github.event.pull_request.state', '$prState').
+    Replace('needs.reuse_evidence.result', '$probe').
+    Replace('needs.reuse_evidence.outputs.reuse', '$reuse').
+    Replace(' != ', ' -cne ').Replace(' == ', ' -ceq ').
+    Replace(' && ', ' -and ').Replace(' || ', ' -or ')
+foreach ($case in @(
+    @('pull_request', 'false', 'open', 'skipped', '', 'heavy'),
+    @('pull_request', 'true', 'open', 'skipped', '', 'light'),
+    @('pull_request', 'null', 'open', 'skipped', '', 'light'),
+    @('pull_request', '"false"', 'open', 'skipped', '', 'light'),
+    @('pull_request', 'false', 'closed', 'skipped', '', 'light'),
+    @('push', 'null', '', 'success', 'true', 'light'),
+    @('push', 'null', '', 'success', 'false', 'heavy'),
+    @('push', 'null', '', 'failure', 'true', 'heavy')
+)) {
+    $eventName, $draftJson, $prState, $probe, $reuse, $expectedProfile = $case
+    $actualProfile = if (Invoke-Expression $routingCondition) { 'light' } else { 'heavy' }
+    if ($actualProfile -cne $expectedProfile) { throw 'Reviewed workflow routing condition misclassified a validation context.' }
+}
 $seen = @{}
 foreach ($name in @('ci.yml', 'preview-access.yml')) {
     $source = [IO.File]::ReadAllText((Join-Path $root ".github/workflows/$name"))
@@ -157,11 +180,11 @@ foreach ($name in @('ci.yml', 'preview-access.yml')) {
     }
     if ($source.Contains('it-inventory-ephemeral')) { throw 'Normal workflow retained a generic runner label.' }
 }
-if ($seen.Count -ne 5) { throw 'Profile tests did not verify all five validation/preview workflow jobs.' }
+if ($seen.Count -ne 4) { throw 'Profile tests did not verify all four validation/preview workflow jobs.' }
 $ci = [IO.File]::ReadAllText((Join-Path $root '.github/workflows/ci.yml'))
 $preview = [IO.File]::ReadAllText((Join-Path $root '.github/workflows/preview-access.yml'))
 foreach ($contract in @('github.event.pull_request.head.sha || github.sha', 'run: npm run validate:app', 'run: npm run test:db', 'run: npm run db:types:check', 'run: npm run test:e2e', 'run: node scripts/ci-gates.mjs', 'FOUNDATION_APP: ${{ steps.app.outcome }}', 'FOUNDATION_DB_TESTS: ${{ steps.db_tests.outcome }}', 'FOUNDATION_E2E: ${{ steps.e2e.outcome }}', 'environment: production-database', "github.ref == 'refs/heads/main'", 'needs: [required]', 'test "$REQUIRED_RESULT" = success')) { if (-not $ci.Contains($contract)) { throw 'CI exact-SHA/required/production gate changed.' } }
 foreach ($contract in @('pull_request_target:', 'ref: refs/heads/main', 'environment: preview-access', "github.ref == 'refs/heads/main'")) { if (-not $preview.Contains($contract)) { throw 'Trusted preview gate changed.' } }
-foreach ($contract in @('run: node scripts/ci-required.mjs', 'run: node scripts/ci-reuse.mjs --reverify', "if: needs.reuse_evidence.outputs.reuse != 'true'", "if: needs.reuse_evidence.outputs.reuse == 'true'", 'EVIDENCE_RESULT: ${{ needs.reuse_evidence.result }}', "if: `${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}")) { if (-not $ci.Contains($contract)) { throw 'CI reuse evidence/fallback/decision gate changed.' } }
+foreach ($contract in @('run: node scripts/ci-required.mjs', 'run: node scripts/ci-reuse.mjs --reverify', "if: (github.event_name != 'pull_request' || (toJSON(github.event.pull_request.draft) == 'false' && github.event.pull_request.state == 'open')) && needs.reuse_evidence.outputs.reuse != 'true'", "if: github.event_name == 'push' && needs.reuse_evidence.outputs.reuse == 'true'", 'EVIDENCE_RESULT: ${{ needs.reuse_evidence.result }}', "if: `${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}")) { if (-not $ci.Contains($contract)) { throw 'CI reuse evidence/fallback/decision gate changed.' } }
 if ($script:fixtureStateDepth -ne 0 -or $script:stateLocked) { throw 'Fixture leaked state recursion.' }
-Write-Host 'Resource profiles passed: fixed boundaries, strict labels, queue skipping, VM/JIT readback, session propagation, capacity loss, legacy recovery and five validation/preview workflow gates.'
+Write-Host 'Resource profiles passed: fixed boundaries, strict labels, queue skipping, VM/JIT readback, session propagation, capacity loss, legacy recovery and four validation/preview workflow gates.'

@@ -1,9 +1,11 @@
+import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
 export function assertRequiredValidation({
   event,
   ref,
+  pullRequest,
   probe,
   reuse,
   checkout,
@@ -11,6 +13,14 @@ export function assertRequiredValidation({
   full,
   recheck,
 }) {
+  if (event === 'pull_request') {
+    if (pullRequest?.draft === true)
+      throw new Error(
+        'Draft pull request is not certified. Mark it ready for review to run full validation.',
+      );
+    if (pullRequest?.draft !== false || pullRequest?.state !== 'open')
+      throw new Error('Pull request validation state is missing or invalid.');
+  }
   if (checkout !== 'success' || node !== 'success')
     throw new Error('Required validation setup did not succeed.');
   const main = event === 'push' && ref === 'refs/heads/main';
@@ -36,6 +46,11 @@ if (
     assertRequiredValidation({
       event: process.env.GITHUB_EVENT_NAME,
       ref: process.env.GITHUB_REF,
+      pullRequest:
+        process.env.GITHUB_EVENT_NAME === 'pull_request'
+          ? JSON.parse(readFileSync(process.env.GITHUB_EVENT_PATH, 'utf8'))
+              .pull_request
+          : undefined,
       probe: process.env.EVIDENCE_RESULT,
       reuse: process.env.REUSE,
       checkout: process.env.CHECKOUT_RESULT,
