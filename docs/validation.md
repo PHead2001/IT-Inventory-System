@@ -5,7 +5,10 @@
 Batch related findings and fixes before one push. Run focused regressions during
 iteration, then `npm run validate:push` (typecheck, zero-warning lint, formatting,
 and the complete Vitest suite) before pushing. It performs no fresh install,
-build, database reset or Playwright execution. Reuse a trusted install while
+build, database reset or Playwright execution. Its sequential local wrapper sets
+a 1 GiB Node old-space limit per child, replacing inherited heap flags, and runs
+Vitest with one worker and no file parallelism. The full CI commands remain
+unchanged; the heap limit is not a total process/host memory bound. Reuse a trusted install while
 dependency inputs are unchanged. The optional repository-local pre-push hook
 enforces this gate on the exact current clean HEAD; see
 [local setup](development/README.md#automatic-local-push-checks).

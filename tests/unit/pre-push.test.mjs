@@ -93,9 +93,7 @@ describe('repository-local pre-push validation', () => {
 
   it('keeps the opt-in separate from install/build and the cheap gate free of builds/databases/browser work', () => {
     const pkg = JSON.parse(readFileSync('package.json', 'utf8'));
-    expect(pkg.scripts['validate:push']).toBe(
-      'npm run typecheck && npm run lint && npm run format:check && npm run test',
-    );
+    expect(pkg.scripts['validate:push']).toBe('node scripts/validate-push.mjs');
     expect(pkg.scripts['hooks:install']).toBe(
       'node scripts/install-git-hooks.mjs',
     );

@@ -86,7 +86,11 @@ setting, not hook activation in every branch or worktree.
 Package installation, CI, Vercel builds and clones do not enable the hook.
 
 The hook runs `npm run validate:push`: typecheck, zero-warning lint, formatting and
-the full Vitest suite. Every nondeleted pushed ref must point at the checked-out
+the full Vitest suite, sequentially. The local wrapper replaces inherited Node
+old-space limits with a 1 GiB limit for each child tool and uses one Vitest worker
+with file parallelism disabled. Other Node options are preserved. This limits
+old-space, not total process/host memory, and does not alter the full CI commands.
+Every nondeleted pushed ref must point at the checked-out
 HEAD, with no tracked, staged or untracked work before or after the checks; commit
 or stash pending changes first. A failing check or a HEAD/worktree change blocks
 the push. Deletion-only/no-update pushes run no checks. It checks main refs the
