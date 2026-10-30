@@ -1013,6 +1013,10 @@ try {
             @{ code=[uint32]61; stage='common-import' }, @{ code=[uint32]62; stage='instance-containment' },
             @{ code=[uint32]63; stage='instance-identity' }, @{ code=[uint32]64; stage='instance-acl' },
             @{ code=[uint32]65; stage='result-precondition' }, @{ code=[uint32]66; stage='result-publication' },
+            @{ code=[uint32]67; stage='acl-read-command-unavailable' }, @{ code=[uint32]68; stage='acl-read-access-denied' },
+            @{ code=[uint32]69; stage='acl-read-other' }, @{ code=[uint32]70; stage='owner-read' },
+            @{ code=[uint32]71; stage='owner-rejected' }, @{ code=[uint32]72; stage='ace-enumeration' },
+            @{ code=[uint32]73; stage='sid-translation' }, @{ code=[uint32]74; stage='allow-rejected' },
             @{ code=[uint32]1; stage='other' }, @{ code=[uint32]3221225781; stage='other' },
             @{ code=[uint32]::MaxValue; stage='other' }
         )

@@ -55,7 +55,7 @@ function Assert-RunnerRecoveryDiagnostic($Diagnostic) {
         if ($Diagnostic.PSObject.Properties.Name -contains 'admissionOperation') { $enums.admissionOperation = @('', 'connect', 'resume', 'other') }
         if ($Diagnostic.PSObject.Properties.Name -contains 'probeOutcome') { $enums.probeOutcome = @('', 'passed', 'timeout', 'child-exit', 'result-missing', 'result-invalid', 'probe-failed', 'other') }
         if ($Diagnostic.PSObject.Properties.Name -contains 'probeWorker') { $enums.probeWorker = @('', 'passed', 'listener-error', 'isolation-error', 'isolation-command-failed', 'isolation-open', 'github-error', 'github-command-failed', 'other') }
-        if ($Diagnostic.PSObject.Properties.Name -contains 'probeExitStage') { $enums.probeExitStage = @('', 'common-import', 'instance-containment', 'instance-identity', 'instance-acl', 'result-precondition', 'result-publication', 'other') }
+        if ($Diagnostic.PSObject.Properties.Name -contains 'probeExitStage') { $enums.probeExitStage = @('', 'common-import', 'instance-containment', 'instance-identity', 'instance-acl', 'acl-read-command-unavailable', 'acl-read-access-denied', 'acl-read-other', 'owner-read', 'owner-rejected', 'ace-enumeration', 'sid-translation', 'allow-rejected', 'result-precondition', 'result-publication', 'other') }
         foreach ($name in @('observationAgeMs', 'quarantineElapsedMs', 'connectElapsedMs', 'resumeElapsedMs', 'probeCount', 'probeFailureCount', 'probeElapsedMs', 'probeWorkerElapsedMs')) {
             if ($Diagnostic.PSObject.Properties.Name -contains $name) { $numbers += $name }
         }
@@ -101,7 +101,7 @@ function New-RunnerRecoveryDiagnostic($Recovery, [DateTime] $NowUtc) {
         if ($d.PSObject.Properties.Name -contains 'probeOutcome') { $value.probeOutcome = if ($d.probeOutcome -is [string] -and $d.probeOutcome -cin @('', 'passed', 'timeout', 'child-exit', 'result-missing', 'result-invalid', 'probe-failed')) { $d.probeOutcome } else { 'other' } }
         if ($d.PSObject.Properties.Name -contains 'probeWorker') { $value.probeWorker = if ($d.probeWorker -is [string] -and $d.probeWorker -cin @('', 'passed', 'listener-error', 'isolation-error', 'isolation-command-failed', 'isolation-open', 'github-error', 'github-command-failed')) { $d.probeWorker } else { 'other' } }
         if ($d.PSObject.Properties.Name -contains 'probeExitCode' -and $null -ne $d.probeExitCode) { $value.probeExitCode = Get-RunnerProbeExitCode $d.probeExitCode }
-        if ($d.PSObject.Properties.Name -contains 'probeExitStage') { $value.probeExitStage = if ($d.probeExitStage -is [string] -and $d.probeExitStage -cin @('', 'common-import', 'instance-containment', 'instance-identity', 'instance-acl', 'result-precondition', 'result-publication')) { $d.probeExitStage } else { 'other' } }
+        if ($d.PSObject.Properties.Name -contains 'probeExitStage') { $value.probeExitStage = if ($d.probeExitStage -is [string] -and $d.probeExitStage -cin @('', 'common-import', 'instance-containment', 'instance-identity', 'instance-acl', 'acl-read-command-unavailable', 'acl-read-access-denied', 'acl-read-other', 'owner-read', 'owner-rejected', 'ace-enumeration', 'sid-translation', 'allow-rejected', 'result-precondition', 'result-publication')) { $d.probeExitStage } else { 'other' } }
         $value.trigger = if ($d.trigger -cin @('', 'observation-unavailable', 'fingerprint-change', 'connectivity-lost')) { $d.trigger } else { 'other' }
         $value.lastTransition = if ($d.lastTransition -cin $phases) { $d.lastTransition } else { 'other' }
         $refusals = @('', 'stale-observation', 'dispatch-deadline', 'provider-uncertain', 'operation-uncertain', 'stop', 'owner-dead', 'identity-changed', 'hard-deadline', 'outage-deadline', 'guardian-progress-expired', 'clock-regressed', 'vm-state-uncertain', 'connectivity-state-uncertain', 'watchdog-expired')
@@ -1233,15 +1233,51 @@ function Assert-RunnerControlIdle {
     }
 }
 
-function Assert-RunnerProtectedPath([string] $Path) {
+function Assert-RunnerProtectedPath([string] $Path, $FailureStage = $null) {
+    # PS5 rejects a typed [ref] parameter's null default before entering legacy
+    # calls. Keep null optional and require a real reference when supplied.
+    if ($null -ne $FailureStage -and $FailureStage -isnot [ref]) { throw 'Protected-path diagnostic stage requires a reference.' }
+    if ($null -ne $FailureStage) { $FailureStage.Value = 'unknown' }
     [void](Assert-OwnedPath $Path)
+    if ($null -ne $FailureStage) { $FailureStage.Value = 'acl-read' }
     $acl = Get-Acl -LiteralPath $Path
     $allowed = @('S-1-5-18', 'S-1-5-32-544')
-    if ($allowed -notcontains $acl.GetOwner([Security.Principal.SecurityIdentifier]).Value) { throw 'Installed path owner is unexpected.' }
-    foreach ($rule in $acl.Access) {
-        $sid = $rule.IdentityReference.Translate([Security.Principal.SecurityIdentifier]).Value
-        if ($rule.AccessControlType -eq 'Allow' -and $allowed -notcontains $sid) { throw 'Installed path grants unexpected access.' }
+    if ($null -ne $FailureStage) { $FailureStage.Value = 'owner-read' }
+    $owner = $acl.GetOwner([Security.Principal.SecurityIdentifier]).Value
+    if ($allowed -notcontains $owner) {
+        if ($null -ne $FailureStage) { $FailureStage.Value = 'owner-rejected' }
+        throw 'Installed path owner is unexpected.'
     }
+    if ($null -ne $FailureStage) { $FailureStage.Value = 'ace-enumeration' }
+    $rules = @($acl.Access)
+    foreach ($rule in $rules) {
+        if ($null -ne $FailureStage) { $FailureStage.Value = 'sid-translation' }
+        $sid = $rule.IdentityReference.Translate([Security.Principal.SecurityIdentifier]).Value
+        if ($rule.AccessControlType -eq 'Allow' -and $allowed -notcontains $sid) {
+            if ($null -ne $FailureStage) { $FailureStage.Value = 'allow-rejected' }
+            throw 'Installed path grants unexpected access.'
+        }
+    }
+    if ($null -ne $FailureStage) { $FailureStage.Value = 'none' }
+}
+
+function Get-RunnerProbeAclFailureExitCode($Failure, [string] $FailureStage) {
+    # Fixed diagnostics only. Never inspect messages, HResults, paths or ACL data.
+    switch -CaseSensitive ($FailureStage) {
+        'owner-read' { return 70 }; 'owner-rejected' { return 71 }
+        'ace-enumeration' { return 72 }; 'sid-translation' { return 73 }
+        'allow-rejected' { return 74 }; 'acl-read' { break }
+        default { return 64 }
+    }
+    $exception = if ($Failure -is [Management.Automation.ErrorRecord]) { $Failure.Exception } elseif ($Failure -is [Exception]) { $Failure } else { $null }
+    for ($depth=0; $depth -lt 8 -and $null -ne $exception; $depth++) {
+        $type = $exception.GetType().FullName
+        if ($type -ceq 'System.Management.Automation.CommandNotFoundException') { return 67 }
+        if ($type -cin @('System.UnauthorizedAccessException','System.Security.SecurityException')) { return 68 }
+        if ($type -cnotin @('System.Management.Automation.RuntimeException','System.Management.Automation.MethodInvocationException','System.Management.Automation.GetValueInvocationException','System.Management.Automation.CmdletInvocationException','System.Management.Automation.ActionPreferenceStopException','System.Management.Automation.ProviderInvocationException','System.Reflection.TargetInvocationException')) { break }
+        $exception = $exception.InnerException
+    }
+    return 69
 }
 
 # Offline tests inject interruption here; production has no environment switch

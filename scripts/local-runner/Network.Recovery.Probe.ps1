@@ -13,7 +13,8 @@ $InstancePath = Assert-OwnedPath $InstancePath
 $failureExitCode = 63 # instance-identity
 if ([IO.Path]::GetDirectoryName($InstancePath) -ine (Join-Path $script:RunnerRoot 'instances') -or [IO.Path]::GetFileName($InstancePath) -cnotmatch '^ITIR-[0-9a-f]{32}$') { throw 'Probe instance identity differs.' }
 $failureExitCode = 64 # instance-acl
-Assert-RunnerProtectedPath $InstancePath
+$aclFailureStage = 'unknown'
+Assert-RunnerProtectedPath $InstancePath -FailureStage ([ref]$aclFailureStage)
 $failureExitCode = 65 # result-precondition
 $resultPath = Assert-OwnedPath (Join-Path $InstancePath ("probe-$ProbeId.json"))
 if (Test-Path -LiteralPath $resultPath) { throw 'Probe result already exists.' }
@@ -46,6 +47,10 @@ $failureExitCode = 66 # result-publication
 Write-RunnerJson $resultPath ([ordered]@{ generation = $Generation; probeId = $ProbeId; success = $success; detail = [ordered]@{ code = $workerCode; elapsedMs = $workerElapsedMs } })
 } catch {
     # Fixed numeric evidence only. Never emit caught errors, paths or output.
+    if ($failureExitCode -eq 64) {
+        try { $failureExitCode = Get-RunnerProbeAclFailureExitCode $_ $aclFailureStage }
+        catch { $failureExitCode = 64 }
+    }
     exit $failureExitCode
 }
 exit 0

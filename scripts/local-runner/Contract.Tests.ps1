@@ -105,6 +105,8 @@ if ($LASTEXITCODE -ne 0) { throw 'Fresh Windows PowerShell prepared-image ACL re
 
 & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'Network.Recovery.Tests.ps1')
 if ($LASTEXITCODE -ne 0) { throw 'Network.Recovery.Tests.ps1 failed.' }
+& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'Protected.Path.Tests.ps1')
+if ($LASTEXITCODE -ne 0) { throw 'Protected.Path.Tests.ps1 failed.' }
 & node.exe (Join-Path $PSScriptRoot 'Network.Probe.Bootstrap.Tests.mjs')
 if ($LASTEXITCODE -ne 0) { throw 'Network.Probe.Bootstrap.Tests.mjs failed.' }
 & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'Network.Probe.Diagnostics.Tests.ps1')

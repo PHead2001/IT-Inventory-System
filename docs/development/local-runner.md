@@ -568,6 +568,16 @@ unsigned 32-bit exit code is retained; an unrecognized code maps to stage
 `other`. A stage identifies where the probe worker reported exiting, not the
 underlying cause of failure.
 
+During the instance ACL check, codes 67–74 distinguish ACL-read command
+unavailability, ACL-read access denial, other ACL-read failure, owner read,
+owner rejection, ACE enumeration, SID translation, and allow-rule rejection.
+Only exact exception types through a bounded allowlist of invocation wrappers
+distinguish the first two ACL-read outcomes; messages and HResults are not used.
+Code 64 remains the fallback when that check cannot be classified. The optional
+validator stage reference does not change its permission checks or exceptions,
+and no ACL data is added to the worker result or failure journal. These codes
+do not establish why a runner disconnected or imply that permissions changed.
+
 An optional `isolationProbe` observation records the fixed `guest-to-host` kind,
 the SSH command's numeric exit code (or `null` when unavailable), and whether the
 host listener had a connection pending (`pending`), no connection pending

@@ -252,7 +252,7 @@ function Get-RunnerNetworkRecoveryPlan($Recovery, $Observation, [DateTime] $NowU
             $childExit = $null
             if ($d.PSObject.Properties.Name -contains 'exitCode' -and $null -ne $d.exitCode) { try { $childExit = Get-RunnerProbeExitCode $d.exitCode } catch { } }
             Set-RunnerRecoveryDiagnostic $next 'probeExitCode' $childExit
-            $exitStage = if ($d.PSObject.Properties.Name -notcontains 'exitStage') { '' } elseif ($d.exitStage -is [string] -and $d.exitStage -cin @('', 'common-import', 'instance-containment', 'instance-identity', 'instance-acl', 'result-precondition', 'result-publication', 'other')) { $d.exitStage } else { 'other' }
+            $exitStage = if ($d.PSObject.Properties.Name -notcontains 'exitStage') { '' } elseif ($d.exitStage -is [string] -and $d.exitStage -cin @('', 'common-import', 'instance-containment', 'instance-identity', 'instance-acl', 'acl-read-command-unavailable', 'acl-read-access-denied', 'acl-read-other', 'owner-read', 'owner-rejected', 'ace-enumeration', 'sid-translation', 'allow-rejected', 'result-precondition', 'result-publication', 'other')) { $d.exitStage } else { 'other' }
             Set-RunnerRecoveryDiagnostic $next 'probeExitStage' $exitStage
             foreach ($pair in @(@('elapsedMs', 'probeElapsedMs'), @('workerElapsedMs', 'probeWorkerElapsedMs'))) {
                 if ($d.PSObject.Properties.Name -contains $pair[0]) {
@@ -576,6 +576,8 @@ function Get-RunnerRecoveryProbeOutcome {
             $exitStage = switch ($exitCode) {
                 0 { '' }; 61 { 'common-import' }; 62 { 'instance-containment' }; 63 { 'instance-identity' }
                 64 { 'instance-acl' }; 65 { 'result-precondition' }; 66 { 'result-publication' }
+                67 { 'acl-read-command-unavailable' }; 68 { 'acl-read-access-denied' }; 69 { 'acl-read-other' }
+                70 { 'owner-read' }; 71 { 'owner-rejected' }; 72 { 'ace-enumeration' }; 73 { 'sid-translation' }; 74 { 'allow-rejected' }
                 default { 'other' }
             }
         } catch { $exitCode = $null }

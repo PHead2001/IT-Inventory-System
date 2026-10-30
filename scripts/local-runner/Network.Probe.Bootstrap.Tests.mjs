@@ -12,10 +12,23 @@ const cases = [
   ['instance-containment', 62],
   ['instance-identity', 63],
   ['instance-acl', 64],
-  ['instance-acl-command-unavailable', 64],
+  ['instance-acl-command-unavailable', 67],
+  ['acl-read-access-denied', 68],
+  ['acl-read-security', 68],
+  ['acl-read-other', 69],
+  ['acl-read-wrapped-command', 67],
+  ['acl-read-wrapped-denied', 68],
+  ['acl-read-unknown-wrapper', 69],
+  ['acl-owner-read', 70],
+  ['acl-owner-rejected', 71],
+  ['acl-enumeration', 72],
+  ['acl-sid-translation', 73],
+  ['acl-allow-rejected', 74],
+  ['acl-classifier-fallback', 64],
   ['result-precondition', 65],
   ['result-path', 65],
   ['result-publication', 66],
+  ['result-publication-command', 66],
   ['network-failed', 0],
   ['listener-failed', 0],
   ['passed', 0],
@@ -111,6 +124,9 @@ export async function runWorkerBootstrapTests({
       const fixtureCommon = `
 Set-StrictMode -Version Latest
 $ErrorActionPreference='Stop'
+class FixtureAccessFailure : System.Collections.IEnumerable {
+    [System.Collections.IEnumerator] GetEnumerator() { throw [InvalidOperationException]::new('PRIVATE_ENUMERATOR') }
+}
 if ($PSVersionTable.PSEdition -cne 'Desktop' -or $PSVersionTable.PSVersion.Major -ne 5) { throw 'PRIVATE_RUNTIME' }
 $script:mode=${literal(mode)}
 if ($script:mode -ceq 'common-import') { throw 'PRIVATE_IMPORT' }
@@ -118,14 +134,43 @@ $script:RunnerRoot=${literal(runnerRoot)}
 $script:ownedCalls=0; $script:nativeCalls=0; $script:stopCalls=0
 function Assert-OwnedPath([string] $Path) {
     $script:ownedCalls++
-    if ($script:mode -ceq 'instance-containment' -or ($script:mode -ceq 'result-path' -and $script:ownedCalls -eq 2)) { throw 'PRIVATE_CONTAINMENT' }
+    if ($script:mode -ceq 'instance-containment' -or ($script:mode -ceq 'instance-acl' -and $script:ownedCalls -eq 2) -or ($script:mode -ceq 'result-path' -and $script:ownedCalls -eq 3)) { throw 'PRIVATE_CONTAINMENT' }
     $full=[IO.Path]::GetFullPath($Path)
     if (-not $full.StartsWith(($script:RunnerRoot+'\'),[StringComparison]::OrdinalIgnoreCase)) { throw 'PRIVATE_ESCAPE' }
     return $full
 }
-function Assert-RunnerProtectedPath([string] $Path) {
-    if ($script:mode -ceq 'instance-acl') { throw [UnauthorizedAccessException]::new('PRIVATE_ACL') }
-    if ($script:mode -ceq 'instance-acl-command-unavailable') { throw [Management.Automation.CommandNotFoundException]::new('PRIVATE_MODULE') }
+foreach ($node in ([Management.Automation.Language.Parser]::ParseFile(${literal(join(sourceRoot, 'Common.ps1'))},[ref]$null,[ref]$null)).FindAll({param($n)$n -is [Management.Automation.Language.FunctionDefinitionAst]},$false)) {
+    if ($node.Name -cin @('Assert-RunnerProtectedPath','Get-RunnerProbeAclFailureExitCode')) { . ([scriptblock]::Create($node.Extent.Text)) }
+}
+if ($script:mode -ceq 'acl-classifier-fallback') { function Get-RunnerProbeAclFailureExitCode { throw 'PRIVATE_CLASSIFIER' } }
+function Get-Acl([string] $LiteralPath) {
+    switch ($script:mode) {
+        'instance-acl-command-unavailable' { throw [Management.Automation.CommandNotFoundException]::new('PRIVATE_MODULE') }
+        'acl-classifier-fallback' { throw [Management.Automation.CommandNotFoundException]::new('PRIVATE_MODULE') }
+        'acl-read-access-denied' { throw [UnauthorizedAccessException]::new('PRIVATE_ACL') }
+        'acl-read-security' { throw [Security.SecurityException]::new('PRIVATE_ACL') }
+        'acl-read-other' { throw [IO.IOException]::new('PRIVATE_COMMANDNOTFOUNDEXCEPTION access denied') }
+        'acl-read-wrapped-command' { throw [Reflection.TargetInvocationException]::new([Management.Automation.RuntimeException]::new('PRIVATE',[Management.Automation.CommandNotFoundException]::new('PRIVATE'))) }
+        'acl-read-wrapped-denied' { throw [Reflection.TargetInvocationException]::new([Management.Automation.RuntimeException]::new('PRIVATE',[UnauthorizedAccessException]::new('PRIVATE'))) }
+        'acl-read-unknown-wrapper' { throw [IO.IOException]::new('PRIVATE',[UnauthorizedAccessException]::new('PRIVATE')) }
+    }
+    $acl=[pscustomobject]@{}
+    $acl | Add-Member ScriptMethod GetOwner {
+        param($Type)
+        if ($script:mode -ceq 'acl-owner-read') { throw 'PRIVATE_OWNER' }
+        return [pscustomobject]@{ Value=$(if ($script:mode -ceq 'acl-owner-rejected') {'S-1-5-21-999'} else {'S-1-5-18'}) }
+    }
+    if ($script:mode -ceq 'acl-enumeration') { $acl | Add-Member NoteProperty Access ([FixtureAccessFailure]::new()) }
+    else { $acl | Add-Member ScriptProperty Access {
+        $identity=[pscustomobject]@{}
+        $identity | Add-Member ScriptMethod Translate {
+            param($Type)
+            if ($script:mode -ceq 'acl-sid-translation') { throw 'PRIVATE_SID' }
+            return [pscustomobject]@{Value=$(if ($script:mode -ceq 'acl-allow-rejected') {'S-1-5-21-999'} else {'S-1-5-18'})}
+        }
+        return @([pscustomobject]@{IdentityReference=$identity;AccessControlType='Allow'})
+    }}
+    return $acl
 }
 function New-FixtureListener {
     $listener=[pscustomobject]@{ LocalEndpoint=[Net.IPEndPoint]::new([ipaddress]::Parse('172.30.240.1'),42037) }
@@ -142,6 +187,7 @@ function Invoke-RunnerNative([string] $Executable,[string[]] $Arguments,[int] $T
 }
 function Write-RunnerJson([string] $Path,$Value) {
     if ($script:mode -ceq 'result-publication') { throw [IO.IOException]::new('PRIVATE_PUBLICATION') }
+    if ($script:mode -ceq 'result-publication-command') { throw [Management.Automation.CommandNotFoundException]::new('PRIVATE_PUBLICATION') }
     [IO.File]::WriteAllText($Path,(ConvertTo-Json -InputObject $Value -Depth 5 -Compress),[Text.UTF8Encoding]::new($false))
 }
 `;
@@ -224,7 +270,7 @@ function Write-RunnerJson([string] $Path,$Value) {
           throw Error('SCAFFOLD_PRIOR_RESULT_CHANGED');
       } else if (await exists(resultPath))
         throw Error('SCAFFOLD_FAILED_BOOTSTRAP_PUBLISHED');
-      if (mode === 'result-publication' && !stopped)
+      if (mode.startsWith('result-publication') && !stopped)
         throw Error('SCAFFOLD_PUBLICATION_SKIPPED_CLEANUP');
       results.push({
         mode,
