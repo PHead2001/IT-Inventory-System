@@ -3,7 +3,7 @@ param([string] $CapturedProjectionsPath = '')
 Set-StrictMode -Version Latest
 $ErrorActionPreference='Stop'
 trap { Write-Host ('CLOUD_INIT_TEST_FAILURE '+(($_.ScriptStackTrace -split '\r?\n' | ForEach-Object { if ($_ -match 'line (\d+)') { $Matches[1] } }) -join ',')+' '+$_.Exception.GetType().Name); exit 1 }
-$functions=@('Assert-RunnerCloudInitFields','Assert-RunnerCloudInitDiagnostic','ConvertFrom-RunnerCloudInitCapture','Test-RunnerCloudInitTerminal','Assert-RunnerCloudInitArtifact','Assert-RunnerCloudInitPreparationIdentity','Invoke-RunnerCloudInitPreparationCapture','Write-RunnerJson','Get-SshArgs','Get-RunnerGuestMtu','Get-RunnerGuestReadinessCommand','Get-RunnerGuestPrerequisites','Get-RunnerResourceProfile','Get-RunnerGuestReadinessStage','Assert-RunnerGuestReadinessDiagnostic','Add-RunnerGuestReadinessAttempt','Set-RunnerGuestReadinessEvidence')
+$functions=@('Get-RunnerSessionPaths','Assert-RunnerSessionTrustedPaths','Assert-RunnerCloudInitFields','Assert-RunnerCloudInitDiagnostic','ConvertFrom-RunnerCloudInitCapture','Test-RunnerCloudInitTerminal','Assert-RunnerCloudInitArtifact','Assert-RunnerCloudInitPreparationIdentity','Invoke-RunnerCloudInitPreparationCapture','Write-RunnerJson','Get-SshArgs','Get-RunnerGuestMtu','Get-RunnerGuestReadinessCommand','Get-RunnerGuestPrerequisites','Get-RunnerResourceProfile','Get-RunnerGuestReadinessStage','Assert-RunnerGuestReadinessDiagnostic','Add-RunnerGuestReadinessAttempt','Set-RunnerGuestReadinessEvidence')
 $runner=$null
 foreach ($file in @('Common.ps1','Runner.ps1')) {
     $errors=$null; $ast=[Management.Automation.Language.Parser]::ParseFile((Join-Path $PSScriptRoot $file),[ref]$null,[ref]$errors)
@@ -21,7 +21,7 @@ function New-Diagnostic {
 }
 function To-Transport($Value) { $copy=Copy-Diagnostic $Value; $copy.PSObject.Properties.Remove('sshExit'); return [pscustomobject]@{ExitCode=0;Output=($copy | ConvertTo-Json -Depth 8 -Compress)} }
 function Reset {
-    $script:state=[pscustomobject]@{purpose='prepare';vmName='ITIR-11111111111111111111111111111111';vmId='22222222-2222-2222-2222-222222222222';instancePath=$script:RunnerRoot}
+    $script:state=[pscustomobject]@{purpose='prepare';vmName='ITIR-11111111111111111111111111111111';vmId='22222222-2222-2222-2222-222222222222';instancePath=(Join-Path (Join-Path $script:RunnerRoot 'instances') 'ITIR-11111111111111111111111111111111');layoutVersion=2}
     $script:auth=$true; $script:alive=0; $script:depth=0; $script:sshCalls=0; $script:changed=$false; $script:writeFails=$false; $script:transportThrows=$false; $script:reads=0; $script:publicationRace=$false; $script:transport=To-Transport (New-Diagnostic)
     if (Test-Path -LiteralPath $script:artifact) { Remove-Item -LiteralPath $script:artifact -Force }
 }
@@ -32,8 +32,8 @@ function Exit-RunnerLock { $script:depth-- }
 function Get-RunnerState { Require ($script:depth -gt 0); $script:reads++; if ($script:publicationRace -and $script:reads -eq 3) { $script:state | Add-Member runnerId 1 }; return $script:state }
 function Assert-StateIdentity($State) { if ($null -eq $State) { throw 'PRIVATE_IDENTITY' } }
 function Get-CoherentInstalledRunnerBundle { return [pscustomobject]@{hash=('A'*64)} }
-function Assert-OwnedPath([string]$Path) { Require ($Path.StartsWith($script:RunnerRoot+'\',[StringComparison]::OrdinalIgnoreCase)); if ($script:writeFails) { throw 'PRIVATE_WRITE' }; return $Path }
-function Assert-RunnerProtectedPath { Require ($script:depth -gt 0) }
+function Assert-OwnedPath([string]$Path) { Require ($Path.StartsWith($script:RunnerRoot+'\',[StringComparison]::OrdinalIgnoreCase)); if ($script:writeFails -and $Path -ceq $script:artifact) { throw 'PRIVATE_WRITE' }; return $Path }
+function Assert-RunnerProtectedPath([string]$Path) { Require ($script:depth -gt 0 -or $Path.StartsWith((Join-Path $script:RunnerRoot 'instances'))) }
 function Invoke-RunnerReceiptNative($Executable,$Arguments) {
     $script:sshCalls++; Require ($Executable -ceq 'ssh.exe' -and $Arguments[-2] -ceq 'runner@192.0.2.1' -and $Arguments[-1].StartsWith("sudo -n timeout --signal=KILL 10s python3 -c 'import base64;"))
     if ($script:changed) { $script:state=Copy-Diagnostic $script:state; $script:state.vmId='33333333-3333-3333-3333-333333333333' }
@@ -95,7 +95,7 @@ try {
     $storedArtifact=[IO.File]::ReadAllText($script:artifact) | ConvertFrom-Json; Assert-RunnerCloudInitArtifact $storedArtifact
     Require ($storedArtifact.sessionId -ceq $frozen.vmName.Substring(5) -and $storedArtifact.vmId -ceq $frozen.vmId -and $storedArtifact.bundleHash -ceq ('A'*64) -and (Get-Item -LiteralPath $script:artifact).Length -le 8192)
     # Actual atomic replacement retains one latest attributable artifact.
-    $script:state.vmName='ITIR-44444444444444444444444444444444'; $frozen=Copy-Diagnostic $script:state
+    $script:state.vmName='ITIR-44444444444444444444444444444444'; $script:state.instancePath=Join-Path (Join-Path $script:RunnerRoot 'instances') $script:state.vmName; $frozen=Copy-Diagnostic $script:state
     Require (Invoke-RunnerCloudInitPreparationCapture $frozen ([pscustomobject]@{guestIp='192.0.2.1'}))
     Require (([IO.File]::ReadAllText($script:artifact) | ConvertFrom-Json).sessionId -ceq ('4'*32))
     Require (@(Get-ChildItem -LiteralPath $script:RunnerRoot).Count -eq 1)
@@ -122,7 +122,7 @@ try {
             function Invoke-RunnerNative { $value=$script:case.codes[$script:attempts]; $script:attempts++; return $value }
             function Invoke-RunnerCloudInitPreparationCapture { $script:captures++; return $script:case.terminal }
             function Start-Sleep([int]$Seconds) { Require ($Seconds -eq 10); $script:now=$script:now.AddSeconds(10) }
-            try { $script:readyMtu=Wait-Guest ([pscustomobject]@{purpose=$script:case.purpose;instancePath=$script:RunnerRoot}) ([pscustomobject]@{guestIp='192.0.2.1'}) 'it-inventory-heavy' } catch { $script:failure=$_ }
+            try { $script:readyMtu=Wait-Guest ([pscustomobject]@{purpose=$script:case.purpose;vmName='ITIR-11111111111111111111111111111111';layoutVersion=2;instancePath=(Join-Path (Join-Path $script:RunnerRoot 'instances') 'ITIR-11111111111111111111111111111111')}) ([pscustomobject]@{guestIp='192.0.2.1'}) 'it-inventory-heavy' } catch { $script:failure=$_ }
         }
         Require ($script:captures -eq $case.captures -and $script:attempts -eq $case.calls)
         if ($case.purpose -ceq 'prepare' -and $case.terminal -and $case.captures -eq 1) { Require ($null -ne $script:failure -and $script:failure.Exception.Data['runnerGuestReadiness'].lastNativeExit -eq 72) }

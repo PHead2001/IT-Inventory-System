@@ -3,6 +3,7 @@
 param([string] $CandidateRoot = $PSScriptRoot, [switch] $DispatchAdmissionOnly)
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
+. (Join-Path $PSScriptRoot 'Test.FileHash.ps1')
 . (Join-Path $CandidateRoot 'Common.ps1')
 . (Join-Path $PSScriptRoot 'Network.Recovery.ps1')
 $ast = [Management.Automation.Language.Parser]::ParseFile((Join-Path $CandidateRoot 'Runner.ps1'), [ref]$null, [ref]$null)
@@ -64,7 +65,7 @@ function New-Fixture {
     if (Test-Path -LiteralPath $registrationPath) { Remove-Item -LiteralPath $registrationPath }
     $script:now = [DateTime]::UtcNow; $script:alive = $true; $script:deadGuardian = $false; $script:sleeps = 0; $script:heartbeats = 0; $script:queries = 0; $script:badReceipt = $false
     $script:nextLockMutation = $null; $script:stateWrites = 0; $script:registrationWrites = 0; $script:decisions = 0; $script:checkpoints = @()
-    $script:state = [pscustomobject]@{ tag = $script:RunnerTag; purpose = 'job'; resourceLabel = 'it-inventory-heavy'; vmName = 'ITIR-' + ('a' * 32); vmId = '00000000-0000-0000-0000-000000000001'; instancePath = Join-Path $root ('ITIR-' + ('a' * 32)); deadlineUtc = $script:now.AddMinutes(5).ToString('o'); guardianPid = 42; guardianStartUtc = $script:now.ToString('o'); guardianReady = $true
+    $script:state = [pscustomobject]@{ layoutVersion = 2; tag = $script:RunnerTag; purpose = 'job'; resourceLabel = 'it-inventory-heavy'; vmName = 'ITIR-' + ('a' * 32); vmId = '00000000-0000-0000-0000-000000000001'; instancePath = Join-Path (Join-Path $root 'instances') ('ITIR-' + ('a' * 32)); deadlineUtc = $script:now.AddMinutes(5).ToString('o'); guardianPid = 42; guardianStartUtc = $script:now.ToString('o'); guardianReady = $true
         supervisorPid = 43; supervisorStartUtc = $script:now.ToString('o')
         networkRecovery = [pscustomobject]@{ phase = 'healthy'; generation = 0; failure = ''; hardDeadlineUtc = $script:now.AddMinutes(5).ToString('o'); episodeDeadlineUtc = ''; progressUtc = $script:now.ToString('o') } }
     $script:state.networkRecovery | Add-Member binding ([pscustomobject]@{ vmId = $script:state.vmId; vmName = $script:state.vmName; claimHash = Get-RunnerRecoveryClaimHash $script:state })
@@ -96,10 +97,10 @@ try {
         New-Fixture
         foreach ($name in @('networkRecovery', 'guardianPid', 'guardianStartUtc', 'guardianReady')) { $script:state.PSObject.Properties.Remove($name) }
         $script:state.instancePath = Join-Path (Join-Path $root 'instances') $script:state.vmName
-        foreach ($pair in @{ tag = $script:RunnerTag; supervisorPid = $PID; supervisorStartUtc = $script:now.ToString('o'); guestMac = '02AABBCCDDEE'; networkFingerprint = ('a' * 64) }.GetEnumerator()) { $script:state | Add-Member -NotePropertyName $pair.Key -NotePropertyValue $pair.Value -Force }
+        foreach ($pair in @{ layoutVersion = 2; tag = $script:RunnerTag; supervisorPid = $PID; supervisorStartUtc = $script:now.ToString('o'); guestMac = '02AABBCCDDEE'; networkFingerprint = ('a' * 64) }.GetEnumerator()) { $script:state | Add-Member -NotePropertyName $pair.Key -NotePropertyValue $pair.Value -Force }
         $rule = [pscustomobject]@{ Action = 'Deny'; Direction = 'Outbound'; Weight = 2; LocalIPAddress = ''; RemoteIPAddress = ''; LocalPort = ''; RemotePort = ''; Protocol = ''; Stateful = $false }
         $script:state | Add-Member -NotePropertyName networkRules -NotePropertyValue @($rule)
-        $script:vm = [pscustomobject]@{ Id = [guid]$script:state.vmId; Name = $script:state.vmName; Notes = $script:RunnerTag; Path = Join-Path $script:state.instancePath $script:state.vmName; State = 'Off' }
+        $script:vm = [pscustomobject]@{ Id = [guid]$script:state.vmId; Name = $script:state.vmName; Notes = $script:RunnerTag; Path = (Get-RunnerSessionPaths $script:state).vmPath; State = 'Off' }
         $script:switch = [pscustomobject]@{ Id = [guid]'00000000-0000-0000-0000-000000000002'; Name = $script:RunnerSwitch; SwitchType = 'Internal' }
         $script:adapter = [pscustomobject]@{ Id = 'fixture-adapter'; VMId = $script:vm.Id; VMName = $script:vm.Name; MacAddress = $script:state.guestMac; DynamicMacAddressEnabled = $false; SwitchId = $script:switch.Id; SwitchName = $script:switch.Name }
         $script:observation = [pscustomobject]@{ fingerprint = ('a' * 64); rules = @($rule); observedUtc = $script:now.ToString('o') }; $script:effects = @()

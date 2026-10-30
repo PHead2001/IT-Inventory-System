@@ -1,15 +1,15 @@
 {
   "schema": 1,
   "tag": "it-inventory-local-runner-v1",
-  "version": "2026-10-30.1",
+  "version": "2026-10-30.2",
   "files": [
     {
       "name": "Common.ps1",
-      "hash": "360B5E61C5D8CF7B353E9FB92F65E4746770DAC4241133CB70E14A7CA9982E95"
+      "hash": "A137273B47DD05A8FBA858A9E8F111A6CD09C7F792813BDC20765F70FE89F0DE"
     },
     {
       "name": "Runner.ps1",
-      "hash": "6465D67169780332B31836C322615947C001BDD456E750C2AE89ED7C6D7A8A55"
+      "hash": "05CCE420B926697E7D0317FDE31AB4990895D803D7D3245202DE3364BD33D7E5"
     },
     {
       "name": "Guest.Network.ps1",
@@ -17,11 +17,11 @@
     },
     {
       "name": "Network.Recovery.ps1",
-      "hash": "9BCDE07A71CDB34E48CD9A7F27653F2E3B5DE91C50ED5B7C847F703E11899386"
+      "hash": "D72EF2CDF5B0C2900F184ADD80C749B11E415ABFDC1AD0810E31CB14150CE272"
     },
     {
       "name": "Network.Recovery.Probe.ps1",
-      "hash": "607C146B5CB13ABF85EE437DC4143E3BCB5083E1D83BC7AAF9F171A195739A41"
+      "hash": "27921924BBD083EF08F5F1CED69E3B15FD3C6710A664CEC3A3E2315C5F14AD4C"
     },
     {
       "name": "Probe.Job.ps1",
@@ -29,7 +29,7 @@
     },
     {
       "name": "PreparedImage.ps1",
-      "hash": "AC1381932951451232A2A585EE363472EA6A6361061C1F2D9DA4E875AB732E57"
+      "hash": "7A580B8D58AD102097C08C087E14A59BF786571EB64D9C273BD6E60F4E855E0C"
     },
     {
       "name": "Image.Prepare.sh",

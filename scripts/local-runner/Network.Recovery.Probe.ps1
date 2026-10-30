@@ -1,6 +1,7 @@
 # Fixed read-only worker. Its host process and all SSH descendants are owned by
 # the guardian's kernel Job Object; it never dispatches VM/workflow mutations.
 param([Parameter(Mandatory)][string] $InstancePath,
+    [Parameter(Mandatory)][int] $LayoutVersion,
     [Parameter(Mandatory)][ValidatePattern('^[0-9a-f]{32}$')][string] $ProbeId,
     [Parameter(Mandatory)][ValidateRange(0, [long]::MaxValue)][long] $Generation)
 Set-StrictMode -Version Latest
@@ -12,15 +13,17 @@ $failureExitCode = 62 # instance-containment
 $InstancePath = Assert-OwnedPath $InstancePath
 $failureExitCode = 63 # instance-identity
 if ([IO.Path]::GetDirectoryName($InstancePath) -ine (Join-Path $script:RunnerRoot 'instances') -or [IO.Path]::GetFileName($InstancePath) -cnotmatch '^ITIR-[0-9a-f]{32}$') { throw 'Probe instance identity differs.' }
+$paths = Get-RunnerSessionPaths ([pscustomobject]@{ vmName = [IO.Path]::GetFileName($InstancePath); instancePath = $InstancePath; layoutVersion = $LayoutVersion })
 $failureExitCode = 64 # instance-acl
 $aclFailureStage = 'unknown'
-Assert-RunnerProtectedPath $InstancePath -FailureStage ([ref]$aclFailureStage)
+Assert-RunnerProtectedPath $paths.instance -FailureStage ([ref]$aclFailureStage)
+Assert-RunnerSessionTrustedPaths ([pscustomobject]@{ vmName = [IO.Path]::GetFileName($InstancePath); instancePath = $InstancePath; layoutVersion = $LayoutVersion })
 $failureExitCode = 65 # result-precondition
-$resultPath = Assert-OwnedPath (Join-Path $InstancePath ("probe-$ProbeId.json"))
+$resultPath = Assert-OwnedPath (Join-Path $paths.probeRoot ("probe-$ProbeId.json"))
 if (Test-Path -LiteralPath $resultPath) { throw 'Probe result already exists.' }
 $failureExitCode = 1 # Unexpected non-bootstrap failures remain unclassified.
 $args = @('-o', 'BatchMode=yes', '-o', 'ConnectTimeout=5', '-o', 'ServerAliveInterval=15', '-o', 'ServerAliveCountMax=2',
-    '-o', 'StrictHostKeyChecking=accept-new', '-o', "UserKnownHostsFile=$InstancePath\known_hosts", '-i', "$InstancePath\id_ed25519")
+    '-o', 'StrictHostKeyChecking=accept-new', '-o', "UserKnownHostsFile=$($paths.knownHosts)", '-i', $paths.privateKey)
 $success = $false
 $workerCode = 'listener-error'
 $probeWatch = [Diagnostics.Stopwatch]::StartNew()

@@ -1,6 +1,15 @@
 # Non-mutating host contract tests. Creates only a disposable directory below TEMP.
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
+if ($PSVersionTable.PSEdition -cne 'Desktop' -or $PSVersionTable.PSVersion.Major -ne 5 -or $PSVersionTable.PSVersion.Minor -lt 1) { throw 'Local runner contract tests require Windows PowerShell 5.1.' }
+# pwsh7 may pass its incompatible module search path to powershell.exe. Repair
+# only this test process; never search user modules or alter persisted settings.
+$env:PSModulePath = [IO.Path]::Combine($PSHOME, 'Modules') + ';' +
+    [IO.Path]::Combine([Environment]::GetFolderPath('ProgramFiles'), 'WindowsPowerShell\Modules')
+$contractHashCommand = Get-Command Get-FileHash -ErrorAction SilentlyContinue
+if ($null -eq $contractHashCommand -or $contractHashCommand.ModuleName -cne 'Microsoft.PowerShell.Utility') { throw 'Windows PowerShell built-in Get-FileHash is unavailable after the process-local module bootstrap.' }
+# Contract fixture imports begin here.
+. (Join-Path $PSScriptRoot 'Test.FileHash.ps1')
 
 # Reject nonportable package bytes before any expensive native checks.
 $bundleAuthor = Join-Path $PSScriptRoot 'Write-Bundle.ps1'
@@ -64,6 +73,8 @@ if ($LASTEXITCODE -ne 0) { throw 'Fresh Windows PowerShell lifecycle recovery re
 if ($LASTEXITCODE -ne 0) { throw 'Fresh Windows PowerShell update controls regression failed.' }
 & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'Lifecycle.Atomicity.Tests.ps1')
 if ($LASTEXITCODE -ne 0) { throw 'Fresh Windows PowerShell lifecycle atomicity regression failed.' }
+& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'Session.Paths.Tests.ps1')
+if ($LASTEXITCODE -ne 0) { throw 'Fresh Windows PowerShell session storage regression failed.' }
 & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'Cleanup.Integrity.Tests.ps1')
 if ($LASTEXITCODE -ne 0) { throw 'Fresh Windows PowerShell cleanup integrity regression failed.' }
 & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'Guest.Network.Tests.ps1')
@@ -163,7 +174,7 @@ try {
 
     $validName = 'ITIR-' + ('a' * 32)
     $validInstance = Join-Path (Join-Path $testRoot 'instances') $validName
-    $state = [ordered]@{ tag = $script:RunnerTag; vmName = $validName; instancePath = $validInstance }
+    $state = [ordered]@{ layoutVersion = 2; tag = $script:RunnerTag; vmName = $validName; instancePath = $validInstance }
     Assert-StateIdentity $state
     $state.instancePath = [IO.Path]::GetTempPath()
     $invalidRejected = $false
@@ -455,11 +466,38 @@ public class ArgvSink {
         throw 'Guest Docker group was not declared before user/group setup and package installation.'
     }
     $seedDefinition = $runnerAst.Find({ param($node) $node -is [Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq 'New-SeedDisk' }, $true)
-    if (@($seedDefinition.FindAll({ param($node) $node -is [Management.Automation.Language.CommandAst] -and $node.GetCommandName() -eq 'Get-GuestCloudConfig' }, $true)).Count -ne 1) {
+    $seedDataDefinition = $runnerAst.Find({ param($node) $node -is [Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -ceq 'Get-GuestSeedData' }, $true)
+    $seedDataCalls = @($seedDefinition.FindAll({ param($node) $node -is [Management.Automation.Language.CommandAst] -and $node.GetCommandName() -ceq 'Get-GuestSeedData' }, $true))
+    $cloudCalls = @($seedDataDefinition.FindAll({ param($node) $node -is [Management.Automation.Language.CommandAst] -and $node.GetCommandName() -ceq 'Get-GuestCloudConfig' }, $true))
+    if ($seedDataCalls.Count -ne 1 -or $cloudCalls.Count -ne 1 -or
+        ($seedDataCalls[0].CommandElements.Extent.Text -join '|') -cne 'Get-GuestSeedData|$PublicKey|$Mac|$Config|$ProfileLabel|$Prepared' -or
+        ($cloudCalls[0].CommandElements.Extent.Text -join '|') -cne 'Get-GuestCloudConfig|$PublicKey|$ProfileLabel|$Prepared') {
         throw 'Actual seed disk bypassed the guest user/group configuration contract.'
+    }
+    $seedWrites = @($seedDefinition.FindAll({ param($node) $node -is [Management.Automation.Language.InvokeMemberExpressionAst] -and $node.Member.Extent.Text -ceq 'WriteAllText' }, $true))
+    foreach ($mapping in @(@('user-data', '$seedData.userData'), @('network-config', '$seedData.networkConfig'))) {
+        if (@($seedWrites | Where-Object { $_.Arguments.Count -eq 3 -and
+            $_.Arguments[0].Extent.Text -ceq ("(Join-Path `$root '" + $mapping[0] + "')") -and $_.Arguments[1].Extent.Text -ceq $mapping[1] }).Count -ne 1) {
+            throw 'Seed disk did not write the rendered user/network payload to its fixed file.'
+        }
+    }
+    $seedConfig = [pscustomobject]@{ guestIp='172.30.240.2'; prefixLength=29; gatewayIp='172.30.240.1' }
+    foreach ($prepared in @($false, $true)) {
+        $seedPayload = Get-GuestSeedData 'fixture-public-key' '02:00:00:00:00:11' $seedConfig 'it-inventory-heavy' $prepared
+        if ((@($seedPayload.PSObject.Properties.Name | Sort-Object) -join ',') -cne 'networkConfig,userData' -or
+            $seedPayload.userData -cne (Get-GuestCloudConfig 'fixture-public-key' 'it-inventory-heavy' $prepared) -or
+            $seedPayload.userData -notmatch '(?m)^    groups: \[sudo, docker\]' -or $seedPayload.userData -notmatch 'fixture-public-key' -or
+            ($seedPayload.userData -match '(?m)^groups:') -eq $prepared -or
+            $seedPayload.networkConfig -notmatch '(?m)^      macaddress: 02:00:00:00:00:11\r?$' -or
+            $seedPayload.networkConfig -notmatch ('(?m)^    mtu: ' + (Get-RunnerGuestMtu) + '\r?$') -or
+            $seedPayload.networkConfig -notmatch 'addresses: \[172\.30\.240\.2/29\]' -or $seedPayload.networkConfig -notmatch 'via: 172\.30\.240\.1') {
+            throw 'Rendered generic/prepared seed lost its user, network, MTU or fresh public-key contract.'
+        }
     }
     $realSessionAlive = (Get-Command Assert-SessionAlive).ScriptBlock
     $realNativeCommand = (Get-Command Invoke-RunnerNative).ScriptBlock
+    $realTrustedPaths = (Get-Command Assert-RunnerSessionTrustedPaths).ScriptBlock
+    function Assert-RunnerSessionTrustedPaths($State) { [void](Get-RunnerSessionPaths $State) } # TEMP readiness seam; strict ACL proof is in Session.Paths.Tests.
     $script:readinessCalls = 0; $script:readinessSleeps = 0
     function Assert-SessionAlive { param($State) }
     function Start-Sleep { param($Seconds) $script:readinessSleeps++ }
@@ -478,17 +516,18 @@ public class ArgvSink {
         if ($script:readinessCalls -eq 2) { return 1 }
         return 0
     }
-    Wait-Guest ([pscustomobject]@{ instancePath = Join-Path $testRoot 'readiness' }) ([pscustomobject]@{ guestIp = '172.30.240.2' })
+    Wait-Guest ([pscustomobject]@{ vmName=$validName; instancePath=$validInstance; layoutVersion=2 }) ([pscustomobject]@{ guestIp = '172.30.240.2' })
     if ($script:readinessCalls -ne 3 -or $script:readinessSleeps -ne 2) { throw 'Guest readiness accepted cloud-init warnings or a Docker access failure.' }
     Set-Item -Path Function:\Assert-SessionAlive -Value $realSessionAlive
     Set-Item -Path Function:\Invoke-RunnerNative -Value $realNativeCommand
+    Set-Item -Path Function:\Assert-RunnerSessionTrustedPaths -Value $realTrustedPaths
     Remove-Item -Path Function:\Start-Sleep
-    $expectedVmPath = Join-Path $validInstance $validName
+    $expectedVmPath = Join-Path (Join-Path $validInstance 'vm-data') $validName
     $script:fakeVm = [pscustomobject]@{
         Id = [guid]'11111111-1111-1111-1111-111111111111'; Name = $validName; Notes = ''; Path = $expectedVmPath; State = 'Off'
         AutomaticStartAction = 'Nothing'; AutomaticStopAction = 'TurnOff'
     }
-    $script:fakeDisks = @([pscustomobject]@{ Path = Join-Path $validInstance 'guest.vhdx' })
+    $script:fakeDisks = @([pscustomobject]@{ Path = Join-Path $validInstance 'vm-data\guest.vhdx' })
     $script:deletions = 0
     $script:fakeVmRemoved = $false
     function Get-VM { param($Name, $Id) if (-not $script:fakeVmRemoved) { return $script:fakeVm } }
@@ -496,7 +535,7 @@ public class ArgvSink {
     function Get-RunnerVmInventory { return @(Get-VM) }
     function Get-VMHardDiskDrive { param($VM, $VMName) return $script:fakeDisks }
     function Get-VHD($Path) {
-        if ($Path -inotmatch ('^' + [regex]::Escape($validInstance.TrimEnd('\') + '\') + '(guest|cidata|other)\.vhdx$')) { throw 'Disk lookup escaped the fixed provisional cleanup fixture.' }
+        if ($Path -inotmatch ('^' + [regex]::Escape($validInstance.TrimEnd('\') + '\vm-data\') + '(guest|cidata|other)\.vhdx$')) { throw 'Disk lookup escaped the fixed provisional cleanup fixture.' }
         return [pscustomobject]@{ VhdType = 'Dynamic'; ParentPath = '' }
     }
     function Remove-VM { param($VM, $Name, [switch]$Force) $script:deletions++; $script:fakeVmRemoved = $true }
@@ -511,7 +550,7 @@ public class ArgvSink {
         $script:fakeVm.$property = $previous
     }
     $creating = [pscustomobject]@{
-        tag = $script:RunnerTag; vmName = $validName; vmId = $script:fakeVm.Id.ToString(); instancePath = $validInstance
+        layoutVersion = 2; tag = $script:RunnerTag; vmName = $validName; vmId = $script:fakeVm.Id.ToString(); instancePath = $validInstance
         phase = 'creating'; expectedBootDisk = $script:fakeDisks[0].Path; expectedVmPath = $expectedVmPath
     }
     Remove-RunnerInstance $creating
@@ -529,7 +568,7 @@ public class ArgvSink {
             'instance-root' { $script:fakeVm.Path = $validInstance }
             'descendant' { $script:fakeVm.Path = Join-Path $expectedVmPath 'another-vm' }
             'wrong-recorded-path' { $creating.expectedVmPath = Join-Path $validInstance 'another-vm' }
-            'extra-disk' { $script:fakeDisks += [pscustomobject]@{ Path = Join-Path $validInstance 'cidata.vhdx' } }
+            'extra-disk' { $script:fakeDisks += [pscustomobject]@{ Path = Join-Path $validInstance 'vm-data\cidata.vhdx' } }
             'wrong-disk' { $script:fakeDisks[0].Path = Join-Path $validInstance 'other.vhdx' }
             'owned-phase' { $creating.phase = 'owned' }
             'wrong-name' { $script:fakeVm.Name = 'ITIR-' + ('b' * 32) }
@@ -570,12 +609,15 @@ public class ArgvSink {
     }
     Write-RunnerJson $script:RunnerStatePath $creating
     $name = $validName; $instance = $validInstance; $key = 'dummy public key'; $Config = [pscustomobject]@{}
+    $paths = Get-RunnerSessionPaths $creating
+    function Assert-RunnerSessionTrustedPaths($State) { [void](Get-RunnerSessionPaths $State) } # Seed/MAC provider seam; strict trust is tested separately.
     $profile = Get-RunnerResourceProfile 'it-inventory-heavy'
     $image = [pscustomobject]@{ prepared = $false }
     $sessionDefinition = $runnerAst.Find({ param($node) $node -is [Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq 'Invoke-RunnerSession' }, $true)
     $segmentStart = $sessionDefinition.Extent.Text.IndexOf('$guestMac = Set-RunnerGuestMac')
     $segmentEnd = $sessionDefinition.Extent.Text.IndexOf('$script:RunnerOperationStage = ''network-isolation''')
     & ([scriptblock]::Create($sessionDefinition.Extent.Text.Substring($segmentStart, $segmentEnd - $segmentStart)))
+    Set-Item -Path Function:\Assert-RunnerSessionTrustedPaths -Value $realTrustedPaths
     if ($script:capturedSeedMac -cnotmatch '^02(:[0-9a-f]{2}){5}$' -or
         ($script:capturedSeedMac.Replace(':', '').ToUpperInvariant()) -cne (Get-RunnerState).guestMac) {
         throw 'NoCloud seed did not use the assigned exact static MAC.'

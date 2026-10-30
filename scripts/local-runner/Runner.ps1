@@ -326,6 +326,7 @@ function Start-SessionGuardian($State) {
 
 function Start-GuardedVm($State) {
     Assert-SessionAlive $State
+    Assert-RunnerSessionTrustedPaths $State
     $boot = $null
     $mutex = Enter-RunnerLock
     try {
@@ -338,7 +339,7 @@ function Start-GuardedVm($State) {
         $vmId = [guid]$current.vmId
         $vm = Get-VM -Id $vmId -ErrorAction Stop
         if ([guid]$vm.Id -ne $vmId -or $vm.Name -cne $current.vmName -or $vm.Notes -cne $script:RunnerTag -or
-            [IO.Path]::GetFullPath($vm.Path) -ine (Join-Path $current.instancePath $current.vmName)) { throw 'VM identity changed before boot dispatch.' }
+            [IO.Path]::GetFullPath($vm.Path) -ine ((Get-RunnerSessionPaths $current).vmPath)) { throw 'VM identity changed before boot dispatch.' }
         # Dispatch against the verified object, never a delayed name lookup.
         # Hyper-V boot completion must not monopolize the guardian's state lock.
         $boot = Start-VM -VM $vm -AsJob -ErrorAction Stop
@@ -364,7 +365,7 @@ function Start-GuardedVm($State) {
             if ($null -eq $current -or $current.vmName -cne $State.vmName -or [guid]$current.vmId -ne $vmId -or $current.guardianReady -ne $true) { throw 'Session identity changed before VM boot continuation.' }
             $vm = Get-VM -Id $vmId -ErrorAction Stop
             if ([guid]$vm.Id -ne $vmId -or $vm.Name -cne $State.vmName -or $vm.State -cne 'Running' -or
-                $vm.Notes -cne $script:RunnerTag -or [IO.Path]::GetFullPath($vm.Path) -ine (Join-Path $current.instancePath $current.vmName)) { throw 'Booted VM readback differs from the recorded identity/running state.' }
+                $vm.Notes -cne $script:RunnerTag -or [IO.Path]::GetFullPath($vm.Path) -ine ((Get-RunnerSessionPaths $current).vmPath)) { throw 'Booted VM readback differs from the recorded identity/running state.' }
         } finally { Exit-RunnerLock $mutex }
     } finally {
         # Stop-Job is not proof of provider cancellation. Canonical cleanup owns
@@ -393,6 +394,7 @@ function Assert-RunnerJitAdmission($State, $Current, $Expected = $null) {
     # here: evidence obtained before an intervening recovery is obsolete.
     if ($null -eq $Current) { throw 'JIT admission session was removed.' }
     Assert-StateIdentity $Current
+    Assert-RunnerSessionTrustedPaths $Current
     if ($Current.vmName -cne $State.vmName -or [guid]$Current.vmId -ne [guid]$State.vmId -or $Current.instancePath -ine $State.instancePath -or
         $Current.purpose -cne 'job' -or $Current.PSObject.Properties.Name -notcontains 'networkRecovery' -or
         (Test-Path -LiteralPath (Join-Path $script:RunnerRoot 'stop.requested')) -or (Test-RunnerSessionStopRequested $Current) -or
@@ -437,7 +439,7 @@ function Save-RunnerLaunchEvent($State, [string] $Event, [long] $RunnerId = 0, [
             Assert-RunnerJitRegistrationClear
             if ($null -eq $Config) { $Config = Get-RunnerConfig }
             $registration = [pscustomobject][ordered]@{ schema = 1; tag = $script:RunnerTag; phase = 'intent'; operationId = $next.launchId
-                repo = $Config.repo; vmName = $current.vmName; vmId = $current.vmId; instancePath = $current.instancePath
+                repo = $Config.repo; vmName = $current.vmName; vmId = $current.vmId; instancePath = $current.instancePath; layoutVersion = $current.layoutVersion
                 supervisorPid = $current.supervisorPid; supervisorStartUtc = $current.supervisorStartUtc
                 labels = @(Get-RunnerJitLabels $Config $current.resourceLabel); runnerGroupId = $Config.runnerGroupId; runnerId = 0 }
             # Atomic root-level barrier is committed before the POST can run.
@@ -445,6 +447,7 @@ function Save-RunnerLaunchEvent($State, [string] $Event, [long] $RunnerId = 0, [
             Invoke-RunnerTransitionCheckpoint 'jit-registration-intent'
         } elseif ($Event -cin @('registered', 'dispatch')) {
             $registration = Get-RunnerJitRegistration
+            Assert-RunnerJitRegistration $registration # Legacy evidence is retirement only.
             if ($null -eq $registration -or $registration.operationId -cne $next.launchId -or
                 $registration.vmName -cne $current.vmName -or [guid]$registration.vmId -ne [guid]$current.vmId -or
                 $registration.instancePath -ine $current.instancePath -or $registration.supervisorPid -ne $current.supervisorPid -or
@@ -503,9 +506,11 @@ function Wait-DetachedRunner($State, $Config) {
 }
 
 function Get-SshArgs($State) {
+    Assert-RunnerSessionTrustedPaths $State
+    $paths = Get-RunnerSessionPaths $State
     return @('-o', 'BatchMode=yes', '-o', 'ConnectTimeout=5', '-o', 'ServerAliveInterval=15',
         '-o', 'ServerAliveCountMax=2', '-o', 'StrictHostKeyChecking=accept-new',
-        '-o', "UserKnownHostsFile=$($State.instancePath)\known_hosts", '-i', "$($State.instancePath)\id_ed25519")
+        '-o', "UserKnownHostsFile=$($paths.knownHosts)", '-i', $paths.privateKey)
 }
 
 function Get-RunnerGuestReadinessCommand([string] $ProfileLabel) {
@@ -849,7 +854,7 @@ function Invoke-RunnerSession($Config, $PilotAttempt = $null, [string] $ProfileL
         $script:RunnerSessionName = $name
         $instance = Assert-OwnedPath (Join-Path (Join-Path $script:RunnerRoot 'instances') $name)
         $state = [ordered]@{
-            tag = $script:RunnerTag; vmName = $name; instancePath = $instance
+            tag = $script:RunnerTag; vmName = $name; instancePath = $instance; layoutVersion = 2
             purpose = $Purpose; resourceLabel = $profile.label
             createdUtc = [DateTime]::UtcNow.ToString('o'); heartbeatUtc = [DateTime]::UtcNow.ToString('o')
             deadlineUtc = [DateTime]::UtcNow.AddMinutes($Config.maxMinutes).ToString('o')
@@ -876,9 +881,12 @@ function Invoke-RunnerSession($Config, $PilotAttempt = $null, [string] $ProfileL
         $verificationReady = $false
         $sessionFailure = $null
         try {
-            New-Item -ItemType Directory -Path $instance -Force | Out-Null
+            $paths = Get-RunnerSessionPaths ([pscustomobject]$state)
+            New-Item -ItemType Directory -Path $paths.instance -Force | Out-Null
+            Assert-RunnerProtectedPath $paths.instance
+            New-Item -ItemType Directory -Path $paths.vmData -ErrorAction Stop | Out-Null
             $script:RunnerOperationStage = 'disk-copy'
-            $disk = Join-Path $instance 'guest.vhdx'
+            $disk = $paths.guestDisk
             if (-not $preparing -and -not (Test-RunnerSessionDemand $Config $profile.label $PilotAttempt)) { return [pscustomobject]@{ name = $name; id = $null; outcome = 'demand-withdrawn' } }
             if ($image.PSObject.Properties.Name -contains 'differencing' -and $image.differencing) {
                 $script:RunnerOperationStage = 'disk-clone'
@@ -890,8 +898,9 @@ function Invoke-RunnerSession($Config, $PilotAttempt = $null, [string] $ProfileL
             Write-RunnerImageProgress 'complete'
             $script:RunnerImagePreflight = $null
             $script:RunnerOperationStage = 'key-generation'
-            New-RunnerSshKey (Join-Path $instance 'id_ed25519')
-            $key = (Get-Content -LiteralPath (Join-Path $instance 'id_ed25519.pub') -Raw).Trim()
+            New-RunnerSshKey $paths.privateKey
+            Assert-RunnerSessionTrustedPaths ([pscustomobject]$state)
+            $key = (Get-Content -LiteralPath $paths.publicKey -Raw).Trim()
             Assert-SessionAlive $state
             $mutex = Enter-RunnerLock
             try {
@@ -900,12 +909,13 @@ function Invoke-RunnerSession($Config, $PilotAttempt = $null, [string] $ProfileL
                 if ($null -eq $current -or $current.vmName -ne $name) { throw 'Session removed before VM creation.' }
                 $current | Add-Member -NotePropertyName phase -NotePropertyValue 'creating' -Force
                 $current | Add-Member -NotePropertyName expectedBootDisk -NotePropertyValue $disk -Force
-                $current | Add-Member -NotePropertyName expectedVmPath -NotePropertyValue (Join-Path $instance $name) -Force
+                $current | Add-Member -NotePropertyName expectedVmPath -NotePropertyValue $paths.vmPath -Force
                 Write-RunnerJson $script:RunnerStatePath $current
-                $vm = New-RunnerProfileVm $name $disk $instance $profile.label
+                $vm = New-RunnerProfileVm $name $disk $paths.vmData $profile.label
                 $current | Add-Member -NotePropertyName vmId -NotePropertyValue ([guid]$vm.Id).ToString() -Force
                 Assert-StateIdentity $current
                 Write-RunnerJson $script:RunnerStatePath $current
+                Assert-RunnerSessionTrustedPaths $current
                 Set-VM -Name $name -Notes $script:RunnerTag -AutomaticCheckpointsEnabled $false -CheckpointType Disabled -AutomaticStartAction Nothing -AutomaticStopAction TurnOff
                 Assert-RunnerVmLifecycle $name
                 if ((Get-VM -Name $name -ErrorAction Stop).Notes -ne $script:RunnerTag) { throw 'VM ownership tag readback failed.' }
@@ -928,9 +938,10 @@ function Invoke-RunnerSession($Config, $PilotAttempt = $null, [string] $ProfileL
                 $current | Add-Member -NotePropertyName guestMac -NotePropertyValue $guestMac.rawMac -Force
                 Write-RunnerJson $script:RunnerStatePath $current
             } finally { Exit-RunnerLock $mutex }
-            $seed = Join-Path $instance 'cidata.vhdx'
+            $seed = $paths.seedDisk
             New-SeedDisk $seed $key $guestMac.seedMac $Config $profile.label $image.prepared
             Add-VMHardDiskDrive -VMName $name -Path $seed
+            Assert-RunnerSessionTrustedPaths $current
             $script:RunnerOperationStage = 'network-isolation'
             $observation = Get-RunnerNetworkObservation # Probe IO outside mutex.
             $mutex = Enter-RunnerLock
@@ -971,7 +982,7 @@ function Invoke-RunnerSession($Config, $PilotAttempt = $null, [string] $ProfileL
                     $verified.imageCandidate.id -cne $ImageCandidate.id -or $verified.imageCandidate.diskHash -cne $candidateReceipt.diskHash) { throw 'Image verifier session binding changed.' }
                 $verifiedVm = Get-VM -Id ([guid]$verified.vmId) -ErrorAction Stop
                 if ($verifiedVm.Name -cne $verified.vmName -or $verifiedVm.State -cne 'Running' -or $verifiedVm.Notes -cne $script:RunnerTag -or
-                    [IO.Path]::GetFullPath($verifiedVm.Path) -ine (Join-Path $instance $verified.vmName)) { throw 'Image verifier VM identity changed after readiness.' }
+                    [IO.Path]::GetFullPath($verifiedVm.Path) -ine ((Get-RunnerSessionPaths $verified).vmPath)) { throw 'Image verifier VM identity changed after readiness.' }
                 # The same fixed probe runs in each of two successive children.
                 # Reusing a written disk, or leaking writes into the parent, fails.
                 $markerCommand = 'sudo test ! -e /var/lib/it-inventory-clone-probe && sudo touch /var/lib/it-inventory-clone-probe && sudo test -f /var/lib/it-inventory-clone-probe'
@@ -984,7 +995,7 @@ function Invoke-RunnerSession($Config, $PilotAttempt = $null, [string] $ProfileL
                     purpose = 'verify-image'; diskType = 'Differencing'; parentLease = 'read-only-same-handle'; parentIdentity = $image.lease.identity; markerProof = 'absent-then-written'
                     preflightSeconds = $preflightSeconds; childCreationSeconds = $childWatch.Elapsed.TotalSeconds; sessionSeconds = $sessionWatch.Elapsed.TotalSeconds; vmName = $verified.vmName; vmId = $verified.vmId; guestMac = $verified.guestMac
                     networkFingerprint = $verified.networkFingerprint
-                    sshPublicKeyHash = (Get-FileHash -LiteralPath (Join-Path $instance 'id_ed25519.pub') -Algorithm SHA256).Hash
+                    sshPublicKeyHash = (Get-FileHash -LiteralPath $paths.publicKey -Algorithm SHA256).Hash
                     readiness = 'cloud-init-and-runner-prerequisites'; guestMtu = $guestMtu; readyUtc = [DateTime]::UtcNow.ToString('o'); readinessSeconds = $readinessWatch.Elapsed.TotalSeconds }
             }
             if ($preparing) {
@@ -1329,7 +1340,7 @@ function Invoke-RunnerJitReconciliation($Config) {
             # Known registration/handoff/DELETE identities retire only after
             # authoritative local abandonment and complete remote ID/name absence.
             $mutex = Enter-RunnerLock
-            try { $record = Assert-RunnerJitReconciliation $record $Config; $record.phase = 'complete'; Write-RunnerJitRegistration $record }
+            try { $record = Assert-RunnerJitReconciliation $record $Config; $record.phase = 'complete'; Write-RunnerJitRegistration $record -AllowLegacy }
             finally { Exit-RunnerLock $mutex }
             Write-Host 'JIT registration retirement completed.'
             return $true
@@ -1339,7 +1350,7 @@ function Invoke-RunnerJitReconciliation($Config) {
         try {
             $record = Assert-RunnerJitReconciliation $record $Config
             $record.runnerId = [long]$runner.id; $record.phase = 'removal-intent'
-            Write-RunnerJitRegistration $record
+            Write-RunnerJitRegistration $record -AllowLegacy
         } finally { Exit-RunnerLock $mutex }
         # Local proof/provider work may be slow. Refresh remote eligibility for
         # the persisted exact ID immediately before final local admission.
@@ -1356,7 +1367,7 @@ function Invoke-RunnerJitReconciliation($Config) {
         $inventory = @(Get-RunnerJitInventory $record $token); $stage = 'evidence'
         if (@($inventory | Where-Object { $_.id -eq $record.runnerId -or $_.name -ceq $record.vmName }).Count -ne 0) { throw 'JIT retirement absence is not authoritative.' }
         $mutex = Enter-RunnerLock
-        try { $record = Assert-RunnerJitReconciliation $record $Config; $record.phase = 'complete'; Write-RunnerJitRegistration $record }
+        try { $record = Assert-RunnerJitReconciliation $record $Config; $record.phase = 'complete'; Write-RunnerJitRegistration $record -AllowLegacy }
         finally { Exit-RunnerLock $mutex }
         Write-Host 'JIT registration retirement completed.'
         return $true
@@ -1468,8 +1479,8 @@ function Show-RunnerCapacityStatus($Config) {
 
 function Show-RunnerSessionResources($State, $Vm) {
     try {
-        Assert-StateIdentity $State
-        $expectedPath = Assert-OwnedPath (Join-Path $State.instancePath $State.vmName)
+        Assert-StateIdentity $State -AllowLegacy
+        $expectedPath = (Get-RunnerSessionPaths $State -AllowLegacy).vmPath
         if ($null -eq $Vm -or $Vm.Name -cne $State.vmName -or $Vm.Notes -cne $script:RunnerTag -or
             -not [string]::Equals([IO.Path]::GetFullPath($Vm.Path), $expectedPath, [StringComparison]::OrdinalIgnoreCase)) { throw 'VM ownership readback failed.' }
         $label = if ($State.PSObject.Properties.Name -contains 'resourceLabel') { $State.resourceLabel } else { 'it-inventory-ephemeral' }
@@ -1827,7 +1838,7 @@ function Invoke-Watchdog {
     try {
         $state = Get-RunnerState
         if ($null -ne $state) {
-            Assert-StateIdentity $state
+            Assert-StateIdentity $state -AllowLegacy
             $deadline = [DateTime]::Parse($state.deadlineUtc).ToUniversalTime()
             $ownerAlive = Test-RunnerProcessIdentity $state.supervisorPid $state.supervisorStartUtc
             # Readiness becomes false during recovery; an established guardian
@@ -1948,7 +1959,7 @@ try { switch ($Action) {
         $supervisor = Get-ScheduledTask -TaskName $script:RunnerSupervisorTask -ErrorAction SilentlyContinue
         if ($null -eq $state) { Write-Host "Supervisor: $($supervisor.State). Idle. Activation: $($config.activation)." }
         else {
-            Assert-StateIdentity $state
+            Assert-StateIdentity $state -AllowLegacy
             $vm = Get-VM -Name $state.vmName -ErrorAction SilentlyContinue
             Write-Host "VM: $($state.vmName); state: $(if ($vm) { $vm.State } else { 'missing' }); deadline: $($state.deadlineUtc); heartbeat: $($state.heartbeatUtc)."
             Show-RunnerSessionResources $state $vm

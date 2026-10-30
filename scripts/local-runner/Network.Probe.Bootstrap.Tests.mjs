@@ -134,13 +134,13 @@ $script:RunnerRoot=${literal(runnerRoot)}
 $script:ownedCalls=0; $script:nativeCalls=0; $script:stopCalls=0
 function Assert-OwnedPath([string] $Path) {
     $script:ownedCalls++
-    if ($script:mode -ceq 'instance-containment' -or ($script:mode -ceq 'instance-acl' -and $script:ownedCalls -eq 2) -or ($script:mode -ceq 'result-path' -and $script:ownedCalls -eq 3)) { throw 'PRIVATE_CONTAINMENT' }
+    if ($script:mode -ceq 'instance-containment' -or ($script:mode -ceq 'instance-acl' -and @((Get-PSCallStack) | Where-Object FunctionName -CEQ 'Assert-RunnerProtectedPath').Count -gt 0) -or ($script:mode -ceq 'result-path' -and [IO.Path]::GetFileName($Path) -like 'probe-*')) { throw 'PRIVATE_CONTAINMENT' }
     $full=[IO.Path]::GetFullPath($Path)
     if (-not $full.StartsWith(($script:RunnerRoot+'\'),[StringComparison]::OrdinalIgnoreCase)) { throw 'PRIVATE_ESCAPE' }
     return $full
 }
 foreach ($node in ([Management.Automation.Language.Parser]::ParseFile(${literal(join(sourceRoot, 'Common.ps1'))},[ref]$null,[ref]$null)).FindAll({param($n)$n -is [Management.Automation.Language.FunctionDefinitionAst]},$false)) {
-    if ($node.Name -cin @('Assert-RunnerProtectedPath','Get-RunnerProbeAclFailureExitCode')) { . ([scriptblock]::Create($node.Extent.Text)) }
+    if ($node.Name -cin @('Get-RunnerSessionPaths','Assert-RunnerSessionTrustedPaths','Assert-RunnerProtectedPath','Get-RunnerProbeAclFailureExitCode')) { . ([scriptblock]::Create($node.Extent.Text)) }
 }
 if ($script:mode -ceq 'acl-classifier-fallback') { function Get-RunnerProbeAclFailureExitCode { throw 'PRIVATE_CLASSIFIER' } }
 function Get-Acl([string] $LiteralPath) {
@@ -219,6 +219,8 @@ function Write-RunnerJson([string] $Path,$Value) {
           workerPath,
           '-InstancePath',
           instance,
+          '-LayoutVersion',
+          '2',
           '-ProbeId',
           'b'.repeat(32),
           '-Generation',

@@ -109,8 +109,9 @@ function Get-RunnerNetworkObservation {
 }
 
 function Get-RunnerRecoveryClaimHash($State) {
+    [void](Get-RunnerSessionPaths $State)
     $claim = [ordered]@{}
-    foreach ($name in @('tag', 'vmName', 'vmId', 'instancePath', 'purpose', 'resourceLabel', 'claimMode', 'pilotClaim', 'createdUtc', 'deadlineUtc', 'supervisorPid', 'supervisorStartUtc', 'guardianPid', 'guardianStartUtc', 'guestMac')) {
+    foreach ($name in @('tag', 'vmName', 'vmId', 'instancePath', 'layoutVersion', 'purpose', 'resourceLabel', 'claimMode', 'pilotClaim', 'createdUtc', 'deadlineUtc', 'supervisorPid', 'supervisorStartUtc', 'guardianPid', 'guardianStartUtc', 'guestMac')) {
         if ($State.PSObject.Properties.Name -contains $name) { $claim[$name] = $State.$name }
     }
     return Get-RunnerRecoveryHash ($claim | ConvertTo-Json -Depth 20 -Compress)
@@ -119,7 +120,7 @@ function Get-RunnerRecoveryClaimHash($State) {
 function New-RunnerNetworkBinding($State, $Vm, $Adapter, $Switch) {
     Assert-StateIdentity $State
     if ([guid]$Vm.Id -ne [guid]$State.vmId -or $Vm.Name -cne $State.vmName -or $Vm.Notes -cne $State.tag -or
-        [IO.Path]::GetFullPath($Vm.Path) -ine (Join-Path $State.instancePath $State.vmName)) { throw 'Network recovery VM ownership differs.' }
+        [IO.Path]::GetFullPath($Vm.Path) -ine ((Get-RunnerSessionPaths $State).vmPath)) { throw 'Network recovery VM ownership differs.' }
     if ([string]$State.guestMac -cnotmatch '^02[0-9a-fA-F]{10}$' -or [string]::IsNullOrEmpty([string]$Adapter.Id) -or [guid]$Adapter.VMId -ne [guid]$State.vmId -or $Adapter.VMName -cne $State.vmName -or
         $Adapter.DynamicMacAddressEnabled -ne $false -or [string]$Adapter.MacAddress -ine $State.guestMac -or
         $Switch.Name -cne $script:RunnerSwitch -or [string]$Switch.SwitchType -cne 'Internal' -or [guid]$Switch.Id -eq [guid]::Empty -or [guid]$Adapter.SwitchId -ne [guid]$Switch.Id) { throw 'Network recovery adapter/switch/MAC ownership differs.' }
@@ -134,7 +135,7 @@ function Assert-RunnerNetworkBinding($State, $Binding, $Vm, $Adapters, $Switch, 
     Assert-StateIdentity $State
     if ((Get-RunnerRecoveryClaimHash $State) -cne $Binding.claimHash -or [guid]$State.vmId -ne [guid]$Binding.vmId -or $State.vmName -cne $Binding.vmName) { throw 'Network recovery session/claim/process identity changed.' }
     if (-not (Test-RunnerProcessIdentity $State.supervisorPid $State.supervisorStartUtc) -or -not (Test-RunnerProcessIdentity $State.guardianPid $State.guardianStartUtc)) { throw 'Network recovery owner/guardian is dead.' }
-    if ([guid]$Vm.Id -ne [guid]$Binding.vmId -or $Vm.Name -cne $Binding.vmName -or $Vm.Notes -cne $State.tag -or [IO.Path]::GetFullPath($Vm.Path) -ine (Join-Path $State.instancePath $State.vmName)) { throw 'Network recovery VM was replaced.' }
+    if ([guid]$Vm.Id -ne [guid]$Binding.vmId -or $Vm.Name -cne $Binding.vmName -or $Vm.Notes -cne $State.tag -or [IO.Path]::GetFullPath($Vm.Path) -ine ((Get-RunnerSessionPaths $State).vmPath)) { throw 'Network recovery VM was replaced.' }
     if (@($Adapters).Count -ne 1) { throw 'Network recovery requires exactly one owned adapter.' }
     $adapter = @($Adapters)[0]
     if ([string]$adapter.Id -cne $Binding.adapterId -or [guid]$adapter.VMId -ne [guid]$Binding.vmId -or $adapter.VMName -cne $Binding.vmName -or
@@ -537,10 +538,12 @@ function Start-RunnerRecoveryProbe($State, $Config, [long] $Generation) {
         (Get-RunnerRecoveryExpiry $current.networkRecovery (Get-RunnerRecoveryNow)) -or
         (Test-RunnerSessionStopRequested $State)) { throw 'Recovery probe admission was cancelled.' }
     $probeId = [guid]::NewGuid().ToString('N')
-    $resultPath = Assert-OwnedPath (Join-Path $State.instancePath ("probe-$probeId.json"))
+    Assert-RunnerSessionTrustedPaths $State
+    $paths = Get-RunnerSessionPaths $State
+    $resultPath = Assert-OwnedPath (Join-Path $paths.probeRoot ("probe-$probeId.json"))
     $executable = Join-Path $PSHOME 'powershell.exe'
     $arguments = @('-NoProfile', '-NonInteractive', '-File', (Join-Path $PSScriptRoot 'Network.Recovery.Probe.ps1'),
-        '-InstancePath', $State.instancePath, '-ProbeId', $probeId, '-Generation', [string]$Generation)
+        '-InstancePath', $paths.instance, '-LayoutVersion', [string]$paths.layoutVersion, '-ProbeId', $probeId, '-Generation', [string]$Generation)
     # Fixed worker is assigned while suspended before it can spawn SSH. The sole
     # noninherited guardian Job handle owns its complete native descendant tree.
     $job = New-RunnerProbeProcess $executable (($arguments | ForEach-Object { ConvertTo-NativeArgument $_ }) -join ' ')

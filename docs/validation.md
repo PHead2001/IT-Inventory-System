@@ -628,7 +628,27 @@ For a focused evidence run in PowerShell, set `$env:E2E_CAPTURE_EVIDENCE='1'`, r
 
 The E2E reporter writes sanitized `test-results/e2e-performance.json` and a compact log summary: checkout SHA, browser-suite elapsed time, discovered/executed/passed/skipped/flaky counts, configured workers and observed peak concurrent tests. Linux samples report actual guest memory, minimum available memory, peak swap use, sampled CPU utilization and kernel OOM-kill delta; missing or non-Linux metrics are explicit. The reporter observes the browser phase and does not measure build time, guarantee that brief memory peaks were sampled, or alter test outcomes. Acceptance requires a complete real Linux 6 GiB/static guest run of every gate/test, a meaningful duration reduction against the recorded main baseline (120 tests; the candidate adds Checkpoint 2 coverage), and inspection of CPU/memory/OOM metrics. A same-candidate serial/parallel comparison with a clean database provides stronger isolation/performance evidence. Configuration, discovery and Windows passes alone do not establish Linux capacity or speed.
 
-Offline PowerShell contracts cover profile capacity boundaries, strict label classification, queue skipping, exact-profile VM/JIT propagation/readback, capacity loss and legacy recovery. `powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File scripts/local-runner/Contract.Tests.ps1` also exercises profile-specific cloud-config/readiness, current-metadata archive reuse, hash/ACL/reparse refusal, atomic publication and bounded retention, plus immediate successful-job pickup and retained idle/error backoff. Light/mid workflows use Bash/Node and remote Supabase CLI operations; Docker readiness remains required for heavy/legacy/pilot guests. Install the reviewed runtime before exercising its changed routing; source contracts do not establish installed cutover, measured startup improvement or real job results.
+Offline PowerShell contracts cover profile capacity boundaries, strict label classification, queue skipping, exact-profile VM/JIT propagation/readback, capacity loss and profile-field compatibility. `powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File scripts/local-runner/Contract.Tests.ps1` also exercises profile-specific cloud-config/readiness, current-metadata archive reuse, hash/ACL/reparse refusal, atomic publication and bounded retention, plus immediate successful-job pickup and retained idle/error backoff. Light/mid workflows use Bash/Node and remote Supabase CLI operations; Docker readiness remains required for heavy/legacy/pilot guests. Install the reviewed runtime before exercising its changed routing; source contracts do not establish installed cutover, measured startup improvement or real job results.
+
+The contract entry point prepares standard Windows PowerShell module lookup for
+its own process, so this command can also be launched from PowerShell 7 without a
+manual environment step. It still runs in Windows PowerShell 5.1 and requires the
+OS capabilities exercised by the contracts, including named mutexes. The bootstrap
+does not change user, machine or global settings, or replace real hashing checks.
+
+Instance layout validation uses the same contract command. New state requires
+integer `layoutVersion: 2` and identity-derived paths: the strict instance root
+holds SSH keys, `known_hosts`, probes and controls, while only its `vm-data` child
+holds `guest.vhdx`, `cidata.vhdx` and the nested Hyper-V configuration directory.
+Missing-version state is recognized at exact legacy paths for Status and guarded
+cleanup only; malformed or unknown present versions refuse admission. Legacy
+layout compatibility does not authorize resume, boot, JIT registration, recovery,
+preparation or resource admission. Path regressions retain these refusals and
+strict-root checks across the affected entry points. Powered-off native VHD-backed
+New-VM probes established broad native access entries on the disk/configuration
+parent, with strict root/sentinel ACLs preserved by the separated layout and
+verified cleanup/pickup restoration. That probe does not certify the updated
+installed SYSTEM runtime, recovery or CI, network-switch behavior or reboot.
 
 Recovery admission regressions retain the two-second original capture lease and
 120-second original outage deadline. They cover removal of the duplicate handoff

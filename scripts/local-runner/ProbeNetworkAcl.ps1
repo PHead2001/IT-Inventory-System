@@ -32,6 +32,7 @@ foreach ($name in @('Set-IsolatedAdapter', 'Get-RuleFingerprint', 'Assert-Adapte
 $script:AclProbeName = "$($script:RunnerPrefix)$([guid]::NewGuid().ToString('N'))"
 $instance = Assert-OwnedPath (Join-Path (Join-Path $script:RunnerRoot 'instances') $script:AclProbeName)
 if (Test-Path -LiteralPath $instance) { throw 'Fresh diagnostic path already exists; refusing adoption.' }
+$paths = Get-RunnerSessionPaths ([pscustomobject]@{ vmName = $script:AclProbeName; instancePath = $instance; layoutVersion = 2 })
 $probeTag = "$($script:RunnerTag)-acl-probe"
 $vmId = $null
 $phase = 'creating'
@@ -73,17 +74,20 @@ function Get-VMNetworkAdapterExtendedAcl {
 
 try {
     New-Item -ItemType Directory -Path $instance -ErrorAction Stop | Out-Null
+    Assert-RunnerProtectedPath $instance
+    New-Item -ItemType Directory -Path $paths.vmData -ErrorAction Stop | Out-Null
     Write-RunnerJson (Join-Path $instance 'probe-identity.json') ([ordered]@{
-        tag = $probeTag; vmName = $script:AclProbeName; instancePath = $instance
-        expectedVmPath = Join-Path $instance $script:AclProbeName; phase = $phase
+        tag = $probeTag; vmName = $script:AclProbeName; instancePath = $instance; layoutVersion = 2
+        expectedVmPath = $paths.vmPath; phase = $phase
     })
-    $vm = New-VM -Name $script:AclProbeName -Generation 2 -NoVHD -Path $instance -MemoryStartupBytes 512MB -SwitchName $script:RunnerSwitch -ErrorAction Stop
+    $vm = New-VM -Name $script:AclProbeName -Generation 2 -NoVHD -Path $paths.vmData -MemoryStartupBytes 512MB -SwitchName $script:RunnerSwitch -ErrorAction Stop
     $vmId = $vm.Id
     $report.vmId = [string]$vmId
+    Assert-RunnerProtectedPath $paths.instance
     $phase = 'created'
     Write-RunnerJson (Join-Path $instance 'probe-identity.json') ([ordered]@{
-        tag = $probeTag; vmName = $script:AclProbeName; vmId = [string]$vmId; instancePath = $instance
-        expectedVmPath = Join-Path $instance $script:AclProbeName; phase = $phase
+        tag = $probeTag; vmName = $script:AclProbeName; vmId = [string]$vmId; instancePath = $instance; layoutVersion = 2
+        expectedVmPath = $paths.vmPath; phase = $phase
     })
     Set-VM -VM $vm -Notes $probeTag -AutomaticStartAction Nothing -AutomaticStopAction TurnOff -AutomaticCheckpointsEnabled $false -CheckpointType Disabled -ErrorAction Stop
     $phase = 'owned'
@@ -105,7 +109,7 @@ try {
     try {
         if ($null -ne $vmId) {
             $owned = Get-VM -Id $vmId -ErrorAction Stop
-            $exactPath = Assert-OwnedPath (Join-Path $instance $script:AclProbeName)
+            $exactPath = Assert-OwnedPath ($paths.vmPath)
             $actualPath = [IO.Path]::GetFullPath($owned.Path).TrimEnd('\')
             $tagMatches = $owned.Notes -eq $probeTag -or ($phase -eq 'created' -and [string]::IsNullOrEmpty($owned.Notes))
             if ($owned.Id -ne $vmId -or $owned.Name -cne $script:AclProbeName -or $owned.State -ne 'Off' -or

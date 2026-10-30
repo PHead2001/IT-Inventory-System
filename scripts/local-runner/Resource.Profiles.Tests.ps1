@@ -120,9 +120,10 @@ foreach ($case in @(@{ free = 4GB; id = 3 }, @{ free = 6GB; id = 2 }, @{ free = 
 if ($null -ne (Get-QueuedRunnerJob $config 'dummy' (4GB - 1KB))) { throw 'Queue admitted insufficient host headroom.' }
 $script:jobs = @((New-Job 4 'it-inventory-ephemeral'), (New-Job 3 'it-inventory-light'))
 if ((Get-QueuedRunnerJob $config 'dummy' 4GB).id -ne 3 -or (Get-QueuedRunnerJob $config 'dummy' 10GB).id -ne 4) { throw 'Legacy generic capacity changed.' }
-    $legacy = [pscustomobject]@{ tag = $script:RunnerTag; vmName = ('ITIR-' + ('c' * 32)); instancePath = (Join-Path $base ('ITIR-' + ('c' * 32))) }
-    Assert-StateIdentity $legacy # Recovery must not require newly introduced profile fields.
-    Complete-RunnerPilotClaim $legacy
+    $legacy = [pscustomobject]@{ tag = $script:RunnerTag; vmName = ('ITIR-' + ('c' * 32)); instancePath = (Join-Path (Join-Path $base 'instances') ('ITIR-' + ('c' * 32))) }
+    Assert-Rejected { Assert-StateIdentity $legacy } 'legacy state admission'
+    Assert-StateIdentity $legacy -AllowLegacy # Status/cleanup need no profile fields.
+    Complete-RunnerPilotClaim $legacy -AllowLegacy
     function Assert-RunnerTransitionClear {}
     function Get-RunnerConfig { return $config }
     function Get-RunnerState { return $null }

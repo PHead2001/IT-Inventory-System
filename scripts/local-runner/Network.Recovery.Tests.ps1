@@ -141,13 +141,13 @@ function New-Fixture {
     $script:locked = $false; $script:alive = $true; $script:fail = ''; $script:effects = @(); $script:cleanups = 0; $script:addCount = 0; $script:removeCount = 0; $script:aclQueries = 0; $script:rules = @(); $script:queriedRules = @()
     $script:captures = @(New-Capture); $script:readIndex = -1
     $script:state = [pscustomobject]@{
-        tag = $script:RunnerTag; vmName = 'ITIR-' + ('a' * 32); vmId = '00000000-0000-0000-0000-000000000001'
-        instancePath = Join-Path $root ('ITIR-' + ('a' * 32)); purpose = 'job'; resourceLabel = 'it-inventory-heavy'; claimMode = 'active'
+        layoutVersion = 2; tag = $script:RunnerTag; vmName = 'ITIR-' + ('a' * 32); vmId = '00000000-0000-0000-0000-000000000001'
+        instancePath = Join-Path (Join-Path $root 'instances') ('ITIR-' + ('a' * 32)); purpose = 'job'; resourceLabel = 'it-inventory-heavy'; claimMode = 'active'
         createdUtc = $script:now.ToString('o'); deadlineUtc = $script:now.AddMinutes(10).ToString('o')
         supervisorPid = 42; supervisorStartUtc = $script:now.ToString('o'); guardianPid = $PID; guardianStartUtc = $script:now.ToString('o'); guestMac = '02AABBCCDDEE'
         networkFingerprint = ('a' * 64)
     }
-    $script:vm = [pscustomobject]@{ Id = [guid]$script:state.vmId; Name = $script:state.vmName; Notes = $script:RunnerTag; Path = Join-Path $script:state.instancePath $script:state.vmName; State = 'Running' }
+    $script:vm = [pscustomobject]@{ Id = [guid]$script:state.vmId; Name = $script:state.vmName; Notes = $script:RunnerTag; Path = (Get-RunnerSessionPaths $script:state).vmPath; State = 'Running' }
     $script:switch = [pscustomobject]@{ Id = [guid]'00000000-0000-0000-0000-000000000002'; Name = $script:RunnerSwitch; SwitchType = 'Internal' }
     $script:adapter = [pscustomobject]@{ Id = 'fixture-adapter'; VMId = $script:vm.Id; VMName = $script:vm.Name; DynamicMacAddressEnabled = $false; MacAddress = $script:state.guestMac; SwitchName = $script:switch.Name; SwitchId = $script:switch.Id }
     $script:binding = New-RunnerNetworkBinding $script:state $script:vm $script:adapter $script:switch

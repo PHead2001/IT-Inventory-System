@@ -264,7 +264,7 @@ function Write-RunnerCleanupObservation([string] $Origin, [string] $Reason, $Sta
         if ([Text.Encoding]::UTF8.GetByteCount((ConvertTo-Json -InputObject $record -Depth 4 -Compress)) -gt 2048) { throw 'Diagnostic bound.' }
         Assert-SecureRoot
         $path = Assert-OwnedPath (Join-Path $script:RunnerRoot 'failure-cleanup.json')
-        Assert-StateIdentity $State
+        Assert-StateIdentity $State -AllowLegacy
         if ($State.vmName -cnotmatch '^ITIR-[0-9a-f]{32}$') { throw 'Invalid diagnostic instance.' }
         $phase = if ($State.PSObject.Properties.Name -notcontains 'phase') { 'initial' } elseif ($State.phase -cin @('creating', 'owned', 'sealed-off')) { $State.phase } else { throw 'Invalid diagnostic state phase.' }
         $vmId = $null
@@ -1055,7 +1055,7 @@ function Test-RunnerSessionStopRequested($State, $Observation = $null) {
     $mutex = Enter-RunnerLock
     try {
         if ($null -ne $Observation) { $Observation.Value = 'unavailable' }
-        if (Test-Path -LiteralPath (Join-Path $State.instancePath 'stop.requested')) {
+        if (Test-Path -LiteralPath ((Get-RunnerSessionPaths $State).stopRequest)) {
             if ($null -ne $Observation) { $Observation.Value = 'instance-marker' }; return $true
         }
         if (-not (Test-Path -LiteralPath (Join-Path $script:RunnerRoot 'stop.requested'))) {
@@ -1073,7 +1073,7 @@ function Test-RunnerSessionStopRequested($State, $Observation = $null) {
         if ($current.PSObject.Properties.Name -notcontains 'purpose' -or $current.purpose -cnotin @('prepare', 'verify-image')) {
             if ($null -ne $Observation) { $Observation.Value = 'purpose-ineligible' }; return $true
         }
-        $requested = Test-Path -LiteralPath (Join-Path $current.instancePath 'stop.requested')
+        $requested = Test-Path -LiteralPath ((Get-RunnerSessionPaths $current).stopRequest)
         if ($null -ne $Observation) { $Observation.Value = if ($requested) { 'instance-marker' } else { 'none' } }
         return $requested
     } finally { Exit-RunnerLock $mutex }
@@ -1160,8 +1160,9 @@ function Assert-RunnerControllerOpen {
 
 # This root-level, nonsecret barrier survives deletion of an ephemeral session.
 # It records only the sole registration operation; it is not a job queue.
-function Assert-RunnerJitRegistration($Record) {
-    $fields = @('schema', 'tag', 'phase', 'operationId', 'repo', 'vmName', 'vmId', 'instancePath', 'supervisorPid', 'supervisorStartUtc', 'labels', 'runnerGroupId', 'runnerId')
+function Assert-RunnerJitRegistration($Record, [switch] $AllowLegacy) {
+    $fields = @('schema', 'tag', 'phase', 'operationId', 'repo', 'vmName', 'vmId', 'instancePath', 'layoutVersion', 'supervisorPid', 'supervisorStartUtc', 'labels', 'runnerGroupId', 'runnerId')
+    if ($null -ne $Record -and $Record.PSObject.Properties.Name -notcontains 'layoutVersion' -and $AllowLegacy) { $fields = @($fields | Where-Object { $_ -cne 'layoutVersion' }) }
     if ($null -eq $Record -or @($Record.PSObject.Properties.Name).Count -ne $fields.Count -or
         @($fields | Where-Object { $Record.PSObject.Properties.Name -notcontains $_ }).Count -ne 0 -or
         $Record.schema -ne 1 -or $Record.tag -cne $script:RunnerTag -or
@@ -1170,7 +1171,7 @@ function Assert-RunnerJitRegistration($Record) {
         [string]$Record.supervisorPid -cnotmatch '^[1-9][0-9]*$' -or [string]$Record.runnerGroupId -cnotmatch '^[1-9][0-9]*$' -or
         [string]$Record.runnerId -cnotmatch '^(0|[1-9][0-9]*)$' -or
         ($Record.phase -ceq 'intent' -and $Record.runnerId -ne 0) -or ($Record.phase -cne 'intent' -and $Record.runnerId -le 0)) { throw 'JIT registration barrier identity is invalid.' }
-    Assert-StateIdentity $Record
+    Assert-StateIdentity $Record -AllowLegacy:$AllowLegacy
     [void][DateTime]::Parse($Record.supervisorStartUtc).ToUniversalTime()
     $labels = @($Record.labels)
     if ($labels.Count -ne 4 -or @($labels | Select-Object -Unique).Count -ne 4 -or
@@ -1183,7 +1184,7 @@ function Get-RunnerJitRegistration {
     if (-not (Test-Path -LiteralPath $path)) { return $null }
     Assert-RunnerProtectedPath $path
     $record = Read-RunnerJson $path
-    Assert-RunnerJitRegistration $record
+    Assert-RunnerJitRegistration $record -AllowLegacy
     return $record
 }
 
@@ -1194,8 +1195,9 @@ function Assert-RunnerJitRegistrationClear {
     }
 }
 
-function Write-RunnerJitRegistration($Record) {
-    Assert-RunnerJitRegistration $Record
+function Write-RunnerJitRegistration($Record, [switch] $AllowLegacy) {
+    if ($AllowLegacy -and $Record.PSObject.Properties.Name -notcontains 'layoutVersion' -and $Record.phase -cnotin @('removal-intent','complete')) { throw 'Legacy JIT evidence is retirement only.' }
+    Assert-RunnerJitRegistration $Record -AllowLegacy:$AllowLegacy
     $path = Assert-OwnedPath (Join-Path $script:RunnerRoot 'jit-registration.json')
     Write-RunnerJson $path $Record
     $actual = Get-RunnerJitRegistration
@@ -1286,9 +1288,10 @@ function Invoke-RunnerTransitionCheckpoint([string] $Name) {}
 
 # A committed initial state is the durable claim. Complete its exact receipt
 # before any recovery can erase that state, including watchdog/Stop cleanup.
-function Complete-RunnerPilotClaim($State) {
+function Complete-RunnerPilotClaim($State, [switch] $AllowLegacy) {
+    Assert-StateIdentity $State -AllowLegacy:$AllowLegacy
     if ($State.PSObject.Properties.Name -contains 'purpose' -and $State.purpose -ceq 'prepare') {
-        Assert-StateIdentity $State
+        Assert-StateIdentity $State -AllowLegacy:$AllowLegacy
         return
     }
     if ($State.PSObject.Properties.Name -contains 'claimMode' -and
@@ -1298,7 +1301,7 @@ function Complete-RunnerPilotClaim($State) {
         throw 'Recorded session claim mode/evidence is invalid; state must be retained.'
     }
     if ($State.PSObject.Properties.Name -notcontains 'pilotClaim') { return }
-    Assert-StateIdentity $State
+    Assert-StateIdentity $State -AllowLegacy:$AllowLegacy
     $attempt = Get-RunnerEvidenceValue $State.pilotClaim
     if ($null -eq $attempt -or $attempt.tag -cne $script:RunnerTag -or $attempt.sessionName -cne $State.vmName -or
         $attempt.jobId -le 0 -or $attempt.runId -le 0 -or $attempt.workflowId -le 0 -or $attempt.runAttempt -le 0 -or
@@ -1311,7 +1314,40 @@ function Complete-RunnerPilotClaim($State) {
     } else { Write-RunnerEvidence $path $State.pilotClaim }
 }
 
-function Assert-StateIdentity($State) {
+function Get-RunnerSessionPaths($State, [switch] $AllowLegacy) {
+    # State carries identity, never authority to select a storage location.
+    if ($State -is [Collections.IDictionary]) { $State = [pscustomobject]$State }
+    if ($null -eq $State -or $State.vmName -isnot [string] -or $State.vmName -cnotmatch '^ITIR-[0-9a-f]{32}$' -or
+        $State.instancePath -isnot [string]) { throw 'Session storage identity is invalid.' }
+    $legacy = $State.PSObject.Properties.Name -notcontains 'layoutVersion'
+    if ($legacy) { if (-not $AllowLegacy) { throw 'Legacy session storage is cleanup/status only.' } }
+    elseif ($State.layoutVersion -isnot [int] -or $State.layoutVersion -ne 2) { throw 'Session storage version is invalid.' }
+    $instance = Assert-OwnedPath (Join-Path (Join-Path $script:RunnerRoot 'instances') $State.vmName)
+    if ($State.instancePath -ine $instance) { throw 'Session instance differs from its canonical location.' }
+    $data = if ($legacy) { $instance } else { Assert-OwnedPath (Join-Path $instance 'vm-data') }
+    $paths = [ordered]@{ layoutVersion = $(if ($legacy) { 1 } else { 2 }); legacy = [bool]$legacy; instance = $instance; vmData = $data
+        vmPath = Join-Path $data $State.vmName; guestDisk = Join-Path $data 'guest.vhdx'; seedDisk = Join-Path $data 'cidata.vhdx'
+        privateKey = Join-Path $instance 'id_ed25519'; publicKey = Join-Path $instance 'id_ed25519.pub'
+        knownHosts = Join-Path $instance 'known_hosts'; stopRequest = Join-Path $instance 'stop.requested'; probeRoot = $instance }
+    foreach ($name in @('vmPath','guestDisk','seedDisk','privateKey','publicKey','knownHosts','stopRequest')) { $paths[$name] = Assert-OwnedPath $paths[$name] }
+    foreach ($pair in @(@('expectedVmPath','vmPath'), @('expectedBootDisk','guestDisk'))) {
+        if ($State.PSObject.Properties.Name -contains $pair[0] -and
+            ($State.($pair[0]) -isnot [string] -or $State.($pair[0]) -ine $paths[$pair[1]])) { throw 'Recorded session storage differs from its canonical layout.' }
+    }
+    return [pscustomobject]$paths
+}
+
+function Assert-RunnerSessionTrustedPaths($State) {
+    $paths = Get-RunnerSessionPaths $State
+    Assert-RunnerProtectedPath $paths.instance
+    foreach ($path in @($paths.privateKey, $paths.publicKey, $paths.knownHosts, $paths.stopRequest)) {
+        if (Test-Path -LiteralPath $path) { Assert-RunnerProtectedPath $path }
+    }
+}
+
+function Assert-StateIdentity($State, [switch] $AllowLegacy) {
+    if ($State -is [Collections.IDictionary]) { $State = [pscustomobject]$State }
+    [void](Get-RunnerSessionPaths $State -AllowLegacy:$AllowLegacy)
     if ($State.PSObject.Properties.Name -contains 'purpose') {
         if ($State.purpose -cnotin @('job', 'prepare', 'verify-image') -or
             ($State.purpose -cne 'job' -and ($State.PSObject.Properties.Name -contains 'claimMode' -or $State.PSObject.Properties.Name -contains 'pilotClaim'))) {
@@ -1335,10 +1371,6 @@ function Assert-StateIdentity($State) {
     if ($State.PSObject.Properties.Name -contains 'vmId') {
         if ([string]$State.vmId -cnotmatch '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$' -or
             [guid]$State.vmId -eq [guid]::Empty) { throw 'Recorded VM GUID is invalid; runner instance files and state are retained.' }
-    }
-    [void](Assert-OwnedPath $State.instancePath)
-    if (-not $State.instancePath.EndsWith($State.vmName, [StringComparison]::OrdinalIgnoreCase)) {
-        throw 'Runner state instance path does not match its VM name.'
     }
 }
 
@@ -1369,7 +1401,7 @@ function Get-RunnerManagedDiskRoots([string] $ExcludedInstance = '') {
     $count = 0
     foreach ($entry in $entries) {
         if (-not $entry.PSIsContainer -or $entry.Name -cnotmatch '^ITIR-[0-9a-f]{32}$') { throw 'Unknown managed instance entry; retain files.' }
-        [void](Assert-OwnedPath $entry.FullName)
+        [void](Get-RunnerSessionPaths ([pscustomobject]@{ vmName = $entry.Name; instancePath = $entry.FullName; layoutVersion = 2 }))
         if ($ExcludedInstance -and $entry.FullName -ieq $ExcludedInstance) { continue }
         $pending = [Collections.Generic.Queue[string]]::new()
         $pending.Enqueue($entry.FullName)
@@ -1407,7 +1439,7 @@ function Assert-RunnerDiskReferencesAbsent([string] $Path, [switch] $Directory, 
 }
 
 function Assert-RunnerInstanceUnreferenced($State) {
-    $instancePath = Assert-OwnedPath $State.instancePath
+    $instancePath = (Get-RunnerSessionPaths $State -AllowLegacy).instance
     $instancePrefix = $instancePath.TrimEnd('\') + '\'
     foreach ($entry in @(Get-RunnerVmInventory)) {
         if ([string]::IsNullOrEmpty($entry.Path)) { throw 'VM configuration path inspection failed; runner files/state are retained.' }
@@ -1420,8 +1452,9 @@ function Assert-RunnerInstanceUnreferenced($State) {
 }
 
 function Remove-RunnerInstance($State) {
-    Assert-StateIdentity $State
-    Complete-RunnerPilotClaim $State
+    Assert-StateIdentity $State -AllowLegacy
+    $paths = Get-RunnerSessionPaths $State -AllowLegacy
+    Complete-RunnerPilotClaim $State -AllowLegacy
     $hasVmId = $State.PSObject.Properties.Name -contains 'vmId'
     $matching = @(Get-RunnerVmInventory | Where-Object { $_.Name -ceq $State.vmName -or ($hasVmId -and [guid]$_.Id -eq [guid]$State.vmId) })
     if ($matching.Count -gt 1) { throw 'Ambiguous VM identity; runner instance files and state are retained.' }
@@ -1433,9 +1466,13 @@ function Remove-RunnerInstance($State) {
         foreach ($entry in $disk) {
             [void](Assert-OwnedPath $entry.Path)
         }
+        if ($disk.Count -lt 1 -or $disk.Count -gt 2 -or @($disk | Where-Object { $_.Path -inotmatch '\.vhdx$' -or
+            [IO.Path]::GetFullPath($_.Path) -notin @($paths.guestDisk, $paths.seedDisk) }).Count -ne 0 -or
+            @($disk | Where-Object { [IO.Path]::GetFullPath($_.Path) -ieq $paths.guestDisk }).Count -ne 1 -or
+            @($disk.Path | Select-Object -Unique).Count -ne $disk.Count) { throw 'VM disks differ from the exact session storage layout; retain files.' }
         $vmPath = [IO.Path]::GetFullPath($vm.Path)
         # New-VM appends its name to -Path. Legacy state has the same deterministic layout.
-        $ownedVmPath = Assert-OwnedPath (Join-Path $State.instancePath $State.vmName)
+        $ownedVmPath = $paths.vmPath
         if ($State.PSObject.Properties.Name -contains 'expectedVmPath' -and
             -not [string]::Equals([IO.Path]::GetFullPath($State.expectedVmPath), $ownedVmPath, [StringComparison]::OrdinalIgnoreCase)) {
             throw 'Recorded VM configuration path differs from the exact creation layout; refusing deletion.'
@@ -1444,7 +1481,7 @@ function Remove-RunnerInstance($State) {
             $vmPath.Equals($ownedVmPath, [StringComparison]::OrdinalIgnoreCase)
         $provisionalOwner = $false
         if ([string]::IsNullOrEmpty($vm.Notes) -and $State.PSObject.Properties.Name -contains 'phase' -and $State.phase -eq 'creating') {
-            $expectedBootDisk = Assert-OwnedPath (Join-Path $State.instancePath 'guest.vhdx')
+            $expectedBootDisk = $paths.guestDisk
             $provisionalOwner = $vm.Name -ceq $State.vmName -and $vm.State -eq 'Off' -and
                 $vmPath.Equals($ownedVmPath, [StringComparison]::OrdinalIgnoreCase) -and
                 $State.expectedBootDisk -ceq $expectedBootDisk -and $disk.Count -eq 1 -and
@@ -1459,7 +1496,7 @@ function Remove-RunnerInstance($State) {
         if ($remaining.Count -ne 0) { throw 'VM removal was not verified; runner instance files and state are retained.' }
     }
     Assert-RunnerInstanceUnreferenced $State
-    $instancePath = Assert-OwnedPath $State.instancePath
+    $instancePath = $paths.instance
     if (Test-Path -LiteralPath $instancePath) {
         $links = @(Get-ChildItem -LiteralPath $instancePath -Recurse -Force -ErrorAction Stop |
             Where-Object { $_.Attributes -band [IO.FileAttributes]::ReparsePoint })

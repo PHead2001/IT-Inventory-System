@@ -4,7 +4,7 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 $common = [Management.Automation.Language.Parser]::ParseFile((Join-Path $PSScriptRoot 'Common.ps1'), [ref]$null, [ref]$null)
 foreach ($definition in $common.FindAll({ param($node) $node -is [Management.Automation.Language.FunctionDefinitionAst] }, $false)) {
-    if ($definition.Name -cin @('New-RunnerExecutionFailure', 'New-RunnerIsolationProbeFailure', 'Assert-RunnerIsolationProbeDiagnostic', 'Get-RunnerGuestMtu', 'Get-RunnerGuestReadinessStage', 'Assert-RunnerGuestReadinessDiagnostic', 'Add-RunnerGuestReadinessAttempt', 'Set-RunnerGuestReadinessEvidence', 'Get-RunnerResourceProfile', 'Get-RunnerSessionFailureEnums', 'New-RunnerSessionFailureRecord', 'Assert-RunnerSessionFailureJournal', 'Write-RunnerSessionFailure', 'Write-RunnerJson', 'Read-RunnerJson')) { Invoke-Expression $definition.Extent.Text }
+    if ($definition.Name -cin @('Get-RunnerSessionPaths','Assert-RunnerSessionTrustedPaths','New-RunnerExecutionFailure', 'New-RunnerIsolationProbeFailure', 'Assert-RunnerIsolationProbeDiagnostic', 'Get-RunnerGuestMtu', 'Get-RunnerGuestReadinessStage', 'Assert-RunnerGuestReadinessDiagnostic', 'Add-RunnerGuestReadinessAttempt', 'Set-RunnerGuestReadinessEvidence', 'Get-RunnerResourceProfile', 'Get-RunnerSessionFailureEnums', 'New-RunnerSessionFailureRecord', 'Assert-RunnerSessionFailureJournal', 'Write-RunnerSessionFailure', 'Write-RunnerJson', 'Read-RunnerJson')) { Invoke-Expression $definition.Extent.Text }
 }
 $script:RunnerRoot = Join-Path $env:TEMP ('ITIR-session-failure-' + [guid]::NewGuid().ToString('N'))
 $script:path = Join-Path $script:RunnerRoot 'session-failures.json'
@@ -15,7 +15,7 @@ function Require([bool] $Condition) { if (-not $Condition) { throw 'Session fail
 function Check([string] $Name, [scriptblock] $Work) { & $Work; $script:checks++; Write-Host "PASS $Name" }
 function Enter-RunnerLock { $script:depth++; $script:lockCalls++; return 'fixture' }
 function Exit-RunnerLock { $script:depth-- }
-function Assert-RunnerProtectedPath { Require ($script:depth -gt 0) }
+function Assert-RunnerProtectedPath([string]$Path) { Require ($script:depth -gt 0 -or $Path.StartsWith((Join-Path $script:RunnerRoot 'instances'))) }
 function Assert-SecureRoot { Require ($script:depth -gt 0) }
 function Assert-OwnedPath([string] $Path) {
     Require ($Path.StartsWith($script:RunnerRoot + '\', [StringComparison]::OrdinalIgnoreCase))
@@ -143,7 +143,8 @@ try {
         )) {
             Reset-Case
             $script:state | Add-Member purpose 'prepare'
-            $script:state | Add-Member instancePath $script:RunnerRoot
+            $script:state | Add-Member instancePath (Join-Path (Join-Path $script:RunnerRoot 'instances') $script:state.vmName)
+            $script:state | Add-Member layoutVersion 2
             $script:readinessNow=[DateTime]::UtcNow; $script:readinessCalls=0; $script:readinessSleeps=0
             $script:readinessCase=$case
             $script:originalReadinessFailure=[InvalidOperationException]::new('SECRET_READINESS')
@@ -178,7 +179,7 @@ try {
             function Assert-SessionAlive {}
             function Start-Sleep([int] $Seconds) { Require ($Seconds -eq 10); $script:readinessSleeps++; $script:readinessNow=$script:readinessNow.AddMinutes(1) }
             function Invoke-RunnerNative { $script:readinessCalls++; if ($script:readinessCalls -eq 1) { return 255 }; return 0 }
-            $readinessMtu=Wait-Guest ([pscustomobject]@{instancePath=$script:RunnerRoot;purpose='verify-image'}) ([pscustomobject]@{guestIp='192.0.2.1'}) 'it-inventory-light'
+            $readinessMtu=Wait-Guest ([pscustomobject]@{vmName='ITIR-11111111111111111111111111111111';layoutVersion=2;instancePath=(Join-Path (Join-Path $script:RunnerRoot 'instances') 'ITIR-11111111111111111111111111111111');purpose='verify-image'}) ([pscustomobject]@{guestIp='192.0.2.1'}) 'it-inventory-light'
             Require ($readinessMtu -is [int] -and $readinessMtu -eq 1400)
         }
         Require ($script:readinessCalls -eq 2 -and $script:readinessSleeps -eq 1 -and -not (Test-Path -LiteralPath $script:path))

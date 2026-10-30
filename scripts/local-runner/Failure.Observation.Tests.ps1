@@ -5,7 +5,7 @@ $ErrorActionPreference = 'Stop'
 foreach ($file in @('Common.ps1', 'Runner.ps1', 'Network.Recovery.ps1')) {
     $ast = [Management.Automation.Language.Parser]::ParseFile((Join-Path $PSScriptRoot $file), [ref]$null, [ref]$null)
     foreach ($definition in $ast.FindAll({ param($node) $node -is [Management.Automation.Language.FunctionDefinitionAst] }, $false)) {
-        if ($definition.Name -cin @('Get-RunnerRecoveryDiagnosticNumber', 'Get-RunnerProbeExitCode', 'Assert-RunnerRecoveryDiagnostic', 'New-RunnerRecoveryDiagnostic', 'New-RunnerFailureObservation', 'New-RunnerObservedFailure', 'Write-RunnerCleanupObservation', 'Write-RunnerSessionFailureObservation', 'Assert-RunnerFailureRecord', 'Assert-RunnerCleanupJournal',
+        if ($definition.Name -cin @('Get-RunnerSessionPaths','Get-RunnerRecoveryDiagnosticNumber', 'Get-RunnerProbeExitCode', 'Assert-RunnerRecoveryDiagnostic', 'New-RunnerRecoveryDiagnostic', 'New-RunnerFailureObservation', 'New-RunnerObservedFailure', 'Write-RunnerCleanupObservation', 'Write-RunnerSessionFailureObservation', 'Assert-RunnerFailureRecord', 'Assert-RunnerCleanupJournal',
             'Test-RunnerSessionStopRequested', 'Assert-SessionAlive', 'Get-RunnerRecoveryExpiry', 'Invoke-Watchdog')) {
             Invoke-Expression $definition.Extent.Text
         }
@@ -19,7 +19,7 @@ function Require([bool] $Condition) { if (-not $Condition) { throw 'Diagnostic r
 function Reset-Fixture {
     $script:now = [DateTime]::UtcNow
     $script:state = [pscustomobject]@{
-        vmName = 'ITIR-11111111111111111111111111111111'; vmId = '11111111-1111-1111-1111-111111111111'; instancePath = 'C:\synthetic-runner\instance'
+        vmName = 'ITIR-11111111111111111111111111111111'; vmId = '11111111-1111-1111-1111-111111111111'; layoutVersion = 2; instancePath = 'C:\synthetic-runner\instances\ITIR-11111111111111111111111111111111'
         purpose = 'prepare'; phase = 'sealed-off'; deadlineUtc = $script:now.AddHours(1).ToString('o')
         supervisorPid = 11; supervisorStartUtc = $script:now.ToString('o'); guardianPid = 22; guardianStartUtc = 'fixture'; guardianReady = $true
         networkRecovery = [pscustomobject]@{ phase = 'healthy'; progressUtc = $script:now.AddSeconds(-1).ToString('o');
@@ -39,6 +39,7 @@ function Test-Path([string] $LiteralPath) {
     if ($LiteralPath -ceq (Join-Path $script:state.instancePath 'stop.requested')) { return $script:localStop }
     return $null -ne $script:record
 }
+function Get-Item { param([string]$LiteralPath,[switch]$Force); Require ($LiteralPath.StartsWith($script:RunnerRoot+'\')); return [pscustomobject]@{Attributes=[IO.FileAttributes]::Normal} }
 function Assert-RunnerProtectedPath {}
 function Assert-SecureRoot {}
 function Assert-StateIdentity {}

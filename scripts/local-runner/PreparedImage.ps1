@@ -330,6 +330,7 @@ function Assert-RunnerImageDiskUnreferenced([string] $Path) {
 
 function Assert-RunnerPrepareState($State) {
     Assert-StateIdentity $State
+    Assert-RunnerSessionTrustedPaths $State
     if ($State.PSObject.Properties.Name -notcontains 'purpose' -or $State.purpose -cne 'prepare' -or
         $State.PSObject.Properties.Name -notcontains 'vmId') { throw 'Only the credential-free preparation session can publish an image.' }
 }
@@ -422,10 +423,10 @@ function Invoke-RunnerImageBuild($State, $Config) {
         Assert-RunnerPrepareState $current
         if ($current.vmName -cne $State.vmName -or [guid]$current.vmId -ne [guid]$vm.Id -or
             $vm.Notes -cne $script:RunnerTag -or $vm.State -cne 'Off' -or
-            [IO.Path]::GetFullPath($vm.Path) -ine (Join-Path $current.instancePath $current.vmName)) { throw 'Prepared VM identity/off state changed.' }
+            [IO.Path]::GetFullPath($vm.Path) -ine ((Get-RunnerSessionPaths $current).vmPath)) { throw 'Prepared VM identity/off state changed.' }
         Assert-RunnerVmLifecycle $current.vmName
         $disks = @(Get-VMHardDiskDrive -VM $vm -ErrorAction Stop)
-        $expected = @((Join-Path $current.instancePath 'guest.vhdx'), (Join-Path $current.instancePath 'cidata.vhdx'))
+        $expected = @(((Get-RunnerSessionPaths $current).guestDisk), ((Get-RunnerSessionPaths $current).seedDisk))
         if ($disks.Count -ne 2 -or (Compare-Object @($disks.Path | Sort-Object) @($expected | Sort-Object))) { throw 'Prepared VM disks differ from the owned fresh copy/seed.' }
         Remove-VM -VM $vm -Force -ErrorAction Stop
         Assert-RunnerInstanceUnreferenced $current
@@ -500,7 +501,7 @@ function New-RunnerPreparedImageCandidate($State, $Config, $Binding, $Guest) {
     Assert-RunnerImageStorageReceipt $proof
     if (@(Get-RunnerVmInventory | Where-Object { $_.Name -ceq $State.vmName -or [guid]$_.Id -eq [guid]$State.vmId }).Count -gt 0) { throw 'Preparation VM is still registered; publication refused.' }
     Assert-RunnerInstanceUnreferenced $State
-    $source = Assert-OwnedPath (Join-Path $State.instancePath 'guest.vhdx')
+    $source = Assert-OwnedPath ((Get-RunnerSessionPaths $State).guestDisk)
     Assert-RunnerImageDiskUnreferenced $source
     if ((Get-RunnerImageBinding $Config).hash -cne $Binding.hash -or $Guest.recipeId -cne $Binding.recipeId -or $Guest.scrubbed -ne $true) { throw 'Trusted inputs or scrub proof changed before publication.' }
     $old = Get-RunnerImageRecord
@@ -528,7 +529,7 @@ function New-RunnerPreparedImageCandidate($State, $Config, $Binding, $Guest) {
             diskHash = (Get-FileHash -LiteralPath $candidate -Algorithm SHA256).Hash; baseHash = $Config.baseSha256
             bindingHash = $Binding.hash; recipeId = $Binding.recipeId; bundleHash = $Binding.bundleHash; scrubbed = $true; capabilities = @($Guest.capabilities); guest = $proof
             builder = [ordered]@{ vmName = $State.vmName; vmId = $State.vmId; guestMac = $current.guestMac
-                sshPublicKeyHash = (Get-FileHash -LiteralPath (Join-Path $State.instancePath 'id_ed25519.pub') -Algorithm SHA256).Hash }; selectorBefore = $selectorBefore }
+                sshPublicKeyHash = (Get-FileHash -LiteralPath ((Get-RunnerSessionPaths $State).publicKey) -Algorithm SHA256).Hash }; selectorBefore = $selectorBefore }
         Write-RunnerJson $receiptPath $receipt
         Assert-RunnerProtectedPath $receiptPath
         Invoke-RunnerTransitionCheckpoint 'image-receipt'

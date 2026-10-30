@@ -13,6 +13,7 @@ $script:RunnerRoot = $root; $script:RunnerStatePath = Join-Path $root 'state.jso
 $script:bootLock = 'Local\ITIR-boot-' + [guid]::NewGuid().ToString('N')
 $script:realEnter = (Get-Command Enter-RunnerLock).ScriptBlock
 function Enter-RunnerLock { return & $script:realEnter $script:bootLock }
+function Assert-RunnerProtectedPath([string]$Path) { [void](Assert-OwnedPath $Path) } # TEMP descriptor seam; strict ACL coverage is in Session.Paths.Tests.
 function Assert-SessionAlive($State) {
     if ($null -eq (Get-RunnerState)) { throw 'Guardian removed the session.' }
     if ($script:dispatched -and $script:scenario -in @('owner-exit', 'guardian-exit', 'deadline')) { throw $script:scenario }
@@ -39,10 +40,10 @@ function Start-VM($VM, [switch] $AsJob) {
             & $script:fixtureEnter $script:fixtureStateLock -FailFast:$FailFast
         }
         function Get-RunnerVmInventory { $entry = Read-RunnerJson (Join-Path $root 'vm.json'); if ($null -ne $entry) { $entry } }
-        function Get-VMHardDiskDrive($VM) { return [pscustomobject]@{ Path = Join-Path (Get-RunnerState).instancePath 'guest.vhdx' } }
+        function Get-VMHardDiskDrive($VM) { return [pscustomobject]@{ Path = (Get-RunnerSessionPaths (Get-RunnerState)).guestDisk } }
         function Get-VHD($Path) {
             $diskPath = [IO.Path]::GetFullPath($Path)
-            $instancePath = [IO.Path]::GetDirectoryName($diskPath)
+            $instancePath = [IO.Path]::GetDirectoryName([IO.Path]::GetDirectoryName($diskPath))
             if ([IO.Path]::GetDirectoryName($instancePath) -ine (Join-Path $script:RunnerRoot 'instances') -or
                 [IO.Path]::GetFileName($instancePath) -cnotmatch '^ITIR-[0-9a-f]{32}$' -or
                 [IO.Path]::GetFileName($diskPath) -cne 'guest.vhdx' -or
@@ -78,10 +79,10 @@ try {
         $script:scenario = $scenario; $script:dispatched = $false
         $name = 'ITIR-' + [guid]::NewGuid().ToString('N')
         $instance = Join-Path (Join-Path $root 'instances') $name
-        [void][IO.Directory]::CreateDirectory($instance)
-        [IO.File]::WriteAllText((Join-Path $instance 'guest.vhdx'), 'owned fresh disk')
-        $state = [pscustomobject]@{ tag = $script:RunnerTag; vmName = $name; vmId = [guid]::NewGuid().ToString(); instancePath = $instance; guardianReady = $true; networkRecovery = [pscustomobject]@{ phase = 'healthy'; hardDeadlineUtc = [DateTime]::UtcNow.AddMinutes(5).ToString('o'); episodeDeadlineUtc = ''; progressUtc = [DateTime]::UtcNow.ToString('o') } }
-        $vm = [pscustomobject]@{ Id = $state.vmId; Name = $name; Notes = $script:RunnerTag; Path = Join-Path $instance $name
+        [void][IO.Directory]::CreateDirectory((Join-Path $instance 'vm-data'))
+        [IO.File]::WriteAllText((Join-Path $instance 'vm-data\guest.vhdx'), 'owned fresh disk')
+        $state = [pscustomobject]@{ layoutVersion = 2; tag = $script:RunnerTag; vmName = $name; vmId = [guid]::NewGuid().ToString(); instancePath = $instance; guardianReady = $true; networkRecovery = [pscustomobject]@{ phase = 'healthy'; hardDeadlineUtc = [DateTime]::UtcNow.AddMinutes(5).ToString('o'); episodeDeadlineUtc = ''; progressUtc = [DateTime]::UtcNow.ToString('o') } }
+        $vm = [pscustomobject]@{ Id = $state.vmId; Name = $name; Notes = $script:RunnerTag; Path = Join-Path (Join-Path $instance 'vm-data') $name
             State = 'Off'; AutomaticStartAction = 'Nothing'; AutomaticStopAction = 'TurnOff' }
         if ($scenario -ceq 'wrong-guid') { $vm.Id = [guid]::NewGuid().ToString() }
         Write-RunnerJson $script:RunnerStatePath $state; Write-RunnerJson (Join-Path $root 'vm.json') $vm
@@ -99,7 +100,7 @@ try {
         if ($scenario -ne 'wrong-guid' -and -not (Test-Path (Join-Path $root 'guardian-acquired'))) { throw 'Guardian could not acquire state mutex during pending boot.' }
         if ($scenario -ceq 'cleanup-race' -and ((Get-RunnerState) -or (Test-Path (Join-Path $root 'vm.json')))) { throw "Delayed boot restored a removed VM/session: $script:lastBootError" }
         if ($scenario -ceq 'cleanup-race' -and (Test-Path $instance)) { throw 'Verified canonical cleanup retained the old instance.' }
-        if ($scenario -ceq 'cleanup-unverified' -and (-not (Get-RunnerState) -or -not (Test-Path (Join-Path $instance 'guest.vhdx')))) { throw 'Unverified provider removal lost state/disk.' }
+        if ($scenario -ceq 'cleanup-unverified' -and (-not (Get-RunnerState) -or -not (Test-Path (Join-Path $instance 'vm-data\guest.vhdx')))) { throw 'Unverified provider removal lost state/disk.' }
     }
     Write-Host 'Guardian boot passed: real pending-job lock contention, delayed provider effect after cleanup, exact GUID, failed provider, owner/guardian exit and deadline refuse continuation.'
 } finally {
