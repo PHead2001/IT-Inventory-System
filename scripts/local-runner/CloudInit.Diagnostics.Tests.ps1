@@ -22,6 +22,8 @@ function New-Diagnostic {
 function To-Transport($Value) { $copy=Copy-Diagnostic $Value; $copy.PSObject.Properties.Remove('sshExit'); return [pscustomobject]@{ExitCode=0;Output=($copy | ConvertTo-Json -Depth 8 -Compress)} }
 function Reset {
     $script:state=[pscustomobject]@{purpose='prepare';vmName='ITIR-11111111111111111111111111111111';vmId='22222222-2222-2222-2222-222222222222';instancePath=(Join-Path (Join-Path $script:RunnerRoot 'instances') 'ITIR-11111111111111111111111111111111');layoutVersion=2}
+    [void][IO.Directory]::CreateDirectory($script:state.instancePath)
+    [IO.File]::WriteAllText((Join-Path $script:state.instancePath 'known_hosts'),'') # Transport fixture's precreated file; no SSH runs.
     $script:auth=$true; $script:alive=0; $script:depth=0; $script:sshCalls=0; $script:changed=$false; $script:writeFails=$false; $script:transportThrows=$false; $script:reads=0; $script:publicationRace=$false; $script:transport=To-Transport (New-Diagnostic)
     if (Test-Path -LiteralPath $script:artifact) { Remove-Item -LiteralPath $script:artifact -Force }
 }
@@ -96,9 +98,12 @@ try {
     Require ($storedArtifact.sessionId -ceq $frozen.vmName.Substring(5) -and $storedArtifact.vmId -ceq $frozen.vmId -and $storedArtifact.bundleHash -ceq ('A'*64) -and (Get-Item -LiteralPath $script:artifact).Length -le 8192)
     # Actual atomic replacement retains one latest attributable artifact.
     $script:state.vmName='ITIR-44444444444444444444444444444444'; $script:state.instancePath=Join-Path (Join-Path $script:RunnerRoot 'instances') $script:state.vmName; $frozen=Copy-Diagnostic $script:state
+    [void][IO.Directory]::CreateDirectory($script:state.instancePath)
+    [IO.File]::WriteAllText((Join-Path $script:state.instancePath 'known_hosts'),'')
     Require (Invoke-RunnerCloudInitPreparationCapture $frozen ([pscustomobject]@{guestIp='192.0.2.1'}))
     Require (([IO.File]::ReadAllText($script:artifact) | ConvertFrom-Json).sessionId -ceq ('4'*32))
-    Require (@(Get-ChildItem -LiteralPath $script:RunnerRoot).Count -eq 1)
+    $children=@(Get-ChildItem -LiteralPath $script:RunnerRoot)
+    Require ($children.Count -eq 2 -and @($children|Where-Object{$_.Name -cnotin @('instances','preparation-cloud-init.json')}).Count -eq 0)
     foreach ($case in @('job','verify-image','unauthorized','changed','imageCandidate','runnerLaunch','runnerId','claimMode','pilotClaim')) {
         Reset
         if ($case -cin @('job','verify-image')) { $script:state.purpose=$case }

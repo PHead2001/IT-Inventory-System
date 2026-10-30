@@ -17,7 +17,7 @@ $paths = Get-RunnerSessionPaths ([pscustomobject]@{ vmName = [IO.Path]::GetFileN
 $failureExitCode = 64 # instance-acl
 $aclFailureStage = 'unknown'
 Assert-RunnerProtectedPath $paths.instance -FailureStage ([ref]$aclFailureStage)
-Assert-RunnerSessionTrustedPaths ([pscustomobject]@{ vmName = [IO.Path]::GetFileName($InstancePath); instancePath = $InstancePath; layoutVersion = $LayoutVersion })
+Assert-RunnerSessionTrustedPaths ([pscustomobject]@{ vmName = [IO.Path]::GetFileName($InstancePath); instancePath = $InstancePath; layoutVersion = $LayoutVersion }) -RequireKnownHosts
 $failureExitCode = 65 # result-precondition
 $resultPath = Assert-OwnedPath (Join-Path $paths.probeRoot ("probe-$ProbeId.json"))
 if (Test-Path -LiteralPath $resultPath) { throw 'Probe result already exists.' }

@@ -75,6 +75,10 @@ if ($LASTEXITCODE -ne 0) { throw 'Fresh Windows PowerShell update controls regre
 if ($LASTEXITCODE -ne 0) { throw 'Fresh Windows PowerShell lifecycle atomicity regression failed.' }
 & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'Session.Paths.Tests.ps1')
 if ($LASTEXITCODE -ne 0) { throw 'Fresh Windows PowerShell session storage regression failed.' }
+& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'Ssh.Files.Tests.ps1')
+if ($LASTEXITCODE -ne 0) { throw 'Fresh Windows PowerShell SSH file security regression failed.' }
+& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'Ssh.Files.Native.Tests.ps1')
+if ($LASTEXITCODE -ne 0) { throw 'Fresh Windows PowerShell native SSH file identity/link regression failed.' }
 & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'Cleanup.Integrity.Tests.ps1')
 if ($LASTEXITCODE -ne 0) { throw 'Fresh Windows PowerShell cleanup integrity regression failed.' }
 & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'Guest.Network.Tests.ps1')
@@ -297,15 +301,13 @@ public class ArgvSink {
 }
 '@
     $keyPath = Join-Path $testRoot 'key with spaces'
-    New-RunnerSshKey $keyPath $sink
+    if ((Invoke-RunnerNative $sink @('-q', '-t', 'ed25519', '-N', '', '-f', $keyPath) -TimeoutSeconds 15) -ne 0) { throw 'Native keygen argv fixture failed.' }
     $captured = [IO.File]::ReadAllLines($keyPath + '.argv')
     $expected = @('-q', '-t', 'ed25519', '-N', '', '-f', $keyPath)
     if ($captured.Count -ne 7 -or (Compare-Object $expected $captured -SyncWindow 0)) {
         throw 'Native keygen arguments lost the empty passphrase or output path.'
     }
-    $keyFailureRejected = $false
-    try { New-RunnerSshKey (Join-Path $testRoot 'fail-key') $sink } catch { $keyFailureRejected = $true }
-    if (-not $keyFailureRejected) { throw 'Native keygen failure was ignored.' }
+    if ((Invoke-RunnerNative $sink @('-q', '-t', 'ed25519', '-N', '', '-f', (Join-Path $testRoot 'fail-key')) -TimeoutSeconds 15) -ne 9) { throw 'Native keygen failure exit changed.' }
     $probePath = Join-Path $testRoot 'quoted-command'
     $command = 'timeout 4 bash -c "echo probe >/dev/tcp/172.30.240.1/49581"; exec ./run.sh --jitconfig "$JIT"'
     $arguments = @('', 'space value', 'C:\trailing\', 'embedded\"quote', $command, $probePath)

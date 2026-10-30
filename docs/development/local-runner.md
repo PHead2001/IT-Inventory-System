@@ -296,6 +296,19 @@ Setup downloads two fixed official Ubuntu artifacts with pinned SHA-256 values: 
 
 Setup creates `C:\ProgramData\ITInventoryLocalRunner`, a temporary image-converter WSL distribution, a dedicated internal switch/NAT on `172.30.240.0/29`, and two SYSTEM tasks. It protects the fixed data root with a non-inheriting SYSTEM/Administrators-only ACL and refuses an unexpected owner, reparse point, conflicting switch/NAT, or overlapping host address. Partial setup can be rerun for the same repository/group using its tagged setup stage; it never adopts a reserved switch/NAT that existed before its own stage. It leaves job pickup disabled. New session state records integer `layoutVersion: 2`. A canonical resolver derives paths from the validated `ITIR-<32 lowercase hex>` identity: `instances\<vmName>\vm-data\guest.vhdx`, `vm-data\cidata.vhdx`, and the configuration directory `vm-data\<vmName>` beneath that instance. SSH keys, `known_hosts`, probe files and control files stay in the strict instance root outside `vm-data`. VM creation journals a provisional identity before New-VM; recovery accepts an untagged VM only while Off, with the exact recorded GUID name, derived configuration path and boot disk. Tagged recovery requires the same paths. Tag readback advances that journal before any additional attachment or boot.
 
+Per-session SSH files use only the canonical `id_ed25519`, `id_ed25519.pub` and
+`known_hosts` destinations in that strict instance root. Both key destinations
+must be absent before generation. Windows OpenSSH's creator-owned output is
+validated while its file identity is held, then its owner and DACL are normalized
+before either key is consumed: Administrators owns each file, with protected,
+explicit FullControl entries only for SYSTEM and Administrators. This applies only
+to the newly generated session files; it does not normalize preexisting files or
+relax the general protected-path policy. The runner precreates an empty
+`known_hosts` with the same strict owner/DACL before SSH, then checks its retained
+identity, exact ACL and nonempty content after the actual connection. These are
+source contracts; native image preparation and fresh-clone proof for the updated
+SSH path remain pending and no readiness result is implied.
+
 Native powered-off VHD-backed New-VM probes showed that Hyper-V adds broad access entries to the disk/configuration parent. The `vm-data` boundary confines those native entries to VM data; it does not relax the SYSTEM/Administrators-only instance-root check. The four-phase native probe retained strict root and sentinel ACLs and a successful bootstrap check, then verified cleanup and pickup restoration. This evidence does not establish the updated installed SYSTEM runtime, recovery, normal CI, network-switch behavior or reboot recovery.
 
 State without `layoutVersion` is recognized only at the exact old paths (`instances\<vmName>\guest.vhdx`, `cidata.vhdx` and `<vmName>` configuration directory) for Status and guarded cleanup. A malformed or unknown present version refuses admission. Legacy layouts cannot resume, boot, register JIT runners, recover, prepare images or pass resource admission. Install the reviewed bundle while idle, then use the canonical prepared-image rebuild and two fresh clone verifications after the bundle binding makes the old image stale. No selector or instance-data migration is performed.

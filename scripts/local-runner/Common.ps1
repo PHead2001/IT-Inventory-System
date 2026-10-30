@@ -917,13 +917,225 @@ function Get-ConverterLinuxPath([string] $Name, [string] $Path) {
     return $linuxPath
 }
 
+function Initialize-RunnerSshFileSecurity {
+    if ('ITInventory.RunnerSshFile' -as [type]) { return }
+    Add-Type -TypeDefinition @'
+using System;
+using System.IO;
+using System.ComponentModel;
+using System.Runtime.InteropServices;
+using System.Security.AccessControl;
+using Microsoft.Win32.SafeHandles;
+namespace ITInventory {
+    // Only new session SSH files use the writable security handle. Existing
+    // paths are never normalized, and key bytes are never read by this helper.
+    public sealed class RunnerSshFile : IDisposable {
+        [StructLayout(LayoutKind.Sequential)] struct Information {
+            public uint Attributes; public System.Runtime.InteropServices.ComTypes.FILETIME Creation, Access, Write;
+            public uint Volume, SizeHigh, SizeLow, Links, IndexHigh, IndexLow;
+        }
+        [StructLayout(LayoutKind.Sequential)] struct Disposition { [MarshalAs(UnmanagedType.U1)] public bool Delete; }
+        [DllImport("kernel32.dll", CharSet=CharSet.Unicode, SetLastError=true)] static extern SafeFileHandle CreateFile(string path, uint access, uint share, IntPtr security, uint creation, uint flags, IntPtr template);
+        [DllImport("kernel32.dll", SetLastError=true)] static extern bool GetFileInformationByHandle(SafeFileHandle handle, out Information info);
+        [DllImport("kernel32.dll", SetLastError=true)] static extern bool SetFileInformationByHandle(SafeFileHandle handle, int kind, ref Disposition data, uint size);
+        FileStream stream;
+        readonly bool directory;
+        readonly string identity;
+        RunnerSshFile(FileStream value, bool isDirectory) {
+            stream=value; directory=isDirectory;
+            try { identity=IdentityOf(ReadInformation()); } catch { Dispose(); throw; }
+        }
+        static Information Inspect(SafeFileHandle handle, bool isDirectory) {
+            Information info;
+            if (!GetFileInformationByHandle(handle, out info)) throw new Win32Exception(Marshal.GetLastWin32Error());
+            if ((info.Attributes & 0x400) != 0 || ((info.Attributes & 0x10) != 0) != isDirectory || (!isDirectory && info.Links != 1)) throw new InvalidOperationException("SSH file type or link count differs.");
+            return info;
+        }
+        Information ReadInformation() { return Inspect(stream.SafeFileHandle, directory); }
+        static string IdentityOf(Information info) { return info.Volume.ToString("X8")+":"+info.IndexHigh.ToString("X8")+info.IndexLow.ToString("X8"); }
+        public static RunnerSshFile Open(string path, bool isDirectory, bool normalize) {
+            // FILE_LIST_DIRECTORY is read access: metadata-only opens do not
+            // participate in the share checks that must prevent parent rename.
+            uint access=isDirectory ? 0x20081u : (0x80000000u | 0x20000u | (normalize ? 0xD0000u : 0u));
+            // A directory lease permits child creation but denies its rename;
+            // file leases deny concurrent file data writes and deletion.
+            SafeFileHandle handle=CreateFile(path, access, isDirectory ? 3u : 1u, IntPtr.Zero, 3, 0x200000u | (isDirectory ? 0x2000000u : 0u), IntPtr.Zero);
+            if (handle.IsInvalid) { int code=Marshal.GetLastWin32Error();handle.Dispose();throw new Win32Exception(code); }
+            try { return new RunnerSshFile(new FileStream(handle, FileAccess.Read),isDirectory); }
+            catch { handle.Dispose();throw; }
+        }
+        public static RunnerSshFile CreateEmpty(string path, FileSecurity security) {
+            return new RunnerSshFile(new FileStream(path,FileMode.CreateNew,FileSystemRights.FullControl,FileShare.Read,4096,FileOptions.None,security),false);
+        }
+        public string Identity { get { return identity; } }
+        public long Length { get { Information info=ReadInformation();return ((long)info.SizeHigh<<32)|info.SizeLow; } }
+        public FileSecurity ReadSecurity() { return stream.GetAccessControl(); }
+        public void ReplaceSecurity(FileSecurity security) { stream.SetAccessControl(security); }
+        public void AssertPath(string path) {
+            using (SafeFileHandle other=CreateFile(path,0x80,7,IntPtr.Zero,3,0x200000u | (directory ? 0x2000000u : 0u),IntPtr.Zero)) {
+                if (other.IsInvalid) throw new Win32Exception(Marshal.GetLastWin32Error());
+                if (IdentityOf(Inspect(other,directory)) != identity || IdentityOf(ReadInformation()) != identity) throw new InvalidOperationException("SSH file identity differs.");
+            }
+        }
+        public void DeleteExact(string path) {
+            AssertPath(path);
+            Disposition value=new Disposition();value.Delete=true;
+            if (!SetFileInformationByHandle(stream.SafeFileHandle,4,ref value,(uint)Marshal.SizeOf(typeof(Disposition)))) throw new Win32Exception(Marshal.GetLastWin32Error());
+        }
+        public void Dispose() { if (stream != null) { stream.Dispose();stream=null; } }
+    }
+}
+'@
+}
+
+function Get-RunnerSshCreationParent([string] $Path, [string] $Leaf) {
+    Assert-SecureRoot
+    $Path = Assert-OwnedPath $Path
+    $parent = Assert-OwnedPath ([IO.Path]::GetDirectoryName($Path))
+    if ([IO.Path]::GetFileName($Path) -cne $Leaf -or
+        [IO.Path]::GetDirectoryName($parent) -ine (Join-Path $script:RunnerRoot 'instances') -or
+        [IO.Path]::GetFileName($parent) -cnotmatch '^ITIR-[0-9a-f]{32}$') { throw 'SSH creation requires its canonical session parent.' }
+    Assert-RunnerProtectedPath (Assert-OwnedPath (Join-Path $script:RunnerRoot 'instances'))
+    Assert-RunnerProtectedPath $parent
+    return $parent
+}
+
+function New-RunnerSshFileAcl {
+    $acl = [Security.AccessControl.FileSecurity]::new()
+    $acl.SetAccessRuleProtection($true, $false)
+    $acl.SetOwner([Security.Principal.SecurityIdentifier]::new('S-1-5-32-544'))
+    foreach ($sid in @('S-1-5-18', 'S-1-5-32-544')) {
+        $acl.AddAccessRule([Security.AccessControl.FileSystemAccessRule]::new([Security.Principal.SecurityIdentifier]::new($sid),
+            [Security.AccessControl.FileSystemRights]::FullControl, [Security.AccessControl.AccessControlType]::Allow))
+    }
+    return $acl
+}
+
+function Assert-RunnerGeneratedSshAcl($Acl, [string] $Creator, [switch] $Public) {
+    $allowed = @('S-1-5-18', 'S-1-5-32-544', $Creator)
+    if ($allowed -cnotcontains $Acl.GetOwner([Security.Principal.SecurityIdentifier]).Value) { throw 'Generated SSH file owner differs from its creator.' }
+    $rules = @($Acl.GetAccessRules($true, $true, [Security.Principal.SecurityIdentifier]))
+    if ($rules.Count -gt 128) { throw 'Generated SSH file ACL exceeds its bound.' }
+    # Data/attribute writes, child deletion, delete, DACL/owner changes, and
+    # generic write/all are writers. Public-only extra read access is removed.
+    $writers = [long]0x500D0156
+    foreach ($rule in $rules) {
+        if ($allowed -cnotcontains $rule.IdentityReference.Value -and
+            (-not $Public -or (([long]$rule.FileSystemRights -band $writers) -ne 0))) { throw 'Generated SSH file grants unexpected access.' }
+    }
+}
+
+function Assert-RunnerExactSshAcl($Acl) {
+    if (-not $Acl.AreAccessRulesProtected -or -not $Acl.AreAccessRulesCanonical -or
+        $Acl.GetOwner([Security.Principal.SecurityIdentifier]).Value -cne 'S-1-5-32-544') { throw 'SSH file owner/protection readback differs.' }
+    $rules = @($Acl.GetAccessRules($true, $true, [Security.Principal.SecurityIdentifier]))
+    if ($rules.Count -ne 2) { throw 'SSH file DACL readback differs.' }
+    $seen = @{}
+    foreach ($rule in $rules) {
+        $sid = $rule.IdentityReference.Value
+        if ($sid -cnotin @('S-1-5-18', 'S-1-5-32-544') -or $seen.ContainsKey($sid) -or $rule.IsInherited -or
+            $rule.AccessControlType -ne [Security.AccessControl.AccessControlType]::Allow -or
+            $rule.FileSystemRights -ne [Security.AccessControl.FileSystemRights]::FullControl -or
+            $rule.InheritanceFlags -ne [Security.AccessControl.InheritanceFlags]::None -or
+            $rule.PropagationFlags -ne [Security.AccessControl.PropagationFlags]::None) { throw 'SSH file DACL readback differs.' }
+        $seen[$sid] = $true
+    }
+}
+
+function Open-RunnerSshFile([string] $Path, [switch] $Directory, [switch] $Normalize) {
+    Initialize-RunnerSshFileSecurity
+    return [ITInventory.RunnerSshFile]::Open($Path, $Directory.IsPresent, $Normalize.IsPresent)
+}
+
 function New-RunnerSshKey([string] $Path, [string] $Executable = (Get-Command ssh-keygen.exe -ErrorAction Stop).Source) {
     $Path = Assert-OwnedPath $Path
-    # The installed Windows PowerShell 5.1 drops empty native arguments; the
-    # process helper preserves the explicit empty passphrase without a shell.
-    if ((Invoke-RunnerNative $Executable @('-q', '-t', 'ed25519', '-N', '', '-f', $Path)) -ne 0) {
-        throw 'Per-VM SSH key generation failed.'
+    $parent = Get-RunnerSshCreationParent $Path 'id_ed25519'
+    $public = Assert-OwnedPath ($Path + '.pub')
+    $directory = Open-RunnerSshFile $parent -Directory
+    $files = @(); $complete = $false
+    try {
+        $directory.AssertPath($parent)
+        Assert-RunnerProtectedPath $parent
+        if ((Test-Path -LiteralPath $Path) -or (Test-Path -LiteralPath $public)) { throw 'SSH destinations must both be absent.' }
+        $creator = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+        # Preserve the explicit empty passphrase; generate exactly once, bounded.
+        $exit = $null
+        try { $exit = Invoke-RunnerNative $Executable @('-q', '-t', 'ed25519', '-N', '', '-f', $Path) -TimeoutSeconds 15 } catch { }
+        $directory.AssertPath($parent)
+        Assert-RunnerProtectedPath $parent
+        foreach ($target in @($Path, $public)) {
+            if (Test-Path -LiteralPath $target) {
+                [void](Assert-OwnedPath $target)
+                $file = Open-RunnerSshFile $target -Normalize
+                $entry = [pscustomobject]@{ path=$target; file=$file; owned=$false }
+                $files += $entry
+                $file.AssertPath($target)
+                Assert-RunnerGeneratedSshAcl ($file.ReadSecurity()) $creator -Public:($target -ceq $public)
+                $entry.owned = $true
+            }
+        }
+        if ($exit -isnot [int] -or $exit -ne 0 -or $files.Count -ne 2) { throw 'Per-VM SSH key generation failed.' }
+        if ($files[0].file.Identity -ceq $files[1].file.Identity) { throw 'Generated SSH files share an identity.' }
+        foreach ($entry in $files) {
+            $entry.file.AssertPath($entry.path)
+            $entry.file.ReplaceSecurity((New-RunnerSshFileAcl))
+            Assert-RunnerExactSshAcl ($entry.file.ReadSecurity())
+            $entry.file.AssertPath($entry.path)
+        }
+        $directory.AssertPath($parent)
+        Assert-RunnerProtectedPath $parent
+        foreach ($entry in $files) { Assert-RunnerProtectedPath $entry.path }
+        $complete = $true
+    } finally {
+        foreach ($entry in $files) {
+            if (-not $complete -and $entry.owned) { try { $entry.file.DeleteExact($entry.path) } catch { } }
+            $entry.file.Dispose()
+        }
+        $directory.Dispose()
     }
+}
+
+function New-RunnerKnownHosts([string] $Path) {
+    $Path = Assert-OwnedPath $Path
+    $parent = Get-RunnerSshCreationParent $Path 'known_hosts'
+    $directory = Open-RunnerSshFile $parent -Directory
+    $file = $null; $complete = $false
+    try {
+        $directory.AssertPath($parent)
+        Assert-RunnerProtectedPath $parent
+        if (Test-Path -LiteralPath $Path) { throw 'SSH known-hosts destination already exists.' }
+        $file = New-RunnerSshControlFile $Path (New-RunnerSshFileAcl)
+        $file.AssertPath($Path)
+        Assert-RunnerExactSshAcl ($file.ReadSecurity())
+        if ($file.Length -ne 0) { throw 'SSH known-hosts file is not empty.' }
+        Assert-RunnerProtectedPath $Path
+        $complete = $true
+        return [pscustomobject]@{ identity=$file.Identity }
+    } finally {
+        if ($null -ne $file) {
+            if (-not $complete) { try { $file.DeleteExact($Path) } catch { } }
+            $file.Dispose()
+        }
+        $directory.Dispose()
+    }
+}
+
+function New-RunnerSshControlFile([string] $Path, $Acl) {
+    Initialize-RunnerSshFileSecurity
+    return [ITInventory.RunnerSshFile]::CreateEmpty($Path, $Acl)
+}
+
+function Assert-RunnerKnownHosts([string] $Path, $Evidence, [switch] $RequireContent) {
+    $Path = Assert-OwnedPath $Path
+    Assert-RunnerProtectedPath $Path
+    $file = Open-RunnerSshFile $Path
+    try {
+        $file.AssertPath($Path)
+        if ($null -eq $Evidence -or $Evidence.identity -isnot [string] -or $Evidence.identity -cnotmatch '^[0-9A-F]{8}:[0-9A-F]{16}$' -or
+            $file.Identity -cne $Evidence.identity) { throw 'SSH known-hosts identity changed.' }
+        Assert-RunnerExactSshAcl ($file.ReadSecurity())
+        if ($RequireContent -and $file.Length -le 0) { throw 'SSH did not append a host key to its protected file.' }
+    } finally { $file.Dispose() }
 }
 
 function Get-ConverterRegistrations([string] $Name) {
@@ -1337,12 +1549,13 @@ function Get-RunnerSessionPaths($State, [switch] $AllowLegacy) {
     return [pscustomobject]$paths
 }
 
-function Assert-RunnerSessionTrustedPaths($State) {
+function Assert-RunnerSessionTrustedPaths($State, [switch] $RequireKnownHosts) {
     $paths = Get-RunnerSessionPaths $State
     Assert-RunnerProtectedPath $paths.instance
     foreach ($path in @($paths.privateKey, $paths.publicKey, $paths.knownHosts, $paths.stopRequest)) {
         if (Test-Path -LiteralPath $path) { Assert-RunnerProtectedPath $path }
     }
+    if ($RequireKnownHosts -and -not (Test-Path -LiteralPath $paths.knownHosts -PathType Leaf)) { throw 'SSH requires its precreated protected known-hosts file.' }
 }
 
 function Assert-StateIdentity($State, [switch] $AllowLegacy) {

@@ -25,6 +25,7 @@ const cases = [
   ['acl-sid-translation', 73],
   ['acl-allow-rejected', 74],
   ['acl-classifier-fallback', 64],
+  ['known-hosts-missing', 64],
   ['result-precondition', 65],
   ['result-path', 65],
   ['result-publication', 66],
@@ -118,6 +119,8 @@ export async function runWorkerBootstrapTests({
           : `ITIR-${'a'.repeat(32)}`,
       );
       await mkdir(instance, { recursive: true });
+      if (mode !== 'known-hosts-missing')
+        await writeFile(join(instance, 'known_hosts'), '');
       const workerPath = join(directory, 'Worker.ps1');
       const resultPath = join(instance, `probe-${'b'.repeat(32)}.json`);
       const stopPath = join(directory, 'listener-stopped');

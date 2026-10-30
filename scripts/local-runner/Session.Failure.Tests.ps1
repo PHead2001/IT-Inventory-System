@@ -41,6 +41,9 @@ function Reset-Case {
     if (Test-Path -LiteralPath $script:path) { Remove-Item -LiteralPath $script:path -Force }
     $script:depth = 0; $script:warnings = @(); $script:readFails = $false; $script:writeFails = $false; $script:cleanupFails = $false; $script:cleanupCalls = 0; $script:events = @(); $script:lockCalls = 0; $script:oldFailureWriteFails = $false
     $script:state = [pscustomobject]@{ vmName = 'ITIR-11111111111111111111111111111111'; vmId = '22222222-2222-2222-2222-222222222222' }
+    $instance=Join-Path (Join-Path $script:RunnerRoot 'instances') $script:state.vmName
+    [void][IO.Directory]::CreateDirectory($instance)
+    [IO.File]::WriteAllText((Join-Path $instance 'known_hosts'),'') # Mocked SSH still requires a precreated control file.
 }
 try {
     [void][IO.Directory]::CreateDirectory($script:RunnerRoot)
@@ -256,7 +259,8 @@ try {
         for ($index = 2; $index -le 12; $index++) { Write-RunnerSessionFailure ('ITIR-' + $index.ToString('x32')) $failure 'job-execution' }
         $journal = Read-RunnerJson $script:path; Assert-RunnerSessionFailureJournal $journal
         Require ($journal.sessions.Count -eq 8 -and $journal.sessions[0].sessionId -ceq (5).ToString('x32') -and (Get-Item -LiteralPath $script:path).Length -le 16384)
-        Require (@(Get-ChildItem -LiteralPath $script:RunnerRoot).Count -eq 1)
+        $children=@(Get-ChildItem -LiteralPath $script:RunnerRoot)
+        Require ($children.Count -eq 2 -and @($children|Where-Object{$_.Name -cnotin @('instances','session-failures.json')}).Count -eq 0)
     }
     Check 'oversized or corrupt history refuses before parsing and unknown fields remain retained' {
         Reset-Case

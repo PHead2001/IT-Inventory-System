@@ -92,6 +92,10 @@ function Wait-Guest {
 function Get-CimInstance { throw 'Postallocation capacity must not be inspected.' }
 function New-SeedDisk($Path, $PublicKey, $Mac, $Config, $ProfileLabel) { if ($ProfileLabel -cne 'it-inventory-heavy') { throw 'Selected profile did not reach guest cloud-config.' } }
 function New-RunnerSshKey($Path) { [IO.File]::WriteAllText(($Path + '.pub'), 'fixture-public') }
+function New-RunnerKnownHosts($Path) { [IO.File]::WriteAllText($Path, ''); return [pscustomobject]@{identity=[guid]::NewGuid().ToString('N')} }
+function Assert-RunnerKnownHosts($Path, $Evidence, [switch]$RequireContent) {
+    if (-not (Test-Path -LiteralPath $Path) -or $Evidence.identity -cnotmatch '^[a-f0-9]{32}$' -or -not $RequireContent) { throw 'Demand fixture lost its per-session known-hosts binding.' }
+}
 function New-RunnerProfileVm { $script:allocations++; return [pscustomobject]@{ Id = [guid]'11111111-1111-1111-1111-111111111111' } }
 function Set-VM {
     $recorded = Get-RunnerState

@@ -46,6 +46,9 @@ try {
     }
     $paths=Get-RunnerSessionPaths $state;[void][IO.Directory]::CreateDirectory($paths.vmData);[IO.File]::WriteAllText($paths.privateKey,'PUBLIC FIXTURE')
     Assert-RunnerSessionTrustedPaths $state; Check $true
+    Refuse {Assert-RunnerSessionTrustedPaths $state -RequireKnownHosts}
+    [IO.File]::WriteAllText($paths.knownHosts,'PUBLIC FIXTURE')
+    Assert-RunnerSessionTrustedPaths $state -RequireKnownHosts; Check $true
     Refuse {Assert-RunnerProtectedPath $paths.vmData}
     $script:badRoot=$true; Refuse {Assert-RunnerSessionTrustedPaths $state};$script:badRoot=$false
     $script:badKey=$true; Refuse {Assert-RunnerSessionTrustedPaths $state};$script:badKey=$false

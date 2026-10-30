@@ -506,7 +506,7 @@ function Wait-DetachedRunner($State, $Config) {
 }
 
 function Get-SshArgs($State) {
-    Assert-RunnerSessionTrustedPaths $State
+    Assert-RunnerSessionTrustedPaths $State -RequireKnownHosts
     $paths = Get-RunnerSessionPaths $State
     return @('-o', 'BatchMode=yes', '-o', 'ConnectTimeout=5', '-o', 'ServerAliveInterval=15',
         '-o', 'ServerAliveCountMax=2', '-o', 'StrictHostKeyChecking=accept-new',
@@ -899,6 +899,7 @@ function Invoke-RunnerSession($Config, $PilotAttempt = $null, [string] $ProfileL
             $script:RunnerImagePreflight = $null
             $script:RunnerOperationStage = 'key-generation'
             New-RunnerSshKey $paths.privateKey
+            $knownHostsEvidence = New-RunnerKnownHosts $paths.knownHosts
             Assert-RunnerSessionTrustedPaths ([pscustomobject]$state)
             $key = (Get-Content -LiteralPath $paths.publicKey -Raw).Trim()
             Assert-SessionAlive $state
@@ -965,6 +966,8 @@ function Invoke-RunnerSession($Config, $PilotAttempt = $null, [string] $ProfileL
             $script:RunnerOperationStage = 'guest-readiness'
             $readinessWatch = [Diagnostics.Stopwatch]::StartNew()
             $guestMtu = Wait-Guest $state $Config $profile.label
+            Assert-RunnerKnownHosts $paths.knownHosts $knownHostsEvidence -RequireContent
+            Write-Host 'Protected known-hosts file retained its identity and strict ACL after SSH appended a host key.'
             if ($guestMtu -isnot [int] -or $guestMtu -ne (Get-RunnerGuestMtu)) { throw 'Guest MTU readiness readback is invalid.' }
             Write-Host ('Guest prerequisites ready in {0:N1}s for {1}; verified MTU {2}.' -f $readinessWatch.Elapsed.TotalSeconds, $profile.label, $guestMtu)
             Assert-SessionAlive $state

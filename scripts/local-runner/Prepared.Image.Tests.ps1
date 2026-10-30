@@ -531,6 +531,10 @@ try {
         return Get-RunnerGuestMtu
     }
     function New-RunnerSshKey([string] $Path) { [IO.File]::WriteAllText(($Path + '.pub'), ('key-' + [guid]::NewGuid().ToString('N'))) }
+    function New-RunnerKnownHosts([string] $Path) { [IO.File]::WriteAllText($Path, ''); return [pscustomobject]@{identity=[guid]::NewGuid().ToString('N')} }
+    function Assert-RunnerKnownHosts([string] $Path, $Evidence, [switch]$RequireContent) {
+        if (-not (Test-Path -LiteralPath $Path) -or $Evidence.identity -cnotmatch '^[a-f0-9]{32}$' -or -not $RequireContent) { throw 'Preparation fixture lost its per-session known-hosts binding.' }
+    }
     function New-SeedDisk($Path, $PublicKey, $Mac, $Config, $ProfileLabel, $Prepared) {
         if ($Prepared -ne ((Get-RunnerState).purpose -ceq 'verify-image') -or $PublicKey -cnotmatch '^key-[0-9a-f]{32}$') { throw 'Builder/verifier reused SSH key or selected the wrong seed path.' }
         [IO.File]::WriteAllText($Path, 'seed'); $script:keys += $PublicKey

@@ -57,6 +57,10 @@ function Save-Heartbeat { if ($script:locked) { throw 'Wait held state mutex.' }
 function Start-Sleep {
     if ($script:locked) { throw 'Wait held state mutex.' }
     $script:sleeps++
+    # The fixture clock is deliberately frozen and waits are simulated. Bound
+    # unexpected retries here, outside the receipt transport catch, so a missing
+    # prerequisite fails this test instead of spinning until the outer gate dies.
+    if ($script:sleeps -gt 4) { throw 'Offline integration exceeded its expected retry steps.' }
     if ($script:state.networkRecovery.phase -cne 'healthy') { $script:state.networkRecovery.phase = 'healthy'; $script:state.guardianReady = $true }
 }
 function New-Fixture {
@@ -69,6 +73,14 @@ function New-Fixture {
         supervisorPid = 43; supervisorStartUtc = $script:now.ToString('o')
         networkRecovery = [pscustomobject]@{ phase = 'healthy'; generation = 0; failure = ''; hardDeadlineUtc = $script:now.AddMinutes(5).ToString('o'); episodeDeadlineUtc = ''; progressUtc = $script:now.ToString('o') } }
     $script:state.networkRecovery | Add-Member binding ([pscustomobject]@{ vmId = $script:state.vmId; vmName = $script:state.vmName; claimHash = Get-RunnerRecoveryClaimHash $script:state })
+    # Real SSH argument admission requires the control file created by session
+    # initialization. Only its empty TEMP counterpart is needed by this mock IO.
+    $paths = Get-RunnerSessionPaths $script:state
+    [void][IO.Directory]::CreateDirectory($paths.instance)
+    if (-not (Test-Path -LiteralPath $paths.knownHosts)) {
+        $empty = [IO.File]::Open($paths.knownHosts, [IO.FileMode]::CreateNew, [IO.FileAccess]::Write, [IO.FileShare]::Read)
+        $empty.Dispose()
+    }
 }
 function Get-HostNetworkFingerprint { throw 'Supervisor attempted competing network observation/repair.' }
 function Get-RunnerConfig { [pscustomobject]@{ guestIp = '172.30.240.2'; gatewayIp = '172.30.240.1'; repo = 'example/fixture'; activation = 'active'; label = 'it-inventory-ephemeral'; runnerGroupId = 1 } }
@@ -296,6 +308,15 @@ try {
         [void](Save-RunnerLaunchEvent $script:state 'intent' 0 ('c' * 32) -Admission (Get-RunnerJitAdmission $script:state)); [void](Save-RunnerLaunchEvent $script:state 'registered' 123); [void](Save-RunnerLaunchEvent $script:state 'dispatch')
         Refuse { Wait-DetachedRunner $script:state ([pscustomobject]@{ guestIp = 'fixture' }) }
         if ($script:queries -ne 4 -or $script:state.runnerLaunch.runnerId -ne 123) { throw 'Different guest runner was adopted.' }
+    }
+    Check 'missing SSH control prerequisite fails the bounded fixture instead of spinning' {
+        New-Fixture; $script:exitCode = 0
+        [IO.File]::Delete((Get-RunnerSessionPaths $script:state).knownHosts)
+        [void](Save-RunnerLaunchEvent $script:state 'intent' 0 ('c' * 32) -Admission (Get-RunnerJitAdmission $script:state)); [void](Save-RunnerLaunchEvent $script:state 'registered' 123); [void](Save-RunnerLaunchEvent $script:state 'dispatch')
+        $failure = $null
+        try { Wait-DetachedRunner $script:state ([pscustomobject]@{ guestIp = 'fixture' }) } catch { $failure = $_ }
+        if ($null -eq $failure -or $failure.Exception.Message -cne 'Offline integration exceeded its expected retry steps.' -or
+            $script:queries -ne 0 -or $script:sleeps -ne 5 -or $script:state.runnerLaunch.phase -cne 'transport-uncertain') { throw 'Missing SSH control prerequisite escaped its bounded fixture failure.' }
     }
     Check 'native receipt capture bounds output and transport timeout without logging stderr' {
         $exe = Join-Path $PSHOME 'powershell.exe'
