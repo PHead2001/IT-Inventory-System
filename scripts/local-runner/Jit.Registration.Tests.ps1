@@ -3,6 +3,7 @@
 param([string] $CandidateRoot = $PSScriptRoot, [switch] $ControllerRestartOnly)
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
+. (Join-Path $PSScriptRoot 'Test.FileHash.ps1')
 . (Join-Path $CandidateRoot 'Common.ps1')
 . (Join-Path $PSScriptRoot 'Network.Recovery.ps1')
 . (Join-Path $CandidateRoot 'Update.ps1')
@@ -53,7 +54,7 @@ function Get-RunnerMemoryAdmission { throw 'Unresolved registration reached memo
 function Get-RunnerVmInventory { if ($script:inventoryFailed) { throw 'Provider uncertain.' }; return $script:vms }
 function Get-VMHardDiskDrive($VM) { return @($VM.disks | ForEach-Object { [pscustomobject]@{ Path = $_ } }) }
 function Get-VHD($Path) {
-    if ($null -eq $script:state -or $Path -ine (Join-Path $script:state.instancePath 'guest.vhdx')) { throw 'Disk lookup escaped the fixed reconciliation fixture.' }
+    if ($null -eq $script:state -or $Path -ine ((Get-RunnerSessionPaths $script:state).guestDisk)) { throw 'Disk lookup escaped the fixed reconciliation fixture.' }
     return [pscustomobject]@{ VhdType = 'Dynamic'; ParentPath = '' }
 }
 function Invoke-RunnerTransitionCheckpoint($Name) { if ($Name -ceq $script:interrupt) { throw 'Simulated process interruption.' } }
@@ -88,10 +89,10 @@ function New-Fixture {
     $script:runners = @(); $script:total = 0; $script:reads = 0; $script:deletes = 0; $script:apiError = $false; $script:deleteLost = $false; $script:readEffect = $null; $script:deleteEffect = $null
     $script:afterSnapshotEffect = $null; $script:starts = 0; $script:coherenceChecks = 0; $script:pollBoundary = 0; $script:task = [pscustomobject]@{ State = 'Ready' }
     $script:liveRepo = ''
-    Write-RunnerJson (Join-Path $root 'credential.dpapi') ([ordered]@{ tag = $script:RunnerTag; scope = 'LocalMachine'; ciphertext = 'ZmFrZQ==' })
+    Write-RunnerJson (Join-Path $root 'credential.dpapi') ([ordered]@{ layoutVersion = 2; tag = $script:RunnerTag; scope = 'LocalMachine'; ciphertext = 'ZmFrZQ==' })
     $now = [DateTime]::UtcNow; $started = (Get-Process -Id $PID).StartTime.ToUniversalTime().ToString('o')
-    $script:state = [pscustomobject]@{ tag = $script:RunnerTag; purpose = 'job'; claimMode = 'active'; resourceLabel = 'it-inventory-heavy'
-        vmName = 'ITIR-' + ('a' * 32); vmId = '00000000-0000-0000-0000-000000000001'; instancePath = Join-Path $root ('ITIR-' + ('a' * 32))
+    $script:state = [pscustomobject]@{ layoutVersion = 2; tag = $script:RunnerTag; purpose = 'job'; claimMode = 'active'; resourceLabel = 'it-inventory-heavy'
+        vmName = 'ITIR-' + ('a' * 32); vmId = '00000000-0000-0000-0000-000000000001'; instancePath = Join-Path (Join-Path $root 'instances') ('ITIR-' + ('a' * 32))
         supervisorPid = $PID; supervisorStartUtc = $started; guardianPid = $PID; guardianStartUtc = $started; guardianReady = $true; deadlineUtc = $now.AddMinutes(5).ToString('o') }
     $binding = [pscustomobject]@{ vmId = $script:state.vmId; vmName = $script:state.vmName; claimHash = Get-RunnerRecoveryClaimHash $script:state }
     $script:state | Add-Member networkRecovery (New-RunnerNetworkRecovery $binding ('a' * 64) $now.AddMinutes(5) $now)
@@ -186,7 +187,7 @@ try {
             $other = [pscustomobject]@{ Name = 'other'; Id = [guid]::NewGuid(); Path = Join-Path $root 'other'; disks = @() }
             switch ($failure) {
                 'vm' { $other.Name = $script:state.vmName; $other.Id = [guid]$script:state.vmId; $script:vms = @($other) }
-                'reference' { $other.disks = @((Join-Path $script:state.instancePath 'guest.vhdx')); $script:vms = @($other) }
+                'reference' { $other.disks = @(((Get-RunnerSessionPaths $script:state).guestDisk)); $script:vms = @($other) }
                 'provider' { $script:inventoryFailed = $true }
                 'journal-during-read' { $script:readEffect = { $record = Get-RunnerJitRegistration; $record.operationId = 'd' * 32; Write-RunnerJitRegistration $record } }
                 'vm-during-read' { $script:readEffect = { $script:vms = @([pscustomobject]@{ Name = $script:state.vmName; Id = [guid]$script:state.vmId; Path = $script:state.instancePath; disks = @() }) } }
@@ -225,7 +226,7 @@ try {
     }
     Check 'handed-off barrier blocks claims pilot retry and activation until authoritative retirement' {
         New-Fixture; Commit-Handoff; Abandon-Fixture
-        Write-RunnerJson (Join-Path $root 'pilot-attempt.json') ([ordered]@{ tag = $script:RunnerTag; jobId = 999 })
+        Write-RunnerJson (Join-Path $root 'pilot-attempt.json') ([ordered]@{ layoutVersion = 2; tag = $script:RunnerTag; jobId = 999 })
         Refuse-Barrier { Assert-RunnerClaimOpen }
         Refuse-Barrier { Enable-RunnerPilotCore ('a' * 40) 'investigated' -Retry }
         Refuse-Barrier { Complete-PilotRetry ([pscustomobject]@{}) }
@@ -261,7 +262,7 @@ try {
             Add-OfflineRunner
             switch ($failure) {
                 'vm' { $script:vms = @([pscustomobject]@{ Name = $script:state.vmName; Id = [guid]$script:state.vmId; Path = $script:state.instancePath; disks = @() }) }
-                'reference' { $script:vms = @([pscustomobject]@{ Name = 'other'; Id = [guid]::NewGuid(); Path = Join-Path $root 'other'; disks = @((Join-Path $script:state.instancePath 'guest.vhdx')) }) }
+                'reference' { $script:vms = @([pscustomobject]@{ Name = 'other'; Id = [guid]::NewGuid(); Path = Join-Path $root 'other'; disks = @(((Get-RunnerSessionPaths $script:state).guestDisk)) }) }
                 'provider-uncertain' { $script:inventoryFailed = $true }
                 'online' { $script:runners[0].status = 'online' }
                 'busy' { $script:runners[0].busy = $true }
@@ -294,6 +295,7 @@ try {
 param([string] $Source, [string] $Root, [string] $CrashPhase)
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
+. (Join-Path $source 'Test.FileHash.ps1')
 . (Join-Path $Source 'Common.ps1')
 . (Join-Path $Source 'Network.Recovery.ps1')
 $ast = [Management.Automation.Language.Parser]::ParseFile((Join-Path $Source 'Runner.ps1'), [ref]$null, [ref]$null)
@@ -344,7 +346,7 @@ if ($CrashPhase -cin @('registered', 'handed-off')) {
     }
     Check 'pilot retry and update retain unresolved nonsecret journal even across cleanup' {
         New-Fixture; Abandon-Fixture
-        $receipt = [ordered]@{ tag = $script:RunnerTag; jobId = 999 }
+        $receipt = [ordered]@{ layoutVersion = 2; tag = $script:RunnerTag; jobId = 999 }
         Write-RunnerJson (Join-Path $root 'pilot-attempt.json') $receipt
         Refuse-Barrier { Enable-RunnerPilotCore ('a' * 40) 'investigated' -Retry }
         Refuse-Barrier { Complete-PilotRetry ([pscustomobject]@{}) }
@@ -361,7 +363,7 @@ if ($CrashPhase -cin @('registered', 'handed-off')) {
     }
     Check 'actual supervisor reconciles before consumed pilot return and never polls demand while unresolved' {
         New-Fixture; Abandon-Fixture
-        Write-RunnerJson (Join-Path $root 'pilot-attempt.json') ([ordered]@{ tag = $script:RunnerTag; jobId = 999 })
+        Write-RunnerJson (Join-Path $root 'pilot-attempt.json') ([ordered]@{ layoutVersion = 2; tag = $script:RunnerTag; jobId = 999 })
         $script:pollBoundary = 0
         foreach ($activation in @('active', 'pilot')) {
             $config.activation = $activation; $beforeReads = $script:reads
@@ -370,6 +372,32 @@ if ($CrashPhase -cin @('registered', 'handed-off')) {
         }
         $config.activation = 'active'
         if ($script:pollBoundary -ne 2 -or $script:deletes -ne 0 -or (Read-RunnerJson (Join-Path $root 'pilot-attempt.json')).jobId -ne 999) { throw 'Unresolved supervisor polled demand or changed consumption.' }
+    }
+    Check 'completed legacy barrier permits a fresh versioned intent without adopting old authority' {
+        New-Fixture; Commit-Registered
+        $fresh=Get-RunnerState; $fresh.PSObject.Properties.Remove('runnerLaunch')
+        $legacy=Get-RunnerJitRegistration; $legacy.PSObject.Properties.Remove('layoutVersion'); $legacy.phase='complete'
+        Write-RunnerJson (Join-Path $root 'jit-registration.json') $legacy
+        Assert-RunnerClaimOpen
+        Write-RunnerJson $script:RunnerStatePath $fresh
+        [void](Save-RunnerLaunchEvent $fresh 'intent' 0 ('d'*32) -Admission (Get-RunnerJitAdmission $fresh) -Config $config)
+        $actual=Get-RunnerJitRegistration
+        if($actual.layoutVersion -ne 2 -or $actual.operationId -cne ('d'*32) -or $actual.phase -cne 'intent'){throw 'Legacy barrier was adopted instead of replaced by fresh admission.'}
+    }
+    Check 'legacy registration cannot authorize current-layout handoff or legacy session admission' {
+        New-Fixture; Commit-Registered
+        $legacy=Get-RunnerJitRegistration; $legacy.PSObject.Properties.Remove('layoutVersion')
+        Write-RunnerJson (Join-Path $root 'jit-registration.json') $legacy
+        Refuse {Save-RunnerLaunchEvent $script:state 'dispatch'}
+        if((Get-RunnerState).runnerLaunch.phase -cne 'registered'){throw 'Legacy metadata advanced a handoff.'}
+        $old=Get-RunnerState;$old.PSObject.Properties.Remove('layoutVersion');Write-RunnerJson $script:RunnerStatePath $old
+        Refuse {Get-RunnerJitAdmission $old}
+    }
+    Check 'legacy pending registration has only bounded authoritative retirement' {
+        New-Fixture; Commit-Registered; Abandon-Fixture; Add-OfflineRunner
+        $legacy=Get-RunnerJitRegistration; $legacy.PSObject.Properties.Remove('layoutVersion')
+        Write-RunnerJson (Join-Path $root 'jit-registration.json') $legacy
+        if(-not (Invoke-RunnerJitReconciliation $config) -or $script:deletes -ne 1 -or (Get-RunnerJitRegistration).phase -cne 'complete'){throw 'Legacy retirement did not preserve its exact remote identity proof.'}
     }
     Write-Host "JIT registration offline regressions passed: $script:checks groups; no live GitHub/provider proof."
 } finally {

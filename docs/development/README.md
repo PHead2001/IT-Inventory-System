@@ -69,6 +69,40 @@ Private inventory files additionally need local Supabase Storage and a server-on
 
 Vercel previews derive their HTTPS origin from VERCEL_BRANCH_URL when APP_ORIGIN is unset. Do not copy the local APP_ORIGIN into Vercel Preview settings. See [deployment](../deployment.md) for the one-time Supabase preview wildcard and exact production redirects.
 
+## Automatic local push checks
+
+After setup, run `npm run hooks:install` once to opt this repository into automatic
+pre-push checks. This explicit command sets only repository-local
+`core.hooksPath=.githooks`. It does not change global Git configuration.
+Installation refuses an existing effective
+custom hooks path or any non-sample entry in the resolved default hooks directory
+so existing hooks can be integrated deliberately. It verifies the effective path
+again after writing the local setting and preserves worktree-specific overrides.
+Worktrees inherit the repository setting unless worktree or command configuration
+overrides it. The relative path enables the hook only on branches/worktrees that
+contain the shipped executable `.githooks/pre-push`; branches without that file
+have no hook until they adopt these changes. The installer confirms the current
+setting, not hook activation in every branch or worktree.
+Package installation, CI, Vercel builds and clones do not enable the hook.
+
+The hook runs `npm run validate:push`: typecheck, zero-warning lint, formatting and
+the full Vitest suite, sequentially. The local wrapper replaces inherited Node
+old-space limits with a 2 GiB limit for the canonical typecheck stage and a 1 GiB
+limit for lint, formatting and Vitest. It uses at most two Vitest workers
+with the default file parallelism and isolation. Other Node options are preserved. This limits
+old-space, not total process/host memory, and does not alter the full CI commands.
+Every nondeleted pushed ref must point at the checked-out
+HEAD, with no tracked, staged or untracked work before or after the checks; commit
+or stash pending changes first. A failing check or a HEAD/worktree change blocks
+the push. Deletion-only/no-update pushes run no checks. It checks main refs the
+same way; repository policy still prohibits unauthorized direct main pushes.
+The hook is local feedback; exact-SHA canonical CI remains authoritative and adds
+the locked install, both builds, database and browser gates.
+
+Use `npm run validate:push` directly before opting in. To opt out, explicitly run
+`git config --local --unset core.hooksPath` only while that setting is still
+`.githooks`. Commit the shipped hook with executable mode for Unix checkouts.
+
 ## Local accounts
 
 Public signup is disabled globally with auth.enable_signup=false. Keep auth.email.enable_signup=true: the pinned CLI maps this provider switch to email login availability, not just registration. Invite a fictional user in Studio, follow the captured local email, explicitly confirm and set a password. Then provision membership through the local SQL editor:

@@ -66,6 +66,25 @@ foreach ($case in @(
     $runner.labels += [pscustomobject]@{ name = 'it-inventory-ephemeral' }
     Assert-Rejected { Assert-RunnerJitLabels $cfg $runner $case.label } 'extra generic JIT label'
 }
+# Exercise the actual shared seed-data path for every generic/prepared profile.
+$seedConfig = [pscustomobject]@{ guestIp='192.0.2.2'; prefixLength=29; gatewayIp='192.0.2.1' }
+$seedCases = 0
+foreach ($label in @('it-inventory-light','it-inventory-mid','it-inventory-heavy','it-inventory-ephemeral',$pilot.pilotLabel)) {
+    foreach ($prepared in @($false,$true)) {
+        $seedData = Get-GuestSeedData 'fixture-key' '02:11:22:33:44:55' $seedConfig $label $prepared
+        if ((Get-RunnerGuestMtu) -isnot [int] -or (Get-RunnerGuestMtu) -ne 1400 -or
+            @([regex]::Matches($seedData.networkConfig, '(?m)^    mtu: 1400$')).Count -ne 1 -or
+            @([regex]::Matches($seedData.networkConfig, 'mtu:')).Count -ne 1 -or
+            -not $seedData.networkConfig.Contains('  runner0:') -or -not $seedData.networkConfig.Contains('      macaddress: 02:11:22:33:44:55') -or
+            -not $seedData.networkConfig.Contains('    set-name: runner0') -or -not $seedData.networkConfig.Contains('    addresses: [192.0.2.2/29]') -or
+            -not $seedData.networkConfig.Contains('        via: 192.0.2.1') -or -not $seedData.networkConfig.Contains('      addresses: [1.1.1.1, 8.8.8.8]') -or
+            -not $seedData.userData.Contains('      - fixture-key') -or
+            -not $seedData.userData.Contains($(if ($prepared) { 'package_update: false' } else { 'package_update: true' }))) { throw 'Shared guest seed MTU/network/profile contract changed.' }
+        $seedCases++
+    }
+}
+$seedDefinition = $ast.Find({param($node) $node -is [Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -ceq 'New-SeedDisk'},$false)
+if ($seedCases -ne 10 -or -not $seedDefinition.Extent.Text.Contains('Get-GuestSeedData $PublicKey $Mac $Config $ProfileLabel $Prepared')) { throw 'Actual seed disk path bypassed shared profile seed generation.' }
 if ((Get-RunnerSessionProfile $config).memoryBytes -ne 8GB) { throw 'Legacy caller resource compatibility changed.' }
 Assert-Rejected { Get-RunnerResourceProfile 'it-inventory-tiny' } 'unsupported profile'
 Assert-Rejected { Get-RunnerSessionProfile $pilot 'it-inventory-light' } 'small pilot profile'
@@ -101,9 +120,10 @@ foreach ($case in @(@{ free = 4GB; id = 3 }, @{ free = 6GB; id = 2 }, @{ free = 
 if ($null -ne (Get-QueuedRunnerJob $config 'dummy' (4GB - 1KB))) { throw 'Queue admitted insufficient host headroom.' }
 $script:jobs = @((New-Job 4 'it-inventory-ephemeral'), (New-Job 3 'it-inventory-light'))
 if ((Get-QueuedRunnerJob $config 'dummy' 4GB).id -ne 3 -or (Get-QueuedRunnerJob $config 'dummy' 10GB).id -ne 4) { throw 'Legacy generic capacity changed.' }
-    $legacy = [pscustomobject]@{ tag = $script:RunnerTag; vmName = ('ITIR-' + ('c' * 32)); instancePath = (Join-Path $base ('ITIR-' + ('c' * 32))) }
-    Assert-StateIdentity $legacy # Recovery must not require newly introduced profile fields.
-    Complete-RunnerPilotClaim $legacy
+    $legacy = [pscustomobject]@{ tag = $script:RunnerTag; vmName = ('ITIR-' + ('c' * 32)); instancePath = (Join-Path (Join-Path $base 'instances') ('ITIR-' + ('c' * 32))) }
+    Assert-Rejected { Assert-StateIdentity $legacy } 'legacy state admission'
+    Assert-StateIdentity $legacy -AllowLegacy # Status/cleanup need no profile fields.
+    Complete-RunnerPilotClaim $legacy -AllowLegacy
     function Assert-RunnerTransitionClear {}
     function Get-RunnerConfig { return $config }
     function Get-RunnerState { return $null }
@@ -136,10 +156,33 @@ if ((Get-QueuedRunnerJob $config 'dummy' 4GB).id -ne 3 -or (Get-QueuedRunnerJob 
 }
 # Consolidated validation must preserve exact-SHA and trusted main/environment gates.
 $root = Split-Path (Split-Path $PSScriptRoot -Parent) -Parent
-$expected = @{ required = 'dynamic'; reuse_evidence = 'light'; production_database = 'light'; discover = 'light'; provision = 'light' }
+$expected = @{ required = 'dynamic'; reuse_evidence = 'light'; production_database = 'light'; provision = 'light' }
 $reuseLabel = @'
-${{ needs.reuse_evidence.result == 'success' && needs.reuse_evidence.outputs.reuse == 'true' && 'it-inventory-light' || 'it-inventory-heavy' }}
+${{ ((github.event_name == 'pull_request' && (toJSON(github.event.pull_request.draft) != 'false' || github.event.pull_request.state != 'open')) || (needs.reuse_evidence.result == 'success' && needs.reuse_evidence.outputs.reuse == 'true')) && 'it-inventory-light' || 'it-inventory-heavy' }}
 '@
+# Evaluate the reviewed routing condition for ready/full, reuse and fail-closed PR states.
+$routingCondition = $reuseLabel.Substring(4, $reuseLabel.IndexOf(" && 'it-inventory-light'") - 4).
+    Replace('toJSON(github.event.pull_request.draft)', '$draftJson').
+    Replace('github.event_name', '$eventName').
+    Replace('github.event.pull_request.state', '$prState').
+    Replace('needs.reuse_evidence.result', '$probe').
+    Replace('needs.reuse_evidence.outputs.reuse', '$reuse').
+    Replace(' != ', ' -cne ').Replace(' == ', ' -ceq ').
+    Replace(' && ', ' -and ').Replace(' || ', ' -or ')
+foreach ($case in @(
+    @('pull_request', 'false', 'open', 'skipped', '', 'heavy'),
+    @('pull_request', 'true', 'open', 'skipped', '', 'light'),
+    @('pull_request', 'null', 'open', 'skipped', '', 'light'),
+    @('pull_request', '"false"', 'open', 'skipped', '', 'light'),
+    @('pull_request', 'false', 'closed', 'skipped', '', 'light'),
+    @('push', 'null', '', 'success', 'true', 'light'),
+    @('push', 'null', '', 'success', 'false', 'heavy'),
+    @('push', 'null', '', 'failure', 'true', 'heavy')
+)) {
+    $eventName, $draftJson, $prState, $probe, $reuse, $expectedProfile = $case
+    $actualProfile = if (Invoke-Expression $routingCondition) { 'light' } else { 'heavy' }
+    if ($actualProfile -cne $expectedProfile) { throw 'Reviewed workflow routing condition misclassified a validation context.' }
+}
 $seen = @{}
 foreach ($name in @('ci.yml', 'preview-access.yml')) {
     $source = [IO.File]::ReadAllText((Join-Path $root ".github/workflows/$name"))
@@ -157,11 +200,11 @@ foreach ($name in @('ci.yml', 'preview-access.yml')) {
     }
     if ($source.Contains('it-inventory-ephemeral')) { throw 'Normal workflow retained a generic runner label.' }
 }
-if ($seen.Count -ne 5) { throw 'Profile tests did not verify all five validation/preview workflow jobs.' }
+if ($seen.Count -ne 4) { throw 'Profile tests did not verify all four validation/preview workflow jobs.' }
 $ci = [IO.File]::ReadAllText((Join-Path $root '.github/workflows/ci.yml'))
 $preview = [IO.File]::ReadAllText((Join-Path $root '.github/workflows/preview-access.yml'))
 foreach ($contract in @('github.event.pull_request.head.sha || github.sha', 'run: npm run validate:app', 'run: npm run test:db', 'run: npm run db:types:check', 'run: npm run test:e2e', 'run: node scripts/ci-gates.mjs', 'FOUNDATION_APP: ${{ steps.app.outcome }}', 'FOUNDATION_DB_TESTS: ${{ steps.db_tests.outcome }}', 'FOUNDATION_E2E: ${{ steps.e2e.outcome }}', 'environment: production-database', "github.ref == 'refs/heads/main'", 'needs: [required]', 'test "$REQUIRED_RESULT" = success')) { if (-not $ci.Contains($contract)) { throw 'CI exact-SHA/required/production gate changed.' } }
 foreach ($contract in @('pull_request_target:', 'ref: refs/heads/main', 'environment: preview-access', "github.ref == 'refs/heads/main'")) { if (-not $preview.Contains($contract)) { throw 'Trusted preview gate changed.' } }
-foreach ($contract in @('run: node scripts/ci-required.mjs', 'run: node scripts/ci-reuse.mjs --reverify', "if: needs.reuse_evidence.outputs.reuse != 'true'", "if: needs.reuse_evidence.outputs.reuse == 'true'", 'EVIDENCE_RESULT: ${{ needs.reuse_evidence.result }}', "if: `${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}")) { if (-not $ci.Contains($contract)) { throw 'CI reuse evidence/fallback/decision gate changed.' } }
+foreach ($contract in @('run: node scripts/ci-required.mjs', 'run: node scripts/ci-reuse.mjs --reverify', "if: (github.event_name != 'pull_request' || (toJSON(github.event.pull_request.draft) == 'false' && github.event.pull_request.state == 'open')) && needs.reuse_evidence.outputs.reuse != 'true'", "if: github.event_name == 'push' && needs.reuse_evidence.outputs.reuse == 'true'", 'EVIDENCE_RESULT: ${{ needs.reuse_evidence.result }}', "if: `${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}")) { if (-not $ci.Contains($contract)) { throw 'CI reuse evidence/fallback/decision gate changed.' } }
 if ($script:fixtureStateDepth -ne 0 -or $script:stateLocked) { throw 'Fixture leaked state recursion.' }
-Write-Host 'Resource profiles passed: fixed boundaries, strict labels, queue skipping, VM/JIT readback, session propagation, capacity loss, legacy recovery and five validation/preview workflow gates.'
+Write-Host 'Resource profiles passed: fixed boundaries, strict labels, queue skipping, VM/JIT readback, session propagation, capacity loss, legacy recovery and four validation/preview workflow gates.'

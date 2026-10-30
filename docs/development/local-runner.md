@@ -1,6 +1,6 @@
 # Local GitHub Actions runner
 
-The repository routes normal CI jobs to fixed self-hosted resource labels described below. Foundation CI keeps the stable `required` job: every PR and main fallback runs full application/database/browser validation on heavy; a main-only light evidence probe can select light `required` only for verified identical-tree PR validation, with a fresh fail-closed recheck. See [validation](../validation.md) for the evidence and trust contract. Production database delivery and the two trusted preview-access jobs remain light. The separate diagnostic `Local runner pilot` remains restricted to its exact reviewed SHA through the `it-inventory-pilot-<headSha>` label. Repository routing records the intended job labels; it does not activate or certify an installation. Activation state, installed bundle version, owner acceptance of the residual detection window, pilot/recovery receipts and normal-workload results are installation-specific evidence recorded with the PR. A successful one-job pilot and recovery check apply only to their recorded revision and installation; they do not certify the full Supabase/Playwright workload or authorize automatic activation. Record transient job IDs and host evidence with the PR; follow the security and workload gates below.
+The repository routes normal CI jobs to fixed self-hosted resource labels described below. Draft PRs use light CI for iteration and are not certified; marking a PR ready runs full application/database/browser validation on heavy. A main-branch push can use verified identical-tree evidence on light. See [validation](../validation.md) for the evidence and trust contract. One trusted-main workflow reconciles preview staff access on PR open, reopen, or ready-for-review, and by manual dispatch; it does not run on synchronize, and its changes activate only after merge to main. The separate diagnostic `Local runner pilot` remains restricted to its exact reviewed SHA through the `it-inventory-pilot-<headSha>` label. Repository routing records the intended job labels; it does not activate or certify an installation. Activation state, installed bundle version, owner acceptance of the residual detection window, pilot/recovery receipts and normal-workload results are installation-specific evidence recorded with the PR. A successful one-job pilot and recovery check apply only to their recorded revision and installation; they do not certify the full Supabase/Playwright workload or authorize automatic activation. Record transient job IDs and host evidence with the PR; follow the security and workload gates below.
 
 Pilot workflow runs share a concurrency group by PR number, while manual dispatches
 use their ref. A newer event cancels an older run in that group, including a run
@@ -52,8 +52,8 @@ Queue inspection collects both `queued` and `in_progress` workflow-run snapshots
 before inspecting jobs: a run already executing can have a queued continuation.
 Each snapshot remains capped at 100 runs, with no pagination; overflow fails
 closed before job lookup. Positive numeric run IDs are validated and deduplicated
-across snapshots (at most 200 distinct runs). Runs are inspected oldest `created_at`
-first using the UTC instant, then numeric run ID for ties. A duplicate uses its
+across snapshots (at most 200 distinct runs). Runs are inspected by effective UTC
+creation time, then original UTC creation time and numeric run ID for ties. A duplicate uses its
 oldest valid observed timestamp. Missing or invalid timestamps remain eligible
 after all dated runs, ordered by numeric ID; this compatibility policy does not
 invent an age from provider response order. Each job view remains capped at 100.
@@ -61,7 +61,25 @@ Unsupported labels, nonfitting capacity and mismatched session profiles are stil
 skipped, and exact pilot workflow/SHA/job binding and Stop checks remain required.
 This orders provisioning demand; GitHub assigns the actual job to a compatible
 JIT runner, so selecting a run does not force that runner to take its job. It
-adds no special main/production routing or authorization bypass.
+adds no authorization bypass.
+
+Only a verified `push` to `main` for `PHead2001/IT-Inventory-System`'s Foundation
+CI workflow at `.github/workflows/ci.yml` receives a 30-minute creation-time
+boost, clamped at the minimum timestamp. Both run repository and head repository
+must identify that canonical repository, with a valid workflow ID. A matching
+display name or branch alone is insufficient. When the run omits its workflow
+path, one workflow metadata read per distinct ID, cached only within that
+inspection, must verify the same ID and canonical path. Missing, mismatched or
+unknown identity keeps ordinary eligibility without the boost; transport errors
+retain fail-closed inspection. Conflicting duplicate observations also deny the
+boost. Undated runs remain after every dated run. PR demand older than the boost
+still precedes newer release demand, including at the exact 30-minute tie.
+The preference applies only to choosing fitting provisioning demand: it does
+not preempt a running job, change resource admission, pilot binding, JIT labels,
+privileges or session deadlines, or create another VM. GitHub still assigns a
+job to a generic matching runner, so this does not guarantee release execution
+order. Offline queue regressions establish selection and bounded metadata calls;
+installed pickup and real GitHub execution order need separate host evidence.
 
 Status reports current available physical memory and guest/reserve/admission for
 every applicable fixed profile, so an idle controller does not imply capacity for
@@ -115,6 +133,31 @@ to remove generated network configuration and reset the machine ID, then require
 the builder's `50-cloud-init.yaml` to be absent and the systemd machine ID to be
 `uninitialized`. The fresh-clone gate verifies the resulting boot behavior. No job
 disk is ever retained as an image.
+
+The browser install command sets `PLAYWRIGHT_DOWNLOAD_CONNECTION_TIMEOUT=120000`
+only for that command. In pinned Playwright 1.62.1 this is a 120-second request
+socket inactivity timeout, not a total download deadline or evidence of a failed
+initial TCP connection. The builder's outer 900-second phase limit and Playwright's
+existing five download attempts remain unchanged. CI's cold-browser fallback uses
+the same child-only value; its existing enclosing job deadline is unchanged.
+Shell-only installation, cache verification, TLS/certificate validation, proxy
+configuration and guest isolation retain their existing behavior. This bounded
+tolerance change requires a real guest download and verification before claiming
+recovery or any runtime improvement.
+
+Every guest seed sets the matched `runner0` Netplan interface to the fixed MTU
+1400, including generic jobs, preparation builders and fresh prepared-image
+verifiers across all resource profiles. This overrides inherited image settings.
+The diagnostic on this host measured a 1420-byte VPN tunnel and packet-size-sensitive
+TLS/download behavior; 1400 is a bounded guest default, not a guarantee for every
+network or proof of a particular PMTUD/ICMP cause. Host MTU, VPN, DNS, routes,
+firewall, isolation and resource profiles are unchanged. Readiness checks the
+effective `/sys/class/net/runner0/mtu` after cloud-init and refuses missing or
+different values before accepting the guest, preserving the existing readiness
+timeouts. Fresh clone proofs record the verified `guestMtu`; current-image admission
+and publication require integer 1400 in both successive children. Historical
+proofs missing that field remain readable for status/upgrade/pruning, while
+malformed present fields fail and stale inputs retain the generic-image fallback.
 
 Storage is pulled once from an available official mirror. The builder adds the
 four exact-version runtime mirror aliases to that verified local image ID, checks
@@ -251,7 +294,24 @@ Double-click `scripts/local-runner/Setup.cmd` and accept the Windows elevation p
 
 Setup downloads two fixed official Ubuntu artifacts with pinned SHA-256 values: the generic [Noble cloud QCOW2 image](https://cloud-images.ubuntu.com/releases/noble/release-20260926/) and [Ubuntu 24.04.5 WSL image](https://releases.ubuntu.com/24.04/). A dedicated WSL image converter installs `qemu-utils` and converts the verified QCOW2 into a Hyper-V VHDX. WSL retains Windows host integration and is a trusted setup tool, not an isolated job sandbox. Its random distribution name is recorded in the protected setup stage before import; resume requires the same Windows WSL registration and owned base path. An unrecognized or preexisting converter is refused. Conversion writes a temporary VHDX, validates and resizes it, then records the completed output hash. Resume verifies both the source and output hashes; a partial or unreceipted VHDX is regenerated. Before setup completes or the token menu can run, setup verifies the exact owned converter registration, terminates it, verifies ownership again, unregisters it, and verifies its absence. Retirement failure keeps setup incomplete; retry uses the protected stage. The Azure VHD is intentionally excluded: [Canonical says it will not work on local Hyper-V](https://ubuntu.com/docs/public-images/public-images-reference/artifacts/). Canonical documents [generic image conversion and NoCloud on Hyper-V](https://ubuntu.com/blog/how-to-use-ubuntu-on-windows). Generic fallback copies the converted VHDX; only a separately verified prepared image can serve as a read-only differencing parent.
 
-Setup creates `C:\ProgramData\ITInventoryLocalRunner`, a temporary image-converter WSL distribution, a dedicated internal switch/NAT on `172.30.240.0/29`, and two SYSTEM tasks. It protects the fixed data root with a non-inheriting SYSTEM/Administrators-only ACL and refuses an unexpected owner, reparse point, conflicting switch/NAT, or overlapping host address. Partial setup can be rerun for the same repository/group using its tagged setup stage; it never adopts a reserved switch/NAT that existed before its own stage. It leaves job pickup disabled. VM creation journals a provisional identity before New-VM; recovery accepts an untagged VM only while Off, with the exact recorded GUID name, exact nested configuration path (`instances\<vmName>\<vmName>`, since New-VM appends its name to the supplied path), and exactly the recorded boot disk. Tagged recovery also requires this exact configuration path. Tag readback advances that journal before any additional attachment or boot.
+Setup creates `C:\ProgramData\ITInventoryLocalRunner`, a temporary image-converter WSL distribution, a dedicated internal switch/NAT on `172.30.240.0/29`, and two SYSTEM tasks. It protects the fixed data root with a non-inheriting SYSTEM/Administrators-only ACL and refuses an unexpected owner, reparse point, conflicting switch/NAT, or overlapping host address. Partial setup can be rerun for the same repository/group using its tagged setup stage; it never adopts a reserved switch/NAT that existed before its own stage. It leaves job pickup disabled. New session state records integer `layoutVersion: 2`. A canonical resolver derives paths from the validated `ITIR-<32 lowercase hex>` identity: `instances\<vmName>\vm-data\guest.vhdx`, `vm-data\cidata.vhdx`, and the configuration directory `vm-data\<vmName>` beneath that instance. SSH keys, `known_hosts`, probe files and control files stay in the strict instance root outside `vm-data`. VM creation journals a provisional identity before New-VM; recovery accepts an untagged VM only while Off, with the exact recorded GUID name, derived configuration path and boot disk. Tagged recovery requires the same paths. Tag readback advances that journal before any additional attachment or boot.
+
+Per-session SSH files use only the canonical `id_ed25519`, `id_ed25519.pub` and
+`known_hosts` destinations in that strict instance root. Both key destinations
+must be absent before generation. Windows OpenSSH's creator-owned output is
+validated while its file identity is held, then its owner and DACL are normalized
+before either key is consumed: Administrators owns each file, with protected,
+explicit FullControl entries only for SYSTEM and Administrators. This applies only
+to the newly generated session files; it does not normalize preexisting files or
+relax the general protected-path policy. The runner precreates an empty
+`known_hosts` with the same strict owner/DACL before SSH, then checks its retained
+identity, exact ACL and nonempty content after the actual connection. These are
+source contracts; native image preparation and fresh-clone proof for the updated
+SSH path remain pending and no readiness result is implied.
+
+Native powered-off VHD-backed New-VM probes showed that Hyper-V adds broad access entries to the disk/configuration parent. The `vm-data` boundary confines those native entries to VM data; it does not relax the SYSTEM/Administrators-only instance-root check. The four-phase native probe retained strict root and sentinel ACLs and a successful bootstrap check, then verified cleanup and pickup restoration. This evidence does not establish the updated installed SYSTEM runtime, recovery, normal CI, network-switch behavior or reboot recovery.
+
+State without `layoutVersion` is recognized only at the exact old paths (`instances\<vmName>\guest.vhdx`, `cidata.vhdx` and `<vmName>` configuration directory) for Status and guarded cleanup. A malformed or unknown present version refuses admission. Legacy layouts cannot resume, boot, register JIT runners, recover, prepare images or pass resource admission. Install the reviewed bundle while idle, then use the canonical prepared-image rebuild and two fresh clone verifications after the bundle binding makes the old image stale. No selector or instance-data migration is performed.
 
 WSL may record the converter's registry BasePath as `\\?\C:\ProgramData\ITInventoryLocalRunner\image-converter`. Setup compares that extended DOS spelling with the same ordinary local path after narrow normalization, while still requiring the exact recorded distribution name, owned root and absence of reparse points. UNC/device paths, ambiguous extended components and genuinely different paths remain rejected. If import completed before an ownership error, retry **Install or resume** with the corrected scripts; retain the protected setup stage and registered converter rather than deleting or adopting another distribution.
 
@@ -374,14 +434,16 @@ selected profile before any claim/VM allocation. Pilot pickup retains its 10 GiB
 minimum. Low capacity waits on the existing 30-second loop without consuming a
 pilot or allocating a VM. Invalid/failed inspection refuses work. Selection flows
 through session state, fixed VM startup memory/readback and exact JIT label readback.
-Older sessions without profile fields remain recoverable. Status reports a bounded
+Within the current instance layout, older sessions without profile fields retain
+their profile compatibility; legacy instance layouts remain Status/cleanup-only.
+Status reports a bounded
 minimum-capacity advisory. Admission is not a reservation; a later allocation race
 still fails closed at `vm-boot` and uses the existing cleanup path. Real workloads
 and independent security review remain required before installation/acceptance.
 
 ## Boundaries and required proof
 
-The host-side Hyper-V extended port ACL denies IPv6, private/link-local/CGNAT destinations, current host addresses and all non-default IPv4 routes, including routes through corporate/VPN gateways, and all unlisted traffic. Split-default VPN routes (`0.0.0.0/1` and `128.0.0.0/1`) intentionally block Internet readiness and fail closed. It allows public HTTP/HTTPS, public TCP 5432 for the linked Supabase session endpoint, and public DNS, plus host-to-guest SSH for setup. The pinned Supabase CLI uses pooler session port 5432; port 6543 is not opened. A linked database workflow requires a public IPv4 session endpoint; these checks do not connect to production or prove actual production connectivity. Higher-priority private/host/route denies also apply to port 5432. Each rule has a distinct weight: public TCP 100-102, DNS 110-113, inbound SSH 150, then ascending private, route, host and IPv6 denies from 200; default denies use 1 and 2. Host addresses and route prefixes are sorted and deduplicated. Invalid inspection data or more than 4096 total deny rules aborts before ACL modification. The count includes both default denies; the eight allow rules do not consume this deny limit. Rules are installed and read back before VM boot and checked again before JIT registration. A live guest-to-host TCP denial and public GitHub TLS/DNS probe must pass before registration. These controls are host-side; a guest firewall rule cannot replace them. [Microsoft documents rule weights and stateful return traffic](https://learn.microsoft.com/en-us/windows-server/virtualization/hyper-v/create-security-policies-extended-port-access-control-lists).
+The host-side Hyper-V extended port ACL denies IPv6, private/link-local/CGNAT destinations, current host addresses and all non-default IPv4 routes, including routes through corporate/VPN gateways, and all unlisted traffic. A unique complementary IPv4 split-default pair (`0.0.0.0/1` and `128.0.0.0/1`) is treated as ordinary default transport only when both routes have the same valid positive interface index, canonical IPv4 next-hop (including on-link `0.0.0.0`), and equal integer route metric (0–65535), with a matching captured host IPv4 interface. Single, duplicate, incomplete, malformed or mismatched pairs remain denied. This omits only those two transport-route denies; all private, link-local, CGNAT, host, IPv6 and other non-default route denies retain priority above the unchanged public-port allows. Route metrics, typed interface indexes and duplicate multiplicity participate in the coherent fingerprint, so a pair change triggers the existing quarantine, stable-observation, ACL-readback and connectivity-probe recovery. DNS resolver addresses and Windows VPN/DNS settings are unchanged. It allows public HTTP/HTTPS, public TCP 5432 for the linked Supabase session endpoint, and public DNS, plus host-to-guest SSH for setup. The pinned Supabase CLI uses pooler session port 5432; port 6543 is not opened. A linked database workflow requires a public IPv4 session endpoint; these checks do not connect to production or prove actual production connectivity. Higher-priority private/host/route denies also apply to port 5432. Each rule has a distinct weight: public TCP 100-102, DNS 110-113, inbound SSH 150, then ascending private, route, host and IPv6 denies from 200; default denies use 1 and 2. Host addresses and route prefixes are sorted and deduplicated. Invalid inspection data or more than 4096 total deny rules aborts before ACL modification. The count includes both default denies; the eight allow rules do not consume this deny limit. Rules are installed and read back before VM boot and checked again before JIT registration. A live guest-to-host TCP denial and public GitHub TLS/DNS probe must pass before registration. These controls are host-side; a guest firewall rule cannot replace them. [Microsoft documents rule weights and stateful return traffic](https://learn.microsoft.com/en-us/windows-server/virtualization/hyper-v/create-security-policies-extended-port-access-control-lists).
 
 Before constructing the NoCloud seed, the host assigns a collision-checked random locally administered static MAC to the owned, never-booted guest adapter. The assigned address is journaled and read back before/after boot and before JIT registration; the seed matches that exact address. Hyper-V may report an all-zero dynamic MAC before first boot, which cannot be used as the guest match. Generic cloud-init declares the Docker group before creating the `runner` user and installing Docker; prepared seeds retain membership without recreating the group. Guest readiness requires successful cloud-init completion (exit 0) and `docker info` as the unprivileged `runner` user; a Docker socket alone is insufficient. Cloud-init warnings or Docker access failures keep readiness pending instead of registering a runner.
 
@@ -505,3 +567,81 @@ Before enabling active pickup on the live host, security evidence must establish
 Source contract validation performs no host provisioning, elevation, credential creation, VM/WSL/NAT/task creation, or GitHub registration. Windows PowerShell 5.1 syntax and non-mutating contract checks cover native argument fidelity, lifecycle readback, provisional cleanup, serialized recovery, synthetic network drift and inspection failure, cancelled boot, converter retirement, menu activation order, real-process claim/suspension races, fail-fast concurrent owner controls, abrupt claim-process loss, and every final setup publication interruption. Offline checks do not substitute for real Hyper-V networking, disk creation, guest boot, shutdown recovery or a working runner job. Preserve exact-revision runtime pilot evidence separately, complete independent review, and apply the security and workload gates above. A new installation leaves pickup disabled until the operator explicitly enables it. Installed activation or a passing pilot does not waive the complete normal-workload gate. Record real reboot recovery separately from synthetic interruption/recovery checks; do not infer reboot proof from those checks or from configured boot tasks.
 
 Official references: [GitHub repository JIT runner API](https://docs.github.com/en/rest/actions/self-hosted-runners), [GitHub workflow job API](https://docs.github.com/en/rest/actions/workflow-jobs), [Ubuntu cloud-init NoCloud](https://docs.cloud-init.io/en/latest/reference/datasources/nocloud.html), [Microsoft Hyper-V NAT](https://learn.microsoft.com/en-us/windows-server/virtualization/hyper-v/setup-nat-network), and [Microsoft Hyper-V extended ACLs](https://learn.microsoft.com/en-us/windows-server/virtualization/hyper-v/create-security-policies-extended-port-access-control-lists).
+
+## Recovery probe outcome diagnostics
+
+Recovery failure observations retain optional fixed probe outcome and worker-stage
+codes, attempt/failure counts (maximum 1,000,000), and elapsed milliseconds
+(maximum 86,400,000). Outcome codes distinguish passed, timeout, child exit,
+missing/invalid result and Boolean probe failure. Worker codes identify listener,
+isolation-command or GitHub-command stages. They do not identify a transport,
+HTTP, hardware or outage root cause. Elapsed fields retain episode maxima and
+need not describe the last attempt. Legacy records without these fields remain
+readable; unknown fields and malformed projected values are rejected. Raw
+exceptions, commands, endpoints, output, credentials and tokens are excluded.
+
+Probe worker exit codes 61–66 map to the fixed stages `common-import`,
+`instance-containment`, `instance-identity`, `instance-acl`,
+`result-precondition`, and `result-publication`, respectively. The exact
+unsigned 32-bit exit code is retained; an unrecognized code maps to stage
+`other`. A stage identifies where the probe worker reported exiting, not the
+underlying cause of failure.
+
+During the instance ACL check, codes 67–74 distinguish ACL-read command
+unavailability, ACL-read access denial, other ACL-read failure, owner read,
+owner rejection, ACE enumeration, SID translation, and allow-rule rejection.
+Only exact exception types through a bounded allowlist of invocation wrappers
+distinguish the first two ACL-read outcomes; messages and HResults are not used.
+Code 64 remains the fallback when that check cannot be classified. The optional
+validator stage reference does not change its permission checks or exceptions,
+and no ACL data is added to the worker result or failure journal. These codes
+do not establish why a runner disconnected or imply that permissions changed.
+
+An optional `isolationProbe` observation records the fixed `guest-to-host` kind,
+the SSH command's numeric exit code (or `null` when unavailable), and whether the
+host listener had a connection pending (`pending`), no connection pending
+(`clear`), or could not be observed (`unavailable`). These fields are bounded
+observations only: they do not establish the packet's source, prove that a
+network repair succeeded, or retain raw SSH output.
+
+Guest-readiness failures may also include a bounded `guestReadiness` observation:
+purpose, attempt count (maximum 1,000,000), elapsed milliseconds (maximum
+86,400,000), first and last recognized failure stage, last native exit code, and
+whether any SSH exit code below 255 was observed. Stages classify cloud-init,
+guest identity and prerequisite checks, Docker readiness, or SSH transport;
+unrecognized outcomes map to `unknown`. These fields localize an observed
+readiness step but do not prove the underlying cause. Raw commands and output
+are omitted.
+
+For a generic image-preparation session, a guest cloud-init readiness exit code
+of 72 triggers at most one read-only pre-JIT status capture. It stores normalized
+status, per-stage counts, and at most eight fixed-template reasons; unmatched or
+sensitive details are withheld. Fixed reason categories cover network and
+TLS, package repository and installation, disk space, permissions, cloud-config
+schema, and filesystem-resize failures. The latest artifact is protected at
+`preparation-cloud-init.json` and is limited to 8 KiB. A complete capture that
+confirms a terminal nonzero cloud-init result fails readiness immediately;
+unavailable or inconclusive capture does not change the existing retry policy.
+For a terminal cloud-init package-update error with only a generic package
+manager reason, the inspector may conditionally read the last 64 KiB of the
+fixed `/var/log/cloud-init-output.log`, and only when it is a root-owned regular
+file not writable by group or others. A matched fixed summary may carry
+`source=cloud-init-output-tail`; this identifies the diagnostic source, not a
+proven cause. Raw log text is not retained or transmitted.
+
+Image-preparation failures may also leave a protected local
+`preparation-image.json` artifact, limited to 8 KiB. It records the builder's
+fixed stage marker (or `unknown`), exit code, receipt length, and bounded,
+sanitized stderr; that detail remains local and is not copied to generic
+failure records or public output.
+
+This is diagnostic instrumentation. The Boolean success policy, generation/nonce
+checks, native commands, timeouts, isolation rules and outage deadline are unchanged.
+Offline worker, recovery and failure-observation contracts prove mocked behavior;
+they do not prove installed delivery or real network continuity. Regenerate the
+source bundle with the canonical Write-Bundle.ps1 after integration, then install
+that reviewed bundle through Update.ps1 while idle. Update refuses an active
+session or owned VM, waits only for graceful idle-supervisor suspension, preserves
+registration/configuration evidence, and leaves pickup stopped. Record installed
+bundle identity separately. Capture tooling must accept the optional fields using
+the installed reviewed validators before a later incident can provide new evidence.

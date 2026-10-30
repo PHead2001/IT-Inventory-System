@@ -1,6 +1,7 @@
 name: Foundation CI
 on:
   pull_request:
+    types: [opened, reopened, synchronize, ready_for_review, converted_to_draft]
   push:
     branches: [main]
 permissions:
@@ -40,8 +41,8 @@ jobs:
     if: ${{ always() && !cancelled() }}
     runs-on:
       - self-hosted
-      - ${{ needs.reuse_evidence.result == 'success' && needs.reuse_evidence.outputs.reuse == 'true' && 'it-inventory-light' || 'it-inventory-heavy' }}
-    timeout-minutes: 30
+      - ${{ ((github.event_name == 'pull_request' && (toJSON(github.event.pull_request.draft) != 'false' || github.event.pull_request.state != 'open')) || (needs.reuse_evidence.result == 'success' && needs.reuse_evidence.outputs.reuse == 'true')) && 'it-inventory-light' || 'it-inventory-heavy' }}
+    timeout-minutes: 40
     permissions:
       contents: read
       actions: read
@@ -61,40 +62,40 @@ jobs:
           package-manager-cache: false
       - name: Reverify matching PR validation
         id: recheck
-        if: needs.reuse_evidence.outputs.reuse == 'true'
+        if: github.event_name == 'push' && needs.reuse_evidence.outputs.reuse == 'true'
         run: node scripts/ci-reuse.mjs --reverify
         env:
           GH_TOKEN: ${{ github.token }}
           REUSE_EVIDENCE: ${{ needs.reuse_evidence.outputs.evidence }}
       - name: Set up pinned npm
         id: npm_setup
-        if: needs.reuse_evidence.outputs.reuse != 'true'
+        if: (github.event_name != 'pull_request' || (toJSON(github.event.pull_request.draft) == 'false' && github.event.pull_request.state == 'open')) && needs.reuse_evidence.outputs.reuse != 'true'
         run: |
           if ! runner_npm_version="$(npm --version)" || [ "$runner_npm_version" != "11.11.0" ]; then
             npm install --global npm@11.11.0
           fi
       - name: Install locked dependencies
         id: install
-        if: needs.reuse_evidence.outputs.reuse != 'true'
+        if: (github.event_name != 'pull_request' || (toJSON(github.event.pull_request.draft) == 'false' && github.event.pull_request.state == 'open')) && needs.reuse_evidence.outputs.reuse != 'true'
         run: npm ci --prefer-offline
       - name: Verify tested revision
         id: revision
-        if: needs.reuse_evidence.outputs.reuse != 'true'
+        if: (github.event_name != 'pull_request' || (toJSON(github.event.pull_request.draft) == 'false' && github.event.pull_request.state == 'open')) && needs.reuse_evidence.outputs.reuse != 'true'
         run: test "$(git rev-parse HEAD)" = "$TESTED_SHA"
       - name: Inspect workflow source for future reuse
         id: workflow_source_inspection
-        if: needs.reuse_evidence.outputs.reuse != 'true'
+        if: (github.event_name != 'pull_request' || (toJSON(github.event.pull_request.draft) == 'false' && github.event.pull_request.state == 'open')) && needs.reuse_evidence.outputs.reuse != 'true'
         continue-on-error: true
         run: node scripts/ci-reuse.mjs --workflow-source
         env:
           GH_TOKEN: ${{ github.token }}
       - name: Verify executed workflow ${{ github.workflow_sha }}
         id: workflow_source
-        if: needs.reuse_evidence.outputs.reuse != 'true' && steps.workflow_source_inspection.outcome == 'success' && steps.workflow_source_inspection.outputs.verified == 'true'
+        if: (github.event_name != 'pull_request' || (toJSON(github.event.pull_request.draft) == 'false' && github.event.pull_request.state == 'open')) && needs.reuse_evidence.outputs.reuse != 'true' && steps.workflow_source_inspection.outcome == 'success' && steps.workflow_source_inspection.outputs.verified == 'true'
         run: echo 'Executed workflow source verified.'
       - name: Validate application
         id: app
-        if: needs.reuse_evidence.outputs.reuse != 'true'
+        if: (github.event_name != 'pull_request' || (toJSON(github.event.pull_request.draft) == 'false' && github.event.pull_request.state == 'open')) && needs.reuse_evidence.outputs.reuse != 'true'
         run: npm run validate:app
         env:
           NEXT_PUBLIC_SUPABASE_URL: http://127.0.0.1:1
@@ -103,35 +104,35 @@ jobs:
           APP_ENV: ci
       - name: Start disposable database
         id: db_start
-        if: needs.reuse_evidence.outputs.reuse != 'true'
+        if: (github.event_name != 'pull_request' || (toJSON(github.event.pull_request.draft) == 'false' && github.event.pull_request.state == 'open')) && needs.reuse_evidence.outputs.reuse != 'true'
         run: npm run db:start
       - name: Reset disposable database
         id: db_reset
-        if: needs.reuse_evidence.outputs.reuse != 'true'
+        if: (github.event_name != 'pull_request' || (toJSON(github.event.pull_request.draft) == 'false' && github.event.pull_request.state == 'open')) && needs.reuse_evidence.outputs.reuse != 'true'
         run: npm run db:reset
       - name: Validate database
         id: db_tests
-        if: needs.reuse_evidence.outputs.reuse != 'true'
+        if: (github.event_name != 'pull_request' || (toJSON(github.event.pull_request.draft) == 'false' && github.event.pull_request.state == 'open')) && needs.reuse_evidence.outputs.reuse != 'true'
         run: npm run test:db
       - name: Verify database types
         id: db_types
-        if: needs.reuse_evidence.outputs.reuse != 'true'
+        if: (github.event_name != 'pull_request' || (toJSON(github.event.pull_request.draft) == 'false' && github.event.pull_request.state == 'open')) && needs.reuse_evidence.outputs.reuse != 'true'
         run: npm run db:types:check
       - name: Prepare browser
         id: browser_install
-        if: needs.reuse_evidence.outputs.reuse != 'true'
+        if: (github.event_name != 'pull_request' || (toJSON(github.event.pull_request.draft) == 'false' && github.event.pull_request.state == 'open')) && needs.reuse_evidence.outputs.reuse != 'true'
         run: node scripts/install-ci-browser.mjs
       - name: Validate browser workflows
         id: e2e
-        if: needs.reuse_evidence.outputs.reuse != 'true'
+        if: (github.event_name != 'pull_request' || (toJSON(github.event.pull_request.draft) == 'false' && github.event.pull_request.state == 'open')) && needs.reuse_evidence.outputs.reuse != 'true'
         run: npm run test:e2e
       - name: Stop disposable database
         id: db_stop
-        if: ${{ always() && needs.reuse_evidence.outputs.reuse != 'true' }}
+        if: ${{ always() && (github.event_name != 'pull_request' || (toJSON(github.event.pull_request.draft) == 'false' && github.event.pull_request.state == 'open')) && needs.reuse_evidence.outputs.reuse != 'true' }}
         run: npm run db:stop
       - name: Require every foundation gate
         id: full_completion
-        if: ${{ always() && needs.reuse_evidence.outputs.reuse != 'true' }}
+        if: ${{ always() && (github.event_name != 'pull_request' || (toJSON(github.event.pull_request.draft) == 'false' && github.event.pull_request.state == 'open')) && needs.reuse_evidence.outputs.reuse != 'true' }}
         run: node scripts/ci-gates.mjs
         env:
           FOUNDATION_CHECKOUT: ${{ steps.checkout.outcome }}

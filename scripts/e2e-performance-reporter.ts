@@ -16,23 +16,25 @@ import type {
 } from '@playwright/test/reporter';
 
 export const MAX_FAILURE_RECORDS = 20;
+export const MAX_SPEC_RECORDS = 200;
+export const MAX_TIMING_INTERVALS = 256;
+
+function sourceFile(file: string) {
+  const source = relative(process.cwd(), file).replaceAll('\\', '/');
+  return source.length <= 160 &&
+    /^tests\/e2e\/[a-zA-Z0-9_/-]+\.spec\.ts$/.test(source)
+    ? source
+    : 'unavailable';
+}
 
 export function failureMetadata(test: TestCase, result: TestResult) {
-  const file = relative(process.cwd(), test.location.file).replaceAll(
-    '\\',
-    '/',
-  );
   // Source coordinates only, never titles, errors, attachments, stdout or bodies.
-  const source =
-    file.length <= 160 && /^tests\/e2e\/[a-zA-Z0-9_/-]+\.spec\.ts$/.test(file)
-      ? file
-      : 'unavailable';
   const integer = (value: number) =>
     Number.isSafeInteger(value) && value >= 0 && value <= 1_000_000
       ? value
       : null;
   return {
-    file: source,
+    file: sourceFile(test.location.file),
     line: integer(test.location.line),
     status: ['failed', 'timedOut', 'interrupted'].includes(result.status)
       ? result.status
@@ -63,13 +65,148 @@ export function linuxMemory(text: string) {
   const value = (name: string) => {
     const match = text.match(new RegExp(`^${name}:\\s+(\\d+) kB$`, 'm'));
     if (!match) throw new Error('Linux memory metric unavailable.');
-    return Number(match[1]) / 1024;
+    const bytes = Number(match[1]);
+    if (!Number.isSafeInteger(bytes))
+      throw new Error('Linux memory metric unavailable.');
+    return bytes / 1024;
   };
-  return {
-    totalMiB: value('MemTotal'),
-    availableMiB: value('MemAvailable'),
-    swapUsedMiB: value('SwapTotal') - value('SwapFree'),
-  };
+  const totalMiB = value('MemTotal');
+  const availableMiB = value('MemAvailable');
+  const swapTotal = value('SwapTotal');
+  const swapFree = value('SwapFree');
+  if (totalMiB <= 0 || availableMiB > totalMiB || swapFree > swapTotal)
+    throw new Error('Linux memory metric unavailable.');
+  return { totalMiB, availableMiB, swapUsedMiB: swapTotal - swapFree };
+}
+
+type CpuTime = { busy: number; idle: number };
+
+export class CpuMetrics {
+  private previous: CpuTime | null = null;
+  private busy = 0;
+  private total = 0;
+  private peak = 0;
+  private intervals = 0;
+  private unavailableIntervals = 0;
+
+  observe(current: CpuTime | null) {
+    const valid = (value: CpuTime | null): value is CpuTime =>
+      value !== null &&
+      Number.isFinite(value.busy) &&
+      Number.isFinite(value.idle) &&
+      value.busy >= 0 &&
+      value.idle >= 0;
+    if (!valid(current)) {
+      this.previous = null;
+      this.unavailableIntervals++;
+      return false;
+    }
+    const previous = this.previous;
+    this.previous = current;
+    if (!previous) return true;
+    const busy = current.busy - previous.busy;
+    const idle = current.idle - previous.idle;
+    const total = busy + idle;
+    if (busy < 0 || idle < 0 || !Number.isFinite(total) || total <= 0) {
+      this.unavailableIntervals++;
+      return false;
+    }
+    this.busy += busy;
+    this.total += total;
+    this.peak = Math.max(this.peak, (100 * busy) / total);
+    this.intervals++;
+    return true;
+  }
+
+  summary() {
+    return {
+      cpuIntervals: this.intervals,
+      unavailableCpuIntervals: this.unavailableIntervals,
+      // Weight by actual CPU-time deltas, never by rounded sample percentages.
+      averageCpuPercent: this.total ? (100 * this.busy) / this.total : null,
+      peakCpuPercent: this.intervals ? this.peak : null,
+    };
+  }
+}
+
+export class AttemptTiming {
+  private attempts = 0;
+  private skippedAttempts = 0;
+  private duration = 0;
+  private unavailableDurations = 0;
+  private unavailableIntervals = 0;
+  private intervals: [number, number][] = [];
+  private overflow = false;
+  private firstStart = Infinity;
+  private lastEnd = -Infinity;
+
+  record(result: Pick<TestResult, 'status' | 'duration' | 'startTime'>) {
+    this.attempts++;
+    if (result.status === 'skipped') {
+      this.skippedAttempts++;
+      return;
+    }
+    if (!Number.isFinite(result.duration) || result.duration < 0) {
+      this.unavailableDurations++;
+      this.unavailableIntervals++;
+      return;
+    }
+    this.duration += result.duration;
+    const start = result.startTime?.getTime();
+    const end = start + result.duration;
+    if (!Number.isFinite(start) || !Number.isFinite(end)) {
+      this.unavailableIntervals++;
+      return;
+    }
+    this.firstStart = Math.min(this.firstStart, start);
+    this.lastEnd = Math.max(this.lastEnd, end);
+    if (this.overflow) return;
+    // Merge overlap and adjacency; retries remain separate when there is a gap.
+    const merged: [number, number][] = [];
+    let interval: [number, number] = [start, end];
+    for (const existing of this.intervals) {
+      if (existing[1] < interval[0]) merged.push(existing);
+      else if (interval[1] < existing[0]) {
+        merged.push(interval);
+        interval = existing;
+      } else {
+        interval = [
+          Math.min(interval[0], existing[0]),
+          Math.max(interval[1], existing[1]),
+        ];
+      }
+    }
+    merged.push(interval);
+    if (merged.length > MAX_TIMING_INTERVALS) {
+      this.overflow = true;
+      this.intervals = [];
+    } else this.intervals = merged;
+  }
+
+  summary() {
+    const hasExecution = this.attempts > this.skippedAttempts;
+    return {
+      attempts: this.attempts,
+      skippedAttempts: this.skippedAttempts,
+      attemptDurationSeconds: this.unavailableDurations
+        ? null
+        : this.duration / 1000,
+      elapsedSeconds:
+        !hasExecution || this.unavailableIntervals
+          ? null
+          : (this.lastEnd - this.firstStart) / 1000,
+      activeIntervalSeconds:
+        !hasExecution || this.overflow || this.unavailableIntervals
+          ? null
+          : this.intervals.reduce(
+              (total, [start, end]) => total + end - start,
+              0,
+            ) / 1000,
+      unavailableDurations: this.unavailableDurations,
+      unavailableIntervals: this.unavailableIntervals,
+      intervalLimitExceeded: this.overflow,
+    };
+  }
 }
 
 function oomKills() {
@@ -79,7 +216,9 @@ function oomKills() {
 }
 
 function cpuTime() {
-  return cpus().reduce(
+  const processors = cpus();
+  if (!processors.length) throw new Error('CPU metric unavailable.');
+  return processors.reduce(
     (total, cpu) => ({
       busy:
         total.busy +
@@ -106,9 +245,18 @@ export default class PerformanceReporter {
     { result: TestResult['status']; outcome: string }
   >();
   private timer?: ReturnType<typeof setInterval>;
-  private cpu = cpuTime();
-  private peakCpuPercent = 0;
+  private cpu = new CpuMetrics();
+  private cpuCount: number | null = null;
   private samples = 0;
+  private memorySamples = 0;
+  private specs = new Map<string, AttemptTiming>();
+  private omittedSpecAttempts = 0;
+  private phases = {
+    exclusive: new AttemptTiming(),
+    parallel: new AttemptTiming(),
+    ordinary: new AttemptTiming(),
+    unclassified: new AttemptTiming(),
+  };
   private totalMemoryMiB: number | null = null;
   private minimumAvailableMemoryMiB: number | null = null;
   private peakSwapUsedMiB: number | null = null;
@@ -119,6 +267,7 @@ export default class PerformanceReporter {
 
   private sample() {
     if (platform() !== 'linux') return;
+    this.samples++;
     try {
       const memory = linuxMemory(readFileSync('/proc/meminfo', 'utf8'));
       this.totalMemoryMiB = memory.totalMiB;
@@ -130,17 +279,14 @@ export default class PerformanceReporter {
         this.peakSwapUsedMiB ?? 0,
         memory.swapUsedMiB,
       );
-      const cpu = cpuTime();
-      const busy = cpu.busy - this.cpu.busy;
-      const idle = cpu.idle - this.cpu.idle;
-      if (busy + idle > 0)
-        this.peakCpuPercent = Math.max(
-          this.peakCpuPercent,
-          (100 * busy) / (busy + idle),
-        );
-      this.cpu = cpu;
-      this.samples++;
+      this.memorySamples++;
     } catch {
+      this.metricFailures++;
+    }
+    try {
+      if (!this.cpu.observe(cpuTime())) this.metricFailures++;
+    } catch {
+      this.cpu.observe(null);
       this.metricFailures++;
     }
   }
@@ -150,6 +296,11 @@ export default class PerformanceReporter {
     this.started = performance.now();
     this.discovered = suite.allTests().length;
     this.workers = config.workers;
+    try {
+      this.cpuCount = cpus().length || null;
+    } catch {
+      this.metricFailures++;
+    }
     if (platform() === 'linux') {
       try {
         this.initialOomKills = oomKills();
@@ -173,6 +324,24 @@ export default class PerformanceReporter {
   onTestEnd(test: TestCase, result: TestResult) {
     this.activeTests.delete(test.id);
     this.attempts++;
+    const file = sourceFile(test.location.file);
+    let timing = this.specs.get(file);
+    if (!timing && this.specs.size < MAX_SPEC_RECORDS) {
+      timing = new AttemptTiming();
+      this.specs.set(file, timing);
+    }
+    if (timing) timing.record(result);
+    else this.omittedSpecAttempts++;
+    const project = test.parent?.project()?.name;
+    const phase =
+      project === 'chromium-exclusive'
+        ? 'exclusive'
+        : project === 'chromium-parallel'
+          ? 'parallel'
+          : project === 'chromium'
+            ? 'ordinary'
+            : 'unclassified';
+    this.phases[phase].record(result);
     if (['failed', 'timedOut', 'interrupted'].includes(result.status)) {
       this.failureCount++;
       if (this.failures.length < MAX_FAILURE_RECORDS)
@@ -207,7 +376,10 @@ export default class PerformanceReporter {
     let oomKillDelta: number | null = null;
     if (this.initialOomKills !== null) {
       try {
-        oomKillDelta = oomKills() - this.initialOomKills;
+        const delta = oomKills() - this.initialOomKills;
+        if (!Number.isSafeInteger(delta) || delta < 0)
+          throw new Error('Linux OOM metric unavailable.');
+        oomKillDelta = delta;
       } catch {
         this.metricFailures++;
       }
@@ -237,14 +409,33 @@ export default class PerformanceReporter {
       configuredWorkers: this.workers,
       peakConcurrentTests: this.peakConcurrentTests,
       tests: counts,
+      timing: {
+        semantics:
+          'Attempt durations sum all non-skipped Playwright attempts, including retries. Active intervals union their start/end times without overlap. Elapsed is first attempt start to last attempt end, including observed gaps; build and server preparation are excluded. Missing attempt timing makes affected totals unavailable.',
+        phases: Object.fromEntries(
+          Object.entries(this.phases).map(([phase, timing]) => [
+            phase,
+            timing.summary(),
+          ]),
+        ),
+        specs: [...this.specs.entries()]
+          .sort(([left], [right]) => left.localeCompare(right))
+          .map(([file, timing]) => ({ file, ...timing.summary() })),
+        omittedSpecAttempts: this.omittedSpecAttempts,
+        maxSpecRecords: MAX_SPEC_RECORDS,
+        maxIntervalsPerRecord: MAX_TIMING_INTERVALS,
+      },
       resources: {
         platform: platform(),
-        cpuCount: cpus().length,
+        cpuCount: this.cpuCount,
         samples: this.samples,
+        memorySamples: this.memorySamples,
+        cpuScope:
+          'All guest vCPUs during the reporter window, including other guest processes; average is weighted by valid CPU-time deltas. Not Chrome-only.',
         totalMemoryMiB: this.totalMemoryMiB,
         minimumAvailableMemoryMiB: this.minimumAvailableMemoryMiB,
         peakSwapUsedMiB: this.peakSwapUsedMiB,
-        peakCpuPercent: this.samples ? this.peakCpuPercent : null,
+        ...this.cpu.summary(),
         oomKillDelta,
         metricFailures: this.metricFailures,
       },
@@ -255,7 +446,19 @@ export default class PerformanceReporter {
         'test-results/e2e-performance.json',
         JSON.stringify(summary, null, 2) + '\n',
       );
-      console.log('E2E performance: ' + JSON.stringify(summary));
+      console.log(
+        'E2E performance: ' +
+          JSON.stringify({
+            ...summary,
+            timing: {
+              ...summary.timing,
+              specs: {
+                recorded: this.specs.size,
+                path: 'test-results/e2e-performance.json',
+              },
+            },
+          }),
+      );
     } catch {
       console.error('E2E performance evidence could not be written.');
     }

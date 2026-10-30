@@ -4,7 +4,7 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 $common = [Management.Automation.Language.Parser]::ParseFile((Join-Path $PSScriptRoot 'Common.ps1'), [ref]$null, [ref]$null)
 foreach ($definition in $common.FindAll({ param($node) $node -is [Management.Automation.Language.FunctionDefinitionAst] }, $false)) {
-    if ($definition.Name -cin @('New-RunnerExecutionFailure', 'Get-RunnerSessionFailureEnums', 'New-RunnerSessionFailureRecord', 'Assert-RunnerSessionFailureJournal', 'Write-RunnerSessionFailure', 'Write-RunnerJson', 'Read-RunnerJson')) { Invoke-Expression $definition.Extent.Text }
+    if ($definition.Name -cin @('Get-RunnerSessionPaths','Assert-RunnerSessionTrustedPaths','New-RunnerExecutionFailure', 'New-RunnerIsolationProbeFailure', 'Assert-RunnerIsolationProbeDiagnostic', 'Get-RunnerGuestMtu', 'Get-RunnerGuestReadinessStage', 'Assert-RunnerGuestReadinessDiagnostic', 'Add-RunnerGuestReadinessAttempt', 'Set-RunnerGuestReadinessEvidence', 'Get-RunnerResourceProfile', 'Get-RunnerSessionFailureEnums', 'New-RunnerSessionFailureRecord', 'Assert-RunnerSessionFailureJournal', 'Write-RunnerSessionFailure', 'Write-RunnerJson', 'Read-RunnerJson')) { Invoke-Expression $definition.Extent.Text }
 }
 $script:RunnerRoot = Join-Path $env:TEMP ('ITIR-session-failure-' + [guid]::NewGuid().ToString('N'))
 $script:path = Join-Path $script:RunnerRoot 'session-failures.json'
@@ -15,7 +15,7 @@ function Require([bool] $Condition) { if (-not $Condition) { throw 'Session fail
 function Check([string] $Name, [scriptblock] $Work) { & $Work; $script:checks++; Write-Host "PASS $Name" }
 function Enter-RunnerLock { $script:depth++; $script:lockCalls++; return 'fixture' }
 function Exit-RunnerLock { $script:depth-- }
-function Assert-RunnerProtectedPath { Require ($script:depth -gt 0) }
+function Assert-RunnerProtectedPath([string]$Path) { Require ($script:depth -gt 0 -or $Path.StartsWith((Join-Path $script:RunnerRoot 'instances'))) }
 function Assert-SecureRoot { Require ($script:depth -gt 0) }
 function Assert-OwnedPath([string] $Path) {
     Require ($Path.StartsWith($script:RunnerRoot + '\', [StringComparison]::OrdinalIgnoreCase))
@@ -41,6 +41,9 @@ function Reset-Case {
     if (Test-Path -LiteralPath $script:path) { Remove-Item -LiteralPath $script:path -Force }
     $script:depth = 0; $script:warnings = @(); $script:readFails = $false; $script:writeFails = $false; $script:cleanupFails = $false; $script:cleanupCalls = 0; $script:events = @(); $script:lockCalls = 0; $script:oldFailureWriteFails = $false
     $script:state = [pscustomobject]@{ vmName = 'ITIR-11111111111111111111111111111111'; vmId = '22222222-2222-2222-2222-222222222222' }
+    $instance=Join-Path (Join-Path $script:RunnerRoot 'instances') $script:state.vmName
+    [void][IO.Directory]::CreateDirectory($instance)
+    [IO.File]::WriteAllText((Join-Path $instance 'known_hosts'),'') # Mocked SSH still requires a precreated control file.
 }
 try {
     [void][IO.Directory]::CreateDirectory($script:RunnerRoot)
@@ -76,6 +79,136 @@ try {
             $record = (Read-RunnerJson $script:path).sessions[0].latest
             Require ($record.failureClass -ceq $class)
             if ($class -ceq 'runner-exit') { Require ($record.exitCode -eq 27) } else { Require ($null -eq $record.exitCode) }
+        }
+    }
+    Check 'optional isolation probe evidence survives durable first/latest publication and old records remain valid' {
+        Reset-Case
+        Write-RunnerSessionFailure $script:state.vmName (Get-Failure { throw 'SECRET_OLD' }) 'guest-readiness'
+        $old = (Read-RunnerJson $script:path).sessions[0].first | ConvertTo-Json -Compress
+        foreach ($case in @(@{ code=1; listener='clear' },@{ code=0; listener='pending' },@{ code=27; listener='pending' },@{ code=$null; listener='unavailable' })) {
+            $failure = Get-Failure { throw (New-RunnerIsolationProbeFailure $case.code $case.listener) }
+            Write-RunnerSessionFailure $script:state.vmName $failure 'guest-readiness'
+            $journal = Read-RunnerJson $script:path; Assert-RunnerSessionFailureJournal $journal
+            Require (($journal.sessions[0].first | ConvertTo-Json -Compress) -ceq $old)
+            $probe = $journal.sessions[0].latest.isolationProbe
+            Require ($probe.kind -ceq 'guest-to-host' -and $probe.exitCode -eq $case.code -and $probe.listener -ceq $case.listener)
+            Require ($journal.sessions[0].vmId -ceq $script:state.vmId -and $journal.sessions[0].latest.stage -ceq 'guest-readiness')
+            Require (([IO.File]::ReadAllText($script:path)) -cnotmatch 'SECRET|172\.30|ssh.exe|stderr|stdout')
+        }
+    }
+    Check 'malformed optional probe fields are rejected without leaking data or evaluating getters' {
+        foreach ($case in @('null','array','unknown-kind','array-kind','unknown-listener','array-listener','string-exit','wide-exit','array-exit','extra','getter')) {
+            Reset-Case
+            Write-RunnerSessionFailure $script:state.vmName (Get-Failure { throw (New-RunnerIsolationProbeFailure 1 'clear') }) 'guest-readiness'
+            $journal = Read-RunnerJson $script:path
+            $probe = $journal.sessions[0].first.isolationProbe
+            switch ($case) {
+                'null' { $journal.sessions[0].first.isolationProbe = $null }
+                'array' { $journal.sessions[0].first.isolationProbe = @($probe) }
+                'unknown-kind' { $probe.kind = 'SECRET_KIND' }
+                'array-kind' { $probe.kind = @('guest-to-host') }
+                'unknown-listener' { $probe.listener = 'SECRET_LISTENER' }
+                'array-listener' { $probe.listener = @('clear') }
+                'string-exit' { $probe.exitCode = '1' }
+                'wide-exit' { $probe.exitCode = [long]::MaxValue }
+                'array-exit' { $probe.exitCode = @(1) }
+                'extra' { $probe | Add-Member secret 'SECRET_EXTRA' }
+                'getter' { $probe.PSObject.Properties.Remove('exitCode'); $probe | Add-Member ScriptProperty exitCode { $script:getterEvaluated=$true; throw 'SECRET_GETTER' } }
+            }
+            $script:getterEvaluated=$false
+            $refused=$false; try { Assert-RunnerSessionFailureJournal $journal } catch { $refused=$true }
+            Require ($refused -and -not $script:getterEvaluated)
+            $failure = New-FixtureFailure
+            $failure.Exception.Data['runnerIsolationProbe'] = $journal.sessions[0].first.isolationProbe
+            $projected = New-RunnerSessionFailureRecord $failure 'guest-readiness'
+            Require (($projected | ConvertTo-Json -Compress) -cnotmatch 'SECRET|stderr|stdout')
+            Require (-not $script:getterEvaluated)
+        }
+    }
+    Check 'actual readiness attempts attach bounded exact-purpose evidence before session cleanup without changing retry admission' {
+        $runner = [Management.Automation.Language.Parser]::ParseFile((Join-Path $PSScriptRoot 'Runner.ps1'), [ref]$null, [ref]$null)
+        foreach ($name in @('Get-SshArgs','Get-RunnerGuestPrerequisites','Get-RunnerGuestReadinessCommand')) {
+            Invoke-Expression ($runner.Find({param($node) $node -is [Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -ceq $name},$false).Extent.Text)
+        }
+        $wait = $runner.Find({param($node) $node -is [Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -ceq 'Wait-Guest'},$false)
+        # Constructed clock substitution only; production has no override and
+        # retains the exact 12-minute limit and 10-second retry interval.
+        $waitText=$wait.Extent.Text.Replace('[DateTime]::UtcNow','(Get-FixtureReadinessNow)')
+        foreach ($case in @(
+            @{ codes=@(255); first='ssh-transport'; last='ssh-transport'; completed=$false },
+            @{ codes=@(72); first='cloud-init-nonzero'; last='cloud-init-nonzero'; completed=$true },
+            @{ codes=@(80); first='guest-mtu-unverified'; last='guest-mtu-unverified'; completed=$true },
+            @{ codes=@(255,72); first='ssh-transport'; last='cloud-init-nonzero'; completed=$true },
+            @{ codes=@(1); first='unknown'; last='unknown'; completed=$true },
+            @{ codes=@(-1073741515); first='unknown'; last='unknown'; completed=$false },
+            @{ codes=@($null); first='unknown'; last='unknown'; completed=$false; nativeThrow=$true },
+            @{ codes=@(); first=''; last=''; completed=$false; livenessThrow=$true }
+        )) {
+            Reset-Case
+            $script:state | Add-Member purpose 'prepare'
+            $script:state | Add-Member instancePath (Join-Path (Join-Path $script:RunnerRoot 'instances') $script:state.vmName)
+            $script:state | Add-Member layoutVersion 2
+            $script:readinessNow=[DateTime]::UtcNow; $script:readinessCalls=0; $script:readinessSleeps=0
+            $script:readinessCase=$case
+            $script:originalReadinessFailure=[InvalidOperationException]::new('SECRET_READINESS')
+            $failure=& {
+                Invoke-Expression $waitText
+                function Get-FixtureReadinessNow { return $script:readinessNow }
+                function Assert-SessionAlive { if ($script:readinessCase.ContainsKey('livenessThrow')) { throw $script:originalReadinessFailure } }
+                function Invoke-RunnerCloudInitPreparationCapture { return $false }
+                function Start-Sleep([int] $Seconds) { Require ($Seconds -eq 10); $script:readinessSleeps++; $script:readinessNow=$script:readinessNow.AddMinutes(12.0/$script:readinessCase.codes.Count) }
+                function Invoke-RunnerNative {
+                    param($Executable,$Arguments)
+                    Require ($Executable -ceq 'ssh.exe' -and $Arguments[-2] -ceq 'runner@192.0.2.1')
+                    $script:readinessCalls++
+                    if ($script:readinessCase.ContainsKey('nativeThrow')) { throw $script:originalReadinessFailure }
+                    return $script:readinessCase.codes[$script:readinessCalls-1]
+                }
+                Get-Failure { Wait-Guest $script:state ([pscustomobject]@{guestIp='192.0.2.1'}) 'it-inventory-heavy' }
+            }
+            $evidence=$failure.Exception.Data['runnerGuestReadiness']; Assert-RunnerGuestReadinessDiagnostic $evidence
+            Require ($evidence.purpose -ceq 'prepare' -and $evidence.attemptCount -eq $case.codes.Count -and $evidence.firstFailureStage -ceq $case.first -and $evidence.lastFailureStage -ceq $case.last -and $evidence.anySshCompleted -eq $case.completed)
+            if ($case.ContainsKey('nativeThrow') -or $case.ContainsKey('livenessThrow')) { Require ([object]::ReferenceEquals($failure.Exception,$script:originalReadinessFailure)) }
+            Write-RunnerSessionFailure $script:state.vmName $failure 'guest-readiness'
+            $journal=Read-RunnerJson $script:path; Assert-RunnerSessionFailureJournal $journal
+            Require ($journal.sessions[0].sessionId -ceq $script:state.vmName.Substring(5) -and $journal.sessions[0].vmId -ceq $script:state.vmId -and $journal.sessions[0].first.guestReadiness.purpose -ceq 'prepare')
+            Require (([IO.File]::ReadAllText($script:path)) -cnotmatch 'SECRET|192\.0|ssh.exe|stdout|stderr|readiness_code')
+        }
+        Reset-Case
+        $script:readinessNow=[DateTime]::UtcNow; $script:readinessCalls=0; $script:readinessSleeps=0
+        & {
+            Invoke-Expression $waitText
+            function Get-FixtureReadinessNow { return $script:readinessNow }
+            function Assert-SessionAlive {}
+            function Start-Sleep([int] $Seconds) { Require ($Seconds -eq 10); $script:readinessSleeps++; $script:readinessNow=$script:readinessNow.AddMinutes(1) }
+            function Invoke-RunnerNative { $script:readinessCalls++; if ($script:readinessCalls -eq 1) { return 255 }; return 0 }
+            $readinessMtu=Wait-Guest ([pscustomobject]@{vmName='ITIR-11111111111111111111111111111111';layoutVersion=2;instancePath=(Join-Path (Join-Path $script:RunnerRoot 'instances') 'ITIR-11111111111111111111111111111111');purpose='verify-image'}) ([pscustomobject]@{guestIp='192.0.2.1'}) 'it-inventory-light'
+            Require ($readinessMtu -is [int] -and $readinessMtu -eq 1400)
+        }
+        Require ($script:readinessCalls -eq 2 -and $script:readinessSleeps -eq 1 -and -not (Test-Path -LiteralPath $script:path))
+    }
+    Check 'readiness mapping bounds legacy journal compatibility and malformed evidence preserve privacy' {
+        foreach ($code in 71..80) { Require ((Get-RunnerGuestReadinessStage ([int]$code)) -cne 'unknown') }
+        Require ((Get-RunnerGuestReadinessStage 80) -ceq 'guest-mtu-unverified')
+        Require ((Get-RunnerGuestReadinessStage 255) -ceq 'ssh-transport' -and (Get-RunnerGuestReadinessStage 2) -ceq 'unknown')
+        $summary=[pscustomobject]@{purpose='job';attemptCount=999999;elapsedMs=[long]0;firstFailureStage='';lastFailureStage='';lastNativeExit=$null;anySshCompleted=$false}
+        Add-RunnerGuestReadinessAttempt $summary 72 ([long]::MaxValue)
+        Add-RunnerGuestReadinessAttempt $summary 255 ([long]::MaxValue)
+        Assert-RunnerGuestReadinessDiagnostic $summary
+        Require ($summary.attemptCount -eq 1000000 -and $summary.elapsedMs -eq 86400000 -and $summary.firstFailureStage -ceq 'cloud-init-nonzero' -and $summary.lastFailureStage -ceq 'ssh-transport' -and $summary.lastNativeExit -eq 255 -and $summary.anySshCompleted)
+        Reset-Case
+        Write-RunnerSessionFailure $script:state.vmName (Get-Failure { throw 'SECRET_OLD' }) 'guest-readiness'
+        $old=(Read-RunnerJson $script:path).sessions[0].first | ConvertTo-Json -Compress
+        $failure=Get-Failure { throw (New-FixtureFailure) }; Set-RunnerGuestReadinessEvidence $failure $summary 999999999
+        Write-RunnerSessionFailure $script:state.vmName $failure 'guest-readiness'
+        $journal=Read-RunnerJson $script:path; Assert-RunnerSessionFailureJournal $journal
+        Require (($journal.sessions[0].first | ConvertTo-Json -Compress) -ceq $old -and $journal.sessions[0].latest.guestReadiness.attemptCount -eq 1000000)
+        foreach ($case in @(@{field='purpose';value='SECRET'},@{field='attemptCount';value=-1},@{field='attemptCount';value=1000001},@{field='elapsedMs';value=86400001},@{field='lastNativeExit';value='255'},@{field='anySshCompleted';value=1},@{field='firstFailureStage';value=@('ssh-transport')},@{field='lastFailureStage';value='SECRET'})) {
+            $invalid=$summary | ConvertTo-Json -Compress | ConvertFrom-Json
+            $invalid.($case.field)=$case.value
+            $refused=$false; try { Assert-RunnerGuestReadinessDiagnostic $invalid } catch { $refused=$true }; Require $refused
+            $failure=Get-Failure { throw (New-FixtureFailure) }; $failure.Exception.Data['runnerGuestReadiness']=$invalid
+            Require ((New-RunnerSessionFailureRecord $failure 'guest-readiness' | ConvertTo-Json -Depth 5 -Compress) -cnotmatch 'SECRET')
         }
     }
     Check 'real detached receipt monitor classifies malformed identity and nonzero exit without retaining guest output' {
@@ -126,7 +259,8 @@ try {
         for ($index = 2; $index -le 12; $index++) { Write-RunnerSessionFailure ('ITIR-' + $index.ToString('x32')) $failure 'job-execution' }
         $journal = Read-RunnerJson $script:path; Assert-RunnerSessionFailureJournal $journal
         Require ($journal.sessions.Count -eq 8 -and $journal.sessions[0].sessionId -ceq (5).ToString('x32') -and (Get-Item -LiteralPath $script:path).Length -le 16384)
-        Require (@(Get-ChildItem -LiteralPath $script:RunnerRoot).Count -eq 1)
+        $children=@(Get-ChildItem -LiteralPath $script:RunnerRoot)
+        Require ($children.Count -eq 2 -and @($children|Where-Object{$_.Name -cnotin @('instances','session-failures.json')}).Count -eq 0)
     }
     Check 'oversized or corrupt history refuses before parsing and unknown fields remain retained' {
         Reset-Case

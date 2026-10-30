@@ -1,6 +1,24 @@
 #!/usr/bin/env bash
 # Fixed owner-reviewed recipe, executed only inside a disposable credential-free builder VM.
 set -euo pipefail
+image_stage=bootstrap
+image_cleanup=false
+image_failure_exit() {
+  local status=$?
+  trap - EXIT
+  if [[ $image_cleanup == true ]]; then
+    rm -rf -- /var/tmp/itir-image-build || { if (( status == 0 )); then status=1; image_stage=cleanup; fi; }
+  fi
+  if (( status != 0 )); then
+    case "$image_stage" in
+      bootstrap|inputs|os-packages|node|npm|npm-cache|browser-install|browser-verify|image-cache|receipt|scrub|shutdown|cleanup)
+        printf '\nITIR_IMAGE_FAILURE_STAGE=%s\n' "$image_stage" >&2 ;;
+      *) printf '\nITIR_IMAGE_FAILURE_STAGE=unknown\n' >&2 ;;
+    esac
+  fi
+  exit "$status"
+}
+trap image_failure_exit EXIT
 [[ $# == 0 && $(id -u) == 0 ]] || exit 1
 exec 3>&1 1>&2
 umask 077
@@ -15,9 +33,10 @@ export AGENT_TOOLSDIRECTORY="$RUNNER_TOOL_CACHE"
 export PLAYWRIGHT_BROWSERS_PATH=/home/runner/.cache/ms-playwright
 export npm_config_cache=/home/runner/.npm
 mkdir -m 700 "$work"
-trap 'rm -rf -- /var/tmp/itir-image-build' EXIT
+image_cleanup=true
 
 # Verify every fixed transferred input before running any package lifecycle command.
+image_stage=inputs
 python3 - "$inputs" <<'PY'
 import hashlib,json,pathlib,re,sys
 p=pathlib.Path(sys.argv[1]); manifest=json.loads((p/'Image.Inputs.json').read_bytes())
@@ -37,8 +56,10 @@ PY
 [[ $(uname -m) == x86_64 ]] || exit 1
 . /etc/os-release
 [[ $ID == ubuntu && $VERSION_ID == 24.04 ]] || exit 1
+image_stage=os-packages
 timeout 600 apt-get update -qq
 timeout 900 env DEBIAN_FRONTEND=noninteractive apt-get install -y -qq ca-certificates curl git openssh-server unzip xz-utils docker.io jq
+image_stage=node
 version=$(jq -er '.node.version' "$inputs/Image.Inputs.json")
 url=$(jq -er '.node.url' "$inputs/Image.Inputs.json")
 digest=$(jq -er '.node.sha256' "$inputs/Image.Inputs.json")
@@ -50,8 +71,10 @@ mkdir -p "$tool"
 tar -xJf "$work/node.tar.xz" -C "$tool" --strip-components=1
 export PATH="$tool/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 [[ $(node --version) == "v$version" ]] || exit 1
+image_stage=npm
 timeout 600 npm install --global npm@11.11.0 --no-audit --no-fund
 [[ $(npm --version) == 11.11.0 ]] || exit 1
+image_stage=npm-cache
 touch "$RUNNER_TOOL_CACHE/node/$version/x64.complete"
 mkdir -p "$HOME/.npm" "$PLAYWRIGHT_BROWSERS_PATH" "$work/project"
 cp -- "$inputs/Image.Package.json" "$work/project/package.json"
@@ -62,9 +85,11 @@ cd "$work/project"
 # Populate integrity-protected tarballs only; PR jobs still run a fresh npm ci.
 timeout 900 runuser -u runner -- env HOME="$HOME" PATH="$PATH" npm_config_cache="$npm_config_cache" npm ci --ignore-scripts --prefer-offline --no-audit --no-fund
 [[ $(node node_modules/supabase/dist/supabase.js --version) == 2.116.0 ]] || exit 1
-timeout 900 node node_modules/playwright/cli.js install --with-deps --only-shell chromium
+image_stage=browser-install
+PLAYWRIGHT_DOWNLOAD_CONNECTION_TIMEOUT=120000 timeout 900 node node_modules/playwright/cli.js install --with-deps --only-shell chromium
 chown -R runner:runner /home/runner/.cache
 # Verify the eventual job user can traverse the cache and launch its browser.
+image_stage=browser-verify
 runuser -u runner -- env HOME="$HOME" PATH="$PATH" PLAYWRIGHT_BROWSERS_PATH="$PLAYWRIGHT_BROWSERS_PATH" node --input-type=module - "$work/project/browser.json" <<'JS'
 import { createRequire } from 'node:module';
 import { writeFileSync,readFileSync } from 'node:fs';
@@ -81,6 +106,7 @@ const {chromium}=require('playwright');
 const browser=await chromium.launch(); await browser.close();
 writeFileSync(process.argv[2],JSON.stringify(records));
 JS
+image_stage=image-cache
 systemctl start docker
 [[ -z $(docker ps -aq) && -z $(docker volume ls -q) ]] || exit 1
 # Storage runtime may select a different official mirror. Add local aliases to
@@ -118,6 +144,7 @@ done < <(jq -ec '.images[]' "$inputs/Image.Inputs.json")
 # Pull only: no databases, container secrets or volumes ever enter the prepared image.
 [[ -z $(docker ps -aq) && -z $(docker volume ls -q) ]] || exit 1
 systemctl stop docker.socket docker.service
+image_stage=receipt
 mkdir -p /opt/it-inventory-image
 python3 - "$inputs/Image.Inputs.json" "$work" "$receipt" <<'PY'
 import hashlib,json,pathlib,subprocess,sys
@@ -132,6 +159,7 @@ r={'schema':1,'recipeId':hashlib.sha256(p.read_bytes()).hexdigest().upper(),'scr
 data=(json.dumps(r,separators=(',',':'))+'\n').encode(); assert len(data)<=16384
 pathlib.Path(sys.argv[3]).write_bytes(data)
 PY
+image_stage=scrub
 cd /
 rm -rf -- "$work" "$inputs" /home/runner/.ssh /root/.ssh /root/.npm /root/.cache /root/.supabase /home/runner/.supabase
 rm -f -- /home/runner/.npmrc /root/.npmrc /home/runner/.docker/config.json /root/.docker/config.json
@@ -156,4 +184,5 @@ chmod 644 "$receipt"
 sync
 cat "$receipt" >&3
 # Host requires VM Off before hashing/publishing; this background helper emits no output.
+image_stage=shutdown
 nohup sh -c 'sleep 5; systemctl poweroff' >/dev/null 2>&1 3>&- &

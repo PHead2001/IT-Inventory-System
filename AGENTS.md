@@ -433,7 +433,9 @@ Use **iterate cheaply, certify expensively**.
 - run focused affected tests first
 - reuse a successful dependency install while dependency inputs are unchanged
 - do not reset local Supabase for isolated UI-only changes
-- batch related findings before expensive full validation
+- batch all related findings and fixes before one push
+- run `npm run validate:push` before pushing (typecheck, zero-warning lint, formatting and Vitest; no build/database/browser gate)
+- keep PRs draft during iteration; mark ready for review for authoritative complete CI
 - adversarially inspect sibling paths before pushing
 
 ## Fresh dependency install
@@ -442,7 +444,7 @@ Run fresh `npm ci` when:
 
 - dependency/lockfile inputs changed
 - the existing install is untrusted/corrupt
-- performing final PR certification
+- executing the final complete gate locally, or in authoritative CI
 
 Do not rerun it after every source-only edit.
 
@@ -478,7 +480,7 @@ Once commands exist, inspect and use them rather than inventing replacements.
 
 ## Final PR certification
 
-Before reporting a code PR ready, run the repository-defined complete gate appropriate to the final change.
+Before reporting a code PR ready, require the repository-defined complete gate on the exact final SHA. The canonical CI result is authoritative; a second full local application/database/browser run is not required when that exact-SHA CI gate has passed. Run focused local regression checks and the cheap pre-push gate while iterating. Run a full local gate when needed to diagnose a failure or validate a boundary CI does not exercise.
 
 For the mature project, this should cover configured equivalents of:
 
@@ -515,7 +517,7 @@ For each valid finding:
 2. implement the invariant-level fix
 3. add durable regression coverage
 4. run focused tests
-5. run appropriate batch/full validation
+5. run affected local regressions and the cheap pre-push gate; use canonical exact-SHA CI for complete certification
 6. push the exact fix SHA
 7. wait for required exact-SHA checks
 8. reply on the original thread with:
