@@ -17,8 +17,11 @@ const pilot = readWorkflow('local-runner-pilot.yml');
 const pilotLabel =
   "${{ format('it-inventory-pilot-{0}', github.event.pull_request.head.sha || github.sha) }}";
 const reuseLabel =
-  "${{ needs.reuse_evidence.result == 'success' && needs.reuse_evidence.outputs.reuse == 'true' && 'it-inventory-light' || 'it-inventory-heavy' }}";
-const fullOnly = "needs.reuse_evidence.outputs.reuse != 'true'";
+  "${{ ((github.event_name == 'pull_request' && (toJSON(github.event.pull_request.draft) != 'false' || github.event.pull_request.state != 'open')) || (needs.reuse_evidence.result == 'success' && needs.reuse_evidence.outputs.reuse == 'true')) && 'it-inventory-light' || 'it-inventory-heavy' }}";
+const readyForFull =
+  "(github.event_name != 'pull_request' || (toJSON(github.event.pull_request.draft) == 'false' && github.event.pull_request.state == 'open'))";
+const fullOnly =
+  readyForFull + " && needs.reuse_evidence.outputs.reuse != 'true'";
 const profileLabels = new Set([
   'it-inventory-light',
   'it-inventory-mid',
@@ -103,6 +106,97 @@ function auditWorkflowRouting(name, source) {
 }
 
 describe('disposable local runner workflow contracts', () => {
+  it('keeps draft and malformed PRs light and uncertified without running full gate markers', () => {
+    const required = foundation.jobs.required;
+    expect(foundation.on.pull_request.types).toEqual([
+      'opened',
+      'reopened',
+      'synchronize',
+      'ready_for_review',
+      'converted_to_draft',
+    ]);
+    expect(foundation.concurrency['cancel-in-progress']).toBe(
+      "${{ github.event_name == 'pull_request' }}",
+    );
+    expect(required['timeout-minutes']).toBe(40);
+    const evaluate = (expression, github, reuse = '') => {
+      const body = expression.replace(/^\$\{\{\s*|\s*\}\}$/g, '');
+      return new Function(
+        'github',
+        'needs',
+        'toJSON',
+        'always',
+        `return (${body});`,
+      )(
+        github,
+        {
+          reuse_evidence: {
+            result: reuse === 'true' ? 'success' : 'skipped',
+            outputs: { reuse },
+          },
+        },
+        JSON.stringify,
+        () => true,
+      );
+    };
+    for (const pull_request of [
+      { draft: true, state: 'open' },
+      { state: 'open' },
+      { draft: 'false', state: 'open' },
+      { draft: false, state: 'closed' },
+    ]) {
+      const github = { event_name: 'pull_request', event: { pull_request } };
+      expect(evaluate(required['runs-on'][1], github)).toBe(
+        'it-inventory-light',
+      );
+      for (const id of [
+        'npm_setup',
+        'install',
+        'revision',
+        'workflow_source_inspection',
+        'workflow_source',
+        'app',
+        'db_start',
+        'db_reset',
+        'db_tests',
+        'db_types',
+        'browser_install',
+        'e2e',
+        'db_stop',
+        'full_completion',
+      ])
+        expect(
+          evaluate(required.steps.find((step) => step.id === id).if, github),
+          id,
+        ).toBe(false);
+      expect(
+        required.steps.find(
+          (step) => step.run === 'node scripts/ci-required.mjs',
+        ).if,
+      ).toBe('always()');
+    }
+    const github = {
+      event_name: 'pull_request',
+      event: { pull_request: { draft: false, state: 'open' } },
+    };
+    expect(evaluate(required['runs-on'][1], github)).toBe('it-inventory-heavy');
+    expect(
+      evaluate(required.steps.find((step) => step.id === 'install').if, github),
+    ).toBe(true);
+    const main = { event_name: 'push', event: {} };
+    expect(evaluate(required['runs-on'][1], main)).toBe('it-inventory-heavy');
+    expect(evaluate(required['runs-on'][1], main, 'true')).toBe(
+      'it-inventory-light',
+    );
+    expect(
+      evaluate(
+        required.steps.find((step) => step.id === 'install').if,
+        main,
+        'true',
+      ),
+    ).toBe(false);
+  });
+
   it('pins every application Node setup to the checked-out exact version', () => {
     expect(readFileSync('.nvmrc', 'utf8').trim()).toMatch(/^\d+\.\d+\.\d+$/);
     for (const name of ['ci.yml', 'preview-access.yml', 'staging-sync.yml']) {
@@ -278,7 +372,6 @@ describe('disposable local runner workflow contracts', () => {
       required: 'dynamic',
       reuse_evidence: 'light',
       production_database: 'light',
-      discover: 'light',
       provision: 'light',
     };
     let jobs = 0;
@@ -307,7 +400,7 @@ describe('disposable local runner workflow contracts', () => {
       expect(workflow, name).not.toContain('it-inventory-ephemeral');
       jobs += definitions.length;
     }
-    expect(jobs).toBe(5);
+    expect(jobs).toBe(4);
   });
 
   it('isolates the pilot on a SHA-specific runner label without the generic assignment', () => {
@@ -376,9 +469,9 @@ describe('disposable local runner workflow contracts', () => {
     expect(artifact).toContain('::warning::Failure diagnostics');
     expect(required).toContain('run: npm run test:db');
     expect(required).toContain('run: npm run test:e2e');
-    expect(required).toMatch(
-      /if: \$\{\{ always\(\) && needs.reuse_evidence.outputs.reuse != 'true' \}\}\s*\n\s*run: npm run db:stop/,
-    );
+    expect(
+      foundation.jobs.required.steps.find((step) => step.id === 'db_stop').if,
+    ).toBe('${{ always() && ' + fullOnly + ' }}');
     expect(ci.match(/continue-on-error:/g)).toHaveLength(2);
     const workflow = load(ci);
     const steps = workflow.jobs.required.steps;
@@ -402,9 +495,7 @@ describe('disposable local runner workflow contracts', () => {
     const completion = steps.find(
       (step) => step.run === 'node scripts/ci-gates.mjs',
     );
-    expect(completion.if).toBe(
-      "${{ always() && needs.reuse_evidence.outputs.reuse != 'true' }}",
-    );
+    expect(completion.if).toBe('${{ always() && ' + fullOnly + ' }}');
     for (const gate of foundationGates) {
       const step = steps.find((entry) => entry.id === gate);
       expect(step, gate).toBeDefined();
@@ -418,7 +509,7 @@ describe('disposable local runner workflow contracts', () => {
         ['checkout', 'node_setup'].includes(gate)
           ? undefined
           : gate === 'db_stop'
-            ? "${{ always() && needs.reuse_evidence.outputs.reuse != 'true' }}"
+            ? '${{ always() && ' + fullOnly + ' }}'
             : fullOnly,
       );
       expect(completion.env['FOUNDATION_' + gate.toUpperCase()]).toBe(
@@ -449,7 +540,7 @@ describe('disposable local runner workflow contracts', () => {
       'node scripts/ci-reuse.mjs --reverify',
     );
     expect(steps.find((step) => step.id === 'recheck').if).toBe(
-      "needs.reuse_evidence.outputs.reuse == 'true'",
+      "github.event_name == 'push' && needs.reuse_evidence.outputs.reuse == 'true'",
     );
     expect(workflow.jobs.reuse_evidence.if).toBe(
       "${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}",
@@ -477,10 +568,10 @@ describe('disposable local runner workflow contracts', () => {
     );
     expect(ci).toContain('run: test "$REQUIRED_RESULT" = success');
     expect(ci).not.toMatch(/paths(?:-ignore)?:/);
-    expect(preview.match(/ref: refs\/heads\/main/g)).toHaveLength(2);
-    expect(preview.match(/github.ref == 'refs\/heads\/main'/g)).toHaveLength(2);
+    expect(preview.match(/ref: refs\/heads\/main/g)).toHaveLength(1);
+    expect(preview.match(/github.ref == 'refs\/heads\/main'/g)).toHaveLength(1);
     expect(preview).toContain('environment: preview-access');
-    const discovery = preview.split('  discover:')[1].split('  provision:')[0];
-    expect(discovery).not.toMatch(/\benvironment:|secrets\./);
+    expect(load(preview).jobs.provision.needs).toBeUndefined();
+    expect(load(preview).jobs.provision.strategy).toBeUndefined();
   });
 });

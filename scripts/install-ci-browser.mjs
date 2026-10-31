@@ -106,6 +106,7 @@ export function installCiBrowser({
   available = preparedBrowserAvailable,
   run = spawnSync,
   log = console.log,
+  env = process.env,
 } = {}) {
   if (available()) {
     log(
@@ -122,7 +123,10 @@ export function installCiBrowser({
       join(dirname(require.resolve('playwright/package.json')), 'cli.js'),
       ...browserInstallArgs(false),
     ],
-    { stdio: 'inherit' },
+    {
+      stdio: 'inherit',
+      env: { ...env, PLAYWRIGHT_DOWNLOAD_CONNECTION_TIMEOUT: '120000' },
+    },
   );
   if (result.error) throw result.error;
   return result.status ?? 1;

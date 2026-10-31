@@ -20,9 +20,9 @@ try {
     [void][IO.Directory]::CreateDirectory($instance)
     $now = [DateTime]::UtcNow
     $rule = [ordered]@{ Action = 'Deny'; Direction = 'Outbound'; Weight = 2; LocalIPAddress = ''; RemoteIPAddress = ''; LocalPort = ''; RemotePort = ''; Protocol = ''; Stateful = $false }
-    $state = [ordered]@{ tag = $script:RunnerTag; vmName = $name; vmId = '00000000-0000-0000-0000-000000000001'; instancePath = $instance; purpose = 'job'; supervisorPid = $PID; supervisorStartUtc = (Get-Process -Id $PID).StartTime.ToUniversalTime().ToString('o'); deadlineUtc = $now.AddMinutes(1).ToString('o'); guestMac = '02AABBCCDDEE'; networkFingerprint = 'a' * 64; networkRules = @($rule) }
+    $state = [ordered]@{ layoutVersion = 2; tag = $script:RunnerTag; vmName = $name; vmId = '00000000-0000-0000-0000-000000000001'; instancePath = $instance; purpose = 'job'; supervisorPid = $PID; supervisorStartUtc = (Get-Process -Id $PID).StartTime.ToUniversalTime().ToString('o'); deadlineUtc = $now.AddMinutes(1).ToString('o'); guestMac = '02AABBCCDDEE'; networkFingerprint = 'a' * 64; networkRules = @($rule) }
     Write-RunnerJson $script:RunnerStatePath $state
-    Write-RunnerJson (Join-Path $root 'vm.json') ([ordered]@{ Id = $state.vmId; Name = $name; Notes = $script:RunnerTag; Path = Join-Path $instance $name; State = 'Off' })
+    Write-RunnerJson (Join-Path $root 'vm.json') ([ordered]@{ Id = $state.vmId; Name = $name; Notes = $script:RunnerTag; Path = (Get-RunnerSessionPaths $state).vmPath; State = 'Off' })
     Write-RunnerJson (Join-Path $root 'adapter.json') ([ordered]@{ Id = 'fixture'; VMId = $state.vmId; VMName = $name; MacAddress = $state.guestMac; DynamicMacAddressEnabled = $false; SwitchId = '00000000-0000-0000-0000-000000000002'; SwitchName = $script:RunnerSwitch })
     $child = Join-Path $root 'guardian.ps1'
     [IO.File]::WriteAllText($child, @'
