@@ -72,7 +72,13 @@ The multi-pose room journey compares each selected label with the authoritative
 response whose successful generation the selected committed render adopted.
 The hook publishes only that accepted generation; loading, failed, disabled and
 retired-key states publish none. The viewer's read-only status/generation witness
-shares the render that publishes the selected code and scene counts. A bounded
+shares the render that publishes the selected code and scene counts. Parent
+readiness can precede label publication by the separate Fiber/Html DOM root. For
+the frozen adopted identity, the test brackets each label observation with real
+commit reads and polls for the visible badge's exact count-span text and complete
+computed accessible button name. A legitimate identity change retires that window;
+reacquisition is limited to four windows. Payload and identity failures are never
+caught or replaced with another response. A bounded
 128-response map lets the test match that exact generation, including when
 focus/pageshow/visibility refreshes issue unrelated same-space requests. Its oracle
 checks request origin, path, space and accepted generation against the response

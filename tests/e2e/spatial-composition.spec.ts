@@ -14,6 +14,10 @@ import { chooseLocation } from './location-picker';
 import {
   observeRoomOccupancy,
   readCommittedRoomOccupancy,
+  ROOM_OCCUPANCY_RETIRED,
+  roomOccupancyLabelState,
+  roomOccupancyLabelNamePattern,
+  type RoomOccupancyLabelObservation,
   type RoomOccupancyCommit,
 } from './room-occupancy-snapshot';
 import { installRoomDrawObservation } from './room-draw-observation';
@@ -532,14 +536,20 @@ for (const motion of ['no-preference', 'reduce'] as const) {
           node.id,
           toScenePosition(revealOffset(node)),
         );
+        // Non-waiting identity reads also retire a disappearing viewer promptly.
+        const readCurrent = () =>
+          viewer.evaluateAll((hosts) => {
+            const host = hosts.length === 1 ? hosts[0] : null;
+            return {
+              code: host?.getAttribute('data-selected-code') ?? '',
+              status: host?.getAttribute('data-occupancy-status') ?? 'off',
+              generation: host?.getAttribute('data-occupancy-generation') ?? '',
+            };
+          });
         const adopted: {
           generation: string;
-          observation: {
-            expected: string;
-            text: string | null;
-            accessible: boolean;
-          };
-        } = await readCommittedRoomOccupancy({
+          observation: RoomOccupancyLabelObservation;
+        } = await readCommittedRoomOccupancy<RoomOccupancyLabelObservation>({
           capture,
           origin,
           spaceId: 'it-closet',
@@ -549,11 +559,7 @@ for (const motion of ['no-preference', 'reduce'] as const) {
             let commit!: RoomOccupancyCommit;
             await expect
               .poll(async () => {
-                commit = await viewer.evaluate((host) => ({
-                  code: host.dataset.selectedCode ?? '',
-                  status: host.dataset.occupancyStatus ?? '',
-                  generation: host.dataset.occupancyGeneration ?? '',
-                }));
+                commit = await readCurrent();
                 return commit.code === code &&
                   commit.status === 'ready' &&
                   commit.generation !== previousGeneration
@@ -563,29 +569,89 @@ for (const motion of ['no-preference', 'reduce'] as const) {
               .toMatch(/^[0-9a-f-]{36}$/);
             return commit;
           },
-          observe: async (counts) => {
+          observe: async (counts, captured) => {
             const badge = viewer.locator(
               '[data-room-label-code="' + code + '"]',
             );
-            await badge.waitFor({ state: 'visible' });
             const expected = occupancyText(counts[code], true);
-            return {
+            let observation: RoomOccupancyLabelObservation = {
               expected,
-              text: await badge.textContent(),
-              accessible:
-                (await badge
-                  .and(page.getByRole('button', { name: new RegExp(expected) }))
-                  .count()) === 1,
+              text: null,
+              accessible: false,
+              visible: false,
             };
+            const progress: { state: 'pending' | 'matched' | 'retired' } = {
+              state: 'pending',
+            };
+            await expect
+              .poll(async () => {
+                const before = await readCurrent();
+                progress.state = roomOccupancyLabelState(
+                  captured,
+                  before,
+                  before,
+                  null,
+                );
+                if (progress.state === 'retired') return progress.state;
+                // These are non-waiting reads. Retirement is checked on both sides.
+                const published = await badge.evaluateAll((elements) => {
+                  const full =
+                    elements.length === 1
+                      ? elements[0].querySelector(
+                          '[data-room-label-full="true"]',
+                        )
+                      : null;
+                  const countSpans = full?.querySelectorAll(':scope > span');
+                  return {
+                    label: full
+                      ? Array.from(full.childNodes)
+                          .filter((node) => node.nodeType === Node.TEXT_NODE)
+                          .map((node) => node.textContent ?? '')
+                          .join('')
+                      : null,
+                    text:
+                      countSpans?.length === 1
+                        ? countSpans[0].textContent
+                        : null,
+                  };
+                });
+                observation = {
+                  expected,
+                  text: published.text,
+                  accessible:
+                    published.label !== null &&
+                    (await badge
+                      .and(
+                        page.getByRole('button', {
+                          name: roomOccupancyLabelNamePattern(
+                            published.label,
+                            code,
+                            expected,
+                          ),
+                        }),
+                      )
+                      .count()) === 1,
+                  visible: await badge.isVisible(),
+                };
+                progress.state = roomOccupancyLabelState(
+                  captured,
+                  before,
+                  await readCurrent(),
+                  observation,
+                );
+                return progress.state;
+              })
+              .toMatch(/^(matched|retired)$/);
+            return progress.state === 'retired'
+              ? ROOM_OCCUPANCY_RETIRED
+              : observation;
           },
         });
         previousGeneration = adopted.generation;
 
         const badge = viewer.locator('[data-room-label-code="' + code + '"]');
         await expect(badge).toBeVisible();
-        expect(adopted.observation.text).toContain(
-          adopted.observation.expected,
-        );
+        expect(adopted.observation.text).toBe(adopted.observation.expected);
         expect(
           adopted.observation.accessible,
           'the committed badge has its exact computed accessible count name',

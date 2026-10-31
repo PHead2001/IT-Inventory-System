@@ -179,6 +179,45 @@ export type RoomOccupancyCommit = {
   generation: string;
 };
 
+/** An observer may retire only a window the subsequent real commit read confirms. */
+export const ROOM_OCCUPANCY_RETIRED = Symbol('room-occupancy-retired');
+export type RoomOccupancyLabelObservation = {
+  expected: string;
+  text: string | null;
+  accessible: boolean;
+  visible: boolean;
+};
+
+/** Match the complete computed button name, including literal location punctuation. */
+export function roomOccupancyLabelNamePattern(
+  label: string,
+  code: string,
+  expected: string,
+) {
+  const name =
+    'Select ' + label + ' (' + code + '); ' + expected + ' at this location';
+  return new RegExp('^' + name.replace(/[.*+?^$()|[\]\\{}]/g, '\\$&') + '$');
+}
+
+/** Parent commit readiness does not imply the separate Fiber/Html label root is current. */
+export function roomOccupancyLabelState(
+  captured: Readonly<RoomOccupancyCommit>,
+  before: RoomOccupancyCommit,
+  after: RoomOccupancyCommit,
+  observation: RoomOccupancyLabelObservation | null,
+): 'pending' | 'matched' | 'retired' {
+  const same = (current: RoomOccupancyCommit) =>
+    current.status === 'ready' &&
+    current.generation === captured.generation &&
+    current.code === captured.code;
+  if (!same(before) || !same(after)) return 'retired';
+  return observation?.visible &&
+    observation.text === observation.expected &&
+    observation.accessible
+    ? 'matched'
+    : 'pending';
+}
+
 /** Reacquire only when a legitimate refresh invalidates the observation window.
  * No body/identity/assertion error is caught or replaced with another payload. */
 export async function readCommittedRoomOccupancy<T>(input: {
@@ -190,10 +229,11 @@ export async function readCommittedRoomOccupancy<T>(input: {
   readCommit(): Promise<RoomOccupancyCommit>;
   observe(
     counts: ReturnType<typeof roomAdoptedOccupancy>['counts'],
-  ): Promise<T>;
+    captured: Readonly<RoomOccupancyCommit>,
+  ): Promise<T | typeof ROOM_OCCUPANCY_RETIRED>;
 }) {
   for (let attempt = 0; attempt < 4; attempt++) {
-    const before = await input.readCommit();
+    const before = Object.freeze({ ...(await input.readCommit()) });
     if (
       before.status !== 'ready' ||
       (input.code !== undefined && before.code !== input.code)
@@ -209,7 +249,7 @@ export async function readCommittedRoomOccupancy<T>(input: {
     });
     if (input.code !== undefined && !Object.hasOwn(snapshot.counts, input.code))
       throw new Error('Room occupancy did not contain the selected code.');
-    const observation = await input.observe(snapshot.counts);
+    const observation = await input.observe(snapshot.counts, before);
     const after = await input.readCommit();
     if (
       after.status !== 'ready' ||
@@ -217,6 +257,10 @@ export async function readCommittedRoomOccupancy<T>(input: {
       after.code !== before.code
     )
       continue;
+    if (observation === ROOM_OCCUPANCY_RETIRED)
+      throw new Error(
+        'Room occupancy observer retired an unchanged adopted render.',
+      );
     return { ...snapshot, observation, cacheControl: captured.cacheControl };
   }
   throw new Error(

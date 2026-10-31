@@ -5,6 +5,10 @@ import {
   createRoomOccupancyCapture,
   readCommittedRoomOccupancy,
   MAX_ROOM_OCCUPANCY_RESPONSES,
+  ROOM_OCCUPANCY_RETIRED,
+  roomOccupancyLabelState,
+  roomOccupancyLabelNamePattern,
+  type RoomOccupancyLabelObservation,
 } from '../e2e/room-occupancy-snapshot';
 import { roomContentsFilter } from '../../src/features/room/contents-contract';
 
@@ -435,3 +439,295 @@ it.each(['duplicate', 'overflow', 'dispose'] as const)(
     await expect(pending).rejects.toThrow('disposed, bounded out or ambiguous');
   },
 );
+
+it('gives the label observer a frozen captured identity while delayed text and accessible name converge', async () => {
+  const capture = createRoomOccupancyCapture(origin, 'it-closet');
+  capture.observe(captureResponse());
+  const original = commit();
+  const expected = '44 units';
+  const samples: RoomOccupancyLabelObservation[] = [
+    { expected, text: 'old 12 units', accessible: false, visible: true },
+    { expected, text: expected, accessible: false, visible: true },
+    { expected, text: expected, accessible: true, visible: true },
+  ];
+  let polls = 0;
+  const result =
+    await readCommittedRoomOccupancy<RoomOccupancyLabelObservation>({
+      capture,
+      origin,
+      spaceId: 'it-closet',
+      code: 'ITC-RED',
+      previousGeneration: previous,
+      readCommit: async () => original,
+      observe: async (_counts, captured) => {
+        expect(captured).toEqual(original);
+        expect(captured).not.toBe(original);
+        expect(Object.isFrozen(captured)).toBe(true);
+        expect(Reflect.set(captured, 'generation', previous)).toBe(false);
+        let observed = samples[0];
+        await expect
+          .poll(
+            () => {
+              observed = samples[Math.min(polls++, samples.length - 1)];
+              return roomOccupancyLabelState(
+                captured,
+                original,
+                original,
+                observed,
+              );
+            },
+            { interval: 1, timeout: 100 },
+          )
+          .toBe('matched');
+        return observed;
+      },
+    });
+  expect(polls).toBeGreaterThanOrEqual(3);
+  expect(result.observation).toEqual(samples[2]);
+  expect(original.generation).toBe(generation);
+  expect(Object.isFrozen(original)).toBe(false);
+});
+
+it.each(['text', 'accessible-name', 'visibility'] as const)(
+  'keeps a stable adopted generation pending for an old %s publication',
+  (field) => {
+    const current = commit();
+    const observation: RoomOccupancyLabelObservation = {
+      expected: '44 units',
+      text: '44 units',
+      accessible: true,
+      visible: true,
+    };
+    if (field === 'text') observation.text = '12 units';
+    if (field === 'accessible-name') observation.accessible = false;
+    if (field === 'visibility') observation.visible = false;
+    expect(
+      roomOccupancyLabelState(current, current, current, observation),
+    ).toBe('pending');
+  },
+);
+
+it('fails a permanent stable-generation label mismatch on poll timeout without retrying the adopted body', async () => {
+  const capture = createRoomOccupancyCapture(origin, 'it-closet');
+  capture.observe(captureResponse());
+  let reads = 0;
+  const pending = readCommittedRoomOccupancy<string>({
+    capture,
+    origin,
+    spaceId: 'it-closet',
+    code: 'ITC-RED',
+    previousGeneration: previous,
+    readCommit: async () => {
+      reads++;
+      return commit();
+    },
+    observe: async (_counts, captured) => {
+      await expect
+        .poll(
+          () =>
+            roomOccupancyLabelState(captured, commit(), commit(), {
+              expected: '44 units',
+              text: '12 units',
+              accessible: false,
+              visible: true,
+            }),
+          { interval: 1, timeout: 20 },
+        )
+        .toBe('matched');
+      return 'unreachable';
+    },
+  });
+  await expect(pending).rejects.toThrow();
+  expect(reads).toBe(1);
+});
+
+it('reacquires only a retirement confirmed by the real subsequent commit read', async () => {
+  const capture = createRoomOccupancyCapture(origin, 'it-closet'),
+    fresh = nextInput(3);
+  capture.observe(captureResponse());
+  capture.observe(captureResponse(fresh));
+  let current = generation,
+    observations = 0;
+  const result = await readCommittedRoomOccupancy<string>({
+    capture,
+    origin,
+    spaceId: 'it-closet',
+    code: 'ITC-RED',
+    previousGeneration: previous,
+    readCommit: async () => commit(current),
+    observe: async (counts, captured) => {
+      observations++;
+      if (observations === 1) {
+        current = fresh.acceptedGeneration;
+        expect(
+          roomOccupancyLabelState(captured, commit(), commit(current), null),
+        ).toBe('retired');
+        return ROOM_OCCUPANCY_RETIRED;
+      }
+      expect(captured.generation).toBe(fresh.acceptedGeneration);
+      return counts['ITC-RED'].quantity_unit_count;
+    },
+  });
+  expect(observations).toBe(2);
+  expect(result.generation).toBe(fresh.acceptedGeneration);
+  expect(result.observation).toBe('99');
+});
+
+it('refuses an observer-manufactured retirement when the adopted identity is unchanged', async () => {
+  const capture = createRoomOccupancyCapture(origin, 'it-closet');
+  capture.observe(captureResponse());
+  let reads = 0,
+    observations = 0;
+  await expect(
+    readCommittedRoomOccupancy<string>({
+      capture,
+      origin,
+      spaceId: 'it-closet',
+      code: 'ITC-RED',
+      previousGeneration: previous,
+      readCommit: async () => {
+        reads++;
+        return commit();
+      },
+      observe: async () => {
+        observations++;
+        return ROOM_OCCUPANCY_RETIRED;
+      },
+    }),
+  ).rejects.toThrow('unchanged adopted render');
+  expect(reads).toBe(2);
+  expect(observations).toBe(1);
+});
+
+it.each(['loading', 'generation', 'selection', 'missing-viewer'] as const)(
+  'detects %s retirement before or during non-waiting label reads',
+  (change) => {
+    const captured = commit(),
+      retired = { ...captured };
+    if (change === 'loading') {
+      retired.status = 'loading';
+      retired.generation = '';
+    }
+    if (change === 'generation')
+      retired.generation = nextInput(3).acceptedGeneration;
+    if (change === 'selection') retired.code = 'ITC-D01';
+    if (change === 'missing-viewer') {
+      retired.status = 'off';
+      retired.code = '';
+      retired.generation = '';
+    }
+    const matched: RoomOccupancyLabelObservation = {
+      expected: '44 units',
+      text: '44 units',
+      accessible: true,
+      visible: true,
+    };
+    expect(roomOccupancyLabelState(captured, retired, retired, null)).toBe(
+      'retired',
+    );
+    expect(roomOccupancyLabelState(captured, captured, retired, matched)).toBe(
+      'retired',
+    );
+  },
+);
+
+it('rejects a larger product count whose suffix contains the complete expected tuple', () => {
+  const current = commit();
+  const expected = '2 products / 12 units / 3 assets';
+  expect(
+    roomOccupancyLabelState(current, current, current, {
+      expected,
+      text: '12 products / 12 units / 3 assets',
+      accessible: true,
+      visible: true,
+    }),
+  ).toBe('pending');
+});
+
+it('matches only the complete literal computed location and count name', () => {
+  const expected = '2 products / 12 units / 3 assets';
+  const label = 'Shelf [A]+ (spare)?';
+  const code = 'ITC-S1A';
+  const name =
+    'Select ' + label + ' (' + code + '); ' + expected + ' at this location';
+  const pattern = roomOccupancyLabelNamePattern(label, code, expected);
+  expect(pattern.test(name)).toBe(true);
+  expect(
+    pattern.test(name.replace(expected, '12 products / 12 units / 3 assets')),
+  ).toBe(false);
+  expect(pattern.test('Before ' + name)).toBe(false);
+  expect(pattern.test(name + ' after')).toBe(false);
+  expect(pattern.test(name.replace(code, 'ITC-S1B'))).toBe(false);
+  expect(pattern.test(name.replace(label, 'Shelf A (spare)'))).toBe(false);
+});
+
+it('waits through a numeric suffix collision until exact count text and computed name converge', async () => {
+  const value = input();
+  value.response.counts['ITC-RED'] = {
+    quantity_product_count: '2',
+    quantity_unit_count: '12',
+    asset_count: '3',
+  };
+  const capture = createRoomOccupancyCapture(origin, 'it-closet');
+  capture.observe(captureResponse(value));
+  const expected = '2 products / 12 units / 3 assets';
+  const stale = '12 products / 12 units / 3 assets';
+  const name = (counts: string) =>
+    'Select Red Container (ITC-RED); ' + counts + ' at this location';
+  const pattern = roomOccupancyLabelNamePattern(
+    'Red Container',
+    'ITC-RED',
+    expected,
+  );
+  const samples = [
+    {
+      expected,
+      text: stale,
+      accessible: pattern.test(name(expected)),
+      visible: true,
+    },
+    {
+      expected,
+      text: expected,
+      accessible: pattern.test(name(stale)),
+      visible: true,
+    },
+    {
+      expected,
+      text: expected,
+      accessible: pattern.test(name(expected)),
+      visible: true,
+    },
+  ];
+  let polls = 0;
+  const result =
+    await readCommittedRoomOccupancy<RoomOccupancyLabelObservation>({
+      capture,
+      origin,
+      spaceId: 'it-closet',
+      code: 'ITC-RED',
+      previousGeneration: previous,
+      readCommit: async () => commit(),
+      observe: async (_counts, captured) => {
+        let observation = samples[0];
+        await expect
+          .poll(
+            () => {
+              observation = samples[Math.min(polls++, samples.length - 1)];
+              return roomOccupancyLabelState(
+                captured,
+                commit(),
+                commit(),
+                observation,
+              );
+            },
+            { interval: 1, timeout: 100 },
+          )
+          .toBe('matched');
+        return observation;
+      },
+    });
+  expect(polls).toBeGreaterThanOrEqual(3);
+  expect(result.generation).toBe(generation);
+  expect(result.observation).toEqual(samples[2]);
+});
