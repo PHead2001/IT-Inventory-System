@@ -75,8 +75,14 @@ describe('prepared Chromium compatibility and cold fallback', () => {
 
   it('uses the installed pinned CLI with shell-only and OS dependencies on a miss', () => {
     const run = vi.fn(() => ({ status: 0 }));
+    const env = {
+      PLAYWRIGHT_DOWNLOAD_CONNECTION_TIMEOUT: '30000',
+      NODE_EXTRA_CA_CERTS: 'fixture-ca.pem',
+      NODE_TLS_REJECT_UNAUTHORIZED: '1',
+      HTTPS_PROXY: 'https://fixture.example',
+    };
     expect(
-      installCiBrowser({ available: () => false, run, log: vi.fn() }),
+      installCiBrowser({ available: () => false, run, log: vi.fn(), env }),
     ).toBe(0);
     expect(run.mock.calls[0][0]).toBe(process.execPath);
     expect(run.mock.calls[0][1].slice(1)).toEqual([
@@ -85,7 +91,32 @@ describe('prepared Chromium compatibility and cold fallback', () => {
       '--only-shell',
       'chromium',
     ]);
+    expect(run).toHaveBeenCalledOnce();
+    expect(run.mock.calls[0][2]).toEqual({
+      stdio: 'inherit',
+      env: { ...env, PLAYWRIGHT_DOWNLOAD_CONNECTION_TIMEOUT: '120000' },
+    });
+    expect(env.PLAYWRIGHT_DOWNLOAD_CONNECTION_TIMEOUT).toBe('30000');
   });
+
+  it.each([23, 124, 137, null])(
+    'preserves cold-install exit %s with one scoped invocation and no added retries',
+    (status) => {
+      const run = vi.fn(() => ({ status }));
+      expect(
+        installCiBrowser({
+          available: () => false,
+          run,
+          log: vi.fn(),
+          env: {},
+        }),
+      ).toBe(status ?? 1);
+      expect(run).toHaveBeenCalledOnce();
+      expect(run.mock.calls[0][2].env).toEqual({
+        PLAYWRIGHT_DOWNLOAD_CONNECTION_TIMEOUT: '120000',
+      });
+    },
+  );
 
   it('propagates installer and spawn failure instead of reporting successful preparation', () => {
     expect(

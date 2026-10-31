@@ -1,8 +1,42 @@
 # Validation
 
-## CI job budget
+## Iteration and authoritative CI
 
-The required Foundation CI job has a 45-minute execution ceiling for the combined application, database and browser gates. Every gate remains required; the configured timeout is an operational budget, not a promised runtime or latency target.
+Batch related findings and fixes before one push. Run focused regressions during
+iteration, then `npm run validate:push` (typecheck, zero-warning lint, formatting,
+and the complete Vitest suite) before pushing. It performs no fresh install,
+build, database reset or Playwright execution. Its sequential local wrapper sets
+a 2 GiB Node old-space limit for the canonical typecheck stage and 1 GiB for lint,
+formatting and Vitest, replacing inherited heap flags. It runs
+Vitest with at most two workers, retaining default file parallelism and isolation. The full CI commands remain
+unchanged; the heap limit is not a total process/host memory bound. Reuse a trusted install while
+dependency inputs are unchanged. The optional repository-local pre-push hook
+enforces this gate on the exact current clean HEAD; see
+[local setup](development/README.md#automatic-local-push-checks).
+
+Keep work in a draft PR during iteration. Foundation CI handles opened, reopened,
+synchronize, ready_for_review and converted_to_draft events, cancelling superseded
+runs for that PR. A draft uses a light runner and ends the stable `required` check
+with an explicit uncertified failure before dependency installation. Missing or
+malformed PR state is also rejected. Drafts emit no full-completion or executed
+workflow-source marker and cannot supply reusable success evidence. Marking ready
+for review runs the full heavy gate for the current SHA; converting back to draft
+invalidates certification even when the head SHA is unchanged.
+
+Ready PRs retain fresh locked installation, the offline application build, clean
+database start/reset/tests/type comparison, browser preparation, backend-specific
+E2E build/browser execution and cleanup. Both builds are intentional: the offline
+build proves database independence, and the E2E build binds runtime public backend
+values. The required-job deadline is forty minutes. This source deadline does not
+establish the installed runner's separate job deadline or measured job duration.
+
+Main retains its conservative exact-tree, latest-attempt reuse proof and immediate
+reverification of all mandatory evidence steps and the workflow-source marker. Missing or invalid evidence
+falls back to the complete gate; the PR path always requires full validation.
+A successful canonical CI gate on the exact final SHA supplies final complete
+certification without a redundant full local run. Local checks do not substitute
+for that CI result, fresh exact-HEAD review, zero actionable unresolved threads,
+clean worktree, local/remote parity or applicable preview/visual acceptance.
 
 ## Browser scheduling and interruption diagnostics
 
@@ -796,11 +830,13 @@ candidate. Local code/test additions do not establish that browser acceptance.
 | npm run build                 | Production build without a live database                                  |
 | npm run test:e2e:list         | Discover browser tests without a running backend                          |
 | npm run test:e2e              | Local fictional users, backend-specific production build, Playwright      |
+| npm run validate:push         | Cheap local typecheck, lint, format and complete Vitest gate              |
+| npm run hooks:install         | Explicit repository-local opt-in for automatic pre-push checks            |
 | npm run validate:app          | Static checks, unit/components, E2E discovery, production build           |
 | npm run validate              | App gate, clean DB gate and critical E2E                                  |
 | npm run db:deliver:production | Main CI only: forward migration delivery and version-history verification |
 
-Start Supabase before database/full validation. Final certification runs fresh `npm ci` then `npm run validate`. E2E rebuilds with local public backend values because they are build inputs.
+Start Supabase before local database/full validation. A local full certification runs fresh `npm ci` then `npm run validate`; authoritative exact-SHA CI performs the corresponding complete stages and needs no duplicate full local run. E2E rebuilds with local public backend values because they are build inputs.
 
 The database gate uses the repository `db:start` bootstrap to install the local-only Storage `v1.77.9` override, then verifies the actual running image before reset and integration tests. `npm run test:local-storage` covers fresh-checkout creation, cache drift, linked-cache preservation and wrong-image rejection without Docker; CI's required job additionally exercises the real clean-checkout start. This override never enters the production migration-delivery command.
 
@@ -896,7 +932,7 @@ Playwright uses real local Supabase and the production Next server for login/log
 
 Run affected tests first and reuse dependencies until dependency inputs change. No Supabase reset for isolated visuals. Schema, seed, RLS, function or persisted-contract changes require the clean DB gate. Preserve regressions; do not skip tests to achieve green checks.
 
-Foundation CI retains the stable `required` check. Every PR runs the complete application, database, types and browser gates on `self-hosted, it-inventory-heavy`, with one fresh dependency install. Main first runs a read-only `reuse_evidence` job on `it-inventory-light`. Only verified evidence selects a light `required` job; ordinary evidence misses select the complete heavy gate. Its application step builds with unreachable placeholder Supabase configuration; E2E then rebuilds with the actual disposable local backend. The placeholders are scoped to the application step. A final full completion check rejects every missing, skipped, cancelled or failed mandatory step, including database cleanup. The final decision check also rejects failed evidence jobs and incomplete reuse verification. Production database delivery and trusted preview discover/provision remain separate fresh `it-inventory-light` VMs. The separate diagnostic `Local runner pilot` remains restricted to the exact reviewed SHA using `it-inventory-pilot-<headSha>`. Repository labels express routing intent; they do not prove live host activation or runtime certification. The [local runner runbook](development/local-runner.md) defines host provisioning and disposal. Linux Bash/Git, the pinned Node/npm toolchain, Docker, writable installation directories, outbound dependency/image access and Chromium system libraries must be available. `playwright install --with-deps` requires compatible Linux package management and permission to install its system dependencies. Separate VMs/daemons prevent collisions between fixed Supabase names/ports and isolate production credentials from test code.
+Foundation CI retains the stable `required` check. Ready, open PRs run the complete application, database, types and browser gates on `self-hosted, it-inventory-heavy`, with one fresh dependency install and a forty-minute required-job deadline. Draft or malformed PR state routes to `it-inventory-light` and explicitly fails certification before installation, without full-completion or workflow-source markers. PR lifecycle triggers include ready_for_review and converted_to_draft, and newer PR runs cancel superseded runs. Main first runs a read-only `reuse_evidence` job on `it-inventory-light`. Only verified evidence selects a light `required` job; ordinary evidence misses select the complete heavy gate. Its application step builds with unreachable placeholder Supabase configuration; E2E then rebuilds with the actual disposable local backend. The placeholders are scoped to the application step. A final full completion check rejects every missing, skipped, cancelled or failed mandatory step, including database cleanup. The final decision check also rejects failed evidence jobs and incomplete reuse verification. Production database delivery and trusted preview provisioning remain separate fresh `it-inventory-light` VMs. Preview access uses one direct-target provisioning job for opened, reopened, ready_for_review or manual events; ordinary pushes create no discovery or provisioning job. The separate diagnostic `Local runner pilot` remains restricted to the exact reviewed SHA using `it-inventory-pilot-<headSha>`. Repository labels express routing intent; they do not prove live host activation or runtime certification. The [local runner runbook](development/local-runner.md) defines host provisioning and disposal. Linux Bash/Git, the pinned Node/npm toolchain, Docker, writable installation directories, outbound dependency/image access and Chromium system libraries must be available. `playwright install --with-deps` requires compatible Linux package management and permission to install its system dependencies. Separate VMs/daemons prevent collisions between fixed Supabase names/ports and isolate production credentials from test code.
 
 Main reuse requires a uniquely associated merged same-repository PR into `main`, whose merge SHA is exactly the pushed target and whose head has the identical whole Git tree. This covers application code, tests, workflows, scripts, configuration and dependency inputs. GitHub's canonical workflow ID/path, PR event, repository/head identity, latest matching run and latest attempt must agree. The completed successful run must have started within seven days; its attempt-specific `required` job must show every uniquely named full gate, workflow-source check, cleanup and terminal checks as completed successfully. Missing, skipped, duplicate or partial evidence is a miss. The API may return an empty run `pull_requests` array after merge; the authoritative commit-to-merged-PR-to-head association remains required, and any populated run association must agree. The inspector never trusts run names, artifacts, or an older green run behind a newer failed/running run. Read-only requests have a shared 45-second deadline, 45-request ceiling, two-MiB response bound and five-page ceiling; unavailable, incomplete or ambiguous API evidence falls back to full validation.
 
@@ -924,7 +960,27 @@ For a focused evidence run in PowerShell, set `$env:E2E_CAPTURE_EVIDENCE='1'`, r
 
 The E2E reporter writes sanitized `test-results/e2e-performance.json` and a compact log summary: checkout SHA, browser-suite elapsed time, discovered/executed/passed/skipped/flaky counts, configured workers and observed peak concurrent tests. Linux samples report actual guest memory, minimum available memory, peak swap use, sampled CPU utilization and kernel OOM-kill delta; missing or non-Linux metrics are explicit. The reporter observes the browser phase and does not measure build time, guarantee that brief memory peaks were sampled, or alter test outcomes. Acceptance requires a complete real Linux 6 GiB/static guest run of every gate/test, a meaningful duration reduction against the recorded main baseline (120 tests; the candidate adds Checkpoint 2 coverage), and inspection of CPU/memory/OOM metrics. A same-candidate serial/parallel comparison with a clean database provides stronger isolation/performance evidence. Configuration, discovery and Windows passes alone do not establish Linux capacity or speed.
 
-Offline PowerShell contracts cover profile capacity boundaries, strict label classification, queue skipping, exact-profile VM/JIT propagation/readback, capacity loss and legacy recovery. `powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File scripts/local-runner/Contract.Tests.ps1` also exercises profile-specific cloud-config/readiness, current-metadata archive reuse, hash/ACL/reparse refusal, atomic publication and bounded retention, plus immediate successful-job pickup and retained idle/error backoff. Light/mid workflows use Bash/Node and remote Supabase CLI operations; Docker readiness remains required for heavy/legacy/pilot guests. Install the reviewed runtime before exercising its changed routing; source contracts do not establish installed cutover, measured startup improvement or real job results.
+Offline PowerShell contracts cover profile capacity boundaries, strict label classification, queue skipping, exact-profile VM/JIT propagation/readback, capacity loss and profile-field compatibility. `powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File scripts/local-runner/Contract.Tests.ps1` also exercises profile-specific cloud-config/readiness, current-metadata archive reuse, hash/ACL/reparse refusal, atomic publication and bounded retention, plus immediate successful-job pickup and retained idle/error backoff. Light/mid workflows use Bash/Node and remote Supabase CLI operations; Docker readiness remains required for heavy/legacy/pilot guests. Install the reviewed runtime before exercising its changed routing; source contracts do not establish installed cutover, measured startup improvement or real job results.
+
+The contract entry point prepares standard Windows PowerShell module lookup for
+its own process, so this command can also be launched from PowerShell 7 without a
+manual environment step. It still runs in Windows PowerShell 5.1 and requires the
+OS capabilities exercised by the contracts, including named mutexes. The bootstrap
+does not change user, machine or global settings, or replace real hashing checks.
+
+Instance layout validation uses the same contract command. New state requires
+integer `layoutVersion: 2` and identity-derived paths: the strict instance root
+holds SSH keys, `known_hosts`, probes and controls, while only its `vm-data` child
+holds `guest.vhdx`, `cidata.vhdx` and the nested Hyper-V configuration directory.
+Missing-version state is recognized at exact legacy paths for Status and guarded
+cleanup only; malformed or unknown present versions refuse admission. Legacy
+layout compatibility does not authorize resume, boot, JIT registration, recovery,
+preparation or resource admission. Path regressions retain these refusals and
+strict-root checks across the affected entry points. Powered-off native VHD-backed
+New-VM probes established broad native access entries on the disk/configuration
+parent, with strict root/sentinel ACLs preserved by the separated layout and
+verified cleanup/pickup restoration. That probe does not certify the updated
+installed SYSTEM runtime, recovery or CI, network-switch behavior or reboot.
 
 Recovery admission regressions retain the two-second original capture lease and
 120-second original outage deadline. They cover removal of the duplicate handoff

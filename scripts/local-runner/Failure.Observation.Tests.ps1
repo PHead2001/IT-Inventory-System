@@ -5,7 +5,7 @@ $ErrorActionPreference = 'Stop'
 foreach ($file in @('Common.ps1', 'Runner.ps1', 'Network.Recovery.ps1')) {
     $ast = [Management.Automation.Language.Parser]::ParseFile((Join-Path $PSScriptRoot $file), [ref]$null, [ref]$null)
     foreach ($definition in $ast.FindAll({ param($node) $node -is [Management.Automation.Language.FunctionDefinitionAst] }, $false)) {
-        if ($definition.Name -cin @('Get-RunnerRecoveryDiagnosticNumber', 'Assert-RunnerRecoveryDiagnostic', 'New-RunnerRecoveryDiagnostic', 'New-RunnerFailureObservation', 'New-RunnerObservedFailure', 'Write-RunnerCleanupObservation', 'Write-RunnerSessionFailureObservation', 'Assert-RunnerFailureRecord', 'Assert-RunnerCleanupJournal',
+        if ($definition.Name -cin @('Get-RunnerSessionPaths','Get-RunnerRecoveryDiagnosticNumber', 'Get-RunnerProbeExitCode', 'Assert-RunnerRecoveryDiagnostic', 'New-RunnerRecoveryDiagnostic', 'New-RunnerFailureObservation', 'New-RunnerObservedFailure', 'Write-RunnerCleanupObservation', 'Write-RunnerSessionFailureObservation', 'Assert-RunnerFailureRecord', 'Assert-RunnerCleanupJournal',
             'Test-RunnerSessionStopRequested', 'Assert-SessionAlive', 'Get-RunnerRecoveryExpiry', 'Invoke-Watchdog')) {
             Invoke-Expression $definition.Extent.Text
         }
@@ -19,7 +19,7 @@ function Require([bool] $Condition) { if (-not $Condition) { throw 'Diagnostic r
 function Reset-Fixture {
     $script:now = [DateTime]::UtcNow
     $script:state = [pscustomobject]@{
-        vmName = 'ITIR-11111111111111111111111111111111'; vmId = '11111111-1111-1111-1111-111111111111'; instancePath = 'C:\synthetic-runner\instance'
+        vmName = 'ITIR-11111111111111111111111111111111'; vmId = '11111111-1111-1111-1111-111111111111'; layoutVersion = 2; instancePath = 'C:\synthetic-runner\instances\ITIR-11111111111111111111111111111111'
         purpose = 'prepare'; phase = 'sealed-off'; deadlineUtc = $script:now.AddHours(1).ToString('o')
         supervisorPid = 11; supervisorStartUtc = $script:now.ToString('o'); guardianPid = 22; guardianStartUtc = 'fixture'; guardianReady = $true
         networkRecovery = [pscustomobject]@{ phase = 'healthy'; progressUtc = $script:now.AddSeconds(-1).ToString('o');
@@ -39,6 +39,7 @@ function Test-Path([string] $LiteralPath) {
     if ($LiteralPath -ceq (Join-Path $script:state.instancePath 'stop.requested')) { return $script:localStop }
     return $null -ne $script:record
 }
+function Get-Item { param([string]$LiteralPath,[switch]$Force); Require ($LiteralPath.StartsWith($script:RunnerRoot+'\')); return [pscustomobject]@{Attributes=[IO.FileAttributes]::Normal} }
 function Assert-RunnerProtectedPath {}
 function Assert-SecureRoot {}
 function Assert-StateIdentity {}
@@ -489,5 +490,59 @@ Check 'sealed liveness releases publication lock before storage and VM provider 
         Assert-SessionAlive $script:state
         Require ($script:depth -eq 0 -and $script:sealedCalls -eq 1)
     }
+}
+Check 'optional probe diagnostics roundtrip with legacy compatibility and strict unknown or overlong projected fields' {
+    Reset-Fixture
+    $r = $script:state.networkRecovery
+    $r | Add-Member diagnostics ([pscustomobject]@{
+        trigger = 'fingerprint-change'; lastTransition = 'probing'; refusal = ''
+        observationUnavailableCount = 0; fingerprintChangeCount = 1; staleAdmissionCount = 2; applyCount = 3
+        observationElapsedMs = 254; preflightElapsedMs = 2348; applyElapsedMs = 4426
+        probeOutcome = 'probe-failed'; probeWorker = 'github-command-failed'
+        probeCount = 1000000; probeFailureCount = 1000000; probeElapsedMs = 86400000; probeWorkerElapsedMs = 86400000
+        probeExitCode = [long]3221225781; probeExitStage = 'other'
+        rawOutput = 'SECRET credential URL'
+    })
+    $record = New-RunnerFailureObservation 'session-guardian' 'recovery-expiry' $script:state $script:now
+    Require ($record.capture -ceq 'complete' -and $record.recoveryDiagnostic.probeWorker -ceq 'github-command-failed' -and $record.recoveryDiagnostic.probeExitCode -eq 3221225781)
+    $json = $record | ConvertTo-Json -Depth 4 -Compress
+    Require ($json -cnotmatch 'SECRET|credential|rawOutput' -and [Text.Encoding]::UTF8.GetByteCount($json) -le 2048)
+    Assert-RunnerFailureRecord ($json | ConvertFrom-Json)
+    $legacy = $json | ConvertFrom-Json
+    foreach ($name in @('probeOutcome', 'probeWorker', 'probeCount', 'probeFailureCount', 'probeElapsedMs', 'probeWorkerElapsedMs', 'probeExitCode', 'probeExitStage')) { $legacy.recoveryDiagnostic.PSObject.Properties.Remove($name) }
+    Assert-RunnerFailureRecord $legacy
+    foreach ($bad in @('SECRET', ('x' * 2000), $true, $null)) {
+        $r.diagnostics.probeWorker = $bad
+        $safe = New-RunnerFailureObservation 'session-guardian' 'recovery-expiry' $script:state $script:now
+        Require ($safe.capture -ceq 'complete' -and $safe.recoveryDiagnostic.probeWorker -ceq 'other')
+        $invalid = $json | ConvertFrom-Json; $invalid.recoveryDiagnostic.probeWorker = $bad
+        $refused = $false; try { Assert-RunnerFailureRecord $invalid } catch { $refused = $true }; Require $refused
+    }
+    $r.diagnostics.probeWorker = 'github-command-failed'
+    foreach ($bad in @(-1,[long]4294967296,'61',[double]61,$true,@(61))) {
+        $invalid=$json | ConvertFrom-Json; $invalid.recoveryDiagnostic.probeExitCode=$bad
+        $refused=$false; try { Assert-RunnerFailureRecord $invalid } catch { $refused=$true }; Require $refused
+    }
+    foreach ($bad in @('SECRET',@('common-import'),$true,$null)) {
+        $invalid=$json | ConvertFrom-Json; $invalid.recoveryDiagnostic.probeExitStage=$bad
+        $refused=$false; try { Assert-RunnerFailureRecord $invalid } catch { $refused=$true }; Require $refused
+    }
+    foreach ($name in @('probeCount', 'probeFailureCount', 'probeElapsedMs', 'probeWorkerElapsedMs')) {
+        $original = $r.diagnostics.$name
+        foreach ($bad in @(-1, 1.5, $true, [double]::NaN, [double]::PositiveInfinity, 86400001)) {
+            $r.diagnostics.$name = $bad
+            $safe = New-RunnerFailureObservation 'session-guardian' 'recovery-expiry' $script:state $script:now
+            Require ($safe.capture -ceq 'unavailable')
+        }
+        $r.diagnostics.$name = $original
+    }
+    $invalid = $json | ConvertFrom-Json; $invalid.recoveryDiagnostic | Add-Member unknownProbeField 'SECRET'
+    $refused = $false; try { Assert-RunnerFailureRecord $invalid } catch { $refused = $true }; Require $refused
+    Write-RunnerCleanupObservation 'session-guardian' 'recovery-expiry' $script:state $script:now '' 'outage-deadline'
+    $first = $script:journal.first | ConvertTo-Json -Depth 4 -Compress
+    Write-RunnerCleanupObservation 'recovery-plan' 'recovery-cleanup' $script:state $script:now.AddSeconds(1)
+    Require (($script:journal.first | ConvertTo-Json -Depth 4 -Compress) -ceq $first)
+    Require ([Text.Encoding]::UTF8.GetByteCount(($script:journal | ConvertTo-Json -Depth 6 -Compress)) -le 4096)
+    Assert-RunnerCleanupJournal $script:journal
 }
 Write-Host "Failure observation passed: $script:checks pure guard/capture regressions. No host providers or files touched."

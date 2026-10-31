@@ -212,6 +212,7 @@ function Get-RunnerImageRecord {
         $receipt.diskHash -cnotmatch '^[0-9A-F]{64}$' -or $receipt.bindingHash -cnotmatch '^[0-9A-F]{64}$' -or
         $receipt.recipeId -cnotmatch '^[0-9A-F]{64}$' -or $receipt.scrubbed -ne $true -or
         @($receipt.capabilities) -cnotcontains 'os-prerequisites') { throw 'Prepared image receipt is invalid.' }
+    if ($receipt.PSObject.Properties.Name -contains 'cloneVerification') { Assert-RunnerImageCloneProof $receipt $receipt.cloneVerification }
     return [pscustomobject]@{ selector = $selector; receipt = $receipt; path = $disk }
 }
 
@@ -235,7 +236,7 @@ function Get-RunnerImageSelection($Config) {
         Write-Host 'Prepared image inputs differ from the installed trusted bundle/base; using the generic base. Prepare image explicitly to refresh.'
         return [pscustomobject]@{ path = $Config.baseVhdx; prepared = $false; reason = 'stale-inputs' }
     }
-    Assert-RunnerImageCloneProof $record.receipt $record.receipt.cloneVerification
+    Assert-RunnerImageCloneProof $record.receipt $record.receipt.cloneVerification -RequireGuestMtu
     Assert-RunnerImageDiskUnreferenced $record.path
     $differencing = $record.receipt.cloneVerification.PSObject.Properties.Name -contains 'diskType' -and
         $record.receipt.cloneVerification.diskType -ceq 'Differencing' -and $record.receipt.cloneVerification.parentLease -ceq 'read-only-same-handle' -and
@@ -329,6 +330,7 @@ function Assert-RunnerImageDiskUnreferenced([string] $Path) {
 
 function Assert-RunnerPrepareState($State) {
     Assert-StateIdentity $State
+    Assert-RunnerSessionTrustedPaths $State
     if ($State.PSObject.Properties.Name -notcontains 'purpose' -or $State.purpose -cne 'prepare' -or
         $State.PSObject.Properties.Name -notcontains 'vmId') { throw 'Only the credential-free preparation session can publish an image.' }
 }
@@ -351,6 +353,38 @@ function Assert-RunnerImageStorageReceipt($Guest) {
     }
 }
 
+function Write-RunnerImagePreparationFailure($State, [string] $BundleHash, $Detail) {
+    # Private local evidence only. The sanitizer is not a general secret scrubber;
+    # never copy stderr into generic journals, owner receipts or public output.
+    try {
+        Assert-RunnerCloudInitPreparationIdentity $State
+        if ((Get-CoherentInstalledRunnerBundle).hash -cne $BundleHash) { throw 'Image failure bundle changed.' }
+        if ($Detail.exitCode -isnot [int] -or $Detail.receiptBytes -isnot [int] -or $Detail.receiptBytes -lt 0 -or $Detail.receiptBytes -gt 65540 -or
+            $Detail.stderr -isnot [string] -or $Detail.stderr.Length -gt 4096) { throw 'Image failure detail is invalid.' }
+        $text=ConvertTo-RunnerDiagnosticText $Detail.stderr
+        $stage='unknown'
+        foreach($match in [regex]::Matches($text,'(?m)^ITIR_IMAGE_FAILURE_STAGE=([a-z-]+)\r?$')) {
+            if ($match.Groups[1].Value -cin (Get-RunnerImageFailureStages)) { $stage=$match.Groups[1].Value }
+        }
+        $record=[pscustomobject][ordered]@{schema=1;sessionId=$State.vmName.Substring(5);vmId=$State.vmId;purpose='prepare';bundleHash=$BundleHash;atUtc=[DateTime]::UtcNow.ToString('o');stage=$stage;exitCode=$Detail.exitCode;receiptBytes=$Detail.receiptBytes;stderr=$text;truncated=([Text.Encoding]::UTF8.GetByteCount($text) -ge 4096)}
+        # JSON escaping/UTF-8 can expand text. Preserve the decisive tail while
+        # bounding the complete serialized artifact before any filesystem write.
+        while ($record.stderr.Length -gt 4096 -or [Text.Encoding]::UTF8.GetByteCount((ConvertTo-Json -InputObject $record -Depth 4 -Compress)) -gt 8192) {
+            $record.stderr=$record.stderr.Substring([Math]::Min(128,$record.stderr.Length)).Trim();$record.truncated=$true
+        }
+        Assert-RunnerImageFailureArtifact $record
+        $mutex=Enter-RunnerLock
+        try {
+            Assert-RunnerCloudInitPreparationIdentity $State
+            if ((Get-CoherentInstalledRunnerBundle).hash -cne $BundleHash) { throw 'Image failure bundle changed.' }
+            $path=Assert-OwnedPath (Join-Path $script:RunnerRoot 'preparation-image.json')
+            if (Test-Path -LiteralPath $path) { Assert-RunnerProtectedPath $path }
+            Write-RunnerJson $path $record
+            Assert-RunnerProtectedPath $path
+        } finally { Exit-RunnerLock $mutex }
+    } catch { } # Evidence failure must not replace the builder failure/cleanup.
+}
+
 function Invoke-RunnerImageBuild($State, $Config) {
     Assert-RunnerPreparationAuthorized
     $binding = Get-RunnerImageBinding $Config
@@ -367,7 +401,8 @@ function Invoke-RunnerImageBuild($State, $Config) {
         $diagnostics = ConvertTo-RunnerDiagnosticText $result.ErrorOutput
         $diagnostics = $diagnostics.Substring(0, [Math]::Min(4096, $diagnostics.Length))
         $failure = [InvalidOperationException]::new('IMAGE_PREPARATION_COMMAND_FAILED')
-        $failure.Data['runnerImagePreparation'] = [ordered]@{ exitCode = $result.ExitCode; stderr = $diagnostics; receiptBytes = $result.Output.Length }
+        $failure.Data['runnerImagePreparation'] = [ordered]@{ exitCode = $result.ExitCode; stderr = $diagnostics; receiptBytes = [Text.Encoding]::UTF8.GetByteCount($result.Output) }
+        Write-RunnerImagePreparationFailure $State $binding.bundleHash $failure.Data['runnerImagePreparation']
         throw $failure
     }
     $guest = $result.Output | ConvertFrom-Json
@@ -388,10 +423,10 @@ function Invoke-RunnerImageBuild($State, $Config) {
         Assert-RunnerPrepareState $current
         if ($current.vmName -cne $State.vmName -or [guid]$current.vmId -ne [guid]$vm.Id -or
             $vm.Notes -cne $script:RunnerTag -or $vm.State -cne 'Off' -or
-            [IO.Path]::GetFullPath($vm.Path) -ine (Join-Path $current.instancePath $current.vmName)) { throw 'Prepared VM identity/off state changed.' }
+            [IO.Path]::GetFullPath($vm.Path) -ine ((Get-RunnerSessionPaths $current).vmPath)) { throw 'Prepared VM identity/off state changed.' }
         Assert-RunnerVmLifecycle $current.vmName
         $disks = @(Get-VMHardDiskDrive -VM $vm -ErrorAction Stop)
-        $expected = @((Join-Path $current.instancePath 'guest.vhdx'), (Join-Path $current.instancePath 'cidata.vhdx'))
+        $expected = @(((Get-RunnerSessionPaths $current).guestDisk), ((Get-RunnerSessionPaths $current).seedDisk))
         if ($disks.Count -ne 2 -or (Compare-Object @($disks.Path | Sort-Object) @($expected | Sort-Object))) { throw 'Prepared VM disks differ from the owned fresh copy/seed.' }
         Remove-VM -VM $vm -Force -ErrorAction Stop
         Assert-RunnerInstanceUnreferenced $current
@@ -466,7 +501,7 @@ function New-RunnerPreparedImageCandidate($State, $Config, $Binding, $Guest) {
     Assert-RunnerImageStorageReceipt $proof
     if (@(Get-RunnerVmInventory | Where-Object { $_.Name -ceq $State.vmName -or [guid]$_.Id -eq [guid]$State.vmId }).Count -gt 0) { throw 'Preparation VM is still registered; publication refused.' }
     Assert-RunnerInstanceUnreferenced $State
-    $source = Assert-OwnedPath (Join-Path $State.instancePath 'guest.vhdx')
+    $source = Assert-OwnedPath ((Get-RunnerSessionPaths $State).guestDisk)
     Assert-RunnerImageDiskUnreferenced $source
     if ((Get-RunnerImageBinding $Config).hash -cne $Binding.hash -or $Guest.recipeId -cne $Binding.recipeId -or $Guest.scrubbed -ne $true) { throw 'Trusted inputs or scrub proof changed before publication.' }
     $old = Get-RunnerImageRecord
@@ -494,7 +529,7 @@ function New-RunnerPreparedImageCandidate($State, $Config, $Binding, $Guest) {
             diskHash = (Get-FileHash -LiteralPath $candidate -Algorithm SHA256).Hash; baseHash = $Config.baseSha256
             bindingHash = $Binding.hash; recipeId = $Binding.recipeId; bundleHash = $Binding.bundleHash; scrubbed = $true; capabilities = @($Guest.capabilities); guest = $proof
             builder = [ordered]@{ vmName = $State.vmName; vmId = $State.vmId; guestMac = $current.guestMac
-                sshPublicKeyHash = (Get-FileHash -LiteralPath (Join-Path $State.instancePath 'id_ed25519.pub') -Algorithm SHA256).Hash }; selectorBefore = $selectorBefore }
+                sshPublicKeyHash = (Get-FileHash -LiteralPath ((Get-RunnerSessionPaths $State).publicKey) -Algorithm SHA256).Hash }; selectorBefore = $selectorBefore }
         Write-RunnerJson $receiptPath $receipt
         Assert-RunnerProtectedPath $receiptPath
         Invoke-RunnerTransitionCheckpoint 'image-receipt'
@@ -557,7 +592,7 @@ function Assert-RunnerImageCandidate($Candidate, $Config, [switch] $Rehash) {
     return $receipt
 }
 
-function Assert-RunnerImageCloneProof($Receipt, $Verification) {
+function Assert-RunnerImageCloneProof($Receipt, $Verification, [switch] $RequireGuestMtu) {
     if ($null -eq $Verification -or $Verification.schema -ne 1 -or $Verification.purpose -cne 'verify-image' -or
         $Verification.candidateId -cne $Receipt.id -or $Verification.diskHash -cne $Receipt.diskHash -or
         $Verification.bindingHash -cne $Receipt.bindingHash -or $Verification.recipeId -cne $Receipt.recipeId -or
@@ -569,13 +604,16 @@ function Assert-RunnerImageCloneProof($Receipt, $Verification) {
         $Verification.sshPublicKeyHash -cnotmatch '^[0-9A-F]{64}$' -or $Verification.sshPublicKeyHash -ceq $Receipt.builder.sshPublicKeyHash -or
         $Verification.readinessSeconds -lt 0 -or [double]::IsNaN($Verification.readinessSeconds) -or [double]::IsInfinity($Verification.readinessSeconds) -or
         [DateTime]::Parse($Verification.readyUtc).ToUniversalTime() -gt [DateTime]::UtcNow.AddMinutes(1)) { throw 'Fresh clone readiness/cleanup proof is invalid.' }
+    if ($Verification.PSObject.Properties.Name -contains 'guestMtu') {
+        if ($Verification.guestMtu -isnot [int] -or $Verification.guestMtu -ne (Get-RunnerGuestMtu)) { throw 'Fresh clone guest MTU proof is invalid.' }
+    } elseif ($RequireGuestMtu) { throw 'Fresh clone guest MTU proof is missing.' }
     if ($Verification.PSObject.Properties.Name -contains 'diskType' -or $Verification.PSObject.Properties.Name -contains 'parentLease') {
         if ($Verification.diskType -cne 'Differencing' -or $Verification.parentLease -cne 'read-only-same-handle') { throw 'Clone disk/parent lease proof is invalid.' }
     }
     if ($Verification.PSObject.Properties.Name -contains 'successiveChild') {
         $next = $Verification.successiveChild
         if ($null -eq $next -or $next.PSObject.Properties.Name -contains 'successiveChild') { throw 'Successive clone proof must contain exactly one next child.' }
-        Assert-RunnerImageCloneProof $Receipt $next
+        Assert-RunnerImageCloneProof $Receipt $next -RequireGuestMtu:$RequireGuestMtu
         if ($Verification.diskType -cne 'Differencing' -or $next.diskType -cne 'Differencing' -or
             $Verification.parentLease -cne 'read-only-same-handle' -or $next.parentLease -cne 'read-only-same-handle' -or
             $Verification.parentIdentity -cnotmatch '^[0-9A-F]{8}:[0-9A-F]{16}$' -or $next.parentIdentity -cne $Verification.parentIdentity -or
@@ -590,7 +628,7 @@ function Publish-RunnerPreparedImage($Candidate, $Config, $Verification) {
     Assert-RunnerPreparationAuthorized
     Assert-RunnerControlIdle
     $receipt = Assert-RunnerImageCandidate $Candidate $Config -Rehash
-    Assert-RunnerImageCloneProof $receipt $Verification
+    Assert-RunnerImageCloneProof $receipt $Verification -RequireGuestMtu
     if ((Get-RunnerNetworkObservation).fingerprint -cne $Verification.networkFingerprint) { throw 'Host network changed after clone verification; publication refused.' }
     $receipt | Add-Member -NotePropertyName cloneVerification -NotePropertyValue $Verification -Force
     Write-RunnerJson $Candidate.receiptPath $receipt

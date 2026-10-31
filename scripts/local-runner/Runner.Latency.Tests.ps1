@@ -144,6 +144,15 @@ try {
     finally { [IO.Directory]::Delete($junction) }
 
     $pilot = 'it-inventory-pilot-' + ('a' * 40)
+    # The profile-only transport/liveness seams below do not waive production
+    # session admission. Its real SSH guard still rejects null/empty identity.
+    $realSshArgs = (Get-Command Get-SshArgs).ScriptBlock
+    Assert-Rejected { & $realSshArgs $null } 'null readiness identity'
+    Assert-Rejected { & $realSshArgs ([pscustomobject]@{}) } 'empty readiness identity'
+    $readinessName = 'ITIR-' + ('c' * 32)
+    $readinessState = [pscustomobject]@{ tag=$script:RunnerTag; vmName=$readinessName; layoutVersion=2; purpose='job'
+        instancePath=(Join-Path (Join-Path $base 'instances') $readinessName) }
+    Assert-StateIdentity $readinessState
     foreach ($label in @('it-inventory-light', 'it-inventory-mid', 'it-inventory-heavy', 'it-inventory-ephemeral', $pilot)) {
         $docker = $label -cnotin @('it-inventory-light', 'it-inventory-mid')
         $prerequisites = Get-RunnerGuestPrerequisites $label
@@ -164,7 +173,8 @@ try {
                 -not $command.Contains('command -v git') -or -not $command.Contains('test "$(id -un)" = runner')) { throw 'Actual guest readiness skipped its required profile checks.' }
             return $(if ($script:guestCalls -eq 1) { 1 } else { 0 })
         }
-        Wait-Guest ([pscustomobject]@{}) ([pscustomobject]@{ guestIp = 'fixture' }) $label
+        $guestMtu = Wait-Guest $readinessState ([pscustomobject]@{ guestIp = 'fixture' }) $label
+        if ($guestMtu -isnot [int] -or $guestMtu -ne (Get-RunnerGuestMtu)) { throw 'Profile readiness lost its verified MTU.' }
         if ($script:guestCalls -ne 2 -or $script:guestSleeps -ne 1) { throw 'Guest readiness did not retry once then return.' }
     }
     Assert-Rejected { Get-RunnerGuestPrerequisites 'unknown' } 'unknown prerequisite profile'

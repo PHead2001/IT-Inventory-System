@@ -6,7 +6,7 @@ import { mkdtempSync, writeFileSync, rmSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { selectOpenSameRepositoryPrs } from '../scripts/preview-access-discover.mjs';
+import { previewAccessTarget } from '../scripts/preview-access-target.mjs';
 import { createPreviewRequest } from '../scripts/preview-access-request.mjs';
 import {
   provisionPreview,
@@ -1063,7 +1063,7 @@ test('malformed event JSON cannot print a secret or parser text', () => {
   }
 });
 
-test('preview workflow coalesces pending PR events before discovery without cancelling active provisioning', () => {
+test('preview workflow coalesces pending PR events before provisioning without cancelling active provisioning', () => {
   const workflow = readFileSync(
     new URL('../.github/workflows/preview-access.yml', import.meta.url),
     'utf8',
@@ -1074,7 +1074,7 @@ test('preview workflow coalesces pending PR events before discovery without canc
   );
   assert.ok(
     workflowConcurrency,
-    'coalescing must apply to the whole workflow before discovery can request a VM',
+    'coalescing must apply to the whole workflow before provisioning can request a VM',
   );
   assert.equal(
     workflowConcurrency[1],
@@ -1108,7 +1108,7 @@ test('preview workflow coalesces pending PR events before discovery without canc
   );
   assert.equal(
     provisionConcurrency[1],
-    'preview-staff-access-${{ matrix.pr }}',
+    'preview-staff-access-${{ github.event.pull_request.number || inputs.pr_number }}',
   );
   assert.notEqual(
     workflowConcurrency[1],
@@ -1117,77 +1117,123 @@ test('preview workflow coalesces pending PR events before discovery without canc
   );
 });
 
-test('schedule discovery emits separate jobs for an early slow PR and a later ready PR', () => {
-  const directory = mkdtempSync(join(tmpdir(), 'preview-discover-test-'));
-  try {
-    const eventPath = join(directory, 'event.json');
-    const outputPath = join(directory, 'output.txt');
-    const mockPath = join(directory, 'mock-fetch.mjs');
-    const pull = (number) => ({
-      number,
-      state: 'open',
-      head: { repo: { full_name: repository } },
-      base: { repo: { full_name: repository } },
-    });
-    writeFileSync(eventPath, '{}');
-    writeFileSync(outputPath, '');
-    writeFileSync(
-      mockPath,
-      `globalThis.fetch = async () => ({ok:true,json:async()=>${JSON.stringify([pull(9), pull(10)])}});`,
+const targetEvent = (action = 'opened') => ({
+  action,
+  number: 9,
+  pull_request: {
+    number: 9,
+    state: 'open',
+    head: { sha, repo: { full_name: repository } },
+    base: { repo: { full_name: repository } },
+  },
+});
+const target = (eventName, event, targetNumber = 9) =>
+  previewAccessTarget({ eventName, event, targetNumber, repository });
+
+test('direct event target preserves the event SHA fence for each provisioning action', () => {
+  for (const action of ['opened', 'reopened', 'ready_for_review'])
+    assert.equal(target('pull_request_target', targetEvent(action)), sha);
+  assert.equal(
+    target('workflow_dispatch', { inputs: { pr_number: '9' } }),
+    undefined,
+  );
+});
+
+test('ordinary pushes, schedules and untrusted or inconsistent targets never provision', () => {
+  for (const action of [
+    'synchronize',
+    'converted_to_draft',
+    'labeled',
+    undefined,
+  ]) {
+    const event = targetEvent();
+    event.action = action;
+    assert.throws(
+      () => target('pull_request_target', event),
+      /Unsupported PR action/,
     );
-    const result = spawnSync(
-      process.execPath,
-      [
-        '--import',
-        pathToFileURL(mockPath).href,
-        'scripts/preview-access-discover.mjs',
-      ],
-      {
-        cwd: new URL('..', import.meta.url),
-        encoding: 'utf8',
-        env: {
-          ...process.env,
-          GITHUB_REPOSITORY: repository,
-          GITHUB_REF: 'refs/heads/main',
-          GITHUB_EVENT_NAME: 'schedule',
-          GITHUB_EVENT_PATH: eventPath,
-          GITHUB_OUTPUT: outputPath,
-          GITHUB_TOKEN: 'test-token',
-        },
-      },
-    );
-    assert.equal(result.status, 0, result.stderr);
-    assert.match(readFileSync(outputPath, 'utf8'), /targets=\[9,10\]/);
-    const workflow = readFileSync(
-      new URL('../.github/workflows/preview-access.yml', import.meta.url),
-      'utf8',
-    );
-    assert.match(
-      workflow,
-      /needs: discover[\s\S]*max-parallel: 4[\s\S]*pr: \$\{\{ fromJSON\(needs\.discover\.outputs\.targets\) \}\}/,
-    );
-    assert.match(
-      workflow,
-      /timeout-minutes: 15[\s\S]*environment: preview-access/,
-    );
-    assert.match(workflow, /fail-fast: false/);
-    const provisionJob = workflow.split('  provision:')[1];
-    assert.ok(provisionJob, 'the per-PR provisioning job must exist');
-    assert.match(
-      provisionJob,
-      /concurrency:\s*\n\s*group: preview-staff-access-\$\{\{ matrix\.pr \}\}\s*\n\s*cancel-in-progress: false/,
-    );
-    const discoveryJob = workflow
-      .split('  discover:')[1]
-      ?.split('  provision:')[0];
-    assert.ok(discoveryJob, 'the discovery job must be separate');
-    assert.doesNotMatch(discoveryJob, /\benvironment:\s*preview-access\b/);
-    assert.doesNotMatch(
-      discoveryJob,
-      /PREVIEW_SUPABASE_MANAGEMENT_TOKEN|PREVIEW_STAFF_PASSWORD|secrets\./,
-    );
-    assert.deepEqual(selectOpenSameRepositoryPrs([pull(9), pull(10)]), [9, 10]);
-  } finally {
-    rmSync(directory, { recursive: true, force: true });
   }
+  for (const name of ['schedule', 'push', 'pull_request'])
+    assert.throws(() => target(name, targetEvent()), /Unsupported event/);
+  for (const mutate of [
+    (event) => {
+      event.number = 10;
+    },
+    (event) => {
+      event.pull_request.number = 10;
+    },
+    (event) => {
+      event.pull_request.state = 'closed';
+    },
+    (event) => {
+      event.pull_request.head.repo.full_name = 'foreign/repo';
+    },
+    (event) => {
+      event.pull_request.base.repo.full_name = 'foreign/repo';
+    },
+    (event) => {
+      event.pull_request.head.sha = 'invalid';
+    },
+  ]) {
+    const event = targetEvent();
+    mutate(event);
+    assert.throws(() => target('pull_request_target', event));
+  }
+  assert.throws(() => target('pull_request_target', targetEvent(), 10), {
+    code: 'TARGET_MISMATCH',
+  });
+  assert.throws(
+    () => target('workflow_dispatch', { inputs: { pr_number: 10 } }),
+    { code: 'TARGET_MISMATCH' },
+  );
+  for (const number of [0, -1, 1.5, '9'])
+    assert.throws(
+      () => target('workflow_dispatch', { inputs: { pr_number: 9 } }, number),
+      { code: 'TARGET_INVALID' },
+    );
+});
+
+test('missing target refuses before provisioning', () => {
+  assert.throws(
+    () =>
+      previewAccessTarget({
+        eventName: 'workflow_dispatch',
+        event: { inputs: { pr_number: 9 } },
+        repository,
+      }),
+    { code: 'TARGET_INVALID' },
+  );
+});
+
+test('one trusted light job provisions only opening, reopening, readiness or manual targets', () => {
+  const workflow = readFileSync(
+    new URL('../.github/workflows/preview-access.yml', import.meta.url),
+    'utf8',
+  );
+  assert.match(workflow, /types: \[opened, reopened, ready_for_review\]/);
+  assert.doesNotMatch(
+    workflow,
+    /synchronize|schedule:|discover:|strategy:|matrix:|npm ci|Foundation/,
+  );
+  assert.deepEqual(
+    [...workflow.matchAll(/^  ([a-z_]+):\s*$/gm)]
+      .map((match) => match[1])
+      .filter(
+        (name) => !['pull_request_target', 'workflow_dispatch'].includes(name),
+      ),
+    ['provision'],
+  );
+  assert.match(workflow, /runs-on: \[self-hosted, it-inventory-light\]/);
+  assert.match(workflow, /timeout-minutes: 15/);
+  assert.match(workflow, /ref: refs\/heads\/main/);
+  assert.match(
+    workflow,
+    /PREVIEW_TARGET_PR: \$\{\{ github.event.pull_request.number \|\| inputs.pr_number \}\}/,
+  );
+  const source = readFileSync(
+    new URL('../scripts/preview-access.mjs', import.meta.url),
+    'utf8',
+  );
+  assert.match(source, /attempts: 12/);
+  assert.match(source, /setTimeout\(resolve, 10000\)/);
 });

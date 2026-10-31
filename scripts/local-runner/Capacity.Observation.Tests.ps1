@@ -79,7 +79,7 @@ try {
     $script:messages.Clear(); Show-RunnerCapacityStatus $config
     if (-not ($script:messages -join "`n").Contains('observation unavailable or invalid')) { throw 'Corrupt observation hid its limitation.' }
     $sessionName = 'ITIR-' + ('c' * 32)
-    $session = [pscustomobject]@{tag=$script:RunnerTag;vmName=$sessionName;instancePath=(Join-Path $base $sessionName);resourceLabel='it-inventory-heavy'}
+    $session = [pscustomobject]@{tag=$script:RunnerTag;vmName=$sessionName;instancePath=(Join-Path (Join-Path $base 'instances') $sessionName);resourceLabel='it-inventory-heavy'}
     $vm = [pscustomobject]@{Name=$sessionName;Notes=$script:RunnerTag;Path=(Join-Path $session.instancePath $sessionName)}
     $script:memoryReads=0
     function Get-VMMemory { $script:memoryReads++; return [pscustomobject]@{Startup=6GB;DynamicMemoryEnabled=$false} }

@@ -2,6 +2,7 @@
 # No live VM, disk, credential, host network or installed state is modified.
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
+. (Join-Path $PSScriptRoot 'Test.FileHash.ps1')
 . (Join-Path $PSScriptRoot 'Common.ps1')
 . (Join-Path $PSScriptRoot 'Network.Recovery.ps1')
 $ast = [Management.Automation.Language.Parser]::ParseFile((Join-Path $PSScriptRoot 'Runner.ps1'), [ref]$null, [ref]$null)
@@ -48,8 +49,8 @@ function New-Fixture {
     if ($script:fixtureStateDepth -ne 0) { throw 'Previous fixture leaked state recursion.' }
     $script:now = [DateTime]::UtcNow; $script:deadPids = @(); $script:locked = $false; $script:inventoryFailed = $false
     $script:vms = @(); $script:vmQueries = 0; $script:observations = 0; $script:cleanups = 0; $script:RunnerRecoveryProbe = $null; $script:RunnerGuardOutcome = $null
-    $script:state = [pscustomobject]@{ tag = $script:RunnerTag; vmName = 'ITIR-' + ('a' * 32); vmId = '00000000-0000-0000-0000-000000000001'
-        instancePath = Join-Path $root ('ITIR-' + ('a' * 32)); purpose = 'prepare'; phase = 'sealed-off'; supervisorPid = 42; supervisorStartUtc = $script:now.ToString('o')
+    $script:state = [pscustomobject]@{ layoutVersion = 2; tag = $script:RunnerTag; vmName = 'ITIR-' + ('a' * 32); vmId = '00000000-0000-0000-0000-000000000001'
+        instancePath = Join-Path (Join-Path $root 'instances') ('ITIR-' + ('a' * 32)); purpose = 'prepare'; phase = 'sealed-off'; supervisorPid = 42; supervisorStartUtc = $script:now.ToString('o')
         guardianPid = $PID; guardianStartUtc = $script:now.ToString('o'); guardianReady = $true; deadlineUtc = $script:now.AddMinutes(10).ToString('o'); heartbeatUtc = $script:now.ToString('o') }
     [void][IO.Directory]::CreateDirectory($script:state.instancePath)
     $script:state | Add-Member imageScrubProof (Get-RunnerJsonEvidence $guest)
@@ -138,7 +139,7 @@ try {
                 'progress' { $script:now = $script:now.AddSeconds(31) }
                 'inventory' { $script:inventoryFailed = $true }
                 'vm-reappeared' { $script:vms = @([pscustomobject]@{ Name = $script:state.vmName; Id = [guid]$script:state.vmId }) }
-                'reference' { $script:vms = @([pscustomobject]@{ Name = 'other'; Id = [guid]::NewGuid(); Path = Join-Path $root 'other'; disks = @((Join-Path $script:state.instancePath 'guest.vhdx')) }) }
+                'reference' { $script:vms = @([pscustomobject]@{ Name = 'other'; Id = [guid]::NewGuid(); Path = Join-Path $root 'other'; disks = @(((Get-RunnerSessionPaths $script:state).guestDisk)) }) }
                 'stop' { [IO.File]::WriteAllText((Join-Path $script:state.instancePath 'stop.requested'), '') }
             }
             try {

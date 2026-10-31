@@ -2,6 +2,7 @@
 param([string] $CandidateRoot = $PSScriptRoot)
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
+. (Join-Path $PSScriptRoot 'Test.FileHash.ps1')
 . (Join-Path $CandidateRoot 'Common.ps1')
 . (Join-Path $PSScriptRoot 'Network.Recovery.ps1')
 $ast = [Management.Automation.Language.Parser]::ParseFile((Join-Path $CandidateRoot 'Runner.ps1'), [ref]$null, [ref]$null)
@@ -86,10 +87,15 @@ function Wait-Guest {
     # Withdraw the originally selected heavy demand during guest startup.
     if ($script:case -eq 'cancelled') { $script:jobs[0].status = 'completed' }
     elseif ($script:case -eq 'incompatible') { $script:jobs = @((New-Job 1 'it-inventory-ephemeral')) }
+    return Get-RunnerGuestMtu
 }
 function Get-CimInstance { throw 'Postallocation capacity must not be inspected.' }
 function New-SeedDisk($Path, $PublicKey, $Mac, $Config, $ProfileLabel) { if ($ProfileLabel -cne 'it-inventory-heavy') { throw 'Selected profile did not reach guest cloud-config.' } }
 function New-RunnerSshKey($Path) { [IO.File]::WriteAllText(($Path + '.pub'), 'fixture-public') }
+function New-RunnerKnownHosts($Path) { [IO.File]::WriteAllText($Path, ''); return [pscustomobject]@{identity=[guid]::NewGuid().ToString('N')} }
+function Assert-RunnerKnownHosts($Path, $Evidence, [switch]$RequireContent) {
+    if (-not (Test-Path -LiteralPath $Path) -or $Evidence.identity -cnotmatch '^[a-f0-9]{32}$' -or -not $RequireContent) { throw 'Demand fixture lost its per-session known-hosts binding.' }
+}
 function New-RunnerProfileVm { $script:allocations++; return [pscustomobject]@{ Id = [guid]'11111111-1111-1111-1111-111111111111' } }
 function Set-VM {
     $recorded = Get-RunnerState
@@ -253,7 +259,7 @@ try {
     foreach ($case in @('pilot-recovery-cancelled', 'pilot-recovery-lookup', 'pilot-dead-guardian-lookup', 'pilot-not-ready-lookup', 'pilot-expired-lookup', 'pilot-new-generation-lookup')) {
         $script:recoveryWaits = 0; $script:jits = 0; $script:lookupChanges = 0
         $script:pilotJob = New-Job 1 $pilotLabel
-        $state = [pscustomobject]@{ tag = $script:RunnerTag; vmName = 'ITIR-' + ('a' * 32); vmId = '11111111-1111-1111-1111-111111111111'; instancePath = Join-Path $base ('ITIR-' + ('a' * 32)); purpose = 'job'; deadlineUtc = [DateTime]::UtcNow.AddMinutes(5).ToString('o') }
+        $state = [pscustomobject]@{ layoutVersion = 2; tag = $script:RunnerTag; vmName = 'ITIR-' + ('a' * 32); vmId = '11111111-1111-1111-1111-111111111111'; instancePath = Join-Path (Join-Path $base 'instances') ('ITIR-' + ('a' * 32)); purpose = 'job'; deadlineUtc = [DateTime]::UtcNow.AddMinutes(5).ToString('o') }
         Write-RunnerJson $script:RunnerStatePath $state; Start-SessionGuardian $state
         $name = $state.vmName; $guestMac = [pscustomobject]@{ rawMac = 'fixture' }; $token = 'fixture'
         Assert-Rejected { & ([scriptblock]::Create($session.Substring($start, $end - $start))) }
