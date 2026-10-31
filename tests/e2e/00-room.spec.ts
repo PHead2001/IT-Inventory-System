@@ -3,7 +3,7 @@ import {
   expect,
   test,
   type Page,
-  type Response,
+  type Locator,
   type TestInfo,
 } from '@playwright/test';
 import { createClient } from '@supabase/supabase-js';
@@ -14,7 +14,13 @@ import { buildRoomBindings } from '../../src/features/room/bindings';
 import { roomSchema } from '../../src/features/room/schema';
 import type { RoomOccupancy } from '../../src/features/room/occupancy-contract';
 import { occupancyText } from '../../src/features/room/occupancy-contract';
-import { roomSelectionOccupancy } from './room-occupancy-snapshot';
+import {
+  roomSelectionOccupancy,
+  observeRoomOccupancy,
+  readCommittedRoomOccupancy,
+  type RoomOccupancyCapture,
+  type RoomOccupancyCommit,
+} from './room-occupancy-snapshot';
 import { measureRoomLabelName } from './room-label-name';
 import { measureRoomTarget, roomTargetMeetsMinimum } from './room-target-size';
 import {
@@ -740,6 +746,42 @@ async function uncoveredCanvasGesture(page: Page, dx: number, dy: number) {
   );
 }
 
+/** Read the body for the actual committed generation, reacquiring only a changed render. */
+async function committedRoomCounts(
+  page: Page,
+  viewer: Locator,
+  capture: RoomOccupancyCapture,
+  previousGeneration: string | null = null,
+  code?: string,
+) {
+  return readCommittedRoomOccupancy({
+    capture,
+    origin: new URL(page.url()).origin,
+    spaceId: 'it-closet',
+    code,
+    previousGeneration,
+    readCommit: async () => {
+      let commit!: RoomOccupancyCommit;
+      await expect
+        .poll(async () => {
+          commit = await viewer.evaluate((host) => ({
+            code: host.dataset.selectedCode ?? '',
+            status: host.dataset.occupancyStatus ?? '',
+            generation: host.dataset.occupancyGeneration ?? '',
+          }));
+          return commit.status === 'ready' &&
+            commit.generation !== previousGeneration &&
+            (code === undefined || commit.code === code)
+            ? commit.generation
+            : '';
+        })
+        .toMatch(/^[0-9a-f-]{36}$/);
+      return commit;
+    },
+    observe: async () => undefined,
+  });
+}
+
 async function ready(page: Page) {
   const show = page.getByRole('button', { name: 'Show room', exact: true });
   if (await show.isVisible()) await show.click();
@@ -1427,42 +1469,15 @@ test('spatial reveal endpoints retain actual picking and labels across oblique, 
     journey: 'spatial-reveal',
     stage: 'room setup',
   });
-  const occupancyResponses = new Map<
-    string,
-    Promise<{ requestUrl: string; response: unknown } | null>
-  >();
-  let occupancyCaptureOverflow = false;
-  const captureOccupancy = (response: Response) => {
-    const url = new URL(response.url());
-    if (
-      !response.ok() ||
-      url.origin !== new URL(page.url()).origin ||
-      url.pathname !== '/api/room/occupancy' ||
-      url.searchParams.get('space') !== 'it-closet'
-    )
-      return;
-    const generation = url.searchParams.get('generation');
-    if (!generation) return;
-    if (occupancyResponses.size >= 128) {
-      occupancyCaptureOverflow = true;
-      return;
-    }
-    occupancyResponses.set(
-      generation,
-      response
-        .json()
-        .then((payload: unknown) => ({
-          requestUrl: response.request().url(),
-          response: payload,
-        }))
-        .catch(() => null),
-    );
-  };
-  page.on('response', captureOccupancy);
   await observeRoomScene(page);
   await page.setViewportSize({ width: 1280, height: 1100 });
   await page.emulateMedia({ reducedMotion: 'no-preference' });
   await login(page);
+  const occupancyCapture = observeRoomOccupancy(
+    page,
+    new URL(page.url()).origin,
+    'it-closet',
+  );
   await page.goto('/room?space=it-closet');
   const viewer = await ready(page),
     canvas = viewer.locator('canvas');
@@ -1566,19 +1581,9 @@ test('spatial reveal endpoints retain actual picking and labels across oblique, 
           return acceptedGeneration;
         })
         .toMatch(/^[0-9a-f-]{36}$/);
-      expect(
-        occupancyCaptureOverflow,
-        'bounded occupancy response capture',
-      ).toBe(false);
-      const adoptedResponse = occupancyResponses.get(acceptedGeneration!);
-      expect(
-        adoptedResponse,
-        'response for the adopted render generation',
-      ).toBeDefined();
-      const adopted = await adoptedResponse!;
-      expect(adopted, 'readable adopted occupancy response').not.toBeNull();
+      const adopted = await occupancyCapture.read(acceptedGeneration!);
       const occupancy = roomSelectionOccupancy({
-        ...adopted!,
+        ...adopted,
         origin: new URL(page.url()).origin,
         spaceId: 'it-closet',
         code,
@@ -3898,6 +3903,11 @@ test('optional room counts reconcile with active leaf contents and refresh as un
   page,
 }) => {
   await login(page);
+  const capture = observeRoomOccupancy(
+    page,
+    new URL(page.url()).origin,
+    'it-closet',
+  );
   await page.goto('/room?space=it-closet&location=ITC-D01');
   const viewer = page.getByTestId('room-viewer');
   await expect(viewer.locator('canvas')).toBeVisible();
@@ -3909,15 +3919,15 @@ test('optional room counts reconcile with active leaf contents and refresh as un
     exact: true,
   });
   await expect(toggle).toHaveAttribute('aria-pressed', 'false');
-  const snapshot = page.waitForResponse(
-    (response) =>
-      response.url().includes('/api/room/occupancy?') &&
-      response.status() === 200,
-  );
   await toggle.click();
-  const countsResponse = await snapshot;
-  expect(countsResponse.headers()['cache-control']).toBe('private, no-store');
-  const counts = await countsResponse.json();
+  const counts = await committedRoomCounts(
+    page,
+    viewer,
+    capture,
+    null,
+    'ITC-D01',
+  );
+  expect(counts.cacheControl).toBe('private, no-store');
   expect(counts.counts['ITC-D01'].quantity_product_count).toMatch(
     /^[1-9][0-9]*$/,
   );
@@ -3949,11 +3959,7 @@ test('optional room counts reconcile with active leaf contents and refresh as un
   });
   await expect(countsExplanation).toBeVisible();
   await expect(countsExplanation).toContainText(/counts are a snapshot/);
-  const refreshed = page.waitForResponse(
-    (response) =>
-      response.url().includes('/api/room/occupancy?') &&
-      response.status() === 200,
-  );
+
   const refreshedContents = page.waitForResponse(
     (response) =>
       response.url().includes('/api/room/contents?') &&
@@ -3962,7 +3968,13 @@ test('optional room counts reconcile with active leaf contents and refresh as un
   await page
     .getByRole('button', { name: 'Refresh inventory', exact: true })
     .click();
-  await refreshed;
+  await committedRoomCounts(
+    page,
+    viewer,
+    capture,
+    counts.generation,
+    'ITC-D01',
+  );
   await refreshedContents;
   await page
     .getByRole('button', { name: 'More map controls', exact: true })
@@ -4134,6 +4146,11 @@ test('375px populated room gives every independently witnessed opaque target an 
   await page.setViewportSize({ width: 375, height: 812 });
   await page.emulateMedia({ reducedMotion: 'reduce' });
   await login(page);
+  const occupancyCapture = observeRoomOccupancy(
+    page,
+    new URL(page.url()).origin,
+    'it-closet',
+  );
   await page.goto('/room?space=it-closet');
   const viewer = await ready(page),
     canvas = viewer.locator('canvas');
@@ -4182,14 +4199,12 @@ test('375px populated room gives every independently witnessed opaque target an 
   };
   await more.click();
   await assertMoreOutsideCanvasWhenAboveFits();
-  const initialSnapshot = page.waitForResponse(
-    (response) =>
-      response.url().includes('/api/room/occupancy?') && response.ok(),
-  );
+
   await page
     .getByRole('button', { name: 'Show item counts', exact: true })
     .click();
-  let counts: RoomOccupancy = (await (await initialSnapshot).json()).counts;
+  let snapshot = await committedRoomCounts(page, viewer, occupancyCapture);
+  let counts: RoomOccupancy = snapshot.counts;
   expect(Object.keys(counts)).toHaveLength(28);
   for (const value of Object.values(counts))
     expect(BigInt(value.quantity_unit_count)).toBeGreaterThan(0n);
@@ -4296,13 +4311,17 @@ test('375px populated room gives every independently witnessed opaque target an 
       page,
       scenario === 'fit-closed' ? undefined : requestedAfter,
     );
-    const response = page.waitForResponse(
-      (result) => result.url().includes('/api/room/occupancy?') && result.ok(),
-    );
+
     await page
       .getByRole('button', { name: 'Refresh inventory', exact: true })
       .click();
-    counts = (await (await response).json()).counts;
+    snapshot = await committedRoomCounts(
+      page,
+      viewer,
+      occupancyCapture,
+      snapshot.generation,
+    );
+    counts = snapshot.counts;
     if (open && (await more.getAttribute('aria-expanded')) !== 'true')
       await more.click();
     await canvas.scrollIntoViewIfNeeded();

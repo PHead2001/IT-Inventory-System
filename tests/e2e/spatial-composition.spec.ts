@@ -4,16 +4,18 @@ import { roomSchema, type RoomNode } from '../../src/features/room/schema';
 import { buildRoomBindings } from '../../src/features/room/bindings';
 import { toScenePosition } from '../../src/features/room/coordinates';
 import { revealOffset } from '../../src/features/room/scene/spatial-reveal';
-import {
-  occupancyText,
-  type RoomOccupancy,
-} from '../../src/features/room/occupancy-contract';
+import { occupancyText } from '../../src/features/room/occupancy-contract';
 import {
   acceptanceCommand,
   acceptanceFixtures,
   acceptanceLogin,
 } from './audit-three-acceptance-fixtures';
 import { chooseLocation } from './location-picker';
+import {
+  observeRoomOccupancy,
+  readCommittedRoomOccupancy,
+  type RoomOccupancyCommit,
+} from './room-occupancy-snapshot';
 import { installRoomDrawObservation } from './room-draw-observation';
 import { chooseRevealWitness } from './spatial-witness-choice';
 import {
@@ -514,33 +516,80 @@ for (const motion of ['no-preference', 'reduce'] as const) {
       await observeSpatialComposition(page);
       await page.emulateMedia({ reducedMotion: motion });
       await acceptanceLogin(page);
+      const origin = new URL(page.url()).origin;
+      const capture = observeRoomOccupancy(page, origin, 'it-closet');
       await page.goto('/room');
       const viewer = page.getByTestId('room-viewer');
       const canvas = await sceneReady(viewer);
+      let previousGeneration: string | null = null;
       for (const code of codes) {
         const node = revealNode(code);
         await expectRevealPosition(canvas, node.id, [0, 0, 0]);
-        const snapshot = page.waitForResponse(
-          (response) =>
-            response.url().includes('/api/room/occupancy?') &&
-            response.status() === 200,
-        );
         await selectRoom(page, code);
-        const counts: { counts: RoomOccupancy } = await (await snapshot).json();
         await expect(canvas).toHaveAttribute('data-spatial-phase', 'settled');
         await expectRevealPosition(
           canvas,
           node.id,
           toScenePosition(revealOffset(node)),
         );
+        const adopted: {
+          generation: string;
+          observation: {
+            expected: string;
+            text: string | null;
+            accessible: boolean;
+          };
+        } = await readCommittedRoomOccupancy({
+          capture,
+          origin,
+          spaceId: 'it-closet',
+          code,
+          previousGeneration,
+          readCommit: async () => {
+            let commit!: RoomOccupancyCommit;
+            await expect
+              .poll(async () => {
+                commit = await viewer.evaluate((host) => ({
+                  code: host.dataset.selectedCode ?? '',
+                  status: host.dataset.occupancyStatus ?? '',
+                  generation: host.dataset.occupancyGeneration ?? '',
+                }));
+                return commit.code === code &&
+                  commit.status === 'ready' &&
+                  commit.generation !== previousGeneration
+                  ? commit.generation
+                  : '';
+              })
+              .toMatch(/^[0-9a-f-]{36}$/);
+            return commit;
+          },
+          observe: async (counts) => {
+            const badge = viewer.locator(
+              '[data-room-label-code="' + code + '"]',
+            );
+            await badge.waitFor({ state: 'visible' });
+            const expected = occupancyText(counts[code], true);
+            return {
+              expected,
+              text: await badge.textContent(),
+              accessible:
+                (await badge
+                  .and(page.getByRole('button', { name: new RegExp(expected) }))
+                  .count()) === 1,
+            };
+          },
+        });
+        previousGeneration = adopted.generation;
+
         const badge = viewer.locator('[data-room-label-code="' + code + '"]');
         await expect(badge).toBeVisible();
-        await expect(badge).toContainText(
-          occupancyText(counts.counts[code], true),
+        expect(adopted.observation.text).toContain(
+          adopted.observation.expected,
         );
-        await expect(badge).toHaveAccessibleName(
-          new RegExp(occupancyText(counts.counts[code], true)),
-        );
+        expect(
+          adopted.observation.accessible,
+          'the committed badge has its exact computed accessible count name',
+        ).toBe(true);
         await viewer.getByRole('button', { name: 'More map controls' }).click();
         await expect(
           viewer.getByRole('button', { name: 'Show item counts' }),
