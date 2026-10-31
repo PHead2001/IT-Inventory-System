@@ -13,7 +13,7 @@ function Assert-Check([bool] $Condition, [string] $Message) {
     if (-not $Condition) { throw $Message }
     $script:checks++
 }
-function New-CleanupFixture([string] $Mode) {
+function New-CleanupFixture([string] $Mode, [int] $Layout = 1) {
     $script:mode = $Mode; $script:removed = $false; $script:removeCalls = 0; $script:stopCalls = 0
     $script:RunnerRoot = Join-Path $fixtureRoot $Mode
     [void][IO.Directory]::CreateDirectory($script:RunnerRoot)
@@ -24,6 +24,11 @@ function New-CleanupFixture([string] $Mode) {
     $script:diskPath = Join-Path $instance 'guest.vhdx'
     [IO.File]::WriteAllText($script:diskPath, 'unchanged disk bytes')
     $script:fixtureState = [pscustomobject]@{ tag = $script:RunnerTag; vmName = $name; instancePath = $instance; vmId = '11111111-1111-1111-1111-111111111111' }
+    if($Layout -eq 2){
+        $script:fixtureState|Add-Member layoutVersion 2
+        [void][IO.Directory]::CreateDirectory((Join-Path $instance 'vm-data'))
+        $nested=Join-Path $instance 'vm-data\guest.vhdx';Move-Item -LiteralPath $script:diskPath -Destination $nested;$script:diskPath=$nested
+    }
     if ($Mode -in @('rename-legacy','rename-disk-only','rename-nested-config','rename-root-config')) { $script:fixtureState.PSObject.Properties.Remove('vmId') }
     if ($Mode -eq 'wrong-recorded-guid') { $script:fixtureState.vmId = '22222222-2222-2222-2222-222222222222' }
     if ($Mode -eq 'invalid-recorded-guid') { $script:fixtureState.vmId = 'invalid' }
@@ -33,6 +38,8 @@ function New-CleanupFixture([string] $Mode) {
         Id = [guid]'11111111-1111-1111-1111-111111111111'; Name = $name
         Notes = $script:RunnerTag; Path = Join-Path $instance $name; State = 'Off'
     }
+    if($Layout -eq 2){$script:vmFixture.Path=(Get-RunnerSessionPaths $script:fixtureState).vmPath}
+    if($Mode -ceq 'partial-creation'){$script:vmFixture.Notes='';$script:fixtureState|Add-Member phase 'creating';$script:fixtureState|Add-Member expectedBootDisk $script:diskPath;$script:fixtureState|Add-Member expectedVmPath $script:vmFixture.Path;Write-RunnerJson $script:RunnerStatePath $script:fixtureState}
     if ($Mode -eq 'stop-error') { $script:vmFixture.State = 'Running' }
     if ($Mode -in @('rename-guid','rename-legacy','rename-disk-only','rename-nested-config','rename-root-config')) { $script:vmFixture.Name = 'ITIR-' + ('b' * 32) }
     if ($Mode -eq 'rename-disk-only') { $script:vmFixture.Path = Join-Path $script:RunnerRoot 'unrelated-config' }
@@ -104,20 +111,22 @@ function Assert-FixtureRetained([string] $Mode) {
     Assert-Check ([IO.File]::ReadAllText($script:RunnerStatePath) -ceq $script:stateBefore) "State bytes changed after $Mode."
 }
 try {
+    foreach($layout in @(1,2)){
     foreach ($mode in @('lookup-error','lookup-partial','lookup-duplicate','provider-error','provider-partial','provider-name-mismatch','provider-duplicate','incomplete-provider','hidden-registration','rename-guid','rename-legacy','rename-disk-only','rename-nested-config','rename-root-config','rename-missing-path','wrong-recorded-guid','invalid-recorded-guid','disk-error','stop-error','remove-error','post-lookup-error','post-provider-error','post-provider-partial','post-present','post-renamed','post-hidden-registration')) {
-        New-CleanupFixture $mode
+        New-CleanupFixture $mode $layout
         Assert-FixtureRetained $mode
         if ($mode -in @('lookup-error','lookup-partial','lookup-duplicate','provider-error','provider-name-mismatch','provider-duplicate','incomplete-provider','hidden-registration','disk-error','stop-error')) {
             Assert-Check ($script:removeCalls -eq 0) "Cleanup removed a VM after $mode."
         }
     }
-    foreach ($mode in @('true-absence','verified-removal')) {
-        New-CleanupFixture $mode
+    foreach ($mode in @('true-absence','verified-removal','partial-creation')) {
+        New-CleanupFixture $mode $layout
         Remove-RunnerInstance $script:fixtureState
         Assert-Check (-not (Test-Path -LiteralPath $script:fixtureState.instancePath)) "Verified $mode retained instance unexpectedly."
         Assert-Check (-not (Test-Path -LiteralPath $script:RunnerStatePath)) "Verified $mode retained state unexpectedly."
         $expectedRemovals = if ($mode -eq 'true-absence') { 0 } else { 1 }
         Assert-Check ($script:removeCalls -eq $expectedRemovals) "Verified $mode removed the wrong VM count."
+    }
     }
     Write-Host "Cleanup integrity regression passed ($script:checks checks)."
 } finally {

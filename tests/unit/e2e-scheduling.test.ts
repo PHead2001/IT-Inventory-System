@@ -119,6 +119,7 @@ describe('browser scheduling', () => {
       'inventory-discovery-fixtures.ts',
       'room-test-support.ts',
       'room-occupancy-exclusive.spec.ts',
+      'audit-three-acceptance-fixtures.ts',
     ])
       expect(
         unsafeFixtureSignOuts(readFileSync('tests/e2e/' + spec, 'utf8')),
@@ -157,6 +158,21 @@ describe('browser scheduling', () => {
       expect(entry.project).toBe(
         reviewed.has(entry.file) ? 'chromium-parallel' : 'chromium-exclusive',
       );
+    // These reviewed additions must retain every real case in the parallel
+    // partition; deriving this only from the allowlist would miss their removal.
+    for (const [file, count] of [
+      ['audit-four-identifier-guidance.spec.ts', 7],
+      ['audit-four-vocabulary.spec.ts', 4],
+      ['route-content-native.spec.ts', 13],
+      ['skip-link.spec.ts', 2],
+    ] as const) {
+      const cases = scheduled.filter((entry) => entry.file === file);
+      expect(cases, file).toHaveLength(count);
+      expect(
+        cases.every((entry) => entry.project === 'chromium-parallel'),
+        file,
+      ).toBe(true);
+    }
     const focused = discover(false, ['tests/e2e/00-room.spec.ts']);
     expect(focused.map((entry) => entry.key).sort()).toEqual(
       baseline
@@ -341,6 +357,7 @@ describe('browser scheduling', () => {
     expect(exclusive).toEqual(
       expect.arrayContaining([
         'configuration.spec.ts',
+        'build-info.spec.ts',
         'custody.spec.ts',
         'experience-visual.spec.ts',
         'files.spec.ts',
@@ -350,6 +367,7 @@ describe('browser scheduling', () => {
         'inventory-search.spec.ts',
         'metadata-designer.spec.ts',
         'room-occupancy-exclusive.spec.ts',
+        'route-motion.spec.ts',
       ]),
     );
     const scheduling = e2eScheduling(true);

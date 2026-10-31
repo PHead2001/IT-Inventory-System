@@ -34,6 +34,13 @@ function Get-RunnerRecoveryDiagnosticNumber($Value, [long] $Maximum = 86400000, 
     return [long]$Value
 }
 
+function Get-RunnerProbeExitCode($Value) {
+    # GetExitCodeProcess supplies UInt32; JSON roundtrips use Int32/Int64.
+    if (($Value -isnot [uint32] -and $Value -isnot [int] -and $Value -isnot [long]) -or
+        $Value -lt 0 -or $Value -gt 4294967295) { throw 'Invalid probe process exit code.' }
+    return [long]$Value
+}
+
 function Assert-RunnerRecoveryDiagnostic($Diagnostic) {
     $enums = @{
         operation = @('', 'quarantine', 'apply', 'connect', 'resume', 'probe', 'other')
@@ -46,11 +53,17 @@ function Assert-RunnerRecoveryDiagnostic($Diagnostic) {
     # these fixed optional diagnostics; unknown fields remain invalid.
     if ($Diagnostic -is [pscustomobject]) {
         if ($Diagnostic.PSObject.Properties.Name -contains 'admissionOperation') { $enums.admissionOperation = @('', 'connect', 'resume', 'other') }
-        foreach ($name in @('observationAgeMs', 'quarantineElapsedMs', 'connectElapsedMs', 'resumeElapsedMs')) {
+        if ($Diagnostic.PSObject.Properties.Name -contains 'probeOutcome') { $enums.probeOutcome = @('', 'passed', 'timeout', 'child-exit', 'result-missing', 'result-invalid', 'probe-failed', 'other') }
+        if ($Diagnostic.PSObject.Properties.Name -contains 'probeWorker') { $enums.probeWorker = @('', 'passed', 'listener-error', 'isolation-error', 'isolation-command-failed', 'isolation-open', 'github-error', 'github-command-failed', 'other') }
+        if ($Diagnostic.PSObject.Properties.Name -contains 'probeExitStage') { $enums.probeExitStage = @('', 'common-import', 'instance-containment', 'instance-identity', 'instance-acl', 'acl-read-command-unavailable', 'acl-read-access-denied', 'acl-read-other', 'owner-read', 'owner-rejected', 'ace-enumeration', 'sid-translation', 'allow-rejected', 'result-precondition', 'result-publication', 'other') }
+        foreach ($name in @('observationAgeMs', 'quarantineElapsedMs', 'connectElapsedMs', 'resumeElapsedMs', 'probeCount', 'probeFailureCount', 'probeElapsedMs', 'probeWorkerElapsedMs')) {
             if ($Diagnostic.PSObject.Properties.Name -contains $name) { $numbers += $name }
         }
     }
-    if ($Diagnostic -isnot [pscustomobject] -or (@($Diagnostic.PSObject.Properties.Name | Sort-Object) -join ',') -cne (@(@($enums.Keys) + $numbers | Sort-Object) -join ',')) { throw 'Invalid recovery diagnostic fields.' }
+    $fields = @($enums.Keys) + $numbers
+    if ($null -ne $Diagnostic -and $Diagnostic.PSObject.Properties.Name -contains 'probeExitCode') { $fields += 'probeExitCode' }
+    if ($Diagnostic -isnot [pscustomobject] -or (@($Diagnostic.PSObject.Properties.Name | Sort-Object) -join ',') -cne (@($fields | Sort-Object) -join ',')) { throw 'Invalid recovery diagnostic fields.' }
+    if ($Diagnostic.PSObject.Properties.Name -contains 'probeExitCode' -and $null -ne $Diagnostic.probeExitCode) { [void](Get-RunnerProbeExitCode $Diagnostic.probeExitCode) }
     foreach ($name in $enums.Keys) {
         if ($Diagnostic.$name -isnot [string] -or $Diagnostic.$name -cnotin $enums[$name]) { throw 'Invalid recovery diagnostic enum.' }
     }
@@ -69,6 +82,8 @@ function New-RunnerRecoveryDiagnostic($Recovery, [DateTime] $NowUtc) {
         observationUnavailableCount = 0; fingerprintChangeCount = 0; staleAdmissionCount = 0; applyCount = 0
         observationElapsedMs = 0; preflightElapsedMs = 0; applyElapsedMs = 0
         admissionOperation = ''; observationAgeMs = 0; quarantineElapsedMs = 0; connectElapsedMs = 0; resumeElapsedMs = 0
+        probeOutcome = ''; probeWorker = ''; probeCount = 0; probeFailureCount = 0; probeElapsedMs = 0; probeWorkerElapsedMs = 0
+        probeExitCode = $null; probeExitStage = ''
     }
     if ($Recovery.PSObject.Properties.Name -contains 'operation') { $value.operation = if ($Recovery.operation -cin @('', 'quarantine', 'apply', 'connect', 'resume', 'probe')) { $Recovery.operation } else { 'other' } }
     if ($Recovery.PSObject.Properties.Name -contains 'diagnostics') {
@@ -80,6 +95,13 @@ function New-RunnerRecoveryDiagnostic($Recovery, [DateTime] $NowUtc) {
             if ($d.PSObject.Properties.Name -contains $name) { $value[$name] = Get-RunnerRecoveryDiagnosticNumber $d.$name 86400000 -Signed:($name -ceq 'observationAgeMs') }
         }
         if ($d.PSObject.Properties.Name -contains 'admissionOperation') { $value.admissionOperation = if ($d.admissionOperation -cin @('', 'connect', 'resume')) { $d.admissionOperation } else { 'other' } }
+        foreach ($name in @('probeCount', 'probeFailureCount', 'probeElapsedMs', 'probeWorkerElapsedMs')) {
+            if ($d.PSObject.Properties.Name -contains $name) { $value[$name] = Get-RunnerRecoveryDiagnosticNumber $d.$name $(if ($name -clike '*Count') { 1000000 } else { 86400000 }) }
+        }
+        if ($d.PSObject.Properties.Name -contains 'probeOutcome') { $value.probeOutcome = if ($d.probeOutcome -is [string] -and $d.probeOutcome -cin @('', 'passed', 'timeout', 'child-exit', 'result-missing', 'result-invalid', 'probe-failed')) { $d.probeOutcome } else { 'other' } }
+        if ($d.PSObject.Properties.Name -contains 'probeWorker') { $value.probeWorker = if ($d.probeWorker -is [string] -and $d.probeWorker -cin @('', 'passed', 'listener-error', 'isolation-error', 'isolation-command-failed', 'isolation-open', 'github-error', 'github-command-failed')) { $d.probeWorker } else { 'other' } }
+        if ($d.PSObject.Properties.Name -contains 'probeExitCode' -and $null -ne $d.probeExitCode) { $value.probeExitCode = Get-RunnerProbeExitCode $d.probeExitCode }
+        if ($d.PSObject.Properties.Name -contains 'probeExitStage') { $value.probeExitStage = if ($d.probeExitStage -is [string] -and $d.probeExitStage -cin @('', 'common-import', 'instance-containment', 'instance-identity', 'instance-acl', 'acl-read-command-unavailable', 'acl-read-access-denied', 'acl-read-other', 'owner-read', 'owner-rejected', 'ace-enumeration', 'sid-translation', 'allow-rejected', 'result-precondition', 'result-publication')) { $d.probeExitStage } else { 'other' } }
         $value.trigger = if ($d.trigger -cin @('', 'observation-unavailable', 'fingerprint-change', 'connectivity-lost')) { $d.trigger } else { 'other' }
         $value.lastTransition = if ($d.lastTransition -cin $phases) { $d.lastTransition } else { 'other' }
         $refusals = @('', 'stale-observation', 'dispatch-deadline', 'provider-uncertain', 'operation-uncertain', 'stop', 'owner-dead', 'identity-changed', 'hard-deadline', 'outage-deadline', 'guardian-progress-expired', 'clock-regressed', 'vm-state-uncertain', 'connectivity-state-uncertain', 'watchdog-expired')
@@ -242,7 +264,7 @@ function Write-RunnerCleanupObservation([string] $Origin, [string] $Reason, $Sta
         if ([Text.Encoding]::UTF8.GetByteCount((ConvertTo-Json -InputObject $record -Depth 4 -Compress)) -gt 2048) { throw 'Diagnostic bound.' }
         Assert-SecureRoot
         $path = Assert-OwnedPath (Join-Path $script:RunnerRoot 'failure-cleanup.json')
-        Assert-StateIdentity $State
+        Assert-StateIdentity $State -AllowLegacy
         if ($State.vmName -cnotmatch '^ITIR-[0-9a-f]{32}$') { throw 'Invalid diagnostic instance.' }
         $phase = if ($State.PSObject.Properties.Name -notcontains 'phase') { 'initial' } elseif ($State.phase -cin @('creating', 'owned', 'sealed-off')) { $State.phase } else { throw 'Invalid diagnostic state phase.' }
         $vmId = $null
@@ -296,6 +318,66 @@ function New-RunnerExecutionFailure([ValidateSet('runner-exit')][string] $Class,
     return $failure
 }
 
+function New-RunnerIsolationProbeFailure($ExitCode, [string] $Listener) {
+    $failure = [Management.Automation.RuntimeException]::new('Guest-to-host isolation probe failed.')
+    $code = if ($ExitCode -is [int]) { $ExitCode } else { $null }
+    $status = if ($Listener -cin @('pending', 'clear', 'unavailable')) { $Listener } else { 'unavailable' }
+    $failure.Data['runnerIsolationProbe'] = [pscustomobject]@{ kind = 'guest-to-host'; exitCode = $code; listener = $status }
+    return $failure
+}
+
+function Assert-RunnerIsolationProbeDiagnostic($Probe) {
+    if ($Probe -isnot [pscustomobject] -or (@($Probe.PSObject.Properties.Name | Sort-Object) -join ',') -cne 'exitCode,kind,listener' -or
+        @($Probe.PSObject.Properties | Where-Object { $_.MemberType -ne 'NoteProperty' }).Count -ne 0) { throw 'Invalid isolation probe diagnostic shape.' }
+    if ($Probe.kind -isnot [string] -or $Probe.kind -cne 'guest-to-host' -or
+        $Probe.listener -isnot [string] -or $Probe.listener -cnotin @('pending', 'clear', 'unavailable') -or
+        ($null -ne $Probe.exitCode -and $Probe.exitCode -isnot [int])) { throw 'Invalid isolation probe diagnostic value.' }
+}
+
+function Get-RunnerGuestMtu { return 1400 }
+
+function Get-RunnerGuestReadinessStage($ExitCode) {
+    if ($ExitCode -isnot [int]) { return 'unknown' }
+    switch ($ExitCode) {
+        0 { return '' }; 71 { return 'cloud-init-timeout' }; 72 { return 'cloud-init-nonzero' }
+        73 { return 'wrong-user' }; 74 { return 'missing-curl' }; 75 { return 'missing-git' }; 76 { return 'missing-unzip' }
+        77 { return 'missing-docker-socket' }; 78 { return 'docker-timeout' }; 79 { return 'docker-nonzero' }; 80 { return 'guest-mtu-unverified' }
+        255 { return 'ssh-transport' }; default { return 'unknown' }
+    }
+}
+
+function Assert-RunnerGuestReadinessDiagnostic($Diagnostic) {
+    if ($Diagnostic -isnot [pscustomobject] -or (@($Diagnostic.PSObject.Properties.Name | Sort-Object) -join ',') -cne 'anySshCompleted,attemptCount,elapsedMs,firstFailureStage,lastFailureStage,lastNativeExit,purpose' -or
+        @($Diagnostic.PSObject.Properties | Where-Object { $_.MemberType -ne 'NoteProperty' }).Count -ne 0) { throw 'Invalid guest readiness diagnostic shape.' }
+    if ($Diagnostic.purpose -isnot [string] -or $Diagnostic.purpose -cnotin @('job','prepare','verify-image','other') -or
+        $Diagnostic.attemptCount -isnot [int] -or $Diagnostic.attemptCount -lt 0 -or $Diagnostic.attemptCount -gt 1000000 -or
+        ($Diagnostic.elapsedMs -isnot [int] -and $Diagnostic.elapsedMs -isnot [long]) -or $Diagnostic.elapsedMs -lt 0 -or $Diagnostic.elapsedMs -gt 86400000 -or
+        $Diagnostic.anySshCompleted -isnot [bool] -or ($null -ne $Diagnostic.lastNativeExit -and $Diagnostic.lastNativeExit -isnot [int])) { throw 'Invalid guest readiness diagnostic value.' }
+    foreach ($name in @('firstFailureStage','lastFailureStage')) {
+        if ($Diagnostic.$name -isnot [string] -or $Diagnostic.$name -cnotin @('','cloud-init-timeout','cloud-init-nonzero','wrong-user','missing-curl','missing-git','missing-unzip','missing-docker-socket','docker-timeout','docker-nonzero','guest-mtu-unverified','ssh-transport','unknown')) { throw 'Invalid guest readiness diagnostic stage.' }
+    }
+}
+
+function Add-RunnerGuestReadinessAttempt($Diagnostic, $ExitCode, [long] $ElapsedMs) {
+    $Diagnostic.attemptCount = [int][Math]::Min([long]1000000, ([long]$Diagnostic.attemptCount + 1))
+    $Diagnostic.elapsedMs = [Math]::Min([long]86400000, [Math]::Max([long]0, $ElapsedMs))
+    $Diagnostic.lastNativeExit = if ($ExitCode -is [int]) { $ExitCode } else { $null }
+    if ($ExitCode -is [int] -and $ExitCode -ge 0 -and $ExitCode -lt 255) { $Diagnostic.anySshCompleted = $true }
+    $stage = Get-RunnerGuestReadinessStage $ExitCode
+    if ($stage) {
+        if (-not $Diagnostic.firstFailureStage) { $Diagnostic.firstFailureStage = $stage }
+        $Diagnostic.lastFailureStage = $stage
+    }
+}
+
+function Set-RunnerGuestReadinessEvidence($Failure, $Diagnostic, [long] $ElapsedMs) {
+    try {
+        $Diagnostic.elapsedMs = [Math]::Min([long]86400000, [Math]::Max([long]0, $ElapsedMs))
+        Assert-RunnerGuestReadinessDiagnostic $Diagnostic
+        $Failure.Exception.Data['runnerGuestReadiness'] = $Diagnostic
+    } catch { } # Diagnostic capture cannot replace the original failure.
+}
+
 function Get-RunnerSessionFailureEnums {
     return @{
         stage = @('idle', 'preflight', 'disk-copy', 'disk-clone', 'key-generation', 'vm-creation', 'vm-configuration', 'network-isolation', 'vm-boot', 'guest-readiness', 'image-clone-readiness', 'image-preparation', 'runner-download', 'runner-transfer', 'jit-registration', 'job-execution', 'memory-admission', 'queue-inspection', 'pilot-consumption', 'pilot-verification', 'cleanup', 'other')
@@ -330,6 +412,17 @@ function New-RunnerSessionFailureRecord($Failure, [string] $Stage) {
             $exit = $Failure.Exception.Data['runnerFailureExitCode']
             if ($class -ceq 'runner-exit' -and $exit -is [int]) { $record.exitCode = $exit }
         }
+        $probe = $Failure.Exception.Data['runnerIsolationProbe']
+        if ($null -ne $probe) {
+            Assert-RunnerIsolationProbeDiagnostic $probe
+            $record.isolationProbe = [ordered]@{ kind = $probe.kind; exitCode = $probe.exitCode; listener = $probe.listener }
+        }
+        $readiness = $Failure.Exception.Data['runnerGuestReadiness']
+        if ($null -ne $readiness) {
+            Assert-RunnerGuestReadinessDiagnostic $readiness
+            $record.guestReadiness = [ordered]@{}
+            foreach ($name in @('purpose','attemptCount','elapsedMs','firstFailureStage','lastFailureStage','lastNativeExit','anySshCompleted')) { $record.guestReadiness[$name] = $readiness.$name }
+        }
         $record.capture = 'complete'
     } catch { $record.capture = 'unavailable' }
     return $record
@@ -345,11 +438,16 @@ function Assert-RunnerSessionFailureJournal($Journal) {
         $seen[$session.sessionId] = $true
         if ($null -ne $session.vmId -and ($session.vmId -isnot [string] -or $session.vmId -cnotmatch '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' -or [guid]$session.vmId -eq [guid]::Empty)) { throw 'Invalid session failure VM identity.' }
         foreach ($record in @($session.first, $session.latest)) {
-            if ($record -isnot [pscustomobject] -or (@($record.PSObject.Properties.Name | Sort-Object) -join ',') -cne 'atUtc,capture,category,errorId,exceptionType,exitCode,failureClass,hResult,line,source,stage' -or
+            $fields = @('atUtc','capture','category','errorId','exceptionType','exitCode','failureClass','hResult','line','source','stage')
+            if ($null -ne $record -and $record.PSObject.Properties.Name -contains 'isolationProbe') { $fields += 'isolationProbe' }
+            if ($null -ne $record -and $record.PSObject.Properties.Name -contains 'guestReadiness') { $fields += 'guestReadiness' }
+            if ($record -isnot [pscustomobject] -or (@($record.PSObject.Properties.Name | Sort-Object) -join ',') -cne (@($fields | Sort-Object) -join ',') -or
                 $record.atUtc -isnot [string] -or [DateTime]::Parse($record.atUtc).ToUniversalTime().ToString('o') -cne $record.atUtc) { throw 'Invalid session failure projection.' }
             foreach ($key in $enums.Keys) { if ($record.$key -isnot [string] -or $record.$key -cnotin $enums[$key]) { throw 'Invalid session failure enum.' } }
             if ($record.line -isnot [int] -or $record.line -lt 0 -or $record.line -gt 100000 -or $record.hResult -isnot [int] -or
                 ($null -ne $record.exitCode -and ($record.exitCode -isnot [int] -or $record.failureClass -cne 'runner-exit'))) { throw 'Invalid session failure number.' }
+            if ($record.PSObject.Properties.Name -contains 'isolationProbe') { Assert-RunnerIsolationProbeDiagnostic $record.isolationProbe }
+            if ($record.PSObject.Properties.Name -contains 'guestReadiness') { Assert-RunnerGuestReadinessDiagnostic $record.guestReadiness }
         }
     }
     if ([Text.Encoding]::UTF8.GetByteCount((ConvertTo-Json -InputObject $Journal -Depth 6 -Compress)) -gt 16384) { throw 'Session failure journal bound.' }
@@ -731,6 +829,24 @@ function Invoke-RunnerNative([string] $Executable, [string[]] $Arguments, [strin
     } finally { $process.Dispose() }
 }
 
+function Get-RunnerImageFailureStages {
+    return @('unknown','bootstrap','inputs','os-packages','node','npm','npm-cache','browser-install','browser-verify','image-cache','receipt','scrub','shutdown','cleanup')
+}
+
+function Assert-RunnerImageFailureArtifact($Record) {
+    Assert-RunnerCloudInitFields $Record @('schema','sessionId','vmId','purpose','bundleHash','atUtc','stage','exitCode','receiptBytes','stderr','truncated')
+    if ($Record.schema -isnot [int] -or $Record.schema -ne 1 -or $Record.sessionId -isnot [string] -or $Record.sessionId -cnotmatch '^[0-9a-f]{32}$' -or [guid]$Record.sessionId -eq [guid]::Empty -or
+        $Record.vmId -isnot [string] -or $Record.vmId -cnotmatch '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' -or [guid]$Record.vmId -eq [guid]::Empty -or
+        $Record.purpose -isnot [string] -or $Record.purpose -cne 'prepare' -or $Record.bundleHash -isnot [string] -or $Record.bundleHash -cnotmatch '^[0-9A-F]{64}$' -or
+        $Record.atUtc -isnot [string] -or $Record.atUtc -cnotmatch '^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{7}Z$' -or
+        $Record.stage -isnot [string] -or $Record.stage -cnotin (Get-RunnerImageFailureStages) -or $Record.exitCode -isnot [int] -or
+        $Record.receiptBytes -isnot [int] -or $Record.receiptBytes -lt 0 -or $Record.receiptBytes -gt 65540 -or ($Record.exitCode -eq 0 -and $Record.receiptBytes -le 16384) -or
+        $Record.stderr -isnot [string] -or $Record.stderr.Length -gt 4096 -or $Record.truncated -isnot [bool] -or
+        $Record.stderr -cmatch '[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]' -or $Record.stderr -cne (ConvertTo-RunnerDiagnosticText $Record.stderr)) { throw 'Invalid image preparation failure artifact.' }
+    [void][DateTime]::ParseExact($Record.atUtc,'o',[Globalization.CultureInfo]::InvariantCulture,[Globalization.DateTimeStyles]::RoundtripKind)
+    if ([Text.Encoding]::UTF8.GetByteCount((ConvertTo-Json -InputObject $Record -Depth 4 -Compress)) -gt 8192) { throw 'Image preparation failure artifact bound.' }
+}
+
 function ConvertTo-RunnerDiagnosticText([string] $Text) {
     # WSL may mix UTF-16 diagnostics with UTF-8 guest output. Remove embedded
     # NUL/control characters and bound only the visible diagnostic, never log JIT.
@@ -801,13 +917,225 @@ function Get-ConverterLinuxPath([string] $Name, [string] $Path) {
     return $linuxPath
 }
 
+function Initialize-RunnerSshFileSecurity {
+    if ('ITInventory.RunnerSshFile' -as [type]) { return }
+    Add-Type -TypeDefinition @'
+using System;
+using System.IO;
+using System.ComponentModel;
+using System.Runtime.InteropServices;
+using System.Security.AccessControl;
+using Microsoft.Win32.SafeHandles;
+namespace ITInventory {
+    // Only new session SSH files use the writable security handle. Existing
+    // paths are never normalized, and key bytes are never read by this helper.
+    public sealed class RunnerSshFile : IDisposable {
+        [StructLayout(LayoutKind.Sequential)] struct Information {
+            public uint Attributes; public System.Runtime.InteropServices.ComTypes.FILETIME Creation, Access, Write;
+            public uint Volume, SizeHigh, SizeLow, Links, IndexHigh, IndexLow;
+        }
+        [StructLayout(LayoutKind.Sequential)] struct Disposition { [MarshalAs(UnmanagedType.U1)] public bool Delete; }
+        [DllImport("kernel32.dll", CharSet=CharSet.Unicode, SetLastError=true)] static extern SafeFileHandle CreateFile(string path, uint access, uint share, IntPtr security, uint creation, uint flags, IntPtr template);
+        [DllImport("kernel32.dll", SetLastError=true)] static extern bool GetFileInformationByHandle(SafeFileHandle handle, out Information info);
+        [DllImport("kernel32.dll", SetLastError=true)] static extern bool SetFileInformationByHandle(SafeFileHandle handle, int kind, ref Disposition data, uint size);
+        FileStream stream;
+        readonly bool directory;
+        readonly string identity;
+        RunnerSshFile(FileStream value, bool isDirectory) {
+            stream=value; directory=isDirectory;
+            try { identity=IdentityOf(ReadInformation()); } catch { Dispose(); throw; }
+        }
+        static Information Inspect(SafeFileHandle handle, bool isDirectory) {
+            Information info;
+            if (!GetFileInformationByHandle(handle, out info)) throw new Win32Exception(Marshal.GetLastWin32Error());
+            if ((info.Attributes & 0x400) != 0 || ((info.Attributes & 0x10) != 0) != isDirectory || (!isDirectory && info.Links != 1)) throw new InvalidOperationException("SSH file type or link count differs.");
+            return info;
+        }
+        Information ReadInformation() { return Inspect(stream.SafeFileHandle, directory); }
+        static string IdentityOf(Information info) { return info.Volume.ToString("X8")+":"+info.IndexHigh.ToString("X8")+info.IndexLow.ToString("X8"); }
+        public static RunnerSshFile Open(string path, bool isDirectory, bool normalize) {
+            // FILE_LIST_DIRECTORY is read access: metadata-only opens do not
+            // participate in the share checks that must prevent parent rename.
+            uint access=isDirectory ? 0x20081u : (0x80000000u | 0x20000u | (normalize ? 0xD0000u : 0u));
+            // A directory lease permits child creation but denies its rename;
+            // file leases deny concurrent file data writes and deletion.
+            SafeFileHandle handle=CreateFile(path, access, isDirectory ? 3u : 1u, IntPtr.Zero, 3, 0x200000u | (isDirectory ? 0x2000000u : 0u), IntPtr.Zero);
+            if (handle.IsInvalid) { int code=Marshal.GetLastWin32Error();handle.Dispose();throw new Win32Exception(code); }
+            try { return new RunnerSshFile(new FileStream(handle, FileAccess.Read),isDirectory); }
+            catch { handle.Dispose();throw; }
+        }
+        public static RunnerSshFile CreateEmpty(string path, FileSecurity security) {
+            return new RunnerSshFile(new FileStream(path,FileMode.CreateNew,FileSystemRights.FullControl,FileShare.Read,4096,FileOptions.None,security),false);
+        }
+        public string Identity { get { return identity; } }
+        public long Length { get { Information info=ReadInformation();return ((long)info.SizeHigh<<32)|info.SizeLow; } }
+        public FileSecurity ReadSecurity() { return stream.GetAccessControl(); }
+        public void ReplaceSecurity(FileSecurity security) { stream.SetAccessControl(security); }
+        public void AssertPath(string path) {
+            using (SafeFileHandle other=CreateFile(path,0x80,7,IntPtr.Zero,3,0x200000u | (directory ? 0x2000000u : 0u),IntPtr.Zero)) {
+                if (other.IsInvalid) throw new Win32Exception(Marshal.GetLastWin32Error());
+                if (IdentityOf(Inspect(other,directory)) != identity || IdentityOf(ReadInformation()) != identity) throw new InvalidOperationException("SSH file identity differs.");
+            }
+        }
+        public void DeleteExact(string path) {
+            AssertPath(path);
+            Disposition value=new Disposition();value.Delete=true;
+            if (!SetFileInformationByHandle(stream.SafeFileHandle,4,ref value,(uint)Marshal.SizeOf(typeof(Disposition)))) throw new Win32Exception(Marshal.GetLastWin32Error());
+        }
+        public void Dispose() { if (stream != null) { stream.Dispose();stream=null; } }
+    }
+}
+'@
+}
+
+function Get-RunnerSshCreationParent([string] $Path, [string] $Leaf) {
+    Assert-SecureRoot
+    $Path = Assert-OwnedPath $Path
+    $parent = Assert-OwnedPath ([IO.Path]::GetDirectoryName($Path))
+    if ([IO.Path]::GetFileName($Path) -cne $Leaf -or
+        [IO.Path]::GetDirectoryName($parent) -ine (Join-Path $script:RunnerRoot 'instances') -or
+        [IO.Path]::GetFileName($parent) -cnotmatch '^ITIR-[0-9a-f]{32}$') { throw 'SSH creation requires its canonical session parent.' }
+    Assert-RunnerProtectedPath (Assert-OwnedPath (Join-Path $script:RunnerRoot 'instances'))
+    Assert-RunnerProtectedPath $parent
+    return $parent
+}
+
+function New-RunnerSshFileAcl {
+    $acl = [Security.AccessControl.FileSecurity]::new()
+    $acl.SetAccessRuleProtection($true, $false)
+    $acl.SetOwner([Security.Principal.SecurityIdentifier]::new('S-1-5-32-544'))
+    foreach ($sid in @('S-1-5-18', 'S-1-5-32-544')) {
+        $acl.AddAccessRule([Security.AccessControl.FileSystemAccessRule]::new([Security.Principal.SecurityIdentifier]::new($sid),
+            [Security.AccessControl.FileSystemRights]::FullControl, [Security.AccessControl.AccessControlType]::Allow))
+    }
+    return $acl
+}
+
+function Assert-RunnerGeneratedSshAcl($Acl, [string] $Creator, [switch] $Public) {
+    $allowed = @('S-1-5-18', 'S-1-5-32-544', $Creator)
+    if ($allowed -cnotcontains $Acl.GetOwner([Security.Principal.SecurityIdentifier]).Value) { throw 'Generated SSH file owner differs from its creator.' }
+    $rules = @($Acl.GetAccessRules($true, $true, [Security.Principal.SecurityIdentifier]))
+    if ($rules.Count -gt 128) { throw 'Generated SSH file ACL exceeds its bound.' }
+    # Data/attribute writes, child deletion, delete, DACL/owner changes, and
+    # generic write/all are writers. Public-only extra read access is removed.
+    $writers = [long]0x500D0156
+    foreach ($rule in $rules) {
+        if ($allowed -cnotcontains $rule.IdentityReference.Value -and
+            (-not $Public -or (([long]$rule.FileSystemRights -band $writers) -ne 0))) { throw 'Generated SSH file grants unexpected access.' }
+    }
+}
+
+function Assert-RunnerExactSshAcl($Acl) {
+    if (-not $Acl.AreAccessRulesProtected -or -not $Acl.AreAccessRulesCanonical -or
+        $Acl.GetOwner([Security.Principal.SecurityIdentifier]).Value -cne 'S-1-5-32-544') { throw 'SSH file owner/protection readback differs.' }
+    $rules = @($Acl.GetAccessRules($true, $true, [Security.Principal.SecurityIdentifier]))
+    if ($rules.Count -ne 2) { throw 'SSH file DACL readback differs.' }
+    $seen = @{}
+    foreach ($rule in $rules) {
+        $sid = $rule.IdentityReference.Value
+        if ($sid -cnotin @('S-1-5-18', 'S-1-5-32-544') -or $seen.ContainsKey($sid) -or $rule.IsInherited -or
+            $rule.AccessControlType -ne [Security.AccessControl.AccessControlType]::Allow -or
+            $rule.FileSystemRights -ne [Security.AccessControl.FileSystemRights]::FullControl -or
+            $rule.InheritanceFlags -ne [Security.AccessControl.InheritanceFlags]::None -or
+            $rule.PropagationFlags -ne [Security.AccessControl.PropagationFlags]::None) { throw 'SSH file DACL readback differs.' }
+        $seen[$sid] = $true
+    }
+}
+
+function Open-RunnerSshFile([string] $Path, [switch] $Directory, [switch] $Normalize) {
+    Initialize-RunnerSshFileSecurity
+    return [ITInventory.RunnerSshFile]::Open($Path, $Directory.IsPresent, $Normalize.IsPresent)
+}
+
 function New-RunnerSshKey([string] $Path, [string] $Executable = (Get-Command ssh-keygen.exe -ErrorAction Stop).Source) {
     $Path = Assert-OwnedPath $Path
-    # The installed Windows PowerShell 5.1 drops empty native arguments; the
-    # process helper preserves the explicit empty passphrase without a shell.
-    if ((Invoke-RunnerNative $Executable @('-q', '-t', 'ed25519', '-N', '', '-f', $Path)) -ne 0) {
-        throw 'Per-VM SSH key generation failed.'
+    $parent = Get-RunnerSshCreationParent $Path 'id_ed25519'
+    $public = Assert-OwnedPath ($Path + '.pub')
+    $directory = Open-RunnerSshFile $parent -Directory
+    $files = @(); $complete = $false
+    try {
+        $directory.AssertPath($parent)
+        Assert-RunnerProtectedPath $parent
+        if ((Test-Path -LiteralPath $Path) -or (Test-Path -LiteralPath $public)) { throw 'SSH destinations must both be absent.' }
+        $creator = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+        # Preserve the explicit empty passphrase; generate exactly once, bounded.
+        $exit = $null
+        try { $exit = Invoke-RunnerNative $Executable @('-q', '-t', 'ed25519', '-N', '', '-f', $Path) -TimeoutSeconds 15 } catch { }
+        $directory.AssertPath($parent)
+        Assert-RunnerProtectedPath $parent
+        foreach ($target in @($Path, $public)) {
+            if (Test-Path -LiteralPath $target) {
+                [void](Assert-OwnedPath $target)
+                $file = Open-RunnerSshFile $target -Normalize
+                $entry = [pscustomobject]@{ path=$target; file=$file; owned=$false }
+                $files += $entry
+                $file.AssertPath($target)
+                Assert-RunnerGeneratedSshAcl ($file.ReadSecurity()) $creator -Public:($target -ceq $public)
+                $entry.owned = $true
+            }
+        }
+        if ($exit -isnot [int] -or $exit -ne 0 -or $files.Count -ne 2) { throw 'Per-VM SSH key generation failed.' }
+        if ($files[0].file.Identity -ceq $files[1].file.Identity) { throw 'Generated SSH files share an identity.' }
+        foreach ($entry in $files) {
+            $entry.file.AssertPath($entry.path)
+            $entry.file.ReplaceSecurity((New-RunnerSshFileAcl))
+            Assert-RunnerExactSshAcl ($entry.file.ReadSecurity())
+            $entry.file.AssertPath($entry.path)
+        }
+        $directory.AssertPath($parent)
+        Assert-RunnerProtectedPath $parent
+        foreach ($entry in $files) { Assert-RunnerProtectedPath $entry.path }
+        $complete = $true
+    } finally {
+        foreach ($entry in $files) {
+            if (-not $complete -and $entry.owned) { try { $entry.file.DeleteExact($entry.path) } catch { } }
+            $entry.file.Dispose()
+        }
+        $directory.Dispose()
     }
+}
+
+function New-RunnerKnownHosts([string] $Path) {
+    $Path = Assert-OwnedPath $Path
+    $parent = Get-RunnerSshCreationParent $Path 'known_hosts'
+    $directory = Open-RunnerSshFile $parent -Directory
+    $file = $null; $complete = $false
+    try {
+        $directory.AssertPath($parent)
+        Assert-RunnerProtectedPath $parent
+        if (Test-Path -LiteralPath $Path) { throw 'SSH known-hosts destination already exists.' }
+        $file = New-RunnerSshControlFile $Path (New-RunnerSshFileAcl)
+        $file.AssertPath($Path)
+        Assert-RunnerExactSshAcl ($file.ReadSecurity())
+        if ($file.Length -ne 0) { throw 'SSH known-hosts file is not empty.' }
+        Assert-RunnerProtectedPath $Path
+        $complete = $true
+        return [pscustomobject]@{ identity=$file.Identity }
+    } finally {
+        if ($null -ne $file) {
+            if (-not $complete) { try { $file.DeleteExact($Path) } catch { } }
+            $file.Dispose()
+        }
+        $directory.Dispose()
+    }
+}
+
+function New-RunnerSshControlFile([string] $Path, $Acl) {
+    Initialize-RunnerSshFileSecurity
+    return [ITInventory.RunnerSshFile]::CreateEmpty($Path, $Acl)
+}
+
+function Assert-RunnerKnownHosts([string] $Path, $Evidence, [switch] $RequireContent) {
+    $Path = Assert-OwnedPath $Path
+    Assert-RunnerProtectedPath $Path
+    $file = Open-RunnerSshFile $Path
+    try {
+        $file.AssertPath($Path)
+        if ($null -eq $Evidence -or $Evidence.identity -isnot [string] -or $Evidence.identity -cnotmatch '^[0-9A-F]{8}:[0-9A-F]{16}$' -or
+            $file.Identity -cne $Evidence.identity) { throw 'SSH known-hosts identity changed.' }
+        Assert-RunnerExactSshAcl ($file.ReadSecurity())
+        if ($RequireContent -and $file.Length -le 0) { throw 'SSH did not append a host key to its protected file.' }
+    } finally { $file.Dispose() }
 }
 
 function Get-ConverterRegistrations([string] $Name) {
@@ -939,7 +1267,7 @@ function Test-RunnerSessionStopRequested($State, $Observation = $null) {
     $mutex = Enter-RunnerLock
     try {
         if ($null -ne $Observation) { $Observation.Value = 'unavailable' }
-        if (Test-Path -LiteralPath (Join-Path $State.instancePath 'stop.requested')) {
+        if (Test-Path -LiteralPath ((Get-RunnerSessionPaths $State).stopRequest)) {
             if ($null -ne $Observation) { $Observation.Value = 'instance-marker' }; return $true
         }
         if (-not (Test-Path -LiteralPath (Join-Path $script:RunnerRoot 'stop.requested'))) {
@@ -957,7 +1285,7 @@ function Test-RunnerSessionStopRequested($State, $Observation = $null) {
         if ($current.PSObject.Properties.Name -notcontains 'purpose' -or $current.purpose -cnotin @('prepare', 'verify-image')) {
             if ($null -ne $Observation) { $Observation.Value = 'purpose-ineligible' }; return $true
         }
-        $requested = Test-Path -LiteralPath (Join-Path $current.instancePath 'stop.requested')
+        $requested = Test-Path -LiteralPath ((Get-RunnerSessionPaths $current).stopRequest)
         if ($null -ne $Observation) { $Observation.Value = if ($requested) { 'instance-marker' } else { 'none' } }
         return $requested
     } finally { Exit-RunnerLock $mutex }
@@ -1044,8 +1372,9 @@ function Assert-RunnerControllerOpen {
 
 # This root-level, nonsecret barrier survives deletion of an ephemeral session.
 # It records only the sole registration operation; it is not a job queue.
-function Assert-RunnerJitRegistration($Record) {
-    $fields = @('schema', 'tag', 'phase', 'operationId', 'repo', 'vmName', 'vmId', 'instancePath', 'supervisorPid', 'supervisorStartUtc', 'labels', 'runnerGroupId', 'runnerId')
+function Assert-RunnerJitRegistration($Record, [switch] $AllowLegacy) {
+    $fields = @('schema', 'tag', 'phase', 'operationId', 'repo', 'vmName', 'vmId', 'instancePath', 'layoutVersion', 'supervisorPid', 'supervisorStartUtc', 'labels', 'runnerGroupId', 'runnerId')
+    if ($null -ne $Record -and $Record.PSObject.Properties.Name -notcontains 'layoutVersion' -and $AllowLegacy) { $fields = @($fields | Where-Object { $_ -cne 'layoutVersion' }) }
     if ($null -eq $Record -or @($Record.PSObject.Properties.Name).Count -ne $fields.Count -or
         @($fields | Where-Object { $Record.PSObject.Properties.Name -notcontains $_ }).Count -ne 0 -or
         $Record.schema -ne 1 -or $Record.tag -cne $script:RunnerTag -or
@@ -1054,7 +1383,7 @@ function Assert-RunnerJitRegistration($Record) {
         [string]$Record.supervisorPid -cnotmatch '^[1-9][0-9]*$' -or [string]$Record.runnerGroupId -cnotmatch '^[1-9][0-9]*$' -or
         [string]$Record.runnerId -cnotmatch '^(0|[1-9][0-9]*)$' -or
         ($Record.phase -ceq 'intent' -and $Record.runnerId -ne 0) -or ($Record.phase -cne 'intent' -and $Record.runnerId -le 0)) { throw 'JIT registration barrier identity is invalid.' }
-    Assert-StateIdentity $Record
+    Assert-StateIdentity $Record -AllowLegacy:$AllowLegacy
     [void][DateTime]::Parse($Record.supervisorStartUtc).ToUniversalTime()
     $labels = @($Record.labels)
     if ($labels.Count -ne 4 -or @($labels | Select-Object -Unique).Count -ne 4 -or
@@ -1067,7 +1396,7 @@ function Get-RunnerJitRegistration {
     if (-not (Test-Path -LiteralPath $path)) { return $null }
     Assert-RunnerProtectedPath $path
     $record = Read-RunnerJson $path
-    Assert-RunnerJitRegistration $record
+    Assert-RunnerJitRegistration $record -AllowLegacy
     return $record
 }
 
@@ -1078,8 +1407,9 @@ function Assert-RunnerJitRegistrationClear {
     }
 }
 
-function Write-RunnerJitRegistration($Record) {
-    Assert-RunnerJitRegistration $Record
+function Write-RunnerJitRegistration($Record, [switch] $AllowLegacy) {
+    if ($AllowLegacy -and $Record.PSObject.Properties.Name -notcontains 'layoutVersion' -and $Record.phase -cnotin @('removal-intent','complete')) { throw 'Legacy JIT evidence is retirement only.' }
+    Assert-RunnerJitRegistration $Record -AllowLegacy:$AllowLegacy
     $path = Assert-OwnedPath (Join-Path $script:RunnerRoot 'jit-registration.json')
     Write-RunnerJson $path $Record
     $actual = Get-RunnerJitRegistration
@@ -1117,15 +1447,51 @@ function Assert-RunnerControlIdle {
     }
 }
 
-function Assert-RunnerProtectedPath([string] $Path) {
+function Assert-RunnerProtectedPath([string] $Path, $FailureStage = $null) {
+    # PS5 rejects a typed [ref] parameter's null default before entering legacy
+    # calls. Keep null optional and require a real reference when supplied.
+    if ($null -ne $FailureStage -and $FailureStage -isnot [ref]) { throw 'Protected-path diagnostic stage requires a reference.' }
+    if ($null -ne $FailureStage) { $FailureStage.Value = 'unknown' }
     [void](Assert-OwnedPath $Path)
+    if ($null -ne $FailureStage) { $FailureStage.Value = 'acl-read' }
     $acl = Get-Acl -LiteralPath $Path
     $allowed = @('S-1-5-18', 'S-1-5-32-544')
-    if ($allowed -notcontains $acl.GetOwner([Security.Principal.SecurityIdentifier]).Value) { throw 'Installed path owner is unexpected.' }
-    foreach ($rule in $acl.Access) {
-        $sid = $rule.IdentityReference.Translate([Security.Principal.SecurityIdentifier]).Value
-        if ($rule.AccessControlType -eq 'Allow' -and $allowed -notcontains $sid) { throw 'Installed path grants unexpected access.' }
+    if ($null -ne $FailureStage) { $FailureStage.Value = 'owner-read' }
+    $owner = $acl.GetOwner([Security.Principal.SecurityIdentifier]).Value
+    if ($allowed -notcontains $owner) {
+        if ($null -ne $FailureStage) { $FailureStage.Value = 'owner-rejected' }
+        throw 'Installed path owner is unexpected.'
     }
+    if ($null -ne $FailureStage) { $FailureStage.Value = 'ace-enumeration' }
+    $rules = @($acl.Access)
+    foreach ($rule in $rules) {
+        if ($null -ne $FailureStage) { $FailureStage.Value = 'sid-translation' }
+        $sid = $rule.IdentityReference.Translate([Security.Principal.SecurityIdentifier]).Value
+        if ($rule.AccessControlType -eq 'Allow' -and $allowed -notcontains $sid) {
+            if ($null -ne $FailureStage) { $FailureStage.Value = 'allow-rejected' }
+            throw 'Installed path grants unexpected access.'
+        }
+    }
+    if ($null -ne $FailureStage) { $FailureStage.Value = 'none' }
+}
+
+function Get-RunnerProbeAclFailureExitCode($Failure, [string] $FailureStage) {
+    # Fixed diagnostics only. Never inspect messages, HResults, paths or ACL data.
+    switch -CaseSensitive ($FailureStage) {
+        'owner-read' { return 70 }; 'owner-rejected' { return 71 }
+        'ace-enumeration' { return 72 }; 'sid-translation' { return 73 }
+        'allow-rejected' { return 74 }; 'acl-read' { break }
+        default { return 64 }
+    }
+    $exception = if ($Failure -is [Management.Automation.ErrorRecord]) { $Failure.Exception } elseif ($Failure -is [Exception]) { $Failure } else { $null }
+    for ($depth=0; $depth -lt 8 -and $null -ne $exception; $depth++) {
+        $type = $exception.GetType().FullName
+        if ($type -ceq 'System.Management.Automation.CommandNotFoundException') { return 67 }
+        if ($type -cin @('System.UnauthorizedAccessException','System.Security.SecurityException')) { return 68 }
+        if ($type -cnotin @('System.Management.Automation.RuntimeException','System.Management.Automation.MethodInvocationException','System.Management.Automation.GetValueInvocationException','System.Management.Automation.CmdletInvocationException','System.Management.Automation.ActionPreferenceStopException','System.Management.Automation.ProviderInvocationException','System.Reflection.TargetInvocationException')) { break }
+        $exception = $exception.InnerException
+    }
+    return 69
 }
 
 # Offline tests inject interruption here; production has no environment switch
@@ -1134,9 +1500,10 @@ function Invoke-RunnerTransitionCheckpoint([string] $Name) {}
 
 # A committed initial state is the durable claim. Complete its exact receipt
 # before any recovery can erase that state, including watchdog/Stop cleanup.
-function Complete-RunnerPilotClaim($State) {
+function Complete-RunnerPilotClaim($State, [switch] $AllowLegacy) {
+    Assert-StateIdentity $State -AllowLegacy:$AllowLegacy
     if ($State.PSObject.Properties.Name -contains 'purpose' -and $State.purpose -ceq 'prepare') {
-        Assert-StateIdentity $State
+        Assert-StateIdentity $State -AllowLegacy:$AllowLegacy
         return
     }
     if ($State.PSObject.Properties.Name -contains 'claimMode' -and
@@ -1146,7 +1513,7 @@ function Complete-RunnerPilotClaim($State) {
         throw 'Recorded session claim mode/evidence is invalid; state must be retained.'
     }
     if ($State.PSObject.Properties.Name -notcontains 'pilotClaim') { return }
-    Assert-StateIdentity $State
+    Assert-StateIdentity $State -AllowLegacy:$AllowLegacy
     $attempt = Get-RunnerEvidenceValue $State.pilotClaim
     if ($null -eq $attempt -or $attempt.tag -cne $script:RunnerTag -or $attempt.sessionName -cne $State.vmName -or
         $attempt.jobId -le 0 -or $attempt.runId -le 0 -or $attempt.workflowId -le 0 -or $attempt.runAttempt -le 0 -or
@@ -1159,7 +1526,41 @@ function Complete-RunnerPilotClaim($State) {
     } else { Write-RunnerEvidence $path $State.pilotClaim }
 }
 
-function Assert-StateIdentity($State) {
+function Get-RunnerSessionPaths($State, [switch] $AllowLegacy) {
+    # State carries identity, never authority to select a storage location.
+    if ($State -is [Collections.IDictionary]) { $State = [pscustomobject]$State }
+    if ($null -eq $State -or $State.vmName -isnot [string] -or $State.vmName -cnotmatch '^ITIR-[0-9a-f]{32}$' -or
+        $State.instancePath -isnot [string]) { throw 'Session storage identity is invalid.' }
+    $legacy = $State.PSObject.Properties.Name -notcontains 'layoutVersion'
+    if ($legacy) { if (-not $AllowLegacy) { throw 'Legacy session storage is cleanup/status only.' } }
+    elseif ($State.layoutVersion -isnot [int] -or $State.layoutVersion -ne 2) { throw 'Session storage version is invalid.' }
+    $instance = Assert-OwnedPath (Join-Path (Join-Path $script:RunnerRoot 'instances') $State.vmName)
+    if ($State.instancePath -ine $instance) { throw 'Session instance differs from its canonical location.' }
+    $data = if ($legacy) { $instance } else { Assert-OwnedPath (Join-Path $instance 'vm-data') }
+    $paths = [ordered]@{ layoutVersion = $(if ($legacy) { 1 } else { 2 }); legacy = [bool]$legacy; instance = $instance; vmData = $data
+        vmPath = Join-Path $data $State.vmName; guestDisk = Join-Path $data 'guest.vhdx'; seedDisk = Join-Path $data 'cidata.vhdx'
+        privateKey = Join-Path $instance 'id_ed25519'; publicKey = Join-Path $instance 'id_ed25519.pub'
+        knownHosts = Join-Path $instance 'known_hosts'; stopRequest = Join-Path $instance 'stop.requested'; probeRoot = $instance }
+    foreach ($name in @('vmPath','guestDisk','seedDisk','privateKey','publicKey','knownHosts','stopRequest')) { $paths[$name] = Assert-OwnedPath $paths[$name] }
+    foreach ($pair in @(@('expectedVmPath','vmPath'), @('expectedBootDisk','guestDisk'))) {
+        if ($State.PSObject.Properties.Name -contains $pair[0] -and
+            ($State.($pair[0]) -isnot [string] -or $State.($pair[0]) -ine $paths[$pair[1]])) { throw 'Recorded session storage differs from its canonical layout.' }
+    }
+    return [pscustomobject]$paths
+}
+
+function Assert-RunnerSessionTrustedPaths($State, [switch] $RequireKnownHosts) {
+    $paths = Get-RunnerSessionPaths $State
+    Assert-RunnerProtectedPath $paths.instance
+    foreach ($path in @($paths.privateKey, $paths.publicKey, $paths.knownHosts, $paths.stopRequest)) {
+        if (Test-Path -LiteralPath $path) { Assert-RunnerProtectedPath $path }
+    }
+    if ($RequireKnownHosts -and -not (Test-Path -LiteralPath $paths.knownHosts -PathType Leaf)) { throw 'SSH requires its precreated protected known-hosts file.' }
+}
+
+function Assert-StateIdentity($State, [switch] $AllowLegacy) {
+    if ($State -is [Collections.IDictionary]) { $State = [pscustomobject]$State }
+    [void](Get-RunnerSessionPaths $State -AllowLegacy:$AllowLegacy)
     if ($State.PSObject.Properties.Name -contains 'purpose') {
         if ($State.purpose -cnotin @('job', 'prepare', 'verify-image') -or
             ($State.purpose -cne 'job' -and ($State.PSObject.Properties.Name -contains 'claimMode' -or $State.PSObject.Properties.Name -contains 'pilotClaim'))) {
@@ -1183,10 +1584,6 @@ function Assert-StateIdentity($State) {
     if ($State.PSObject.Properties.Name -contains 'vmId') {
         if ([string]$State.vmId -cnotmatch '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$' -or
             [guid]$State.vmId -eq [guid]::Empty) { throw 'Recorded VM GUID is invalid; runner instance files and state are retained.' }
-    }
-    [void](Assert-OwnedPath $State.instancePath)
-    if (-not $State.instancePath.EndsWith($State.vmName, [StringComparison]::OrdinalIgnoreCase)) {
-        throw 'Runner state instance path does not match its VM name.'
     }
 }
 
@@ -1217,7 +1614,7 @@ function Get-RunnerManagedDiskRoots([string] $ExcludedInstance = '') {
     $count = 0
     foreach ($entry in $entries) {
         if (-not $entry.PSIsContainer -or $entry.Name -cnotmatch '^ITIR-[0-9a-f]{32}$') { throw 'Unknown managed instance entry; retain files.' }
-        [void](Assert-OwnedPath $entry.FullName)
+        [void](Get-RunnerSessionPaths ([pscustomobject]@{ vmName = $entry.Name; instancePath = $entry.FullName; layoutVersion = 2 }))
         if ($ExcludedInstance -and $entry.FullName -ieq $ExcludedInstance) { continue }
         $pending = [Collections.Generic.Queue[string]]::new()
         $pending.Enqueue($entry.FullName)
@@ -1255,7 +1652,7 @@ function Assert-RunnerDiskReferencesAbsent([string] $Path, [switch] $Directory, 
 }
 
 function Assert-RunnerInstanceUnreferenced($State) {
-    $instancePath = Assert-OwnedPath $State.instancePath
+    $instancePath = (Get-RunnerSessionPaths $State -AllowLegacy).instance
     $instancePrefix = $instancePath.TrimEnd('\') + '\'
     foreach ($entry in @(Get-RunnerVmInventory)) {
         if ([string]::IsNullOrEmpty($entry.Path)) { throw 'VM configuration path inspection failed; runner files/state are retained.' }
@@ -1268,8 +1665,9 @@ function Assert-RunnerInstanceUnreferenced($State) {
 }
 
 function Remove-RunnerInstance($State) {
-    Assert-StateIdentity $State
-    Complete-RunnerPilotClaim $State
+    Assert-StateIdentity $State -AllowLegacy
+    $paths = Get-RunnerSessionPaths $State -AllowLegacy
+    Complete-RunnerPilotClaim $State -AllowLegacy
     $hasVmId = $State.PSObject.Properties.Name -contains 'vmId'
     $matching = @(Get-RunnerVmInventory | Where-Object { $_.Name -ceq $State.vmName -or ($hasVmId -and [guid]$_.Id -eq [guid]$State.vmId) })
     if ($matching.Count -gt 1) { throw 'Ambiguous VM identity; runner instance files and state are retained.' }
@@ -1281,9 +1679,13 @@ function Remove-RunnerInstance($State) {
         foreach ($entry in $disk) {
             [void](Assert-OwnedPath $entry.Path)
         }
+        if ($disk.Count -lt 1 -or $disk.Count -gt 2 -or @($disk | Where-Object { $_.Path -inotmatch '\.vhdx$' -or
+            [IO.Path]::GetFullPath($_.Path) -notin @($paths.guestDisk, $paths.seedDisk) }).Count -ne 0 -or
+            @($disk | Where-Object { [IO.Path]::GetFullPath($_.Path) -ieq $paths.guestDisk }).Count -ne 1 -or
+            @($disk.Path | Select-Object -Unique).Count -ne $disk.Count) { throw 'VM disks differ from the exact session storage layout; retain files.' }
         $vmPath = [IO.Path]::GetFullPath($vm.Path)
         # New-VM appends its name to -Path. Legacy state has the same deterministic layout.
-        $ownedVmPath = Assert-OwnedPath (Join-Path $State.instancePath $State.vmName)
+        $ownedVmPath = $paths.vmPath
         if ($State.PSObject.Properties.Name -contains 'expectedVmPath' -and
             -not [string]::Equals([IO.Path]::GetFullPath($State.expectedVmPath), $ownedVmPath, [StringComparison]::OrdinalIgnoreCase)) {
             throw 'Recorded VM configuration path differs from the exact creation layout; refusing deletion.'
@@ -1292,7 +1694,7 @@ function Remove-RunnerInstance($State) {
             $vmPath.Equals($ownedVmPath, [StringComparison]::OrdinalIgnoreCase)
         $provisionalOwner = $false
         if ([string]::IsNullOrEmpty($vm.Notes) -and $State.PSObject.Properties.Name -contains 'phase' -and $State.phase -eq 'creating') {
-            $expectedBootDisk = Assert-OwnedPath (Join-Path $State.instancePath 'guest.vhdx')
+            $expectedBootDisk = $paths.guestDisk
             $provisionalOwner = $vm.Name -ceq $State.vmName -and $vm.State -eq 'Off' -and
                 $vmPath.Equals($ownedVmPath, [StringComparison]::OrdinalIgnoreCase) -and
                 $State.expectedBootDisk -ceq $expectedBootDisk -and $disk.Count -eq 1 -and
@@ -1307,7 +1709,7 @@ function Remove-RunnerInstance($State) {
         if ($remaining.Count -ne 0) { throw 'VM removal was not verified; runner instance files and state are retained.' }
     }
     Assert-RunnerInstanceUnreferenced $State
-    $instancePath = Assert-OwnedPath $State.instancePath
+    $instancePath = $paths.instance
     if (Test-Path -LiteralPath $instancePath) {
         $links = @(Get-ChildItem -LiteralPath $instancePath -Recurse -Force -ErrorAction Stop |
             Where-Object { $_.Attributes -band [IO.FileAttributes]::ReparsePoint })
@@ -1358,4 +1760,81 @@ function Invoke-RunnerReceiptNative([string] $Executable, [string[]] $Arguments,
         if (-not $process.HasExited) { $process.Kill() }
         $process.Dispose()
     }
+}
+
+function Assert-RunnerCloudInitFields($Value, [string[]] $Fields) {
+    if ($Value -isnot [pscustomobject] -or @($Value.PSObject.Properties).Count -ne $Fields.Count) { throw 'Invalid cloud-init diagnostic shape.' }
+    foreach ($property in $Value.PSObject.Properties) {
+        if ($property.MemberType -ne 'NoteProperty' -or $property.Name -cnotin $Fields) { throw 'Invalid cloud-init diagnostic field.' }
+    }
+}
+
+function Assert-RunnerCloudInitDiagnostic($Value) {
+    Assert-RunnerCloudInitFields $Value @('schema','capture','cloudInitExit','status','extendedStatus','stages','reasons','sshExit')
+    if ($Value.schema -isnot [int] -or $Value.schema -ne 1 -or $Value.capture -isnot [string] -or
+        $Value.capture -cnotin @('complete','status-timeout','status-overflow','status-invalid','unavailable') -or
+        ($null -ne $Value.cloudInitExit -and $Value.cloudInitExit -isnot [int]) -or
+        ($null -ne $Value.sshExit -and $Value.sshExit -isnot [int]) -or
+        $Value.status -isnot [string] -or $Value.status -cnotin @('not started','running','done','disabled','error','unknown') -or
+        $Value.extendedStatus -isnot [string] -or $Value.extendedStatus -cnotin @('not started','running','done','disabled','error - running','error - done','degraded running','degraded done','unknown') -or
+        $Value.stages -isnot [array] -or $Value.stages.Count -ne 5 -or $Value.reasons -isnot [array] -or $Value.reasons.Count -gt 8) { throw 'Invalid cloud-init diagnostic scalar.' }
+    $stages = @('top-level','init-local','init','modules-config','modules-final')
+    for ($index=0; $index -lt $stages.Count; $index++) {
+        $entry=$Value.stages[$index]
+        Assert-RunnerCloudInitFields $entry @('stage','errorCount','recoverableCount')
+        if ($entry.stage -isnot [string] -or $entry.stage -cne $stages[$index] -or $entry.errorCount -isnot [int] -or $entry.errorCount -lt 0 -or $entry.errorCount -gt 1024 -or
+            $entry.recoverableCount -isnot [int] -or $entry.recoverableCount -lt 0 -or $entry.recoverableCount -gt 1024) { throw 'Invalid cloud-init diagnostic stage.' }
+    }
+    foreach ($entry in $Value.reasons) {
+        $fields=@('stage','kind','module','exception','reason','redacted','truncated')
+        $hasSource=$entry.PSObject.Properties.Name -ccontains 'source'
+        if ($hasSource) { $fields+= 'source' }
+        Assert-RunnerCloudInitFields $entry $fields
+        if ($hasSource -and ($entry.source -isnot [string] -or $entry.source -cne 'cloud-init-output-tail' -or
+            $entry.kind -cne 'error' -or $entry.redacted -ne $true -or $Value.status -cne 'error' -or $Value.extendedStatus -cne 'error - done' -or $Value.cloudInitExit -eq 0 -or
+            $entry.reason -cin @('reason-withheld','Package manager exited with an error.','Group already exists.','Permission was denied.','Cloud configuration schema was invalid.','Filesystem resize failed.'))) { throw 'Invalid cloud-init diagnostic source.' }
+        if ($entry.stage -isnot [string] -or $entry.stage -cnotin $stages -or $entry.kind -isnot [string] -or $entry.kind -cnotin @('error','recoverable') -or
+            $entry.module -isnot [string] -or $entry.module -cnotin @('users-groups','package-update-upgrade-install','runcmd','scripts-user','resizefs','growpart','ssh','set-passwords','apt-configure','other') -or
+            $entry.exception -isnot [string] -or $entry.exception -cnotin @('ProcessExecutionError','RuntimeError','ValueError','TypeError','KeyError','OSError','PermissionError','FileNotFoundError','TimeoutExpired','SchemaValidationError','other') -or
+            $entry.reason -isnot [string] -or $entry.reason.Length -lt 1 -or $entry.reason.Length -gt 256 -or $entry.redacted -isnot [bool] -or $entry.truncated -isnot [bool]) { throw 'Invalid cloud-init diagnostic reason.' }
+        # Repeat the guest privacy boundary: fixed useful templates only, never
+        # arbitrary prose containing an error word, unmatched captures or tails.
+        if ($entry.reason -cnotin @('reason-withheld','Group already exists.','DNS resolution failed.','Network was unreachable.','Connection timed out.','Connection was refused.','Connection failed.','TLS validation or handshake failed.','Package repository signature verification failed.','Package repository Release file was unavailable.','Package hash verification failed.','Disk space was exhausted.','Package manager was interrupted.','Package dependencies could not be satisfied.','Package fetch failed.','Package manager exited with an error.','Package has no installation candidate.','Package was not found.','Package manager lock was unavailable.','Permission was denied.','Cloud configuration schema was invalid.','Filesystem resize failed.')) { throw 'Unsafe cloud-init diagnostic reason.' }
+    }
+    if ($Value.capture -ceq 'complete' -and ($null -eq $Value.cloudInitExit -or $Value.sshExit -ne 0)) { throw 'Incomplete cloud-init diagnostic transport.' }
+    if ($Value.capture -cne 'complete' -and ($Value.status -cne 'unknown' -or $Value.extendedStatus -cne 'unknown' -or $Value.reasons.Count -ne 0)) { throw 'Unavailable cloud-init diagnostic carried status.' }
+    if ([Text.Encoding]::UTF8.GetByteCount((ConvertTo-Json -InputObject $Value -Depth 6 -Compress)) -gt 6144) { throw 'Cloud-init diagnostic bound.' }
+}
+
+function ConvertFrom-RunnerCloudInitCapture($Transport) {
+    $empty = [pscustomobject]@{schema=1;capture='unavailable';cloudInitExit=$null;status='unknown';extendedStatus='unknown';stages=@(@('top-level','init-local','init','modules-config','modules-final') | ForEach-Object { [pscustomobject]@{stage=$_;errorCount=0;recoverableCount=0} });reasons=@();sshExit=$null}
+    try {
+        if ($null -eq $Transport -or $Transport.ExitCode -isnot [int]) { return $empty }
+        $empty.sshExit=$Transport.ExitCode
+        if ($Transport.ExitCode -ne 0) { return $empty }
+        if ($Transport.Output -isnot [string] -or $Transport.Output.Length -gt 4096 -or $Transport.Output -cmatch '[^\x20-\x7e]') { return $empty }
+        $value = $Transport.Output | ConvertFrom-Json
+        Assert-RunnerCloudInitFields $value @('schema','capture','cloudInitExit','status','extendedStatus','stages','reasons')
+        $value | Add-Member NoteProperty sshExit $Transport.ExitCode
+        Assert-RunnerCloudInitDiagnostic $value
+        return $value
+    } catch { return $empty }
+}
+
+function Test-RunnerCloudInitTerminal($Diagnostic) {
+    Assert-RunnerCloudInitDiagnostic $Diagnostic
+    return $Diagnostic.capture -ceq 'complete' -and $Diagnostic.sshExit -eq 0 -and $Diagnostic.cloudInitExit -in @(1,2) -and
+        (($Diagnostic.status -ceq 'error' -and $Diagnostic.extendedStatus -ceq 'error - done') -or
+        ($Diagnostic.status -ceq 'done' -and $Diagnostic.extendedStatus -ceq 'degraded done'))
+}
+
+function Assert-RunnerCloudInitArtifact($Record) {
+    Assert-RunnerCloudInitFields $Record @('schema','sessionId','vmId','purpose','bundleHash','atUtc','diagnostic')
+    if ($Record.schema -isnot [int] -or $Record.schema -ne 1 -or $Record.sessionId -isnot [string] -or $Record.sessionId -cnotmatch '^[0-9a-f]{32}$' -or [guid]$Record.sessionId -eq [guid]::Empty -or
+        $Record.vmId -isnot [string] -or $Record.vmId -cnotmatch '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' -or [guid]$Record.vmId -eq [guid]::Empty -or
+        $Record.purpose -isnot [string] -or $Record.purpose -cne 'prepare' -or $Record.bundleHash -isnot [string] -or $Record.bundleHash -cnotmatch '^[0-9A-F]{64}$' -or
+        $Record.atUtc -isnot [string] -or $Record.atUtc -cnotmatch '^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{7}Z$') { throw 'Invalid cloud-init artifact identity.' }
+    [void][DateTime]::ParseExact($Record.atUtc, 'o', [Globalization.CultureInfo]::InvariantCulture, [Globalization.DateTimeStyles]::RoundtripKind)
+    Assert-RunnerCloudInitDiagnostic $Record.diagnostic
+    if ([Text.Encoding]::UTF8.GetByteCount((ConvertTo-Json -InputObject $Record -Depth 7 -Compress)) -gt 8192) { throw 'Cloud-init artifact bound.' }
 }

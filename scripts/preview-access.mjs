@@ -1,3 +1,4 @@
+import { previewAccessTarget } from './preview-access-target.mjs';
 import { provisionPreviewFiles } from './preview-file-keys.mjs';
 import { fileProviders } from './preview-file-providers.mjs';
 import { createPreviewRequest } from './preview-access-request.mjs';
@@ -162,32 +163,12 @@ async function main() {
   };
 
   const targetNumber = Number(process.env.PREVIEW_TARGET_PR);
-  if (!Number.isSafeInteger(targetNumber) || targetNumber < 1)
-    throw coded('TARGET_INVALID');
-  let expectedSha;
-  if (eventName === 'pull_request_target') {
-    if (
-      !['opened', 'reopened', 'synchronize', 'ready_for_review'].includes(
-        event.action,
-      )
-    )
-      throw new Error('Unsupported PR action');
-    if (
-      !Number.isSafeInteger(event.number) ||
-      event.pull_request?.head?.repo?.full_name !== repository ||
-      event.pull_request?.base?.repo?.full_name !== repository ||
-      event.pull_request?.state !== 'open'
-    )
-      throw new Error('Untrusted PR event');
-    if (event.number !== targetNumber) throw coded('TARGET_MISMATCH');
-    expectedSha = event.pull_request.head.sha;
-  } else if (eventName === 'workflow_dispatch' || eventName === 'schedule') {
-    if (
-      eventName === 'workflow_dispatch' &&
-      Number(event.inputs?.pr_number) !== targetNumber
-    )
-      throw coded('TARGET_MISMATCH');
-  } else throw new Error('Unsupported event');
+  const expectedSha = previewAccessTarget({
+    eventName,
+    event,
+    targetNumber,
+    repository,
+  });
   const result = await provisionPreview({
     repository,
     number: targetNumber,
@@ -197,7 +178,7 @@ async function main() {
     github,
     management,
     project,
-    attempts: eventName === 'schedule' ? 1 : 12,
+    attempts: 12,
     pause: () => new Promise((resolve) => setTimeout(resolve, 10000)),
   });
   process.stdout.write(

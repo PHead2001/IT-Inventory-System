@@ -26,6 +26,11 @@ function New-Capture([string] $Ip = '192.168.4.12', [string] $Route = '192.168.4
     }
 }
 function Get-NetIPAddress { $script:readIndex++; if ($script:fail -ceq 'slow-network') { $script:clock = $script:clock.AddSeconds(3) }; return $script:captures[[Math]::Min($script:readIndex, $script:captures.Count - 1)].addresses }
+function New-SplitCapture {
+    $capture=New-Capture
+    $capture.routes+=@('0.0.0.0/1','128.0.0.0/1') | ForEach-Object { [pscustomobject]@{AddressFamily='IPv4';DestinationPrefix=$_;NextHop='0.0.0.0';InterfaceIndex=3;RouteMetric=0} }
+    return $capture
+}
 function Get-NetRoute { return $script:captures[[Math]::Min($script:readIndex, $script:captures.Count - 1)].routes }
 function Get-RunnerState { if ($script:serializeState) { return ($script:serializedState | ConvertFrom-Json) }; return $script:state }
 function Write-RunnerJson($Path, $Value) { if ($script:serializeState) { if (-not $script:locked) { throw 'Serialized fixture write escaped state lock.' }; $script:serializedState = $Value | ConvertTo-Json -Depth 30 -Compress; $script:stateWrites++ }; $script:state = $Value }
@@ -136,13 +141,13 @@ function New-Fixture {
     $script:locked = $false; $script:alive = $true; $script:fail = ''; $script:effects = @(); $script:cleanups = 0; $script:addCount = 0; $script:removeCount = 0; $script:aclQueries = 0; $script:rules = @(); $script:queriedRules = @()
     $script:captures = @(New-Capture); $script:readIndex = -1
     $script:state = [pscustomobject]@{
-        tag = $script:RunnerTag; vmName = 'ITIR-' + ('a' * 32); vmId = '00000000-0000-0000-0000-000000000001'
-        instancePath = Join-Path $root ('ITIR-' + ('a' * 32)); purpose = 'job'; resourceLabel = 'it-inventory-heavy'; claimMode = 'active'
+        layoutVersion = 2; tag = $script:RunnerTag; vmName = 'ITIR-' + ('a' * 32); vmId = '00000000-0000-0000-0000-000000000001'
+        instancePath = Join-Path (Join-Path $root 'instances') ('ITIR-' + ('a' * 32)); purpose = 'job'; resourceLabel = 'it-inventory-heavy'; claimMode = 'active'
         createdUtc = $script:now.ToString('o'); deadlineUtc = $script:now.AddMinutes(10).ToString('o')
         supervisorPid = 42; supervisorStartUtc = $script:now.ToString('o'); guardianPid = $PID; guardianStartUtc = $script:now.ToString('o'); guestMac = '02AABBCCDDEE'
         networkFingerprint = ('a' * 64)
     }
-    $script:vm = [pscustomobject]@{ Id = [guid]$script:state.vmId; Name = $script:state.vmName; Notes = $script:RunnerTag; Path = Join-Path $script:state.instancePath $script:state.vmName; State = 'Running' }
+    $script:vm = [pscustomobject]@{ Id = [guid]$script:state.vmId; Name = $script:state.vmName; Notes = $script:RunnerTag; Path = (Get-RunnerSessionPaths $script:state).vmPath; State = 'Running' }
     $script:switch = [pscustomobject]@{ Id = [guid]'00000000-0000-0000-0000-000000000002'; Name = $script:RunnerSwitch; SwitchType = 'Internal' }
     $script:adapter = [pscustomobject]@{ Id = 'fixture-adapter'; VMId = $script:vm.Id; VMName = $script:vm.Name; DynamicMacAddressEnabled = $false; MacAddress = $script:state.guestMac; SwitchName = $script:switch.Name; SwitchId = $script:switch.Id }
     $script:binding = New-RunnerNetworkBinding $script:state $script:vm $script:adapter $script:switch
@@ -403,6 +408,74 @@ try {
         Assert-Equal @($rules | Where-Object { $_.PSObject.Properties.Name -contains 'RemoteIPAddress' -and $_.RemoteIPAddress -ceq '::/0' }).Count 1 'IPv6 deny lost.'
         Assert-Equal @($rules | Where-Object { $_.PSObject.Properties.Name -contains 'RemoteIPAddress' -and $_.RemoteIPAddress -ceq '0.0.0.0/1' }).Count 1 'Split-default deny lost.'
         Assert-Equal @($rules.Weight | Sort-Object -Unique).Count $rules.Count 'Rule priority collided.'
+    }
+    Check 'paired split default only removes transport denies and preserves exact allow scope' {
+        New-Fixture; $capture=New-SplitCapture
+        $capture.routes += [pscustomobject]@{AddressFamily='IPv4';DestinationPrefix='203.0.113.0/24';NextHop='0.0.0.0';InterfaceIndex=3;RouteMetric=0}
+        $rules=@(New-RunnerNetworkPolicy $capture)
+        $ordinary=Copy-Fixture $capture; $ordinary.routes=@($ordinary.routes | Where-Object DestinationPrefix -notin @('0.0.0.0/1','128.0.0.0/1'))
+        Assert-Equal @($rules | ForEach-Object {Get-RunnerRecoveryRuleKey $_}) @((New-RunnerNetworkPolicy $ordinary) | ForEach-Object {Get-RunnerRecoveryRuleKey $_}) 'Pair changed any non-transport rule or weight.'
+        Assert-Equal @($rules | Where-Object Action -eq Allow).Count 8 'Pair expanded allowed endpoints or ports.'
+        foreach($hop in @('0.0.0.0','192.168.4.1')) {
+            foreach($metric in @([uint16]0,[uint16]65535)) {
+                $valid=New-SplitCapture
+                foreach($route in $valid.routes[-2..-1]) {$route.NextHop=$hop;$route.RouteMetric=$metric;$route.InterfaceIndex=[uint32]3}
+                if(-not (Test-RunnerSplitDefaultTransport $valid)){throw 'Valid native-typed pair refused.'}
+            }
+        }
+    }
+    Check 'single ambiguous malformed or unmatched split defaults stay denied' {
+        New-Fixture
+        foreach ($case in @('single','duplicate','different-interface','different-hop','different-metric','missing-metric','string-metric','negative-metric','large-metric','array-metric','missing-index','zero-index','string-index','large-index','missing-hop','noncanonical-hop','ipv6-hop','missing-host-interface','host-string-index','ipv6-host')) {
+            $capture=New-SplitCapture
+            switch ($case) {
+                single {$capture.routes=@($capture.routes | Where-Object DestinationPrefix -ne '128.0.0.0/1')}
+                duplicate {$capture.routes+=Copy-Fixture $capture.routes[-1]}
+                different-interface {$capture.routes[-1].InterfaceIndex=4}
+                different-hop {$capture.routes[-1].NextHop='192.168.4.1'}
+                different-metric {$capture.routes[-1].RouteMetric=1}
+                missing-metric {$capture.routes[-1].PSObject.Properties.Remove('RouteMetric')}
+                string-metric {$capture.routes[-1].RouteMetric='0'}
+                negative-metric {$capture.routes[-1].RouteMetric=-1}
+                large-metric {$capture.routes[-1].RouteMetric=65536}
+                array-metric {$capture.routes[-1].RouteMetric=@(0)}
+                missing-index {$capture.routes[-1].PSObject.Properties.Remove('InterfaceIndex')}
+                zero-index {$capture.routes[-1].InterfaceIndex=0}
+                string-index {$capture.routes[-1].InterfaceIndex='3'}
+                large-index {$capture.routes[-1].InterfaceIndex=[long]4294967296}
+                missing-hop {$capture.routes[-1].PSObject.Properties.Remove('NextHop')}
+                noncanonical-hop {$capture.routes[-1].NextHop='127.1'}
+                ipv6-hop {$capture.routes[-1].NextHop='::1'}
+                missing-host-interface {$capture.addresses[0].InterfaceIndex=4}
+                host-string-index {$capture.addresses[0].InterfaceIndex='3'}
+                ipv6-host {$capture.addresses[0].AddressFamily='IPv6';$capture.addresses+=[pscustomobject]@{AddressFamily='IPv4';IPAddress='192.168.5.2';InterfaceIndex=4}}
+            }
+            $rules=@(New-RunnerNetworkPolicy $capture)
+            Assert-Equal @($rules | Where-Object { $_.PSObject.Properties.Name -contains 'RemoteIPAddress' -and $_.RemoteIPAddress -ceq '0.0.0.0/1' }).Count 1 ('Unsafe pair exemption: '+$case)
+        }
+    }
+    Check 'metric and duplicate pair drift change the coherent fingerprint and quarantine' {
+        New-Fixture; $script:captures=@(New-SplitCapture);$script:readIndex=-1
+        $first=Get-RunnerNetworkObservation
+        foreach($case in @('metric','duplicate','metric-type','host-index-type')) {
+            $changed=New-SplitCapture
+            switch($case) { metric {$changed.routes[-1].RouteMetric=1}; duplicate {$changed.routes+=Copy-Fixture $changed.routes[-1]}; metric-type {$changed.routes[-1].RouteMetric='0'}; host-index-type {$changed.addresses[0].InterfaceIndex='3'} }
+            $script:captures=@($changed);$script:readIndex=-1
+            $next=Get-RunnerNetworkObservation
+            if($first.fingerprint -ceq $next.fingerprint){throw ('Pair drift hidden: '+$case)}
+            $script:recovery.fingerprint=$first.fingerprint
+            Assert-Equal (Plan 0 $next).action 'quarantine' 'Pair drift bypassed recovery.'
+            $script:captures=@((New-SplitCapture),$changed);$script:readIndex=-1
+            Assert-Refused {Get-RunnerNetworkObservation} 'Mixed pair snapshots accepted.'
+        }
+    }
+    Check 'paired split default enumeration is deterministic' {
+        New-Fixture; $script:captures=@(New-SplitCapture);$script:readIndex=-1
+        $first=Get-RunnerNetworkObservation
+        [Array]::Reverse($script:captures[0].routes)
+        $next=Get-RunnerNetworkObservation
+        Assert-Equal $first.fingerprint $next.fingerprint 'Pair enumeration changed fingerprint.'
+        Assert-Equal @($first.rules | ForEach-Object {Get-RunnerRecoveryRuleKey $_}) @($next.rules | ForEach-Object {Get-RunnerRecoveryRuleKey $_}) 'Pair enumeration changed rules.'
     }
     Check 'malformed or oversized captured policy is refused' {
         New-Fixture; Assert-Refused { New-RunnerNetworkPolicy (New-Capture '999.1.1.1') } 'Invalid IP accepted.'
@@ -908,6 +981,91 @@ try {
         Assert-Refused { Get-RunnerLaunchDecision $j 'runner-exited' 124 ('c' * 32) } 'Wrong runner exit accepted.'
         $failed = Get-RunnerLaunchDecision $j 'runner-exited' 123 ('c' * 32) 1; Assert-Equal $failed.phase 'runner-failed' 'Nonzero exit ignored.'
         $j = Get-RunnerLaunchDecision $j 'runner-exited' 123 ('c' * 32); Assert-Equal $j.phase 'runner-exited' 'Exit receipt implied workflow success.'
+    }
+    Check 'probe terminal diagnostics distinguish timeout exit missing invalid legacy and worker failure without changing success correlation' {
+        foreach ($case in @('timeout', 'child-exit', 'result-missing', 'result-invalid', 'probe-failed', 'passed', 'legacy', 'untrusted-detail')) {
+            New-Fixture; $r = $script:state.networkRecovery; $r.operation = 'probe'; $r.phase = 'probing'
+            [void][IO.Directory]::CreateDirectory($script:state.instancePath)
+            $script:RunnerRecoveryProbe = Start-RunnerRecoveryProbe $script:state ([pscustomobject]@{ guestIp = '172.30.240.2'; gatewayIp = '172.30.240.1' }) 0
+            $probe = $script:RunnerRecoveryProbe; $probe.job.Completed = $true
+            if ($case -ceq 'timeout') { $script:clock = $script:clock.AddSeconds(25) }
+            elseif ($case -ceq 'child-exit') { $probe.job.ExitCode = 1 }
+            elseif ($case -cne 'result-missing') {
+                $value = [ordered]@{ generation = 0; probeId = $probe.probeId; success = $case -cin @('passed', 'legacy', 'untrusted-detail') }
+                if ($case -ceq 'result-invalid') { $value.probeId = 'f' * 32 }
+                if ($case -cin @('probe-failed', 'passed')) { $value.detail = @{ code = if ($case -ceq 'passed') { 'passed' } else { 'github-command-failed' }; elapsedMs = 12 } }
+                if ($case -ceq 'untrusted-detail') { $value.detail = @{ code = 'SECRET raw URL credential'; elapsedMs = -1; rawOutput = 'SECRET' } }
+                [IO.File]::WriteAllText($probe.resultPath, ($value | ConvertTo-Json -Depth 4 -Compress))
+            }
+            $outcome = Get-RunnerRecoveryProbeOutcome
+            Assert-Equal $outcome.success ($case -cin @('passed', 'legacy', 'untrusted-detail')) 'Diagnostic detail changed the existing Boolean success policy.'
+            Assert-Equal $outcome.diagnostic.outcome $(if ($case -cin @('legacy', 'untrusted-detail')) { 'passed' } else { $case }) 'Terminal probe reason collapsed.'
+            if ($case -ceq 'probe-failed') { Assert-Equal $outcome.diagnostic.worker 'github-command-failed' 'Worker stage lost.' }
+            if ($case -ceq 'untrusted-detail') { Assert-Equal $outcome.diagnostic.worker 'other' 'Untrusted detail persisted.' }
+            if (($outcome | ConvertTo-Json -Depth 4 -Compress) -cmatch 'SECRET|credential|rawOutput') { throw 'Raw worker data escaped sanitization.' }
+            Assert-Equal $script:effects @('probe-start', 'probe-cancel', 'probe-remove') 'Probe diagnostics changed lifetime actions.'
+            Assert-Equal $script:RunnerRecoveryProbe $null 'Probe diagnostics retained a worker.'
+        }
+    }
+    Check 'unsigned child exit diagnostics preserve native values and classify only reserved worker stages' {
+        $cases = @(
+            @{ code=[uint32]0; stage=''; success=$true },
+            @{ code=[uint32]61; stage='common-import' }, @{ code=[uint32]62; stage='instance-containment' },
+            @{ code=[uint32]63; stage='instance-identity' }, @{ code=[uint32]64; stage='instance-acl' },
+            @{ code=[uint32]65; stage='result-precondition' }, @{ code=[uint32]66; stage='result-publication' },
+            @{ code=[uint32]67; stage='acl-read-command-unavailable' }, @{ code=[uint32]68; stage='acl-read-access-denied' },
+            @{ code=[uint32]69; stage='acl-read-other' }, @{ code=[uint32]70; stage='owner-read' },
+            @{ code=[uint32]71; stage='owner-rejected' }, @{ code=[uint32]72; stage='ace-enumeration' },
+            @{ code=[uint32]73; stage='sid-translation' }, @{ code=[uint32]74; stage='allow-rejected' },
+            @{ code=[uint32]1; stage='other' }, @{ code=[uint32]3221225781; stage='other' },
+            @{ code=[uint32]::MaxValue; stage='other' }
+        )
+        foreach ($case in $cases) {
+            New-Fixture; $r=$script:state.networkRecovery; $r.operation='probe'; $r.phase='probing'
+            [void][IO.Directory]::CreateDirectory($script:state.instancePath)
+            $script:RunnerRecoveryProbe=Start-RunnerRecoveryProbe $script:state ([pscustomobject]@{guestIp='172.30.240.2';gatewayIp='172.30.240.1'}) 0
+            $probe=$script:RunnerRecoveryProbe; $probe.job.Completed=$true; $probe.job.ExitCode=$case.code
+            $success=$case.ContainsKey('success') -and $case.success
+            if ($success) { [IO.File]::WriteAllText($probe.resultPath,([ordered]@{generation=0;probeId=$probe.probeId;success=$true}|ConvertTo-Json -Compress)) }
+            $outcome=Get-RunnerRecoveryProbeOutcome
+            Assert-Equal $outcome.success $success 'Unsigned exit changed fail-closed result admission.'
+            Assert-Equal $outcome.diagnostic.exitCode ([long]$case.code) 'Unsigned native exit was lost or overflowed.'
+            Assert-Equal $outcome.diagnostic.exitStage $case.stage 'Unknown native exit manufactured a reserved stage.'
+            $plan=Get-RunnerNetworkRecoveryPlan $r $script:observation $script:clock 'Running' $outcome
+            Assert-Equal $plan.recovery.diagnostics.probeExitCode ([long]$case.code) 'Reducer lost exact child exit.'
+            Assert-Equal $plan.recovery.diagnostics.probeExitStage $case.stage 'Reducer lost mapped child stage.'
+            $projected=New-RunnerRecoveryDiagnostic $plan.recovery $script:clock | ConvertTo-Json -Depth 4 -Compress | ConvertFrom-Json
+            Assert-RunnerRecoveryDiagnostic $projected
+            Assert-Equal $projected.probeExitCode ([long]$case.code) 'Failure projection lost high unsigned exit.'
+        }
+    }
+    Check 'malformed negative or overflowing child exits stay unavailable and fail closed' {
+        foreach ($bad in @(-1,[long]4294967296,'61',[double]61,$true,@([uint32]61),$null)) {
+            New-Fixture; $script:state.networkRecovery.operation='probe'; $script:state.networkRecovery.phase='probing'
+            $script:RunnerRecoveryProbe=Start-RunnerRecoveryProbe $script:state ([pscustomobject]@{guestIp='172.30.240.2';gatewayIp='172.30.240.1'}) 0
+            $script:RunnerRecoveryProbe.job.Completed=$true; $script:RunnerRecoveryProbe.job.ExitCode=$bad
+            $outcome=Get-RunnerRecoveryProbeOutcome
+            Assert-Equal $outcome.success $false 'Malformed child exit authorized continuation.'
+            Assert-Equal $outcome.diagnostic.exitCode $null 'Malformed child exit was fabricated as numeric evidence.'
+            Assert-Equal $outcome.diagnostic.exitStage 'other' 'Malformed child exit acquired a trusted stage.'
+        }
+    }
+    Check 'probe evidence cannot change any core action generation binding or deadline and stale outcomes are not counted' {
+        foreach ($success in @($false, $true)) {
+            foreach ($condition in @('current', 'drift', 'expired', 'stale')) {
+                New-Fixture; Isolate; $r = $script:recovery; $r.phase = 'probing'; $r.operation = 'probe'; $r.candidateFingerprint = $script:observation.fingerprint
+                $now = if ($condition -ceq 'expired') { $script:now.AddSeconds(120) } else { $script:now.AddSeconds(2) }
+                $observation = if ($condition -ceq 'drift') { [pscustomobject]@{ fingerprint = 'c' * 64; rules = @() } } else { $script:observation }
+                $outcome = [pscustomobject]@{ generation = if ($condition -ceq 'stale') { $r.generation - 1 } else { $r.generation }; operation = 'probe'; success = $success; diagnostic = [pscustomobject]@{ outcome = if ($success) { 'passed' } else { 'timeout' }; worker = ''; elapsedMs = 25000; workerElapsedMs = 0 } }
+                $core = Get-RunnerNetworkRecoveryPlanCore $r $observation $now 'Running' $outcome
+                $rich = Get-RunnerNetworkRecoveryPlan $r $observation $now 'Running' $outcome
+                Assert-Equal $rich.action $core.action 'Probe evidence changed core action.'
+                if ($condition -ceq 'stale') { Assert-Equal $rich.recovery.diagnostics.probeCount 0 'Stale probe evidence counted.' }
+                else { Assert-Equal $rich.recovery.diagnostics.probeCount 1 'Correlated probe evidence missing.'; Assert-Equal $rich.recovery.diagnostics.probeFailureCount $(if ($success) { 0 } else { 1 }) 'Probe failure count differs.' }
+                $core.recovery.PSObject.Properties.Remove('diagnostics'); $rich.recovery.PSObject.Properties.Remove('diagnostics')
+                Assert-Equal $rich.recovery $core.recovery 'Probe evidence changed core state/generation/deadline/binding.'
+            }
+        }
     }
     Write-Host "Network recovery offline regressions passed: $script:count cases. No live network/provider containment or GitHub continuity proof."
 } finally {

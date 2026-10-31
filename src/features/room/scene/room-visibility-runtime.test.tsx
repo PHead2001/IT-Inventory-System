@@ -547,76 +547,114 @@ describe('shared room visibility transaction', () => {
     batch.finish();
     expect(batch.needsFrame).toBe(false);
   });
-  it('mounts one provider, snapshots DOM masks once, resolves all anchors before publishing, and invalidates only on explicit retry', () => {
-    const { scene, camera, origin } = fixture();
-    const surface = document.createElement('div'),
-      canvas = document.createElement('canvas'),
-      panel = document.createElement('div');
-    surface.dataset.roomSurface = 'true';
-    panel.dataset.roomObstruction = 'true';
-    surface.append(canvas, panel);
-    document.body.append(surface);
-    const rect = vi.spyOn(canvas, 'getBoundingClientRect').mockReturnValue({
-      ...viewport,
-      x: 0,
-      y: 0,
-      width: 400,
-      height: 400,
-      toJSON() {},
-    });
-    vi.spyOn(panel, 'getClientRects').mockReturnValue([
-      viewport,
-    ] as unknown as DOMRectList);
-    const obstruction = vi
-      .spyOn(panel, 'getBoundingClientRect')
-      .mockReturnValue({
+  it.each([false, true])(
+    'mounts one provider, snapshots DOM masks once, resolves anchors before publishing, and separates retry from budget continuation (pause retry work: %s)',
+    (pauseOnRetry) => {
+      const { scene, camera, origin } = fixture();
+      let now = 0;
+      let pauseRetryWork = false;
+      // Provider-created projections use the real 8 ms cooperative allowance,
+      // independently of fixture().projection. Model elapsed work explicitly so
+      // CI scheduling and GC cannot introduce an unrequested continuation here.
+      vi.spyOn(performance, 'now').mockImplementation(() => now);
+      const update = scene.updateWorldMatrix.bind(scene);
+      vi.spyOn(scene, 'updateWorldMatrix').mockImplementation(
+        (parents, children) => {
+          update(parents, children);
+          if (pauseRetryWork) {
+            now += defaultSurfaceLimits.maxMilliseconds + 1;
+            pauseRetryWork = false;
+          }
+        },
+      );
+      const surface = document.createElement('div'),
+        canvas = document.createElement('canvas'),
+        panel = document.createElement('div');
+      surface.dataset.roomSurface = 'true';
+      panel.dataset.roomObstruction = 'true';
+      surface.append(canvas, panel);
+      document.body.append(surface);
+      const rect = vi.spyOn(canvas, 'getBoundingClientRect').mockReturnValue({
         ...viewport,
-        left: 500,
-        right: 600,
-        x: 500,
+        x: 0,
         y: 0,
-        width: 100,
+        width: 400,
         height: 400,
         toJSON() {},
       });
-    const invalidate = vi.fn(),
-      notify = vi.fn(),
-      retryRef = { current: null as (() => void) | null },
-      result = vi.fn();
-    runtime.state = { scene, camera, gl: { domElement: canvas }, invalidate };
-    function Query() {
-      const batch = useRoomVisibilityBatch();
-      useFrame(
-        () => result(batch.resolve(origin, 'ITC-S1A', new Vector3(0, 0, 1))),
-        -0.25,
+      vi.spyOn(panel, 'getClientRects').mockReturnValue([
+        viewport,
+      ] as unknown as DOMRectList);
+      const obstruction = vi
+        .spyOn(panel, 'getBoundingClientRect')
+        .mockReturnValue({
+          ...viewport,
+          left: 500,
+          right: 600,
+          x: 500,
+          y: 0,
+          width: 100,
+          height: 400,
+          toJSON() {},
+        });
+      const invalidate = vi.fn(),
+        notify = vi.fn(),
+        retryRef = { current: null as (() => void) | null },
+        result = vi.fn();
+      runtime.state = { scene, camera, gl: { domElement: canvas }, invalidate };
+      function Query() {
+        const batch = useRoomVisibilityBatch();
+        useFrame(
+          () => result(batch.resolve(origin, 'ITC-S1A', new Vector3(0, 0, 1))),
+          -0.25,
+        );
+        return null;
+      }
+      const view = render(
+        <RoomVisibilityProvider onUnresolvedChange={notify} retryRef={retryRef}>
+          <Query />
+        </RoomVisibilityProvider>,
       );
-      return null;
-    }
-    const view = render(
-      <RoomVisibilityProvider onUnresolvedChange={notify} retryRef={retryRef}>
-        <Query />
-      </RoomVisibilityProvider>,
-    );
-    const refresh = vi.spyOn(ProjectedVisibleSurface.prototype, 'refresh');
-    const frame = () =>
-      act(() =>
-        runtime.frames
-          .sort((a, b) => a.priority - b.priority)
-          .forEach(({ frame }) => frame()),
-      );
-    frame();
-    expect(result.mock.lastCall?.[0].status).toBe('visible');
-    expect(rect).toHaveBeenCalledOnce();
-    expect(obstruction).toHaveBeenCalledOnce();
-    expect(refresh).toHaveBeenCalledOnce();
-    expect(notify).not.toHaveBeenCalled();
-    expect(invalidate).not.toHaveBeenCalled();
-    act(() => retryRef.current!());
-    expect(invalidate).toHaveBeenCalledOnce();
-    frame();
-    expect(invalidate).toHaveBeenCalledOnce();
-    view.unmount();
-    expect(retryRef.current).toBeNull();
-    surface.remove();
-  });
+      const refresh = vi.spyOn(ProjectedVisibleSurface.prototype, 'refresh');
+      const frame = () =>
+        act(() =>
+          runtime.frames
+            .sort((a, b) => a.priority - b.priority)
+            .forEach(({ frame }) => frame()),
+        );
+      frame();
+      expect(result.mock.lastCall?.[0].status).toBe('visible');
+      expect(rect).toHaveBeenCalledOnce();
+      expect(obstruction).toHaveBeenCalledOnce();
+      expect(refresh).toHaveBeenCalledOnce();
+      expect(notify).not.toHaveBeenCalled();
+      expect(invalidate).not.toHaveBeenCalled();
+      act(() => retryRef.current!());
+      expect(invalidate).toHaveBeenCalledOnce();
+      pauseRetryWork = pauseOnRetry;
+      frame();
+      if (pauseOnRetry) {
+        expect(result.mock.lastCall?.[0].status).toBe('pending');
+        expect(invalidate).toHaveBeenCalledTimes(2);
+        expect(notify).toHaveBeenCalledExactlyOnceWith(['ITC-S1A']);
+        expect(result.mock.invocationCallOrder.at(-1)).toBeLessThan(
+          notify.mock.invocationCallOrder.at(-1)!,
+        );
+        frame();
+        expect(result.mock.lastCall?.[0].status).toBe('visible');
+        expect(invalidate).toHaveBeenCalledTimes(2);
+        expect(notify).toHaveBeenCalledTimes(2);
+        expect(notify).toHaveBeenLastCalledWith([]);
+      } else {
+        expect(result.mock.lastCall?.[0].status).toBe('visible');
+        expect(invalidate).toHaveBeenCalledOnce();
+        expect(notify).not.toHaveBeenCalled();
+      }
+      frame(); // An unrelated settled demand frame never requests more work.
+      expect(invalidate).toHaveBeenCalledTimes(pauseOnRetry ? 2 : 1);
+      view.unmount();
+      expect(retryRef.current).toBeNull();
+      surface.remove();
+    },
+  );
 });

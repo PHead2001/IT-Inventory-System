@@ -96,6 +96,25 @@ resize_rootfs: true
 "@
 }
 
+function Get-GuestSeedData([string] $PublicKey, [string] $Mac, $Config, [string] $ProfileLabel = 'it-inventory-ephemeral', [bool] $Prepared = $false) {
+    $network = @"
+version: 2
+ethernets:
+  runner0:
+    match:
+      macaddress: $Mac
+    set-name: runner0
+    mtu: $(Get-RunnerGuestMtu)
+    addresses: [$($Config.guestIp)/$($Config.prefixLength)]
+    routes:
+      - to: default
+        via: $($Config.gatewayIp)
+    nameservers:
+      addresses: [1.1.1.1, 8.8.8.8]
+"@
+    return [pscustomobject]@{ userData = (Get-GuestCloudConfig $PublicKey $ProfileLabel $Prepared); networkConfig = $network }
+}
+
 function New-SeedDisk([string] $Path, [string] $PublicKey, [string] $Mac, $Config, [string] $ProfileLabel = 'it-inventory-ephemeral', [bool] $Prepared = $false) {
     [void](Assert-OwnedPath $Path)
     New-VHD -Path $Path -SizeBytes 64MB -Dynamic | Out-Null
@@ -111,24 +130,11 @@ function New-SeedDisk([string] $Path, [string] $PublicKey, [string] $Mac, $Confi
         $partition | Format-Volume -FileSystem FAT32 -NewFileSystemLabel CIDATA -Confirm:$false | Out-Null
         $letter = $partition.DriveLetter
         $root = "$($letter):\"
-        $userData = Get-GuestCloudConfig $PublicKey $ProfileLabel $Prepared
-        $network = @"
-version: 2
-ethernets:
-  runner0:
-    match:
-      macaddress: $Mac
-    set-name: runner0
-    addresses: [$($Config.guestIp)/$($Config.prefixLength)]
-    routes:
-      - to: default
-        via: $($Config.gatewayIp)
-    nameservers:
-      addresses: [1.1.1.1, 8.8.8.8]
-"@
-        [IO.File]::WriteAllText((Join-Path $root 'user-data'), $userData, [Text.UTF8Encoding]::new($false))
+        $seedData = Get-GuestSeedData $PublicKey $Mac $Config $ProfileLabel $Prepared
+
+        [IO.File]::WriteAllText((Join-Path $root 'user-data'), $seedData.userData, [Text.UTF8Encoding]::new($false))
         [IO.File]::WriteAllText((Join-Path $root 'meta-data'), "instance-id: $([guid]::NewGuid().ToString('N'))`nlocal-hostname: itir-guest`n", [Text.UTF8Encoding]::new($false))
-        [IO.File]::WriteAllText((Join-Path $root 'network-config'), $network, [Text.UTF8Encoding]::new($false))
+        [IO.File]::WriteAllText((Join-Path $root 'network-config'), $seedData.networkConfig, [Text.UTF8Encoding]::new($false))
     } finally {
         Dismount-VHD -Path $Path -ErrorAction Stop
     }
@@ -174,9 +180,18 @@ function Test-GuestIsolation($State, $Config) {
         if ($endpoint -isnot [Net.IPEndPoint] -or -not $endpoint.Address.Equals($gateway) -or $endpoint.Port -lt 1 -or $endpoint.Port -gt 65535) { throw 'Isolation listener endpoint readback differs.' }
         $port = $endpoint.Port
         $command = 'timeout 4 bash -c "echo probe >/dev/tcp/{0}/{1}" >/dev/null 2>&1; test $? -ne 0' -f $gateway.ToString(), $port
-        $exitCode = Invoke-RunnerNative 'ssh.exe' ($args + @("runner@$($Config.guestIp)", $command))
-        if ($exitCode -ne 0 -or $listener.Pending()) {
-            throw 'Guest-to-host isolation probe failed.'
+        $exitCode = $null
+        $listenerStatus = 'unavailable'
+        try {
+            $observedExit = Invoke-RunnerNative 'ssh.exe' ($args + @("runner@$($Config.guestIp)", $command))
+            if ($observedExit -is [int]) { $exitCode = $observedExit }
+        } catch { } # An unavailable SSH observation never authorizes continuation.
+        try {
+            $pending = $listener.Pending()
+            if ($pending -is [bool]) { $listenerStatus = if ($pending) { 'pending' } else { 'clear' } }
+        } catch { } # Observe independently even when SSH failed or was unavailable.
+        if ($null -eq $exitCode -or $exitCode -ne 0 -or $listenerStatus -cne 'clear') {
+            throw (New-RunnerIsolationProbeFailure $exitCode $listenerStatus)
         }
     } finally { $listener.Stop() }
     $exitCode = Invoke-RunnerNative 'ssh.exe' ($args + @("runner@$($Config.guestIp)", 'curl --head --fail --silent --show-error --max-time 10 https://api.github.com >/dev/null'))
@@ -311,6 +326,7 @@ function Start-SessionGuardian($State) {
 
 function Start-GuardedVm($State) {
     Assert-SessionAlive $State
+    Assert-RunnerSessionTrustedPaths $State
     $boot = $null
     $mutex = Enter-RunnerLock
     try {
@@ -323,7 +339,7 @@ function Start-GuardedVm($State) {
         $vmId = [guid]$current.vmId
         $vm = Get-VM -Id $vmId -ErrorAction Stop
         if ([guid]$vm.Id -ne $vmId -or $vm.Name -cne $current.vmName -or $vm.Notes -cne $script:RunnerTag -or
-            [IO.Path]::GetFullPath($vm.Path) -ine (Join-Path $current.instancePath $current.vmName)) { throw 'VM identity changed before boot dispatch.' }
+            [IO.Path]::GetFullPath($vm.Path) -ine ((Get-RunnerSessionPaths $current).vmPath)) { throw 'VM identity changed before boot dispatch.' }
         # Dispatch against the verified object, never a delayed name lookup.
         # Hyper-V boot completion must not monopolize the guardian's state lock.
         $boot = Start-VM -VM $vm -AsJob -ErrorAction Stop
@@ -349,7 +365,7 @@ function Start-GuardedVm($State) {
             if ($null -eq $current -or $current.vmName -cne $State.vmName -or [guid]$current.vmId -ne $vmId -or $current.guardianReady -ne $true) { throw 'Session identity changed before VM boot continuation.' }
             $vm = Get-VM -Id $vmId -ErrorAction Stop
             if ([guid]$vm.Id -ne $vmId -or $vm.Name -cne $State.vmName -or $vm.State -cne 'Running' -or
-                $vm.Notes -cne $script:RunnerTag -or [IO.Path]::GetFullPath($vm.Path) -ine (Join-Path $current.instancePath $current.vmName)) { throw 'Booted VM readback differs from the recorded identity/running state.' }
+                $vm.Notes -cne $script:RunnerTag -or [IO.Path]::GetFullPath($vm.Path) -ine ((Get-RunnerSessionPaths $current).vmPath)) { throw 'Booted VM readback differs from the recorded identity/running state.' }
         } finally { Exit-RunnerLock $mutex }
     } finally {
         # Stop-Job is not proof of provider cancellation. Canonical cleanup owns
@@ -378,6 +394,7 @@ function Assert-RunnerJitAdmission($State, $Current, $Expected = $null) {
     # here: evidence obtained before an intervening recovery is obsolete.
     if ($null -eq $Current) { throw 'JIT admission session was removed.' }
     Assert-StateIdentity $Current
+    Assert-RunnerSessionTrustedPaths $Current
     if ($Current.vmName -cne $State.vmName -or [guid]$Current.vmId -ne [guid]$State.vmId -or $Current.instancePath -ine $State.instancePath -or
         $Current.purpose -cne 'job' -or $Current.PSObject.Properties.Name -notcontains 'networkRecovery' -or
         (Test-Path -LiteralPath (Join-Path $script:RunnerRoot 'stop.requested')) -or (Test-RunnerSessionStopRequested $Current) -or
@@ -422,7 +439,7 @@ function Save-RunnerLaunchEvent($State, [string] $Event, [long] $RunnerId = 0, [
             Assert-RunnerJitRegistrationClear
             if ($null -eq $Config) { $Config = Get-RunnerConfig }
             $registration = [pscustomobject][ordered]@{ schema = 1; tag = $script:RunnerTag; phase = 'intent'; operationId = $next.launchId
-                repo = $Config.repo; vmName = $current.vmName; vmId = $current.vmId; instancePath = $current.instancePath
+                repo = $Config.repo; vmName = $current.vmName; vmId = $current.vmId; instancePath = $current.instancePath; layoutVersion = $current.layoutVersion
                 supervisorPid = $current.supervisorPid; supervisorStartUtc = $current.supervisorStartUtc
                 labels = @(Get-RunnerJitLabels $Config $current.resourceLabel); runnerGroupId = $Config.runnerGroupId; runnerId = 0 }
             # Atomic root-level barrier is committed before the POST can run.
@@ -430,6 +447,7 @@ function Save-RunnerLaunchEvent($State, [string] $Event, [long] $RunnerId = 0, [
             Invoke-RunnerTransitionCheckpoint 'jit-registration-intent'
         } elseif ($Event -cin @('registered', 'dispatch')) {
             $registration = Get-RunnerJitRegistration
+            Assert-RunnerJitRegistration $registration # Legacy evidence is retirement only.
             if ($null -eq $registration -or $registration.operationId -cne $next.launchId -or
                 $registration.vmName -cne $current.vmName -or [guid]$registration.vmId -ne [guid]$current.vmId -or
                 $registration.instancePath -ine $current.instancePath -or $registration.supervisorPid -ne $current.supervisorPid -or
@@ -488,29 +506,249 @@ function Wait-DetachedRunner($State, $Config) {
 }
 
 function Get-SshArgs($State) {
+    Assert-RunnerSessionTrustedPaths $State -RequireKnownHosts
+    $paths = Get-RunnerSessionPaths $State
     return @('-o', 'BatchMode=yes', '-o', 'ConnectTimeout=5', '-o', 'ServerAliveInterval=15',
         '-o', 'ServerAliveCountMax=2', '-o', 'StrictHostKeyChecking=accept-new',
-        '-o', "UserKnownHostsFile=$($State.instancePath)\known_hosts", '-i', "$($State.instancePath)\id_ed25519")
+        '-o', "UserKnownHostsFile=$($paths.knownHosts)", '-i', $paths.privateKey)
 }
 
 function Get-RunnerGuestReadinessCommand([string] $ProfileLabel) {
     $prerequisites = Get-RunnerGuestPrerequisites $ProfileLabel
-    $command = 'timeout 25 cloud-init status --wait >/dev/null 2>&1 && test "$(id -un)" = runner && command -v curl >/dev/null && command -v git >/dev/null && command -v unzip >/dev/null'
-    if ($prerequisites.docker) { $command += ' && test -S /var/run/docker.sock && timeout 10 docker info >/dev/null 2>&1' }
-    return $command
+    $command = 'timeout 25 cloud-init status --wait >/dev/null 2>&1; readiness_code=$?; if test "$readiness_code" -eq 124; then exit 71; elif test "$readiness_code" -ne 0; then exit 72; fi; test "$(id -un)" = runner || exit 73; command -v curl >/dev/null || exit 74; command -v git >/dev/null || exit 75; command -v unzip >/dev/null || exit 76'
+    $command += '; readiness_mtu=$(cat /sys/class/net/runner0/mtu 2>/dev/null) || exit 80; test "$readiness_mtu" = ' + (Get-RunnerGuestMtu) + ' || exit 80'
+    if ($prerequisites.docker) { $command += '; test -S /var/run/docker.sock || exit 77; timeout 10 docker info >/dev/null 2>&1; readiness_code=$?; if test "$readiness_code" -eq 124; then exit 78; elif test "$readiness_code" -ne 0; then exit 79; fi' }
+    return $command + '; exit 0'
+}
+
+function Get-RunnerCloudInitInspector {
+    # Fixed read-only inspector. Raw status output exists only in bounded memory;
+    # neither stderr nor unselected JSON keys cross the SSH protocol.
+    return @'
+import json, os, re, stat, subprocess, sys, threading, queue, time
+STAGES = ('top-level','init-local','init','modules-config','modules-final')
+STATUSES = ('not started','running','done','disabled','error','unknown')
+EXTENDED = ('not started','running','done','disabled','error - running','error - done','degraded running','degraded done','unknown')
+MODULES = ('users-groups','package-update-upgrade-install','runcmd','scripts-user','resizefs','growpart','ssh','set-passwords','apt-configure')
+EXCEPTIONS = ('ProcessExecutionError','RuntimeError','ValueError','TypeError','KeyError','OSError','PermissionError','FileNotFoundError','TimeoutExpired','SchemaValidationError')
+result = dict(schema=1,capture='unavailable',cloudInitExit=None,status='unknown',extendedStatus='unknown',stages=[dict(stage=s,errorCount=0,recoverableCount=0) for s in STAGES],reasons=[])
+def reason(text):
+    # Reasons are fixed templates, never copied prose, matches, tokens or tails.
+    if not isinstance(text,str): return ('reason-withheld',True,False)
+    # The full status JSON was capped at 64KiB before parsing. Scan the complete
+    # bounded error, including a decisive tail after verbose package output.
+    if len(text)>65536: return ('reason-withheld',True,True)
+    # Multiline ProcessExecutionError text may contain the decisive apt reason.
+    # Normalize only in bounded memory; no matched text ever reaches output.
+    text=' '.join(text.split())
+    templates = (
+        (r'temporary failure in name resolution|temporary failure resolving|could not resolve|failed to resolve|name resolution.{0,80}(?:failed|failure)','DNS resolution failed.'),
+        (r'network (?:is )?unreachable|no route to host','Network was unreachable.'),
+        (r'connection timed out|connect(?:ion)? timeout|timed out (?:while )?connect(?:ing)?','Connection timed out.'),
+        (r'connection refused','Connection was refused.'),
+        (r'certificate verif(?:y|ication) failed|ssl certificate problem|tls.{0,80}handshake.{0,80}failed','TLS validation or handshake failed.'),
+        (r'no_pubkey|gpg error|signatures could not be verified|signatures couldn.t be verified|repository.{0,80}not signed','Package repository signature verification failed.'),
+        (r'(?:does not have|no longer has).{0,80}release file|release file.{0,80}(?:not found|missing)','Package repository Release file was unavailable.'),
+        (r'hash sum mismatch','Package hash verification failed.'),
+        (r'no space left on device','Disk space was exhausted.'),
+        (r'no installation candidate','Package has no installation candidate.'),
+        (r'unable to locate package|\bpackage\b.{0,80}(?:not found|does not exist)','Package was not found.'),
+        (r'could not get lock|unable to acquire.{0,80}lock|(?:dpkg|apt).{0,80}lock','Package manager lock was unavailable.'),
+        (r'dpkg was interrupted','Package manager was interrupted.'),
+        (r'unmet dependencies|unmet dependency|held broken packages','Package dependencies could not be satisfied.'),
+        (r'\bgroup\b.{0,96}\balready exists\b','Group already exists.'),
+        (r'permission denied|operation not permitted','Permission was denied.'),
+        (r'schema.{0,80}(?:error|invalid|failed)|invalid.{0,80}cloud.?config|cloud.?config.{0,80}(?:invalid|schema)','Cloud configuration schema was invalid.'),
+        (r'(?:resize|growpart).{0,80}(?:failed|error)|(?:failed|error).{0,80}(?:resize|growpart)','Filesystem resize failed.'),
+        (r'(?:could not|failed to|unable to) connect|connection failed','Connection failed.'),
+        (r'failed to fetch|unable to fetch|some index files failed to download|failed to download','Package fetch failed.'),
+        (r'dpkg: error|sub-process.{0,80}\bdpkg\b.{0,80}returned an error code','Package manager exited with an error.'),
+    )
+    for pattern,template in templates:
+        if re.search(pattern,text,re.I): return (template,True,False)
+    if re.search(r'\b(?:apt|apt-get|dpkg)\b',text,re.I) and re.search(r'exit code: [1-9][0-9]*\b|(?:returned|exited).{0,40}(?:error|non-zero|nonzero)',text,re.I):
+        return ('Package manager exited with an error.',True,False)
+    return ('reason-withheld',True,False)
+def strings(value):
+    if isinstance(value,list):
+        return [s for s in value[:1024] if isinstance(s,str)]
+    if isinstance(value,dict):
+        return [s for key in ('WARNING','ERROR','CRITICAL') for s in strings(value.get(key,[]))][:1024]
+    return []
+def package_tail():
+    # Fixed guest-local source; never accept caller paths or follow symlinks.
+    # O_NONBLOCK prevents a substituted FIFO from blocking before fstat rejects it.
+    # Read only a root-owned, non-writable-by-others regular file, capped BEFORE
+    # allocation. The outer timeout also bounds this local filesystem operation.
+    fd=None
+    try:
+        fd=os.open('/var/log/cloud-init-output.log',os.O_RDONLY|os.O_NOFOLLOW|os.O_NONBLOCK)
+        info=os.fstat(fd)
+        if not stat.S_ISREG(info.st_mode) or info.st_uid!=0 or info.st_mode & 0o022: return None
+        offset=max(0,info.st_size-65536)
+        os.lseek(fd,offset,os.SEEK_SET)
+        raw=os.read(fd,65536)
+        # A partial first line cannot supply an independently meaningful match.
+        if offset: raw=raw.partition(b'\n')[2]
+        text,redacted,_=reason(raw.decode('utf-8',errors='replace'))
+        if text in ('reason-withheld','Package manager exited with an error.','Group already exists.','Permission was denied.','Cloud configuration schema was invalid.','Filesystem resize failed.'): return None
+        return (text,redacted,offset>0)
+    except Exception: return None
+    finally:
+        if fd is not None: os.close(fd)
+
+def inspect():
+    process=None; thread=None; stop=threading.Event(); chunks=queue.Queue(maxsize=2)
+    try:
+        process=subprocess.Popen(['cloud-init','status','--format=json'],stdin=subprocess.DEVNULL,stdout=subprocess.PIPE,stderr=subprocess.DEVNULL)
+        def read():
+            try:
+                while not stop.is_set():
+                    data=process.stdout.read1(4096)
+                    while not stop.is_set():
+                        try: chunks.put(data,timeout=0.05); break
+                        except queue.Full: pass
+                    if not data: break
+            except Exception: pass
+        thread=threading.Thread(target=read,daemon=True); thread.start()
+        raw=bytearray(); deadline=time.monotonic()+5
+        while True:
+            remaining=deadline-time.monotonic()
+            if remaining<=0: result['capture']='status-timeout'; return
+            try: data=chunks.get(timeout=min(0.1,remaining))
+            except queue.Empty: continue
+            if not data: break
+            if len(raw)+len(data)>65536: result['capture']='status-overflow'; return
+            raw.extend(data)
+        remaining=deadline-time.monotonic()
+        if remaining<=0: result['capture']='status-timeout'; return
+        try: code=process.wait(timeout=remaining)
+        except subprocess.TimeoutExpired: result['capture']='status-timeout'; return
+        result['cloudInitExit']=code
+        try: status=json.loads(raw.decode('utf-8'))
+        except (ValueError,UnicodeError): result['capture']='status-invalid'; return
+        if not isinstance(status,dict): result['capture']='status-invalid'; return
+        result['capture']='complete'
+        result['status']=status.get('status') if status.get('status') in STATUSES else 'unknown'
+        result['extendedStatus']=status.get('extended_status') if status.get('extended_status') in EXTENDED else 'unknown'
+        package_module=False
+        for stage in STAGES[1:]+STAGES[:1]:
+            item=status if stage=='top-level' else status.get(stage,{})
+            if not isinstance(item,dict): continue
+            errors=strings(item.get('errors',[])); recoverable=strings(item.get('recoverable_errors',{}))
+            if any(re.search(r'\bcc_package_update_upgrade_install\b',entry) for entry in errors+recoverable): package_module=True
+            result['stages'][STAGES.index(stage)].update(errorCount=len(errors),recoverableCount=len(recoverable))
+            for kind,entries in (('error',errors),('recoverable',recoverable)):
+                for entry in entries:
+                    if len(result['reasons'])>=8: break
+                    text,redacted,truncated=reason(entry)
+                    module=next((m for m in MODULES if re.search(r'\bcc_'+re.escape(m.replace('-','_'))+r'\b',entry)), 'other')
+                    exception=next((e for e in EXCEPTIONS if re.search(r'\b'+e+r'\b',entry)), 'other')
+                    result['reasons'].append(dict(stage=stage,kind=kind,module=module,exception=exception,reason=text,redacted=redacted,truncated=truncated))
+        generic=[r for r in result['reasons'] if r['kind']=='error' and r['reason']=='Package manager exited with an error.']
+        if result['status']=='error' and result['extendedStatus']=='error - done' and code!=0 and package_module and generic:
+            tail=package_tail()
+            if tail is not None:
+                for entry in generic:
+                    entry.update(reason=tail[0],redacted=tail[1],truncated=tail[2],source='cloud-init-output-tail')
+    except Exception: result['capture']='unavailable'
+    finally:
+        stop.set()
+        if process is not None:
+            try:
+                if process.poll() is None: process.kill()
+                process.wait(timeout=1)
+            except Exception: pass
+            if thread is not None: thread.join(timeout=1)
+            if process.stdout is not None: process.stdout.close()
+inspect()
+encoded=json.dumps(result,ensure_ascii=True,separators=(',',':'))
+if len(encoded)>4096:
+    result['reasons']=[]; result['capture']='status-overflow'
+    encoded=json.dumps(result,ensure_ascii=True,separators=(',',':'))
+sys.stdout.write(encoded)
+'@
+}
+
+function Assert-RunnerCloudInitPreparationIdentity($State) {
+    Assert-RunnerPreparationAuthorized
+    Assert-SessionAlive $State
+    $mutex = Enter-RunnerLock
+    try {
+        $current = Get-RunnerState
+        Assert-StateIdentity $current
+        if ($State.purpose -cne 'prepare' -or $current.purpose -cne 'prepare' -or
+            $current.vmName -cne $State.vmName -or $current.vmId -cne $State.vmId -or
+            $current.PSObject.Properties.Name -contains 'imageCandidate' -or
+            $current.PSObject.Properties.Name -contains 'runnerLaunch' -or
+            $current.PSObject.Properties.Name -contains 'runnerId' -or
+            $current.PSObject.Properties.Name -contains 'claimMode' -or
+            $current.PSObject.Properties.Name -contains 'pilotClaim') { throw 'Cloud-init diagnostic requires the current generic preparation session.' }
+    } finally { Exit-RunnerLock $mutex }
+}
+
+function Invoke-RunnerCloudInitPreparationCapture($State, $Config) {
+    # Diagnostic failure never replaces readiness failure or changes admission.
+    $terminal = $false
+    try {
+        Assert-RunnerCloudInitPreparationIdentity $State
+        $bundle = Get-CoherentInstalledRunnerBundle
+        $python = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes((Get-RunnerCloudInitInspector)))
+        # Fixed read-only inspector, no environment preservation or caller input.
+        # GNU timeout owns the process group, including the status child.
+        $command = "sudo -n timeout --signal=KILL 10s python3 -c 'import base64;exec(base64.b64decode(""$python""))'"
+        try { $transport = Invoke-RunnerReceiptNative 'ssh.exe' ((Get-SshArgs $State) + @("runner@$($Config.guestIp)", $command)) }
+        catch { $transport = $null }
+        Assert-RunnerCloudInitPreparationIdentity $State
+        $capture = ConvertFrom-RunnerCloudInitCapture $transport
+        $terminal = Test-RunnerCloudInitTerminal $capture
+        $record = [pscustomobject][ordered]@{ schema=1; sessionId=$State.vmName.Substring(5); vmId=$State.vmId; purpose='prepare'; bundleHash=$bundle.hash; atUtc=[DateTime]::UtcNow.ToString('o'); diagnostic=$capture }
+        Assert-RunnerCloudInitArtifact $record
+        $mutex = Enter-RunnerLock
+        try {
+            # No stale session may publish after waiting for the state mutex.
+            $current = Get-RunnerState
+            Assert-StateIdentity $current
+            if ($null -eq $current -or $current.vmName -cne $State.vmName -or $current.vmId -cne $State.vmId -or $current.purpose -cne 'prepare' -or
+                $current.PSObject.Properties.Name -contains 'imageCandidate' -or $current.PSObject.Properties.Name -contains 'runnerLaunch' -or
+                $current.PSObject.Properties.Name -contains 'runnerId' -or $current.PSObject.Properties.Name -contains 'claimMode' -or
+                $current.PSObject.Properties.Name -contains 'pilotClaim') { throw 'Cloud-init diagnostic session was replaced.' }
+            Assert-RunnerPreparationAuthorized
+            $path = Assert-OwnedPath (Join-Path $script:RunnerRoot 'preparation-cloud-init.json')
+            if (Test-Path -LiteralPath $path) { Assert-RunnerProtectedPath $path }
+            Write-RunnerJson $path $record
+            Assert-RunnerProtectedPath $path
+        } finally { Exit-RunnerLock $mutex }
+    } catch { }
+    return $terminal
 }
 
 function Wait-Guest($State, $Config, [string] $ProfileLabel = 'it-inventory-ephemeral') {
     $args = Get-SshArgs $State
     $command = Get-RunnerGuestReadinessCommand $ProfileLabel
     $limit = [DateTime]::UtcNow.AddMinutes(12)
+    $watch = [Diagnostics.Stopwatch]::StartNew()
+    $purpose = if ($State.PSObject.Properties.Name -contains 'purpose' -and $State.purpose -is [string] -and $State.purpose -cin @('job','prepare','verify-image')) { $State.purpose } else { 'other' }
+    $diagnostic = [pscustomobject]@{ purpose=$purpose; attemptCount=0; elapsedMs=[long]0; firstFailureStage=''; lastFailureStage=''; lastNativeExit=$null; anySshCompleted=$false }
+    $cloudInitCaptureAttempted = $false
+    try {
     while ([DateTime]::UtcNow -lt $limit) {
         Assert-SessionAlive $State
-        $exitCode = Invoke-RunnerNative 'ssh.exe' ($args + @("runner@$($Config.guestIp)", $command))
-        if ($exitCode -eq 0) { return }
+        try { $exitCode = Invoke-RunnerNative 'ssh.exe' ($args + @("runner@$($Config.guestIp)", $command)) }
+        catch { Add-RunnerGuestReadinessAttempt $diagnostic $null $watch.ElapsedMilliseconds; throw }
+        Add-RunnerGuestReadinessAttempt $diagnostic $exitCode $watch.ElapsedMilliseconds
+        if ($exitCode -eq 0) { return Get-RunnerGuestMtu }
+        if ($purpose -ceq 'prepare' -and $exitCode -eq 72 -and -not $cloudInitCaptureAttempted) {
+            $cloudInitCaptureAttempted = $true
+            if (Invoke-RunnerCloudInitPreparationCapture $State $Config) { throw 'Guest cloud-init reported a terminal preparation failure.' }
+        }
         Start-Sleep -Seconds 10
     }
     throw 'Guest never reached its profile prerequisite readiness.'
+    } catch {
+        Set-RunnerGuestReadinessEvidence $_ $diagnostic $watch.ElapsedMilliseconds
+        throw
+    } finally { $watch.Stop() }
 }
 
 function Get-RunnerArchive($State) {
@@ -616,7 +854,7 @@ function Invoke-RunnerSession($Config, $PilotAttempt = $null, [string] $ProfileL
         $script:RunnerSessionName = $name
         $instance = Assert-OwnedPath (Join-Path (Join-Path $script:RunnerRoot 'instances') $name)
         $state = [ordered]@{
-            tag = $script:RunnerTag; vmName = $name; instancePath = $instance
+            tag = $script:RunnerTag; vmName = $name; instancePath = $instance; layoutVersion = 2
             purpose = $Purpose; resourceLabel = $profile.label
             createdUtc = [DateTime]::UtcNow.ToString('o'); heartbeatUtc = [DateTime]::UtcNow.ToString('o')
             deadlineUtc = [DateTime]::UtcNow.AddMinutes($Config.maxMinutes).ToString('o')
@@ -643,9 +881,12 @@ function Invoke-RunnerSession($Config, $PilotAttempt = $null, [string] $ProfileL
         $verificationReady = $false
         $sessionFailure = $null
         try {
-            New-Item -ItemType Directory -Path $instance -Force | Out-Null
+            $paths = Get-RunnerSessionPaths ([pscustomobject]$state)
+            New-Item -ItemType Directory -Path $paths.instance -Force | Out-Null
+            Assert-RunnerProtectedPath $paths.instance
+            New-Item -ItemType Directory -Path $paths.vmData -ErrorAction Stop | Out-Null
             $script:RunnerOperationStage = 'disk-copy'
-            $disk = Join-Path $instance 'guest.vhdx'
+            $disk = $paths.guestDisk
             if (-not $preparing -and -not (Test-RunnerSessionDemand $Config $profile.label $PilotAttempt)) { return [pscustomobject]@{ name = $name; id = $null; outcome = 'demand-withdrawn' } }
             if ($image.PSObject.Properties.Name -contains 'differencing' -and $image.differencing) {
                 $script:RunnerOperationStage = 'disk-clone'
@@ -657,8 +898,10 @@ function Invoke-RunnerSession($Config, $PilotAttempt = $null, [string] $ProfileL
             Write-RunnerImageProgress 'complete'
             $script:RunnerImagePreflight = $null
             $script:RunnerOperationStage = 'key-generation'
-            New-RunnerSshKey (Join-Path $instance 'id_ed25519')
-            $key = (Get-Content -LiteralPath (Join-Path $instance 'id_ed25519.pub') -Raw).Trim()
+            New-RunnerSshKey $paths.privateKey
+            $knownHostsEvidence = New-RunnerKnownHosts $paths.knownHosts
+            Assert-RunnerSessionTrustedPaths ([pscustomobject]$state)
+            $key = (Get-Content -LiteralPath $paths.publicKey -Raw).Trim()
             Assert-SessionAlive $state
             $mutex = Enter-RunnerLock
             try {
@@ -667,12 +910,13 @@ function Invoke-RunnerSession($Config, $PilotAttempt = $null, [string] $ProfileL
                 if ($null -eq $current -or $current.vmName -ne $name) { throw 'Session removed before VM creation.' }
                 $current | Add-Member -NotePropertyName phase -NotePropertyValue 'creating' -Force
                 $current | Add-Member -NotePropertyName expectedBootDisk -NotePropertyValue $disk -Force
-                $current | Add-Member -NotePropertyName expectedVmPath -NotePropertyValue (Join-Path $instance $name) -Force
+                $current | Add-Member -NotePropertyName expectedVmPath -NotePropertyValue $paths.vmPath -Force
                 Write-RunnerJson $script:RunnerStatePath $current
-                $vm = New-RunnerProfileVm $name $disk $instance $profile.label
+                $vm = New-RunnerProfileVm $name $disk $paths.vmData $profile.label
                 $current | Add-Member -NotePropertyName vmId -NotePropertyValue ([guid]$vm.Id).ToString() -Force
                 Assert-StateIdentity $current
                 Write-RunnerJson $script:RunnerStatePath $current
+                Assert-RunnerSessionTrustedPaths $current
                 Set-VM -Name $name -Notes $script:RunnerTag -AutomaticCheckpointsEnabled $false -CheckpointType Disabled -AutomaticStartAction Nothing -AutomaticStopAction TurnOff
                 Assert-RunnerVmLifecycle $name
                 if ((Get-VM -Name $name -ErrorAction Stop).Notes -ne $script:RunnerTag) { throw 'VM ownership tag readback failed.' }
@@ -695,9 +939,10 @@ function Invoke-RunnerSession($Config, $PilotAttempt = $null, [string] $ProfileL
                 $current | Add-Member -NotePropertyName guestMac -NotePropertyValue $guestMac.rawMac -Force
                 Write-RunnerJson $script:RunnerStatePath $current
             } finally { Exit-RunnerLock $mutex }
-            $seed = Join-Path $instance 'cidata.vhdx'
+            $seed = $paths.seedDisk
             New-SeedDisk $seed $key $guestMac.seedMac $Config $profile.label $image.prepared
             Add-VMHardDiskDrive -VMName $name -Path $seed
+            Assert-RunnerSessionTrustedPaths $current
             $script:RunnerOperationStage = 'network-isolation'
             $observation = Get-RunnerNetworkObservation # Probe IO outside mutex.
             $mutex = Enter-RunnerLock
@@ -720,8 +965,11 @@ function Invoke-RunnerSession($Config, $PilotAttempt = $null, [string] $ProfileL
             Assert-RunnerGuestMac -VmName $name -ExpectedMac $guestMac.rawMac
             $script:RunnerOperationStage = 'guest-readiness'
             $readinessWatch = [Diagnostics.Stopwatch]::StartNew()
-            Wait-Guest $state $Config $profile.label
-            Write-Host ('Guest prerequisites ready in {0:N1}s for {1}.' -f $readinessWatch.Elapsed.TotalSeconds, $profile.label)
+            $guestMtu = Wait-Guest $state $Config $profile.label
+            Assert-RunnerKnownHosts $paths.knownHosts $knownHostsEvidence -RequireContent
+            Write-Host 'Protected known-hosts file retained its identity and strict ACL after SSH appended a host key.'
+            if ($guestMtu -isnot [int] -or $guestMtu -ne (Get-RunnerGuestMtu)) { throw 'Guest MTU readiness readback is invalid.' }
+            Write-Host ('Guest prerequisites ready in {0:N1}s for {1}; verified MTU {2}.' -f $readinessWatch.Elapsed.TotalSeconds, $profile.label, $guestMtu)
             Assert-SessionAlive $state
             Assert-CurrentRunnerNetworkRules $state
             Test-GuestIsolation $state $Config
@@ -737,7 +985,7 @@ function Invoke-RunnerSession($Config, $PilotAttempt = $null, [string] $ProfileL
                     $verified.imageCandidate.id -cne $ImageCandidate.id -or $verified.imageCandidate.diskHash -cne $candidateReceipt.diskHash) { throw 'Image verifier session binding changed.' }
                 $verifiedVm = Get-VM -Id ([guid]$verified.vmId) -ErrorAction Stop
                 if ($verifiedVm.Name -cne $verified.vmName -or $verifiedVm.State -cne 'Running' -or $verifiedVm.Notes -cne $script:RunnerTag -or
-                    [IO.Path]::GetFullPath($verifiedVm.Path) -ine (Join-Path $instance $verified.vmName)) { throw 'Image verifier VM identity changed after readiness.' }
+                    [IO.Path]::GetFullPath($verifiedVm.Path) -ine ((Get-RunnerSessionPaths $verified).vmPath)) { throw 'Image verifier VM identity changed after readiness.' }
                 # The same fixed probe runs in each of two successive children.
                 # Reusing a written disk, or leaking writes into the parent, fails.
                 $markerCommand = 'sudo test ! -e /var/lib/it-inventory-clone-probe && sudo touch /var/lib/it-inventory-clone-probe && sudo test -f /var/lib/it-inventory-clone-probe'
@@ -750,8 +998,8 @@ function Invoke-RunnerSession($Config, $PilotAttempt = $null, [string] $ProfileL
                     purpose = 'verify-image'; diskType = 'Differencing'; parentLease = 'read-only-same-handle'; parentIdentity = $image.lease.identity; markerProof = 'absent-then-written'
                     preflightSeconds = $preflightSeconds; childCreationSeconds = $childWatch.Elapsed.TotalSeconds; sessionSeconds = $sessionWatch.Elapsed.TotalSeconds; vmName = $verified.vmName; vmId = $verified.vmId; guestMac = $verified.guestMac
                     networkFingerprint = $verified.networkFingerprint
-                    sshPublicKeyHash = (Get-FileHash -LiteralPath (Join-Path $instance 'id_ed25519.pub') -Algorithm SHA256).Hash
-                    readiness = 'cloud-init-and-runner-prerequisites'; readyUtc = [DateTime]::UtcNow.ToString('o'); readinessSeconds = $readinessWatch.Elapsed.TotalSeconds }
+                    sshPublicKeyHash = (Get-FileHash -LiteralPath $paths.publicKey -Algorithm SHA256).Hash
+                    readiness = 'cloud-init-and-runner-prerequisites'; guestMtu = $guestMtu; readyUtc = [DateTime]::UtcNow.ToString('o'); readinessSeconds = $readinessWatch.Elapsed.TotalSeconds }
             }
             if ($preparing) {
                 $script:RunnerOperationStage = 'image-preparation'
@@ -902,6 +1150,45 @@ function Get-PilotEvidence($Config, $Binding, [string] $Token, [switch] $PickupI
     return [pscustomobject]@{ run = $run; workflow = $workflow; job = $job }
 }
 
+function Test-RunnerReleaseQueuePriority($Config, $Run, [string] $Base, [string] $Token, [hashtable] $WorkflowCache) {
+    # This is provisioning preference only, never an authorization or assignment
+    # predicate. Legacy/incomplete metadata keeps ordinary queue eligibility.
+    $repository = 'PHead2001/IT-Inventory-System'
+    if ($Config.activation -cne 'active' -or $Config.repo -cne $repository -or $null -eq $Run) { return $false }
+    foreach ($field in @('event', 'head_branch', 'repository', 'head_repository', 'workflow_id')) {
+        if ($Run.PSObject.Properties.Name -notcontains $field) { return $false }
+    }
+    if ($Run.event -isnot [string] -or $Run.head_branch -isnot [string] -or
+        $Run.event -cne 'push' -or $Run.head_branch -cne 'main') { return $false }
+    foreach ($field in @('repository', 'head_repository')) {
+        $identity = $Run.$field
+        if ($null -eq $identity -or $identity.PSObject.Properties.Name -notcontains 'full_name' -or
+            $identity.full_name -isnot [string] -or $identity.full_name -cne $repository) { return $false }
+    }
+    $workflowId = [uint64]0
+    if ($Run.workflow_id -is [array] -or [string]$Run.workflow_id -cnotmatch '^[1-9][0-9]*$' -or
+        -not [uint64]::TryParse([string]$Run.workflow_id, [ref]$workflowId)) { return $false }
+    $path = '.github/workflows/ci.yml'
+    if ($Run.PSObject.Properties.Name -contains 'path' -and -not [string]::IsNullOrEmpty([string]$Run.path)) {
+        return $Run.path -is [string] -and $Run.path -ceq $path
+    }
+    # At most one metadata request per workflow ID in the two bounded snapshots.
+    # Unknown metadata denies preference; API errors still fail this inspection
+    # closed rather than being mistaken for trustworthy release evidence.
+    $key = [string]$workflowId
+    if (-not $WorkflowCache.ContainsKey($key)) {
+        Assert-RunnerPickupInspectionActive
+        $WorkflowCache[$key] = Invoke-GitHub "$Base/workflows/$key" 'GET' $null $Token
+        Assert-RunnerPickupInspectionActive
+    }
+    $workflow = $WorkflowCache[$key]
+    if ($null -eq $workflow -or $workflow.PSObject.Properties.Name -notcontains 'id' -or
+        $workflow.PSObject.Properties.Name -notcontains 'path' -or
+        $workflow.id -is [array] -or [string]$workflow.id -cne $key -or
+        $workflow.path -isnot [string] -or $workflow.path -cne $path) { return $false }
+    return $true
+}
+
 function Get-QueuedRunnerJob($Config, [string] $Token, [decimal] $AvailableBytes = [decimal]::MaxValue, [string] $SessionProfileLabel = '') {
     Assert-RunnerPickupInspectionActive
     $script:RunnerQueueObservation = @{}
@@ -912,7 +1199,8 @@ function Get-QueuedRunnerJob($Config, [string] $Token, [decimal] $AvailableBytes
     $base = "https://api.github.com/repos/$($parts[0])/$($parts[1])/actions"
     # Runs can already be in progress while a continuation waits for this runner.
     # Collect both bounded views before selection; API newest-first/status order
-    # must not give new previews priority over older continuations.
+    # must not give new previews priority over older continuations. A verified
+    # main Foundation push receives only a bounded 30-minute age preference.
     $candidates = @{}
     foreach ($runStatus in @('queued', 'in_progress')) {
         Assert-RunnerPickupInspectionActive
@@ -940,12 +1228,27 @@ function Get-QueuedRunnerJob($Config, [string] $Token, [decimal] $AvailableBytes
                 # Status can change between snapshots. Inspect one run only and
                 # retain its oldest valid timestamp from either bounded view.
                 $candidates[$key].createdTicks = [Math]::Min($candidates[$key].createdTicks, $createdTicks)
+                $candidates[$key].observations.Add($run)
             } else {
-                $candidates[$key] = [pscustomobject]@{ run = $run; id = $runId; createdTicks = $createdTicks }
+                $observations = [Collections.Generic.List[object]]::new()
+                $observations.Add($run)
+                $candidates[$key] = [pscustomobject]@{ run = $run; id = $runId; createdTicks = $createdTicks; effectiveTicks = $createdTicks; observations = $observations }
             }
         }
     }
-    foreach ($candidate in @($candidates.Values | Sort-Object createdTicks, id)) {
+    $workflowCache = @{}
+    $boostTicks = [TimeSpan]::FromMinutes(30).Ticks
+    foreach ($candidate in $candidates.Values) {
+        $candidate.effectiveTicks = $candidate.createdTicks
+        # Invalid/unknown dates stay after every dated run, even for main.
+        if ($candidate.createdTicks -eq [long]::MaxValue) { continue }
+        $preferred = $true
+        foreach ($observation in $candidate.observations) {
+            if (-not (Test-RunnerReleaseQueuePriority $Config $observation $base $Token $workflowCache)) { $preferred = $false; break }
+        }
+        if ($preferred) { $candidate.effectiveTicks = [Math]::Max([long]0, ($candidate.createdTicks - $boostTicks)) }
+    }
+    foreach ($candidate in @($candidates.Values | Sort-Object effectiveTicks, createdTicks, id)) {
         $run = $candidate.run
         $workflow = $null
         if ($Config.activation -eq 'pilot') {
@@ -1040,7 +1343,7 @@ function Invoke-RunnerJitReconciliation($Config) {
             # Known registration/handoff/DELETE identities retire only after
             # authoritative local abandonment and complete remote ID/name absence.
             $mutex = Enter-RunnerLock
-            try { $record = Assert-RunnerJitReconciliation $record $Config; $record.phase = 'complete'; Write-RunnerJitRegistration $record }
+            try { $record = Assert-RunnerJitReconciliation $record $Config; $record.phase = 'complete'; Write-RunnerJitRegistration $record -AllowLegacy }
             finally { Exit-RunnerLock $mutex }
             Write-Host 'JIT registration retirement completed.'
             return $true
@@ -1050,7 +1353,7 @@ function Invoke-RunnerJitReconciliation($Config) {
         try {
             $record = Assert-RunnerJitReconciliation $record $Config
             $record.runnerId = [long]$runner.id; $record.phase = 'removal-intent'
-            Write-RunnerJitRegistration $record
+            Write-RunnerJitRegistration $record -AllowLegacy
         } finally { Exit-RunnerLock $mutex }
         # Local proof/provider work may be slow. Refresh remote eligibility for
         # the persisted exact ID immediately before final local admission.
@@ -1067,7 +1370,7 @@ function Invoke-RunnerJitReconciliation($Config) {
         $inventory = @(Get-RunnerJitInventory $record $token); $stage = 'evidence'
         if (@($inventory | Where-Object { $_.id -eq $record.runnerId -or $_.name -ceq $record.vmName }).Count -ne 0) { throw 'JIT retirement absence is not authoritative.' }
         $mutex = Enter-RunnerLock
-        try { $record = Assert-RunnerJitReconciliation $record $Config; $record.phase = 'complete'; Write-RunnerJitRegistration $record }
+        try { $record = Assert-RunnerJitReconciliation $record $Config; $record.phase = 'complete'; Write-RunnerJitRegistration $record -AllowLegacy }
         finally { Exit-RunnerLock $mutex }
         Write-Host 'JIT registration retirement completed.'
         return $true
@@ -1179,8 +1482,8 @@ function Show-RunnerCapacityStatus($Config) {
 
 function Show-RunnerSessionResources($State, $Vm) {
     try {
-        Assert-StateIdentity $State
-        $expectedPath = Assert-OwnedPath (Join-Path $State.instancePath $State.vmName)
+        Assert-StateIdentity $State -AllowLegacy
+        $expectedPath = (Get-RunnerSessionPaths $State -AllowLegacy).vmPath
         if ($null -eq $Vm -or $Vm.Name -cne $State.vmName -or $Vm.Notes -cne $script:RunnerTag -or
             -not [string]::Equals([IO.Path]::GetFullPath($Vm.Path), $expectedPath, [StringComparison]::OrdinalIgnoreCase)) { throw 'VM ownership readback failed.' }
         $label = if ($State.PSObject.Properties.Name -contains 'resourceLabel') { $State.resourceLabel } else { 'it-inventory-ephemeral' }
@@ -1538,7 +1841,7 @@ function Invoke-Watchdog {
     try {
         $state = Get-RunnerState
         if ($null -ne $state) {
-            Assert-StateIdentity $state
+            Assert-StateIdentity $state -AllowLegacy
             $deadline = [DateTime]::Parse($state.deadlineUtc).ToUniversalTime()
             $ownerAlive = Test-RunnerProcessIdentity $state.supervisorPid $state.supervisorStartUtc
             # Readiness becomes false during recovery; an established guardian
@@ -1659,7 +1962,7 @@ try { switch ($Action) {
         $supervisor = Get-ScheduledTask -TaskName $script:RunnerSupervisorTask -ErrorAction SilentlyContinue
         if ($null -eq $state) { Write-Host "Supervisor: $($supervisor.State). Idle. Activation: $($config.activation)." }
         else {
-            Assert-StateIdentity $state
+            Assert-StateIdentity $state -AllowLegacy
             $vm = Get-VM -Name $state.vmName -ErrorAction SilentlyContinue
             Write-Host "VM: $($state.vmName); state: $(if ($vm) { $vm.State } else { 'missing' }); deadline: $($state.deadlineUtc); heartbeat: $($state.heartbeatUtc)."
             Show-RunnerSessionResources $state $vm

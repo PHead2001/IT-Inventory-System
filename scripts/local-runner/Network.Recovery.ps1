@@ -18,23 +18,49 @@ function Get-RunnerNetworkCapture {
     $routes = @(Get-NetRoute -ErrorAction Stop)
     $records = @(
         foreach ($ip in $addresses) {
-            'address|{0}|{1}|{2}|{3}' -f $ip.AddressFamily, $ip.IPAddress, $ip.PrefixLength, $ip.InterfaceIndex
+            'address|{0}|{1}|{2}|{3}' -f $ip.AddressFamily, $ip.IPAddress, $ip.PrefixLength, (ConvertTo-Json -InputObject $ip.InterfaceIndex -Compress)
         }
         foreach ($route in $routes) {
-            'route|{0}|{1}|{2}|{3}' -f $route.AddressFamily, $route.DestinationPrefix, $route.NextHop, $route.InterfaceIndex
+            $metric = if ($route.PSObject.Properties.Name -contains 'RouteMetric') { ConvertTo-Json -InputObject $route.RouteMetric -Compress } else { 'missing' }
+            'route|{0}|{1}|{2}|{3}|{4}' -f $route.AddressFamily, $route.DestinationPrefix, $route.NextHop, (ConvertTo-Json -InputObject $route.InterfaceIndex -Compress), $metric
         }
     )
     if ($addresses.Count -eq 0 -or $routes.Count -eq 0) { throw 'Network observation is incomplete.' }
     return [pscustomobject]@{
         addresses = $addresses; routes = $routes; observedUtc = $observedUtc
-        fingerprint = Get-RunnerRecoveryHash (@($records | Sort-Object -Unique) -join "`n")
+        # Multiplicity matters: a duplicate /1 makes the transport ambiguous.
+        fingerprint = Get-RunnerRecoveryHash (@($records | Sort-Object) -join "`n")
     }
+}
+
+function Test-RunnerRouteInteger($Value, [long] $Minimum, [long] $Maximum) {
+    return ($null -ne $Value -and $Value.GetType().FullName -cin @('System.Byte','System.SByte','System.Int16','System.UInt16','System.Int32','System.UInt32','System.Int64','System.UInt64') -and
+        [decimal]$Value -ge $Minimum -and [decimal]$Value -le $Maximum)
+}
+
+function Test-RunnerSplitDefaultTransport($Capture) {
+    # A unique complementary pair is the same IPv4 transport scope as /0.
+    # Ambiguous/malformed pairs remain ordinary protected routes (fail closed).
+    $pair=@($Capture.routes | Where-Object { [string]$_.AddressFamily -in @('IPv4','InterNetwork','2') -and $_.DestinationPrefix -cin @('0.0.0.0/1','128.0.0.0/1') })
+    if ($pair.Count -ne 2 -or @($pair.DestinationPrefix | Sort-Object -Unique).Count -ne 2) { return $false }
+    foreach ($route in $pair) {
+        if ($route.PSObject.Properties.Name -notcontains 'InterfaceIndex' -or $route.PSObject.Properties.Name -notcontains 'NextHop' -or $route.PSObject.Properties.Name -notcontains 'RouteMetric' -or
+            -not (Test-RunnerRouteInteger $route.InterfaceIndex 1 4294967295) -or -not (Test-RunnerRouteInteger $route.RouteMetric 0 65535)) { return $false }
+        $parsed=$null
+        if ($route.NextHop -isnot [string] -or -not [Net.IPAddress]::TryParse($route.NextHop,[ref]$parsed) -or
+            $parsed.AddressFamily -ne [Net.Sockets.AddressFamily]::InterNetwork -or $parsed.ToString() -cne $route.NextHop) { return $false }
+    }
+    if ($pair[0].InterfaceIndex -ne $pair[1].InterfaceIndex -or $pair[0].NextHop -cne $pair[1].NextHop -or $pair[0].RouteMetric -ne $pair[1].RouteMetric) { return $false }
+    return @($Capture.addresses | Where-Object { [string]$_.AddressFamily -in @('IPv4','InterNetwork','2') -and
+        $_.PSObject.Properties.Name -contains 'InterfaceIndex' -and (Test-RunnerRouteInteger $_.InterfaceIndex 1 4294967295) -and $_.InterfaceIndex -eq $pair[0].InterfaceIndex }).Count -gt 0
 }
 
 function New-RunnerNetworkPolicy($Capture) {
     $privatePrefixes = @('0.0.0.0/8', '10.0.0.0/8', '100.64.0.0/10', '127.0.0.0/8', '169.254.0.0/16', '172.16.0.0/12', '192.168.0.0/16', '198.18.0.0/15', '224.0.0.0/4')
     $hostIps = @($Capture.addresses | Where-Object { [string]$_.AddressFamily -in @('IPv4', 'InterNetwork', '2') } | ForEach-Object { [string]$_.IPAddress } | Sort-Object -Unique)
-    $routes = @($Capture.routes | Where-Object { [string]$_.AddressFamily -in @('IPv4', 'InterNetwork', '2') -and $_.DestinationPrefix -cne '0.0.0.0/0' } | ForEach-Object { [string]$_.DestinationPrefix } | Sort-Object -Unique)
+    $splitDefault = Test-RunnerSplitDefaultTransport $Capture
+    $routes = @($Capture.routes | Where-Object { [string]$_.AddressFamily -in @('IPv4', 'InterNetwork', '2') -and $_.DestinationPrefix -cne '0.0.0.0/0' -and
+        -not ($splitDefault -and $_.DestinationPrefix -cin @('0.0.0.0/1','128.0.0.0/1')) } | ForEach-Object { [string]$_.DestinationPrefix } | Sort-Object -Unique)
     if ($hostIps.Count -eq 0) { throw 'Network observation has no host IPv4 addresses.' }
     foreach ($ip in $hostIps) {
         $parsed = $null
@@ -83,8 +109,9 @@ function Get-RunnerNetworkObservation {
 }
 
 function Get-RunnerRecoveryClaimHash($State) {
+    [void](Get-RunnerSessionPaths $State)
     $claim = [ordered]@{}
-    foreach ($name in @('tag', 'vmName', 'vmId', 'instancePath', 'purpose', 'resourceLabel', 'claimMode', 'pilotClaim', 'createdUtc', 'deadlineUtc', 'supervisorPid', 'supervisorStartUtc', 'guardianPid', 'guardianStartUtc', 'guestMac')) {
+    foreach ($name in @('tag', 'vmName', 'vmId', 'instancePath', 'layoutVersion', 'purpose', 'resourceLabel', 'claimMode', 'pilotClaim', 'createdUtc', 'deadlineUtc', 'supervisorPid', 'supervisorStartUtc', 'guardianPid', 'guardianStartUtc', 'guestMac')) {
         if ($State.PSObject.Properties.Name -contains $name) { $claim[$name] = $State.$name }
     }
     return Get-RunnerRecoveryHash ($claim | ConvertTo-Json -Depth 20 -Compress)
@@ -93,7 +120,7 @@ function Get-RunnerRecoveryClaimHash($State) {
 function New-RunnerNetworkBinding($State, $Vm, $Adapter, $Switch) {
     Assert-StateIdentity $State
     if ([guid]$Vm.Id -ne [guid]$State.vmId -or $Vm.Name -cne $State.vmName -or $Vm.Notes -cne $State.tag -or
-        [IO.Path]::GetFullPath($Vm.Path) -ine (Join-Path $State.instancePath $State.vmName)) { throw 'Network recovery VM ownership differs.' }
+        [IO.Path]::GetFullPath($Vm.Path) -ine ((Get-RunnerSessionPaths $State).vmPath)) { throw 'Network recovery VM ownership differs.' }
     if ([string]$State.guestMac -cnotmatch '^02[0-9a-fA-F]{10}$' -or [string]::IsNullOrEmpty([string]$Adapter.Id) -or [guid]$Adapter.VMId -ne [guid]$State.vmId -or $Adapter.VMName -cne $State.vmName -or
         $Adapter.DynamicMacAddressEnabled -ne $false -or [string]$Adapter.MacAddress -ine $State.guestMac -or
         $Switch.Name -cne $script:RunnerSwitch -or [string]$Switch.SwitchType -cne 'Internal' -or [guid]$Switch.Id -eq [guid]::Empty -or [guid]$Adapter.SwitchId -ne [guid]$Switch.Id) { throw 'Network recovery adapter/switch/MAC ownership differs.' }
@@ -108,7 +135,7 @@ function Assert-RunnerNetworkBinding($State, $Binding, $Vm, $Adapters, $Switch, 
     Assert-StateIdentity $State
     if ((Get-RunnerRecoveryClaimHash $State) -cne $Binding.claimHash -or [guid]$State.vmId -ne [guid]$Binding.vmId -or $State.vmName -cne $Binding.vmName) { throw 'Network recovery session/claim/process identity changed.' }
     if (-not (Test-RunnerProcessIdentity $State.supervisorPid $State.supervisorStartUtc) -or -not (Test-RunnerProcessIdentity $State.guardianPid $State.guardianStartUtc)) { throw 'Network recovery owner/guardian is dead.' }
-    if ([guid]$Vm.Id -ne [guid]$Binding.vmId -or $Vm.Name -cne $Binding.vmName -or $Vm.Notes -cne $State.tag -or [IO.Path]::GetFullPath($Vm.Path) -ine (Join-Path $State.instancePath $State.vmName)) { throw 'Network recovery VM was replaced.' }
+    if ([guid]$Vm.Id -ne [guid]$Binding.vmId -or $Vm.Name -cne $Binding.vmName -or $Vm.Notes -cne $State.tag -or [IO.Path]::GetFullPath($Vm.Path) -ine ((Get-RunnerSessionPaths $State).vmPath)) { throw 'Network recovery VM was replaced.' }
     if (@($Adapters).Count -ne 1) { throw 'Network recovery requires exactly one owned adapter.' }
     $adapter = @($Adapters)[0]
     if ([string]$adapter.Id -cne $Binding.adapterId -or [guid]$adapter.VMId -ne [guid]$Binding.vmId -or $adapter.VMName -cne $Binding.vmName -or
@@ -128,6 +155,8 @@ function New-RunnerRecoveryEpisodeDiagnostic {
         observationUnavailableCount = 0; fingerprintChangeCount = 0; staleAdmissionCount = 0; applyCount = 0
         observationElapsedMs = 0; preflightElapsedMs = 0; applyElapsedMs = 0
         admissionOperation = ''; observationAgeMs = 0; quarantineElapsedMs = 0; connectElapsedMs = 0; resumeElapsedMs = 0
+        probeOutcome = ''; probeWorker = ''; probeCount = 0; probeFailureCount = 0; probeElapsedMs = 0; probeWorkerElapsedMs = 0
+        probeExitCode = $null; probeExitStage = ''
     }
 }
 
@@ -138,12 +167,18 @@ function Set-RunnerRecoveryDiagnostic($Recovery, [string] $Name, $Value) {
     if ($Recovery.PSObject.Properties.Name -notcontains 'diagnostics') {
         $Recovery | Add-Member -NotePropertyName diagnostics -NotePropertyValue (New-RunnerRecoveryEpisodeDiagnostic)
     }
-    if ($Name -cin @('trigger', 'lastTransition', 'refusal', 'lastFingerprint', 'operation', 'operationStartedUtc', 'admissionOperation')) {
+    if ($Name -ceq 'probeExitCode') {
+        $code = if ($null -eq $Value) { $null } else { Get-RunnerProbeExitCode $Value }
+        if ($Recovery.diagnostics.PSObject.Properties.Name -notcontains $Name) { $Recovery.diagnostics | Add-Member -NotePropertyName $Name -NotePropertyValue $code }
+        else { $Recovery.diagnostics.$Name = $code }
+        return
+    }
+    if ($Name -cin @('trigger', 'lastTransition', 'refusal', 'lastFingerprint', 'operation', 'operationStartedUtc', 'admissionOperation', 'probeOutcome', 'probeWorker', 'probeExitStage')) {
         if ($Recovery.diagnostics.PSObject.Properties.Name -notcontains $Name) { $Recovery.diagnostics | Add-Member -NotePropertyName $Name -NotePropertyValue $Value }
         else { $Recovery.diagnostics.$Name = $Value }
         return
     }
-    if ($Name -cnotin @('observationUnavailableCount', 'fingerprintChangeCount', 'staleAdmissionCount', 'applyCount', 'observationElapsedMs', 'preflightElapsedMs', 'applyElapsedMs', 'observationAgeMs', 'quarantineElapsedMs', 'connectElapsedMs', 'resumeElapsedMs')) { return }
+    if ($Name -cnotin @('observationUnavailableCount', 'fingerprintChangeCount', 'staleAdmissionCount', 'applyCount', 'observationElapsedMs', 'preflightElapsedMs', 'applyElapsedMs', 'observationAgeMs', 'quarantineElapsedMs', 'connectElapsedMs', 'resumeElapsedMs', 'probeCount', 'probeFailureCount', 'probeElapsedMs', 'probeWorkerElapsedMs')) { return }
     if ($Recovery.diagnostics.PSObject.Properties.Name -notcontains $Name) { $Recovery.diagnostics | Add-Member -NotePropertyName $Name -NotePropertyValue 0 }
     if ($Name -ceq 'observationAgeMs') {
         # Last actual retained-capture age, including a future-clock refusal.
@@ -204,6 +239,32 @@ function Get-RunnerNetworkRecoveryPlan($Recovery, $Observation, [DateTime] $NowU
     $plan = Get-RunnerNetworkRecoveryPlanCore $Recovery $Observation $NowUtc $VmState $Outcome -Stop:$Stop -OwnerDead:$OwnerDead -IdentityChanged:$IdentityChanged -ConnectivityLost:$ConnectivityLost
     $next = $plan.recovery
     try {
+    # Correlate evidence to the same input generation/operation, never to a new
+    # action. The core reducer above remains the sole authority for decisions.
+    if ($null -ne $Outcome -and $Recovery.operation -ceq 'probe' -and $Outcome.operation -ceq 'probe' -and $Outcome.generation -eq $Recovery.generation) {
+        Set-RunnerRecoveryDiagnostic $next 'probeCount' 1
+        if (-not $Outcome.success) { Set-RunnerRecoveryDiagnostic $next 'probeFailureCount' 1 }
+        $d = if ($Outcome.PSObject.Properties.Name -contains 'diagnostic') { $Outcome.diagnostic } else { $null }
+        $outcomeCode = if ($null -ne $d -and $d.PSObject.Properties.Name -contains 'outcome' -and $d.outcome -cin @('passed', 'timeout', 'child-exit', 'result-missing', 'result-invalid', 'probe-failed')) { $d.outcome } elseif ($null -eq $d) { if ($Outcome.success) { 'passed' } else { 'probe-failed' } } else { 'other' }
+        $workerCode = if ($null -ne $d -and $d.PSObject.Properties.Name -contains 'worker' -and $d.worker -cin @('', 'passed', 'listener-error', 'isolation-error', 'isolation-command-failed', 'isolation-open', 'github-error', 'github-command-failed', 'other')) { $d.worker } elseif ($null -eq $d) { '' } else { 'other' }
+        Set-RunnerRecoveryDiagnostic $next 'probeOutcome' $outcomeCode
+        Set-RunnerRecoveryDiagnostic $next 'probeWorker' $workerCode
+        if ($null -ne $d) {
+            $childExit = $null
+            if ($d.PSObject.Properties.Name -contains 'exitCode' -and $null -ne $d.exitCode) { try { $childExit = Get-RunnerProbeExitCode $d.exitCode } catch { } }
+            Set-RunnerRecoveryDiagnostic $next 'probeExitCode' $childExit
+            $exitStage = if ($d.PSObject.Properties.Name -notcontains 'exitStage') { '' } elseif ($d.exitStage -is [string] -and $d.exitStage -cin @('', 'common-import', 'instance-containment', 'instance-identity', 'instance-acl', 'acl-read-command-unavailable', 'acl-read-access-denied', 'acl-read-other', 'owner-read', 'owner-rejected', 'ace-enumeration', 'sid-translation', 'allow-rejected', 'result-precondition', 'result-publication', 'other')) { $d.exitStage } else { 'other' }
+            Set-RunnerRecoveryDiagnostic $next 'probeExitStage' $exitStage
+            foreach ($pair in @(@('elapsedMs', 'probeElapsedMs'), @('workerElapsedMs', 'probeWorkerElapsedMs'))) {
+                if ($d.PSObject.Properties.Name -contains $pair[0]) {
+                    try { $number = Get-RunnerRecoveryDiagnosticNumber $d.($pair[0]); Set-RunnerRecoveryDiagnostic $next $pair[1] $number } catch { }
+                }
+            }
+        } else {
+            Set-RunnerRecoveryDiagnostic $next 'probeExitCode' $null
+            Set-RunnerRecoveryDiagnostic $next 'probeExitStage' ''
+        }
+    }
     if ($Recovery.phase -ceq 'healthy' -and $next.episodeStartedUtc -and $next.episodeStartedUtc -cne $Recovery.episodeStartedUtc) {
         if ($next.PSObject.Properties.Name -notcontains 'diagnostics') { $next | Add-Member -NotePropertyName diagnostics -NotePropertyValue (New-RunnerRecoveryEpisodeDiagnostic) }
         else { $next.diagnostics = New-RunnerRecoveryEpisodeDiagnostic }
@@ -477,10 +538,12 @@ function Start-RunnerRecoveryProbe($State, $Config, [long] $Generation) {
         (Get-RunnerRecoveryExpiry $current.networkRecovery (Get-RunnerRecoveryNow)) -or
         (Test-RunnerSessionStopRequested $State)) { throw 'Recovery probe admission was cancelled.' }
     $probeId = [guid]::NewGuid().ToString('N')
-    $resultPath = Assert-OwnedPath (Join-Path $State.instancePath ("probe-$probeId.json"))
+    Assert-RunnerSessionTrustedPaths $State
+    $paths = Get-RunnerSessionPaths $State
+    $resultPath = Assert-OwnedPath (Join-Path $paths.probeRoot ("probe-$probeId.json"))
     $executable = Join-Path $PSHOME 'powershell.exe'
     $arguments = @('-NoProfile', '-NonInteractive', '-File', (Join-Path $PSScriptRoot 'Network.Recovery.Probe.ps1'),
-        '-InstancePath', $State.instancePath, '-ProbeId', $probeId, '-Generation', [string]$Generation)
+        '-InstancePath', $paths.instance, '-LayoutVersion', [string]$paths.layoutVersion, '-ProbeId', $probeId, '-Generation', [string]$Generation)
     # Fixed worker is assigned while suspended before it can spawn SSH. The sole
     # noninherited guardian Job handle owns its complete native descendant tree.
     $job = New-RunnerProbeProcess $executable (($arguments | ForEach-Object { ConvertTo-NativeArgument $_ }) -join ' ')
@@ -502,18 +565,53 @@ function Get-RunnerRecoveryProbeOutcome {
     $probe = $script:RunnerRecoveryProbe
     $current = Get-RunnerState
     if (-not (Test-RunnerRecoveryGeneration $current $probe.binding $probe.generation 'probe')) { Stop-RunnerRecoveryProbe; return $null }
-    $expired = ((Get-RunnerRecoveryNow) - [DateTime]::Parse($probe.startedUtc).ToUniversalTime()).TotalSeconds -ge 25
+    $elapsed = (Get-RunnerRecoveryNow) - [DateTime]::Parse($probe.startedUtc).ToUniversalTime()
+    $expired = $elapsed.TotalSeconds -ge 25
     if (-not $expired -and -not $probe.job.Completed) { return $null }
     $success = $false
-    if (-not $expired -and $probe.job.ExitCode -eq 0 -and (Test-Path -LiteralPath $probe.resultPath -PathType Leaf)) {
+    $outcomeCode = if ($expired) { 'timeout' } else { 'child-exit' }
+    $received = $null; $correlated = $false
+    $exitCode = $null; $exitStage = ''
+    if (-not $expired) {
+        $exitStage = 'other'
+        try {
+            $exitCode = Get-RunnerProbeExitCode $probe.job.ExitCode
+            $exitStage = switch ($exitCode) {
+                0 { '' }; 61 { 'common-import' }; 62 { 'instance-containment' }; 63 { 'instance-identity' }
+                64 { 'instance-acl' }; 65 { 'result-precondition' }; 66 { 'result-publication' }
+                67 { 'acl-read-command-unavailable' }; 68 { 'acl-read-access-denied' }; 69 { 'acl-read-other' }
+                70 { 'owner-read' }; 71 { 'owner-rejected' }; 72 { 'ace-enumeration' }; 73 { 'sid-translation' }; 74 { 'allow-rejected' }
+                default { 'other' }
+            }
+        } catch { $exitCode = $null }
+    }
+    if (-not $expired -and $null -ne $exitCode -and $exitCode -eq 0) {
+        $outcomeCode = 'result-missing'
+        if (Test-Path -LiteralPath $probe.resultPath -PathType Leaf) {
+        $outcomeCode = 'result-invalid'
         try {
             Assert-RunnerProtectedPath $probe.resultPath
             if ((Get-Item -LiteralPath $probe.resultPath).Length -gt 256) { throw 'Probe result exceeded protocol bound.' }
             $received = Read-RunnerJson $probe.resultPath
             $success = $received.generation -eq $probe.generation -and $received.probeId -ceq $probe.probeId -and $received.success -is [bool] -and $received.success -eq $true
+            $correlated = $received.generation -eq $probe.generation -and $received.probeId -ceq $probe.probeId -and $received.success -is [bool]
+            if ($correlated) { $outcomeCode = if ($success) { 'passed' } else { 'probe-failed' } }
         } catch { $success = $false }
+        }
     }
-    $outcome = [pscustomobject]@{ generation = $probe.generation; operation = 'probe'; success = $success }
+    $worker = ''; $workerElapsed = 0
+    if ($correlated -and $null -ne $received -and $received.PSObject.Properties.Name -contains 'detail') {
+        # Never copy worker dictionaries or errors into state; select fixed enums.
+        $worker = 'other'
+        try {
+            if ($received.detail.code -is [string] -and $received.detail.code -cin @('passed', 'listener-error', 'isolation-error', 'isolation-command-failed', 'isolation-open', 'github-error', 'github-command-failed')) {
+                $workerElapsed = Get-RunnerRecoveryDiagnosticNumber $received.detail.elapsedMs
+                $worker = $received.detail.code
+            }
+        } catch { $workerElapsed = 0; $worker = 'other' }
+    }
+    $elapsedMs = [long][Math]::Min(86400000, [Math]::Max(0, [Math]::Truncate($elapsed.TotalMilliseconds)))
+    $outcome = [pscustomobject]@{ generation = $probe.generation; operation = 'probe'; success = $success; diagnostic = [pscustomobject]@{ outcome = $outcomeCode; worker = $worker; elapsedMs = $elapsedMs; workerElapsedMs = $workerElapsed; exitCode = $exitCode; exitStage = $exitStage } }
     Stop-RunnerRecoveryProbe
     return $outcome
 }

@@ -2,6 +2,7 @@
 # atomic image files and protected-state transitions use the real implementation.
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
+. (Join-Path $PSScriptRoot 'Test.FileHash.ps1')
 . (Join-Path $PSScriptRoot 'Common.ps1')
 . (Join-Path $PSScriptRoot 'Network.Recovery.ps1')
 . (Join-Path $PSScriptRoot 'Test.Mutex.ps1')
@@ -21,6 +22,7 @@ function Assert-Rejected([scriptblock] $Work, [string] $Case) {
     $rejected = $false; try { & $Work } catch { $rejected = $true }
     if (-not $rejected) { throw "Prepared-image fixture accepted $Case." }
 }
+$script:missingMtuProof = $false
 $script:blocked = ''; $script:interrupt = ''; $script:attached = $false; $script:vms = @()
 $script:RunnerGuardOutcome = $null; $script:RunnerRecoveryProbe = $null
 $script:binding = [pscustomobject]@{ hash = ('A' * 64); recipeId = ('B' * 64); bundleHash = ('F' * 64) }
@@ -70,7 +72,7 @@ function Get-Acl([string] $LiteralPath) {
     return $acl
 }
 function Get-RunnerImageBinding { return $script:binding }
-function Get-CoherentInstalledRunnerBundle { return [pscustomobject]@{ fixture = $true } }
+function Get-CoherentInstalledRunnerBundle { return [pscustomobject]@{ fixture = $true; hash = ('F'*64) } }
 function Get-RunnerVmInventory { return $script:vms }
 $script:childParents = @{}
 function Get-VHD($Path) {
@@ -107,7 +109,7 @@ function New-FixtureVerification($Candidate) {
     $receipt = Read-RunnerJson $Candidate.receiptPath
     return [pscustomobject]@{ schema = 1; candidateId = $Candidate.id; diskHash = $receipt.diskHash; bindingHash = $receipt.bindingHash; recipeId = $receipt.recipeId; bundleHash = $receipt.bundleHash
         purpose = 'verify-image'; diskType = 'Differencing'; parentLease = 'read-only-same-handle'; parentIdentity = '00000001:0000000000000001'; markerProof = 'absent-then-written'; sessionSeconds = 1; cleanupVerified = $true; vmName = ('ITIR-' + [guid]::NewGuid().ToString('N')); vmId = [guid]::NewGuid().ToString(); guestMac = ('02' + [guid]::NewGuid().ToString('N').Substring(0,10).ToUpperInvariant())
-        sshPublicKeyHash = (([guid]::NewGuid().ToString('N') * 2).ToUpperInvariant()); networkFingerprint = ('a' * 64); readiness = 'cloud-init-and-runner-prerequisites'; readyUtc = [DateTime]::UtcNow.ToString('o'); readinessSeconds = 1 }
+        sshPublicKeyHash = (([guid]::NewGuid().ToString('N') * 2).ToUpperInvariant()); networkFingerprint = ('a' * 64); readiness = 'cloud-init-and-runner-prerequisites'; guestMtu = (Get-RunnerGuestMtu); readyUtc = [DateTime]::UtcNow.ToString('o'); readinessSeconds = 1 }
 }
 function Publish-FixtureImage($State, $Config, $Binding, $Guest) {
     $candidate = $null
@@ -121,16 +123,18 @@ function Publish-FixtureImage($State, $Config, $Binding, $Guest) {
         Close-RunnerImageLeases
         $proof = New-FixtureVerification $candidate
         $proof | Add-Member successiveChild (New-FixtureVerification $candidate)
+        if ($script:missingMtuProof) { $proof.successiveChild.PSObject.Properties.Remove('guestMtu') }
         Publish-RunnerPreparedImage $candidate $Config $proof
     } finally { if ($null -ne $candidate) { Remove-RunnerImageCandidate $candidate } }
 }
+$script:sealedFixtureStates = [Collections.Generic.List[object]]::new()
 function New-SealedState {
     $name = 'ITIR-' + [guid]::NewGuid().ToString('N')
     $instance = Join-Path (Join-Path $base 'instances') $name
-    [void][IO.Directory]::CreateDirectory($instance)
-    [IO.File]::WriteAllText((Join-Path $instance 'guest.vhdx'), ('scrubbed-' + $name))
+    [void][IO.Directory]::CreateDirectory((Join-Path $instance 'vm-data'))
+    [IO.File]::WriteAllText((Join-Path $instance 'vm-data\guest.vhdx'), ('scrubbed-' + $name))
     [IO.File]::WriteAllText((Join-Path $instance 'id_ed25519.pub'), ('builder-key-' + $name))
-    $state = [pscustomobject]@{ tag = $script:RunnerTag; vmName = $name; vmId = [guid]::NewGuid().ToString(); instancePath = $instance
+    $state = [pscustomobject]@{ layoutVersion = 2; tag = $script:RunnerTag; vmName = $name; vmId = [guid]::NewGuid().ToString(); instancePath = $instance
         purpose = 'prepare'; guestMac = '020000000001'; phase = 'sealed-off'; imageScrubProof = Get-RunnerJsonEvidence $script:guest
         deadlineUtc = [DateTime]::UtcNow.AddMinutes(2).ToString('o'); heartbeatUtc = [DateTime]::UtcNow.ToString('o') }
     Set-FixtureGuardian $state
@@ -138,6 +142,10 @@ function New-SealedState {
     $state | Add-Member imageSealBinding (Get-RunnerJsonEvidence ([ordered]@{ schema = 1; generation = $state.networkRecovery.generation
         bindingHash = $script:binding.hash; recipeId = $script:binding.recipeId; bundleHash = $script:binding.bundleHash; scrubProofHash = $state.imageScrubProof.hash }))
     Write-RunnerJson $script:RunnerStatePath $state
+    # Keep immutable cleanup identities for only this factory's disposable
+    # builder trees. Individual publication/race cases still reuse their bytes.
+    [void]$script:sealedFixtureStates.Add([pscustomobject]@{ tag=$state.tag; vmName=$state.vmName; vmId=$state.vmId
+        instancePath=$state.instancePath; layoutVersion=$state.layoutVersion; purpose='prepare'; phase='sealed-off' })
     return $state
 }
 function Set-FixtureGuardian($State) {
@@ -162,6 +170,7 @@ function Invoke-FixtureCandidateCopyCheckpoint {
         $job = Start-Job -ArgumentList $PSScriptRoot, $base, $lockName, $script:copyRace -ScriptBlock {
             param($source, $root, $lockName, $race)
             $ErrorActionPreference = 'Stop'
+. (Join-Path $source 'Test.FileHash.ps1')
             . (Join-Path $source 'Common.ps1')
             . (Join-Path $source 'Test.Mutex.ps1')
             $script:RunnerRoot = $root; $script:RunnerStatePath = Join-Path $root 'state.json'
@@ -196,7 +205,7 @@ try {
     # descriptor is never assigned to the newly inherited destination descriptor.
     $state = New-SealedState
     $copyFixture = Join-Path $base 'byte-copy-fixture'; [void][IO.Directory]::CreateDirectory($copyFixture)
-    $copySource = Join-Path $state.instancePath 'guest.vhdx'
+    $copySource = (Get-RunnerSessionPaths $state).guestDisk
     $copyDestination = Join-Path $copyFixture 'candidate.vhdx'
     $script:copyProbe = 'source-sharing'; $script:copyProbeSource = $copySource
     try { Copy-RunnerPreparedImageBytes $copySource $copyDestination $state } finally { $script:copyProbe = '' }
@@ -283,6 +292,23 @@ try {
     $legacyProof.PSObject.Properties.Remove('successiveChild')
     Assert-RunnerImageCloneProof $initial.receipt $legacyProof # Legacy proof remains valid for full-copy only.
     $verificationBytes = ConvertTo-Json -InputObject $initial.receipt.cloneVerification -Depth 8
+    # Legacy missing MTU remains readable, never usable as a current/fresh proof.
+    $withoutMtu = $verificationBytes | ConvertFrom-Json
+    $withoutMtu.PSObject.Properties.Remove('guestMtu')
+    $withoutMtu.successiveChild.PSObject.Properties.Remove('guestMtu')
+    Assert-RunnerImageCloneProof $initial.receipt $withoutMtu
+    Assert-Rejected { Assert-RunnerImageCloneProof $initial.receipt $withoutMtu -RequireGuestMtu } 'missing measured guest MTU'
+    $childWithoutMtu = $verificationBytes | ConvertFrom-Json
+    $childWithoutMtu.successiveChild.PSObject.Properties.Remove('guestMtu')
+    Assert-Rejected { Assert-RunnerImageCloneProof $initial.receipt $childWithoutMtu -RequireGuestMtu } 'successive child missing measured MTU'
+    foreach ($badMtu in @($null,1500,'1400',[long]1400,@(1400))) {
+        foreach ($child in @($false,$true)) {
+            $proof = $verificationBytes | ConvertFrom-Json
+            if ($child) { $proof.successiveChild.guestMtu=$badMtu } else { $proof.guestMtu=$badMtu }
+            Assert-Rejected { Assert-RunnerImageCloneProof $initial.receipt $proof } 'malformed MTU is invalid even for legacy readback'
+            Assert-Rejected { Assert-RunnerImageCloneProof $initial.receipt $proof -RequireGuestMtu } 'malformed MTU cannot qualify fresh proof'
+        }
+    }
     foreach ($bad in @('job-purpose', 'not-cleaned', 'wrong-candidate', 'wrong-bundle', 'builder-vm', 'builder-mac', 'builder-key', 'wrong-readiness')) {
         $proof = $verificationBytes | ConvertFrom-Json
         switch ($bad) {
@@ -324,6 +350,24 @@ try {
         Write-RunnerJson $initialSelectorPath $legacySelector
         $legacySelection = Get-RunnerImageSelection $config
         if (-not $legacySelection.prepared -or $legacySelection.differencing) { throw 'Legacy clone proof must select only the existing prepared full-copy path.' }
+        $legacyReceipt.cloneVerification=$withoutMtu
+        Write-RunnerJson $initialReceiptPath $legacyReceipt
+        $legacySelector.receiptHash=(Get-FileHash -LiteralPath $initialReceiptPath).Hash
+        Write-RunnerJson $initialSelectorPath $legacySelector
+        [void](Get-RunnerImageRecord)
+        Assert-Rejected { Get-RunnerImageSelection $config } 'current-binding legacy image has no measured MTU'
+        $legacyReceipt.bindingHash=('E'*64)
+        Write-RunnerJson $initialReceiptPath $legacyReceipt
+        $legacySelector.receiptHash=(Get-FileHash -LiteralPath $initialReceiptPath).Hash
+        Write-RunnerJson $initialSelectorPath $legacySelector
+        Assert-Rejected { Get-RunnerImageRecord } 'inconsistent stale receipt and clone binding cannot become a cache miss'
+        $legacyReceipt.cloneVerification.bindingHash=$legacyReceipt.bindingHash
+        $legacyReceipt.cloneVerification.successiveChild.bindingHash=$legacyReceipt.bindingHash
+        Write-RunnerJson $initialReceiptPath $legacyReceipt
+        $legacySelector.receiptHash=(Get-FileHash -LiteralPath $initialReceiptPath).Hash
+        Write-RunnerJson $initialSelectorPath $legacySelector
+        if ((Get-RunnerImageSelection $config).reason -cne 'stale-inputs') { throw 'Legacy stale inputs lost the generic fallback.' }
+        $legacyReceipt.bindingHash=$initial.receipt.bindingHash
         $legacyReceipt.PSObject.Properties.Remove('cloneVerification')
         Write-RunnerJson $initialReceiptPath $legacyReceipt
         $legacySelector = (ConvertTo-Json -InputObject $initial.selector) | ConvertFrom-Json
@@ -332,6 +376,9 @@ try {
         Assert-Rejected { Get-RunnerImageSelection $config } 'matching image with no clone verification cannot qualify'
     } finally { [IO.File]::WriteAllBytes($initialReceiptPath, $savedReceipt); [IO.File]::WriteAllBytes($initialSelectorPath, $savedSelector) }
     $initialSelectorHash = (Get-FileHash -LiteralPath (Join-Path $base 'prepared-image.json')).Hash
+    $script:missingMtuProof = $true
+    try { Assert-Rejected { Publish-FixtureImage (New-SealedState) $config $script:binding $script:guest } 'fresh publication missing successive MTU proof' } finally { $script:missingMtuProof = $false }
+    if ((Get-FileHash -LiteralPath (Join-Path $base 'prepared-image.json')).Hash -cne $initialSelectorHash) { throw 'Missing MTU publication changed image selection.' }
     # Recoverable interruption keeps old selection; selector is always the last commit.
     foreach ($point in @('image-copy', 'image-receipt')) {
         $state = New-SealedState; $script:interrupt = $point
@@ -365,7 +412,7 @@ try {
     Close-RunnerImageLeases # Model a supervisor restart before offline corruption.
     [IO.File]::AppendAllText($current.path, 'tamper')
     Assert-Rejected { Get-RunnerImageSelection $config } 'corrupt stale image cannot fall back'
-    [IO.File]::WriteAllText($current.path, [IO.File]::ReadAllText((Join-Path $state.instancePath 'guest.vhdx')))
+    [IO.File]::WriteAllText($current.path, [IO.File]::ReadAllText(((Get-RunnerSessionPaths $state).guestDisk)))
     $script:binding = [pscustomobject]@{ hash = ('A' * 64); recipeId = ('B' * 64); bundleHash = ('F' * 64) }
     $script:blocked = $current.path
     Assert-Rejected { Get-RunnerImageSelection $config } 'disk ACL mismatch'
@@ -405,6 +452,37 @@ try {
         }
     }
 
+    # Publication/reference/reparse assertions above deliberately reused sealed
+    # builder bytes. Retire those exact factory-owned trees before exercising
+    # fresh sessions, as the real session finally does after publication.
+    Write-Host 'PREPARED_TEST_BEGIN sealed-fixture-cleanup'
+    if ([IO.Path]::GetDirectoryName($base).TrimEnd('\') -ine [IO.Path]::GetTempPath().TrimEnd('\') -or
+        [IO.Path]::GetFileName($base) -cnotmatch '^ITIR-image-[0-9a-f]{32}$' -or
+        $script:sealedFixtureStates.Count -ne 11 -or $script:vms.Count -ne 0 -or @(Get-RunnerVmInventory).Count -ne 0) { throw 'Sealed fixture cleanup lacks its exact idle namespace.' }
+    $selectedBefore = Get-RunnerImageRecord
+    $selectionHashBefore = (Get-FileHash -LiteralPath $selectorPath).Hash
+    $selectedDiskHashBefore = (Get-FileHash -LiteralPath $selectedBefore.path).Hash
+    $recorded = Get-RunnerState
+    if ($null -ne $recorded) {
+        Assert-StateIdentity $recorded
+        if (@($script:sealedFixtureStates | Where-Object { $_.vmName -ceq $recorded.vmName -and $_.vmId -ceq $recorded.vmId -and $_.instancePath -ceq $recorded.instancePath }).Count -ne 1) { throw 'Sealed cleanup state was not created by its fixture factory.' }
+    }
+    foreach ($owned in $script:sealedFixtureStates) {
+        $ownedPaths = Get-RunnerSessionPaths $owned
+        if ([IO.Path]::GetDirectoryName($ownedPaths.instance) -ine (Join-Path $base 'instances') -or
+            $ownedPaths.instance -cne $owned.instancePath -or @(Get-RunnerVmInventory).Count -ne 0) { throw 'Sealed cleanup target or idle inventory changed.' }
+        Remove-RunnerInstance $owned
+        if (Test-Path -LiteralPath $ownedPaths.instance) { throw 'Canonical cleanup retained a factory-owned sealed tree.' }
+    }
+    $script:sealedFixtureStates.Clear()
+    if ($script:sealedFixtureStates.Count -ne 0 -or (Get-RunnerState) -or $script:vms.Count -ne 0 -or
+        @(Get-ChildItem -LiteralPath (Join-Path $base 'instances') -Directory).Count -ne 0 -or
+        (Get-RunnerImageRecord).selector.id -cne $selectedBefore.selector.id -or
+        (Get-FileHash -LiteralPath $selectorPath).Hash -cne $selectionHashBefore -or
+        (Get-FileHash -LiteralPath $selectedBefore.path).Hash -cne $selectedDiskHashBefore -or
+        @(Get-ChildItem -LiteralPath (Join-Path $base 'prepared-images')).Count -ne 4) { throw 'Sealed fixture retirement changed image selection or left session resources.' }
+    Write-Host 'PREPARED_TEST_END sealed-fixture-cleanup'
+
     # Actual preparation session runs creation/guard/readiness and cleanup while
     # all token, runner archive, GitHub and JIT paths are fatal fixture sentinels.
     if (Test-Path -LiteralPath $script:RunnerStatePath) { Remove-Item -LiteralPath $script:RunnerStatePath }
@@ -437,8 +515,10 @@ try {
     function Wait-Guest($State) {
         $script:readiness++
         if ($State.purpose -ceq 'verify-image') {
+            if ($script:verifyFailure -ceq 'mtu') { return 1500 }
+            if ($script:verifyFailure -ceq 'missing-mtu') { return }
             if ($script:verifyFailure -in @('cloud-init', 'docker')) { throw "Fixture $($script:verifyFailure) readiness refused." }
-            [IO.File]::AppendAllText((Join-Path $State.instancePath 'guest.vhdx'), 'booted-clone-marker')
+            [IO.File]::AppendAllText(((Get-RunnerSessionPaths $State).guestDisk), 'booted-clone-marker')
             if ($script:verifyFailure -ceq 'guardian') {
                 $fresh = Get-RunnerState
                 $fresh | Add-Member -NotePropertyName guardianReady -NotePropertyValue $true -Force
@@ -448,8 +528,13 @@ try {
             }
             if ($script:verifyFailure -ceq 'candidate-tamper') { [IO.File]::AppendAllText((Join-Path (Join-Path $base 'prepared-images') ($State.imageCandidate.id + '.vhdx')), 'unexpected-write') }
         }
+        return Get-RunnerGuestMtu
     }
     function New-RunnerSshKey([string] $Path) { [IO.File]::WriteAllText(($Path + '.pub'), ('key-' + [guid]::NewGuid().ToString('N'))) }
+    function New-RunnerKnownHosts([string] $Path) { [IO.File]::WriteAllText($Path, ''); return [pscustomobject]@{identity=[guid]::NewGuid().ToString('N')} }
+    function Assert-RunnerKnownHosts([string] $Path, $Evidence, [switch]$RequireContent) {
+        if (-not (Test-Path -LiteralPath $Path) -or $Evidence.identity -cnotmatch '^[a-f0-9]{32}$' -or -not $RequireContent) { throw 'Preparation fixture lost its per-session known-hosts binding.' }
+    }
     function New-SeedDisk($Path, $PublicKey, $Mac, $Config, $ProfileLabel, $Prepared) {
         if ($Prepared -ne ((Get-RunnerState).purpose -ceq 'verify-image') -or $PublicKey -cnotmatch '^key-[0-9a-f]{32}$') { throw 'Builder/verifier reused SSH key or selected the wrong seed path.' }
         [IO.File]::WriteAllText($Path, 'seed'); $script:keys += $PublicKey
@@ -475,7 +560,7 @@ try {
         }
         if ($Arguments[-1] -cmatch 'it-inventory-clone-probe') {
             if ($TimeoutSeconds -ne 15 -or $Arguments[-1] -cne 'sudo test ! -e /var/lib/it-inventory-clone-probe && sudo touch /var/lib/it-inventory-clone-probe && sudo test -f /var/lib/it-inventory-clone-probe') { throw 'Verifier marker command/bound changed.' }
-            $disk = Join-Path (Get-RunnerState).instancePath 'guest.vhdx'
+            $disk = (Get-RunnerSessionPaths (Get-RunnerState)).guestDisk
             if ([IO.File]::ReadAllText($disk).Contains('marker-written')) { return 1 }
             [IO.File]::AppendAllText($disk, 'marker-written')
             $script:markers++
@@ -485,6 +570,7 @@ try {
     $script:keys = @(); $script:forcedStops = 0; $script:guardians = 0; $script:readiness = 0; $script:isolation = 0; $script:natives = 0; $script:markers = 0; $script:buildFails = $false
     $script:copyRace = 'observe'
     foreach ($attempt in @(1, 2)) {
+        Write-Host "PREPARED_TEST_BEGIN prepare-verify-pair-$attempt"
         $candidate = Invoke-RunnerSession $config $null 'it-inventory-heavy' 'prepare'
         $verification = Invoke-RunnerSession $config $null 'it-inventory-heavy' 'verify-image' $candidate
         $verification | Add-Member -NotePropertyName cleanupVerified -NotePropertyValue $true
@@ -496,6 +582,8 @@ try {
         Publish-RunnerPreparedImage $candidate $config $verification
         Remove-RunnerImageCandidate $candidate
         if ((Get-RunnerState) -or $script:vms.Count -ne 0) { throw 'Builder/verifier session failed publication/owned cleanup.' }
+        if (@(Get-ChildItem -LiteralPath (Join-Path $base 'instances') -Directory).Count -ne 0) { throw 'Successful builder/verifier pair retained an instance tree.' }
+        Write-Host "PREPARED_TEST_END prepare-verify-pair-$attempt"
     }
     $script:copyRace = ''
     if ($script:keys.Count -ne 4 -or @($script:keys | Select-Object -Unique).Count -ne 4 -or $script:guardians -ne 4 -or
@@ -506,6 +594,9 @@ try {
     if ($null -eq $failureDetail -or $failureDetail.exitCode -ne 1 -or $failureDetail.stderr.Length -gt 4096 -or
         $failureDetail.stderr -match '[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]') { throw 'Credential-free builder failure lost bounded/control-cleaned native diagnostics.' }
     if ((Get-FileHash -LiteralPath $selectorPath).Hash -cne $before -or (Get-RunnerState) -or $script:vms.Count -gt 0) { throw 'Failed builder published or bypassed cleanup.' }
+    $retainedFailure=Read-RunnerJson (Join-Path $base 'preparation-image.json')
+    Assert-RunnerImageFailureArtifact $retainedFailure
+    if ($retainedFailure.exitCode -ne 1 -or $retainedFailure.bundleHash -cne ('F'*64) -or -not $retainedFailure.stderr.StartsWith('fixture prepare error')) { throw 'Builder evidence did not survive cleanup.' }
     $script:buildFails = $false
     function Get-RunnerConfig { return $config }
     function Get-RunnerMemoryAdmission { return [pscustomobject]@{ ready = $true } }
@@ -514,6 +605,7 @@ try {
     # Execute the actual owner core with both complete credential-free sessions.
     # A verifier boot writes its copy; only the original unbooted candidate wins.
     $config.activation = 'disabled'
+    Write-Host 'PREPARED_TEST_BEGIN owner-core-success'
     Invoke-RunnerPrepareImageCore
     $verifiedImage = Get-RunnerImageRecord
     if ([IO.File]::ReadAllText($verifiedImage.path) -match 'booted-clone-marker' -or
@@ -524,7 +616,10 @@ try {
         $verifiedImage.receipt.cloneVerification.successiveChild.markerProof -cne 'absent-then-written' -or
         $verifiedImage.receipt.cloneVerification.successiveChild.parentIdentity -cne $verifiedImage.receipt.cloneVerification.parentIdentity) { throw 'Prepared owner gate omitted successive child isolation under the same parent lease.' }
     $before = (Get-FileHash -LiteralPath $selectorPath).Hash
-    foreach ($failure in @('cloud-init', 'docker', 'guardian', 'guardian-after-ready', 'cleanup', 'candidate-tamper')) {
+    Write-Host 'PREPARED_TEST_END owner-core-success'
+    if ((Get-RunnerState) -or $script:vms.Count -ne 0 -or @(Get-ChildItem -LiteralPath (Join-Path $base 'instances') -Directory).Count -ne 0) { throw 'Successful owner preparation retained session resources.' }
+    foreach ($failure in @('cloud-init', 'docker', 'mtu', 'missing-mtu', 'guardian', 'guardian-after-ready', 'cleanup', 'candidate-tamper')) {
+        Write-Host "PREPARED_TEST_BEGIN clone-failure-$failure"
         $script:verifyFailure = $failure
         Assert-Rejected { Invoke-RunnerPrepareImageCore } "clone-$failure"
         if ((Get-FileHash -LiteralPath $selectorPath).Hash -cne $before -or -not (Test-Path (Join-Path $base 'stop.requested'))) { throw 'Failed clone changed selector or resumed pickup.' }
@@ -532,21 +627,28 @@ try {
             if (-not (Get-RunnerState) -or $script:vms.Count -ne 1) { throw 'Uncertain verifier removal did not retain canonical state/VM.' }
             $script:verifyFailure = ''; Remove-RunnerInstance (Get-RunnerState)
         } elseif ((Get-RunnerState) -or $script:vms.Count) { throw 'Verifier failure did not complete canonical cleanup.' }
+        # In the cleanup-failure case this runs only after the explicit recovery
+        # cleanup above; the retained-state/VM assertion remains authoritative.
+        if ((Get-RunnerState) -or $script:vms.Count -ne 0 -or @(Get-ChildItem -LiteralPath (Join-Path $base 'instances') -Directory).Count -ne 0) { throw 'Verifier failure/recovery cleanup retained an instance tree.' }
         $script:verifyFailure = ''
+        Write-Host "PREPARED_TEST_END clone-failure-$failure"
     }
     foreach ($point in @('image-builder-cleaned', 'image-clone-ready', 'image-clone-cleaned', 'image-successive-clone-cleaned', 'image-verified-receipt')) {
+        Write-Host "PREPARED_TEST_BEGIN clone-interrupt-$point"
         $script:interrupt = $point
         Assert-Rejected { Invoke-RunnerPrepareImageCore } "clone-interrupt-$point"
         $script:interrupt = ''
         if ((Get-FileHash -LiteralPath $selectorPath).Hash -cne $before -or (Get-RunnerState) -or $script:vms.Count -or
+            @(Get-ChildItem -LiteralPath (Join-Path $base 'instances') -Directory).Count -ne 0 -or
             @(Get-ChildItem -LiteralPath (Join-Path $base 'prepared-images')).Count -ne 4) { throw 'Interrupted clone gate selected/leaked a candidate or skipped cleanup.' }
+        Write-Host "PREPARED_TEST_END clone-interrupt-$point"
     }
     $script:RunnerPreparationAuthorized = $false
     Assert-Rejected { Invoke-RunnerSession $config $null 'it-inventory-heavy' 'prepare' } 'prepare outside explicit owner control'
     Assert-Rejected { Invoke-RunnerSession $config $null 'it-inventory-heavy' 'verify-image' $candidate } 'verifier outside explicit owner control'
     Assert-Rejected { Invoke-RunnerSession $config $null 'it-inventory-heavy' 'verify-image' } 'verifier without candidate'
     Assert-Rejected { Invoke-RunnerSession $config ([pscustomobject]@{ jobId = 1 }) 'it-inventory-heavy' 'verify-image' $candidate } 'verifier carrying pilot claim'
-    $verificationState = [pscustomobject]@{ tag = $script:RunnerTag; purpose = 'verify-image'; vmName = ('ITIR-' + ('a' * 32)); instancePath = (Join-Path $base ('ITIR-' + ('a' * 32)))
+    $verificationState = [pscustomobject]@{ layoutVersion = 2; tag = $script:RunnerTag; purpose = 'verify-image'; vmName = ('ITIR-' + ('a' * 32)); instancePath = (Join-Path (Join-Path $base 'instances') ('ITIR-' + ('a' * 32)))
         imageCandidate = [pscustomobject]@{ id = ('a' * 32); diskHash = ('A' * 64); bindingHash = ('B' * 64); recipeId = ('C' * 64) } }
     Assert-StateIdentity $verificationState
     $verificationState | Add-Member -NotePropertyName claimMode -NotePropertyValue 'active'
@@ -578,6 +680,7 @@ try {
         $script:resumes++; Remove-Item -LiteralPath (Join-Path $base 'stop.requested')
     }
     foreach ($mode in @('active', 'stopped', 'disabled', 'failed')) {
+        Write-Host "PREPARED_TEST_BEGIN owner-intent-$mode"
         $config.activation = if ($mode -ceq 'disabled') { 'disabled' } else { 'active' }
         $script:coreFails = $mode -ceq 'failed'
         if (Test-Path -LiteralPath (Join-Path $base 'stop.requested')) { Remove-Item -LiteralPath (Join-Path $base 'stop.requested') }
@@ -585,6 +688,7 @@ try {
         if ($script:coreFails) { Assert-Rejected { Invoke-RunnerPrepareImageCore } 'owner core interrupted build' }
         else { Invoke-RunnerPrepareImageCore }
         if ($script:RunnerPreparationAuthorized -ne $false -or ((Test-Path -LiteralPath (Join-Path $base 'stop.requested')) -ne ($mode -cne 'active'))) { throw 'Owner preparation did not preserve stop state or revoke preparation authority.' }
+        Write-Host "PREPARED_TEST_END owner-intent-$mode"
     }
     if ($script:resumes -ne 1) { throw 'Preparation auto-resumed stopped/inactive/failed pickup.' }
     Write-Host 'Prepared image passed: credential-free guarded builder plus fresh prepared clone gate; original unbooted selection; readiness/guardian/cleanup/hash failure and interruption refusal; proof/purpose/claim boundaries; old selector/Stop preservation; copy mutex races, corruption/ACL/reparse/offline/reference checks and original resume behavior.'

@@ -827,6 +827,7 @@ describe('stable required gate fails closed', () => {
   const full = {
     event: 'pull_request',
     ref: 'refs/pull/8/merge',
+    pullRequest: { draft: false, state: 'open' },
     probe: 'skipped',
     reuse: '',
     checkout: 'success',
@@ -858,6 +859,11 @@ describe('stable required gate fails closed', () => {
     ).not.toThrow();
   });
   it.each([
+    { pullRequest: { draft: true, state: 'open' } },
+    { pullRequest: undefined },
+    { pullRequest: { draft: 'false', state: 'open' } },
+    { pullRequest: { draft: false, state: 'closed' } },
+    { pullRequest: { draft: false } },
     { full: 'skipped' },
     { full: 'failure' },
     { checkout: 'failure' },

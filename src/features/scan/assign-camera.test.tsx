@@ -144,7 +144,13 @@ it('releases capture when sign-out fails and the route and scope props remain mo
     preview.srcObject = stream;
     return { stop: mocks.stop };
   });
-  mocks.signOut.mockResolvedValue({ ok: false, message: 'Sign-out failed.' });
+  // Teardown and stale-frame fencing must precede the network result.
+  let finishSignOut!: (result: { ok: false; message: string }) => void;
+  mocks.signOut.mockReturnValue(
+    new Promise((resolve) => {
+      finishSignOut = resolve;
+    }),
+  );
   const detected = vi.fn();
   render(
     <>
@@ -157,14 +163,30 @@ it('releases capture when sign-out fails and the route and scope props remain mo
   fireEvent.submit(
     screen.getByRole('button', { name: 'Sign out' }).closest('form')!,
   );
-  await screen.findByText('Sign-out failed.');
+  await waitFor(() => expect(mocks.signOut).toHaveBeenCalledOnce());
   expect(mocks.stop).toHaveBeenCalledOnce();
   expect(track.stop).toHaveBeenCalled();
   act(() =>
     mocks.decode.mock.calls[0][2]({ getText: () => 'private stale label' }),
   );
   expect(detected).not.toHaveBeenCalled();
-  expect(screen.getByRole('button', { name: 'Start camera' })).toBeDisabled();
+  expect(navigator.mediaDevices.getUserMedia).toHaveBeenCalledOnce();
+  await act(async () =>
+    finishSignOut({ ok: false, message: 'Sign-out failed.' }),
+  );
+  await screen.findByText('Sign-out failed.');
+  // The form's error commit does not establish the camera's render readiness.
+  await waitFor(() =>
+    expect(screen.getByRole('button', { name: 'Start camera' })).toBeDisabled(),
+  );
+  expect(mocks.stop).toHaveBeenCalledOnce();
+  expect(track.stop).toHaveBeenCalled();
+  act(() =>
+    mocks.decode.mock.calls[0][2]({
+      getText: () => 'stale after failed sign-out',
+    }),
+  );
+  expect(detected).not.toHaveBeenCalled();
   expect(navigator.mediaDevices.getUserMedia).toHaveBeenCalledOnce();
 });
 it.each(['invalidate', 'unmount'] as const)(

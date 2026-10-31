@@ -1653,6 +1653,15 @@ describe('file state and role fixtures', () => {
   });
   it('keeps cleanup secondary and reports inaccessible activity truthfully', async () => {
     show([], true);
+    // Card availability does not mean the independent history read has settled.
+    let finishHistory!: () => void;
+    const historyReady = new Promise<void>((resolve) => {
+      finishHistory = resolve;
+    });
+    mocks.browserRpc.mockImplementation(async (name: string, args: unknown) => {
+      if (name === 'inventory_file_history') await historyReady;
+      return mocks.operation(name, args);
+    });
     render(
       <FilesPanel
         actorId="actor-a"
@@ -1672,6 +1681,8 @@ describe('file state and role fixtures', () => {
     expect(
       screen.getByRole('button', { name: 'Check file cleanup' }),
     ).toBeVisible();
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    await act(async () => finishHistory());
     expect(await screen.findByRole('alert')).toHaveTextContent(
       'File activity could not be loaded',
     );

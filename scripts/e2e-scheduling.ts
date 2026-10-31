@@ -6,8 +6,14 @@
 // The pinned Playwright collector sorts files lexically and dispatches file groups
 // in that order. Start the long room journey first to avoid a lone late worker;
 // file-level sequencing and the existing two-worker ceiling remain unchanged.
+// Audit-four fixtures own their categories/records and use local session cleanup.
+// Native route geometry and skip-link fixtures use isolated page content only.
+// build-info remains exclusive: its compiled probe starts additional Next servers
+// against the shared build, outside the ordinary single-server browser lifecycle.
 export const parallelSpecs = [
   '00-room.spec.ts',
+  'audit-four-identifier-guidance.spec.ts',
+  'audit-four-vocabulary.spec.ts',
   'creation-recovery.spec.ts',
   'experience-completion.spec.ts',
   'experience-designer-acceptance.spec.ts',
@@ -19,8 +25,10 @@ export const parallelSpecs = [
   'metadata.spec.ts',
   'navigation-performance.spec.ts',
   'navigation-workflow.spec.ts',
+  'route-content-native.spec.ts',
   'scope-accessibility-forms.spec.ts',
   'scope-accessibility.spec.ts',
+  'skip-link.spec.ts',
   'telemetry.spec.ts',
 ] as const;
 

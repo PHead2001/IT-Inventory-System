@@ -2,7 +2,18 @@
 
 This is the durable acceptance index for the complete owner-authorized Audit 4.2 goal: 65 numbered requirements, with D303 split into two acceptance rows, plus C402–C404 and N01–N07 (76 rows, 75 distinct base IDs). All A and W requirements remain implementation scope, including U303, U313 and A307. This document tracks disposition and dependencies; recordings, logs and one-time measurements belong in the relevant PR or retained protected artifacts, following Playbook §7.4.
 
-## Current delivery snapshot — 2026-10-21
+## Current delivery snapshot — 2026-10-30
+
+This post-merge reconciliation uses verified `origin/main` `1f6fb65` and the retained PR heads/evidence below. It preserves the complete 76-row matrix and its historical, SHA-scoped acceptance; merging source does not by itself establish integrated staging, runtime or physical acceptance.
+
+- **Merged since the prior snapshot:** PR54 route-motion, PR55 identification, PR60 local ports, PR61 Next upgrade and PR63 CI optimizations are merged. Their merges do not close the remaining runtime, staging or physical proof.
+- **Open source/integration scopes:** PR56 `488cff7f` retains D303.2, A302/A303 and W13–W16 with source/runtime acceptance pending; PR57 `7be8d350` retains A301 and W20 with source/runtime acceptance pending; PR62 `b207eee4` retains D402 token-only acceptance and W12, with source/runtime acceptance pending. Existing candidate and scoped evidence remains limited to its recorded criteria.
+- **Remaining held source:** U303, U313, A305, A308, A403, A304, A309, W01–W07, W10–W11 and W17–W19 remain held for source reconciliation and their acceptance gates. Integrated/runtime proof also remains pending where called out in the matrix; no statuses or acceptance rows are added or removed here.
+- **A307 amendment:** no label printer is currently owned. The required implementation is configurable, hardware-neutral paper/browser output, with physical paper alignment and decoding still pending. The implementation must not wait for a printer choice and does not claim universal printer compatibility.
+
+The prior 2026-10-21 snapshot and all older evidence narratives are retained below as historical provenance, not refreshed acceptance.
+
+## Historical delivery snapshot — 2026-10-21
 
 This reconciliation uses retained acceptance evidence and locally reported source checkpoints; it does not rerun CI, fetch provider state or certify the current integrated application. Historical acceptance below remains bound to its named candidate, environment and tested scope. The older integration narratives remain provenance, not current release status.
 
