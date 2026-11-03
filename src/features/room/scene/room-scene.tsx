@@ -591,8 +591,9 @@ function NodeVisual({
   const interactive = !!node.locationCode && !!node.interaction?.selectable;
   const proxy = selectionEnabled ? roomSelectionBox(node) : null;
   const click = (event: ThreeEvent<MouseEvent>) => {
-    event.stopPropagation();
     const code = actualOwner(event);
+    if (!interactive || code !== node.locationCode) return;
+    event.stopPropagation();
     if (
       pointerOwner.click(
         code,
@@ -623,8 +624,10 @@ function NodeVisual({
           onPointerDown={
             selectionEnabled
               ? (event) => {
+                  const code = actualOwner(event);
+                  if (!interactive || code !== node.locationCode) return;
                   event.stopPropagation();
-                  pointerOwner.down(actualOwner(event), event.pointerId);
+                  pointerOwner.down(code, event.pointerId);
                 }
               : undefined
           }
