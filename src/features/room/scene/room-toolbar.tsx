@@ -458,10 +458,11 @@ export function RoomToolbar({
                 location browser works without the map.
               </p>
               <p>
-                Counts mark occupied visible locations. Focus or select a marker
-                for its products, units and individual assets at that leaf
-                location. Unknown counts are omitted. Hidden locations remain in
-                the location browser.
+                Counts mark occupied visible locations with read-only badges.
+                Select a location on the map or in the location browser to see
+                its distinct products, units and individual assets. Unknown
+                counts are omitted. Hidden locations remain in the location
+                browser.
               </p>
             </div>
           )}

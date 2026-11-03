@@ -83,6 +83,10 @@ type TransactionTiming = {
   source: 'runtime' | 'unavailable';
   elapsedMs?: number;
   solverElapsedMs?: number;
+  frameCount?: number;
+  continuationFrames?: number;
+  chargedElapsedMs?: number;
+  maxFrameElapsedMs?: number;
   stages: TimingStage[];
 };
 type TransactionSummary = {
@@ -261,6 +265,7 @@ function label(value: LabelRect): LabelRect {
   keys(value, [
     'id',
     'selected',
+    'presentation',
     'priority',
     'locationCode',
     'left',
@@ -284,6 +289,11 @@ function label(value: LabelRect): LabelRect {
     width: finite(value.width),
     height: finite(value.height),
   };
+  if (value.presentation !== undefined) {
+    if (value.presentation !== 'occupied-marker' || value.selected)
+      throw new Error('invalid-data');
+    result.presentation = value.presentation;
+  }
   if (value.locationCode !== undefined) {
     if (!codes.has(value.locationCode)) throw new Error('invalid-data');
     result.locationCode = value.locationCode;
@@ -543,7 +553,7 @@ export function createLabelLayoutDiagnostics(target?: Window) {
     const elapsedMs = finite(finite(at) - startedAt);
     if (
       elapsedMs < (timing.stages.at(-1)?.elapsedMs ?? 0) ||
-      timing.stages.length >= 40
+      timing.stages.length >= 48
     )
       throw Error('invalid-data');
     const event: TimingStage = { stage, elapsedMs };
@@ -597,6 +607,26 @@ export function createLabelLayoutDiagnostics(target?: Window) {
     return null;
   }
   return {
+    frame(start: number, end: number, continuationFrames: number) {
+      attempt(() => {
+        const elapsed = finite(end - start);
+        if (
+          elapsed < 0 ||
+          !Number.isSafeInteger(continuationFrames) ||
+          continuationFrames < 0 ||
+          continuationFrames > 4 ||
+          (timing.frameCount ?? 0) >= 5
+        )
+          throw Error('invalid-data');
+        timing.frameCount = (timing.frameCount ?? 0) + 1;
+        timing.continuationFrames = continuationFrames;
+        timing.chargedElapsedMs = (timing.chargedElapsedMs ?? 0) + elapsed;
+        timing.maxFrameElapsedMs = Math.max(
+          timing.maxFrameElapsedMs ?? 0,
+          elapsed,
+        );
+      }, false);
+    },
     begin(at?: number) {
       retainedActual = snapshot;
       transaction++;

@@ -1,10 +1,6 @@
 'use client';
-import {
-  createRoot,
-  events,
-  extend,
-  unmountComponentAtNode,
-} from '@react-three/fiber';
+import { createRoot, extend, unmountComponentAtNode } from '@react-three/fiber';
+import { roomCanvasEvents } from './canvas-events';
 import {
   Color,
   Group,
@@ -469,7 +465,7 @@ function CanvasRoot({
           await root.current
             .configure({
               ...latest.current.configuration,
-              events,
+              events: roomCanvasEvents,
               size: { width, height, top: 0, left: 0 },
               onCreated: (state) => {
                 // Drei Html portals into events.connected, so connect the host, never the canvas fallback subtree.

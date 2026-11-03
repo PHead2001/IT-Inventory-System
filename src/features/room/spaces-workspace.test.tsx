@@ -1728,7 +1728,16 @@ it('loads selected reveal counts with the optional overlay off and refreshes bot
   );
   expect(countsExplanation).toHaveAttribute('role', 'status');
   expect(countsExplanation).toBeVisible();
-  expect(countsExplanation).toHaveTextContent(/counts are a snapshot/);
+  expect(countsExplanation).toHaveTextContent(
+    'Badges mark occupied locations.',
+  );
+  expect(countsExplanation).toHaveTextContent(
+    'Select a location on the map or in the location browser to see its distinct products, units and individual assets.',
+  );
+  expect(countsExplanation).toHaveTextContent(
+    'Hidden locations remain in the browser; counts are a snapshot.',
+  );
+  expect(countsExplanation).not.toHaveTextContent(/Focus or select a marker/i);
   await user.click(screen.getByRole('button', { name: 'Refresh inventory' }));
   await waitFor(() => expect(fetcher.mock.calls.length).toBe(before + 4));
   await user.click(screen.getByRole('button', { name: 'Toggle item counts' }));
