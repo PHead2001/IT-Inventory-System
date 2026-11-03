@@ -1011,3 +1011,122 @@ test('A303 cold compact scene chunk preserves the normal phone preview and downs
     await page.unroute(pattern);
   }
 });
+
+for (const reducedMotion of ['no-preference', 'reduce'] as const) {
+  test(
+    '390px map location browser preserves readable long identities (' +
+      reducedMotion +
+      ')',
+    async ({ page }, testInfo) => {
+      test.setTimeout(120_000);
+      await page.setViewportSize({ width: 390, height: 844 });
+      await page.emulateMedia({ reducedMotion });
+      const owned = await acceptanceFixtures();
+      try {
+        const item = await owned.quantity(
+          'Long location picker ' + owned.suffix,
+          await owned.location('ITC-S1A'),
+          2,
+        );
+        const unmodeled = await owned.ownedLocation(
+          'Fictional test fixture - ITIA42-PR56-FIXTURE-NOV2 unmodeled location',
+        );
+        await acceptanceLogin(page);
+        await page.goto('/inventory/quantity/' + item);
+        const form = await receiveForm(page);
+        await chooseLocation(form, 'Receive at', 'ITC-S1A');
+        await form.getByRole('button', { name: 'Pick on map' }).click();
+        const dialog = page.getByRole('dialog', {
+          name: 'Pick a storage location',
+        });
+        await sceneReady(dialog);
+        const browser = dialog.getByRole('combobox', {
+          name: 'Choose location in browser',
+          exact: true,
+        });
+        const checkRow = async (
+          row: Locator,
+          capture: string,
+          insideList = true,
+        ) => {
+          await row.scrollIntoViewIfNeeded();
+          await expect(row).toBeVisible();
+          const measured = await row.evaluate(
+            (element, identity) => {
+              const spans = [...element.querySelectorAll('span')];
+              const name = spans
+                .toReversed()
+                .find((span) =>
+                  span.textContent?.trim().startsWith(identity.name),
+                );
+              const code = spans.find(
+                (span) => span.textContent?.trim() === identity.code,
+              );
+              if (!name || !code)
+                throw new Error('Location identity is missing');
+              const rowRect = element.getBoundingClientRect();
+              const nameRect = name.getBoundingClientRect();
+              const codeRect = code.getBoundingClientRect();
+              const list = element.closest<HTMLElement>(
+                '[role="tree"], [role="listbox"]',
+              );
+              return {
+                nameWidth: nameRect.width,
+                rowWidth: rowRect.width,
+                nameLines:
+                  nameRect.height /
+                  Number.parseFloat(getComputedStyle(name).lineHeight),
+                codeBelowName: codeRect.top >= nameRect.bottom - 1,
+                codeContained:
+                  codeRect.left >= rowRect.left - 1 &&
+                  codeRect.right <= rowRect.right + 1,
+                rowFits: element.scrollWidth <= element.clientWidth + 1,
+                hasList: !!list,
+                listFits: !list || list.scrollWidth <= list.clientWidth + 1,
+              };
+            },
+            { name: unmodeled.name, code: unmodeled.code },
+          );
+          expect(measured.nameWidth).toBeGreaterThanOrEqual(
+            measured.rowWidth * 0.6,
+          );
+          expect(measured.nameLines).toBeLessThanOrEqual(4);
+          expect(measured.codeBelowName).toBe(true);
+          expect(measured.codeContained).toBe(true);
+          expect(measured.rowFits).toBe(true);
+          expect(measured.hasList).toBe(insideList);
+          expect(measured.listFits).toBe(true);
+          await expect(row).toContainText(unmodeled.name);
+          await expect(row).toContainText(unmodeled.code);
+          await row.screenshot({ path: testInfo.outputPath(capture) });
+        };
+        await browser.click();
+        const search = dialog.getByRole('combobox', {
+          name: 'Search locations',
+        });
+        await search.fill(unmodeled.code);
+        const option = dialog
+          .getByRole('option')
+          .filter({ hasText: unmodeled.code });
+        await checkRow(option, 'long-location-search-390.png');
+        await option.click();
+        await expect(browser).toContainText(unmodeled.code);
+        await checkRow(browser, 'long-location-trigger-390.png', false);
+        await browser.click();
+        const treeRow = dialog
+          .getByRole('treeitem')
+          .filter({ hasText: unmodeled.code });
+        await checkRow(treeRow, 'long-location-tree-390.png');
+        await treeRow.press('Escape');
+        await dialog
+          .getByRole('button', { name: 'Cancel', exact: true })
+          .click();
+        await expect(
+          form.getByRole('combobox', { name: 'Receive at', exact: true }),
+        ).toContainText('ITC-S1A');
+      } finally {
+        await owned.cleanup();
+      }
+    },
+  );
+}

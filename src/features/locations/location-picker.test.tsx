@@ -112,6 +112,50 @@ const leftDrawer: LocationRef = {
 };
 
 describe('LocationPicker', () => {
+  it.each(['tree', 'search'] as const)(
+    'keeps the complete long location identity selectable in the %s',
+    async (view) => {
+      const user = userEvent.setup();
+      const changed = vi.fn();
+      const longLocation: LocationRef = {
+        ...drawer,
+        id: 'long-unmodeled',
+        code: 'ITIA42-PR56-FIXTURE-NOV2-UNMODELED',
+        name: 'Fictional test fixture - ITIA42-PR56-FIXTURE-NOV2 unmodeled location',
+        breadcrumb:
+          'IT Closet / Fictional test fixture - ITIA42-PR56-FIXTURE-NOV2 unmodeled location',
+      };
+      render(
+        <LocationPicker
+          mode="destination"
+          label="Destination"
+          locations={[root, longLocation]}
+          onValueChange={changed}
+        />,
+      );
+      await user.click(screen.getByLabelText('Destination'));
+      if (view === 'search')
+        await user.type(
+          screen.getByRole('combobox', { name: 'Search locations' }),
+          longLocation.code,
+        );
+      const row = screen.getByRole(view === 'tree' ? 'treeitem' : 'option', {
+        name: new RegExp(longLocation.code),
+      });
+      expect(row).toHaveTextContent(longLocation.name);
+      expect(row).toHaveTextContent(longLocation.code);
+      if (view === 'tree') expect(row).toHaveAttribute('aria-level', '2');
+      else expect(row).toHaveTextContent(longLocation.breadcrumb);
+      await user.click(row);
+      expect(changed).toHaveBeenCalledExactlyOnceWith(longLocation.id);
+      const trigger = screen.getByRole('combobox', {
+        name: 'Destination',
+      });
+      expect(trigger).toHaveAttribute('aria-expanded', 'false');
+      expect(trigger).toHaveTextContent(longLocation.name);
+      expect(trigger).toHaveTextContent(longLocation.code);
+    },
+  );
   it.each([false, true])(
     'expands the first open with a deferred updater (replayed: %s) and preserves manual collapse',
     async (replay) => {
