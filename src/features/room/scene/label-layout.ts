@@ -1,6 +1,8 @@
 export type LabelRect = {
   id: string;
   selected: boolean;
+  /** Explicit readonly occupied badge; never an interactive action footprint. */
+  presentation?: 'occupied-marker';
   priority?: number;
   locationCode?: string;
   left: number;
@@ -177,8 +179,14 @@ function sharedCompactLayout(
       !size ||
       !Number.isFinite(size.width) ||
       !Number.isFinite(size.height) ||
-      size.width < 44 ||
-      size.height < 44 ||
+      size.width <
+        (label.presentation === 'occupied-marker' && !label.selected
+          ? 24
+          : 44) ||
+      size.height <
+        (label.presentation === 'occupied-marker' && !label.selected
+          ? 24
+          : 44) ||
       (label.previous &&
         (!Number.isFinite(label.previous.dx) ||
           !Number.isFinite(label.previous.dy)))

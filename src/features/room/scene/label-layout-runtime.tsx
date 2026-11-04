@@ -7,12 +7,14 @@ import {
   type LabelPackingBudget,
   type LabelRect,
   type LabelArea,
+  type LabelPlacement,
 } from './label-layout';
 import { createLabelLayoutDiagnostics } from './label-layout-diagnostics';
 
 export type LabelOptions = {
   priority: number;
   locationCode?: string;
+  presentation?: 'occupied-marker';
   interactive?: boolean;
   mandatory?: boolean;
   compact?: boolean;
@@ -27,6 +29,12 @@ export type LabelOptions = {
 // up to 3/65536px. This comparison-only bound is 128 times smaller than a
 // 1/64px layout unit; actual packing still uses the unrounded measured sizes.
 const DIMENSION_NOISE = 1 / 8192;
+const MAX_VALIDATION_CONTINUATIONS = 4;
+type GeometryIdentity = {
+  camera: object;
+  projection: readonly number[];
+  world: readonly number[];
+};
 
 type Entry = {
   element: HTMLElement;
@@ -62,6 +70,9 @@ export function createRoomLabelRegistry(
   let observer: ResizeObserver | null = null;
   let overlays: MutationObserver | null = null;
   let pending: number | null = null;
+  let continuation: (() => void) | null = null;
+  let identityRevision = 0;
+  let geometryIdentity: (() => GeometryIdentity) | undefined;
   let invalidateGeometry: (() => void) | undefined;
   let lastSuppressed = -1;
   let lastMissing = '';
@@ -86,28 +97,48 @@ export function createRoomLabelRegistry(
     if (focused instanceof HTMLElement && element.contains(focused))
       focused.blur();
   };
+  const setFocusability = (entry: Entry, visible = false) => {
+    if (entry.options.presentation === 'occupied-marker')
+      entry.element.removeAttribute('tabindex');
+    else
+      entry.element.tabIndex =
+        visible && entry.options.interactive !== false ? 0 : -1;
+  };
   const hideEntry = (entry: Entry) => {
     releaseFocus(entry.element);
     entry.element.dataset.roomExposed = 'false';
     entry.element.dataset.labelSuppressed = 'true';
     entry.element.style.visibility = 'hidden';
     entry.element.style.pointerEvents = 'none';
-    entry.element.tabIndex = -1;
+    setFocusability(entry);
     entry.element.setAttribute('aria-hidden', 'true');
     entry.leader.style.display = 'none';
     entry.placed = false;
   };
   const place = () => {
     pending = null;
+    if (continuation) {
+      const resume = continuation;
+      continuation = null;
+      resume();
+      return;
+    }
     const startedAt = clock();
-    const deadline = startedAt + limits.maxMilliseconds;
+    let deadline = startedAt + limits.maxMilliseconds;
+    let frameStartedAt = startedAt;
+    let continuationCount = 0;
+    let hiddenForValidation = false;
+    const originalCanvas = canvas;
+    const originalRevision = identityRevision;
     diagnostics?.begin(startedAt);
     diagnostics?.mark('initial-measurement-start', startedAt);
     const remaining = { ...limits };
     let measurementExhausted = false;
+    let timeExhausted = false;
     const charge = () => {
       remaining.maxOperations -= 1;
-      if (remaining.maxOperations < 0 || clock() >= deadline)
+      if (clock() >= deadline) timeExhausted = true;
+      if (remaining.maxOperations < 0 || timeExhausted)
         measurementExhausted = true;
       return !measurementExhausted;
     };
@@ -126,7 +157,10 @@ export function createRoomLabelRegistry(
       const codes: string[] = [];
       for (const entry of entries.values()) {
         hideEntry(entry);
-        if (entry.options.interactive !== false && entry.options.locationCode)
+        if (
+          (entry.options.interactive !== false || entry.options.mandatory) &&
+          entry.options.locationCode
+        )
           codes.push(entry.options.locationCode);
       }
       reportIssue(codes);
@@ -138,7 +172,9 @@ export function createRoomLabelRegistry(
       diagnostics?.abort('unmeasured-viewport', clock());
       return;
     }
+    const measuredBounds = new Map<string, LabelArea>();
     const measure = () => {
+      measuredBounds.clear();
       const labels: LabelRect[] = [];
       for (const [id, entry] of entries) {
         if (!charge()) break;
@@ -152,20 +188,26 @@ export function createRoomLabelRegistry(
           entry.element.dataset.labelSuppressed = 'true';
           entry.element.style.visibility = 'hidden';
           entry.element.style.pointerEvents = 'none';
-          entry.element.tabIndex = -1;
+          setFocusability(entry);
           entry.element.setAttribute('aria-hidden', 'true');
           entry.leader.style.display = 'none';
           entry.placed = false;
           continue;
         }
         const rect = entry.element.getBoundingClientRect();
-        charge();
+        measuredBounds.set(id, {
+          left: rect.left,
+          top: rect.top,
+          right: rect.right,
+          bottom: rect.bottom,
+        });
+        if (!charge()) break;
         entry.element.dataset.roomExposed = 'true';
         const full = entry.element.querySelector<HTMLElement>(
           '[data-room-label-full]',
         );
         const fullRect = full?.getBoundingClientRect();
-        charge();
+        if (!charge()) break;
         const pointer = entry.options.pointer?.();
         const hovered = entry.options.inspection === 'hover';
         const witnessedPointer =
@@ -195,6 +237,7 @@ export function createRoomLabelRegistry(
           selected: entry.options.priority >= 4,
           priority: entry.options.priority,
           locationCode: entry.options.locationCode,
+          presentation: entry.options.presentation,
           left: rect.left - entry.dx,
           top: rect.top - entry.dy,
           width: fullRect?.width
@@ -214,7 +257,9 @@ export function createRoomLabelRegistry(
           pointer: witnessedPointer,
           holdCompact: entry.yielded && hovered,
           compact: entry.options.compact
-            ? { width: 44, height: 44 }
+            ? entry.options.presentation === 'occupied-marker'
+              ? { width: rect.width, height: rect.height }
+              : { width: 44, height: 44 }
             : undefined,
           previous: entry.placed
             ? { dx: entry.dx, dy: entry.dy, compact: entry.compact }
@@ -223,45 +268,78 @@ export function createRoomLabelRegistry(
       }
       return labels;
     };
-    const reserved: LabelArea[] = Array.from(
-      host
+    const readReserved = () => {
+      const result: LabelArea[] = [];
+      for (const element of host
         .closest('[data-room-surface]')
-        ?.querySelectorAll<HTMLElement>('[data-room-obstruction]') ?? [],
-    )
-      .filter((element) => element.getClientRects().length > 0)
-      .map((element) => {
-        charge();
-        return element.getBoundingClientRect();
-      });
-    // Collect every currently exposed physical anchor before logical-action
-    // deduplication. A tooltip winning the label slot must not cover its mesh.
-    // These masks belong only to DOM packing, never the visibility resolver.
-    for (const entry of entries.values()) {
-      if (!entry.options.pickReservation) continue;
-      if (!charge()) break;
+        ?.querySelectorAll<HTMLElement>('[data-room-obstruction]') ?? []) {
+        if (!charge()) break;
+        if (element.getClientRects().length > 0)
+          result.push(element.getBoundingClientRect());
+      }
+      // Physical reservations remain packing masks, never visibility geometry.
+      for (const entry of entries.values()) {
+        if (!entry.options.pickReservation) continue;
+        if (!charge()) break;
+        if (
+          !sceneLabelVisible(entry.element, host) ||
+          entry.options.isVisible?.() === false
+        )
+          continue;
+        const area = entry.options.pickReservation();
+        if (
+          area &&
+          [area.left, area.top, area.right, area.bottom].every(
+            Number.isFinite,
+          ) &&
+          area.left < area.right &&
+          area.top < area.bottom &&
+          area.right > viewport.left &&
+          area.left < viewport.right &&
+          area.bottom > viewport.top &&
+          area.top < viewport.bottom
+        )
+          result.push({
+            left: area.left,
+            top: area.top,
+            right: area.right,
+            bottom: area.bottom,
+          });
+      }
+      return result;
+    };
+    const reserved = readReserved();
+    const cameraIdentity = geometryIdentity?.();
+    const sameGeometry = () => {
       if (
-        !sceneLabelVisible(entry.element, host) ||
-        entry.options.isVisible?.() === false
+        canvas !== originalCanvas ||
+        identityRevision !== originalRevision ||
+        !charge()
       )
-        continue;
-      const area = entry.options.pickReservation();
-      if (
-        area &&
-        [area.left, area.top, area.right, area.bottom].every(Number.isFinite) &&
-        area.left < area.right &&
-        area.top < area.bottom &&
-        area.right > viewport.left &&
-        area.left < viewport.right &&
-        area.bottom > viewport.top &&
-        area.top < viewport.bottom
-      )
-        reserved.push({
-          left: area.left,
-          top: area.top,
-          right: area.right,
-          bottom: area.bottom,
-        });
-    }
+        return false;
+      const current = canvas?.getBoundingClientRect();
+      const camera = geometryIdentity?.();
+      return (
+        !!current &&
+        ['left', 'top', 'right', 'bottom', 'width', 'height'].every(
+          (key) =>
+            current[key as keyof DOMRect] === viewport[key as keyof DOMRect],
+        ) &&
+        (cameraIdentity
+          ? !!camera &&
+            camera.camera === cameraIdentity.camera &&
+            camera.projection.length === cameraIdentity.projection.length &&
+            camera.world.length === cameraIdentity.world.length &&
+            camera.projection.every(
+              (value, index) => value === cameraIdentity.projection[index],
+            ) &&
+            camera.world.every(
+              (value, index) => value === cameraIdentity.world[index],
+            )
+          : !camera) &&
+        JSON.stringify(readReserved()) === JSON.stringify(reserved)
+      );
+    };
     const measuredKey = (labels: LabelRect[]) =>
       JSON.stringify([
         {
@@ -278,26 +356,30 @@ export function createRoomLabelRegistry(
         })),
         labels.map((label) => ({ ...label, previous: undefined })),
       ]);
-    const hideUnverified = (message: string, labels: LabelRect[]) => {
+    const hideUnverified = (
+      message: string,
+      labels: LabelRect[],
+      cache = true,
+    ) => {
       const codes: string[] = [];
       for (const entry of entries.values()) {
         const { element, leader } = entry;
         releaseFocus(element);
         element.style.visibility = 'hidden';
         element.style.pointerEvents = 'none';
-        element.tabIndex = -1;
+        setFocusability(entry);
         element.setAttribute('aria-hidden', 'true');
         element.dataset.labelSuppressed = 'true';
         leader.style.display = 'none';
         entry.placed = false;
         if (
           entry.options.locationCode &&
-          entry.options.interactive !== false &&
+          (entry.options.interactive !== false || entry.options.mandatory) &&
           entry.options.isVisible?.() !== false
         )
           codes.push(entry.options.locationCode);
       }
-      failedMeasurement = measuredKey(labels);
+      failedMeasurement = cache ? measuredKey(labels) : '';
       reportIssue(codes);
       if (canvas) {
         canvas.dataset.labelLayoutError = message;
@@ -309,7 +391,8 @@ export function createRoomLabelRegistry(
     const missing: string[] = [];
     let summary: string | null = null;
     let focusedSummary = false;
-    let settled = false;
+    let cacheableOutcome = true;
+    let finalPlacements: LabelPlacement[] = [];
     let finalLabels: LabelRect[] = [];
     let finalStatus: 'complete' | 'candidate-infeasible' | 'budget-exhausted' =
       'complete';
@@ -320,7 +403,11 @@ export function createRoomLabelRegistry(
     const initialLabels = measure();
     diagnostics?.mark('initial-measurement-end', clock());
     if (measurementExhausted) {
-      hideUnverified('Label measurement work budget exhausted', initialLabels);
+      hideUnverified(
+        'Label measurement work budget exhausted',
+        initialLabels,
+        !timeExhausted,
+      );
       diagnostics?.abort('measurement-budget', clock());
       return;
     }
@@ -329,7 +416,33 @@ export function createRoomLabelRegistry(
       diagnostics?.cachedSuppression(clock());
       return;
     }
-    for (let pass = 0; pass < 4; pass++) {
+    const finish = () => {
+      if (canvas) canvas.dataset.labelLayoutStatus = finalStatus;
+      if (finalStatus === 'complete') {
+        failedMeasurement = '';
+        reportIssue([]);
+      } else {
+        failedMeasurement = cacheableOutcome ? measuredKey(finalLabels) : '';
+
+        reportIssue(missing);
+      }
+      if (lastSummary !== summary) {
+        lastSummary = summary;
+        onReadSummaryChange?.(summary);
+      }
+      if (suppressed !== lastSuppressed || missing.join('|') !== lastMissing) {
+        lastSuppressed = suppressed;
+        lastMissing = missing.join('|');
+        onSuppressionChange(suppressed, missing);
+      }
+      if (canvas) {
+        delete canvas.dataset.labelLayoutError;
+        canvas.dataset.labelLayoutRevision = String(++revision);
+        canvas.dataset.labelLayoutPending = 'false';
+      }
+      diagnostics?.finish(true, clock(), finalStatus);
+    };
+    const runPass = (pass: number) => {
       if (pass > 0)
         diagnostics?.mark('pass-measurement-start', clock(), pass + 1);
       const labels = pass === 0 ? initialLabels : measure();
@@ -337,7 +450,11 @@ export function createRoomLabelRegistry(
         diagnostics?.mark('pass-measurement-end', clock(), pass + 1);
       finalLabels = labels;
       if (measurementExhausted) {
-        hideUnverified('Label measurement work budget exhausted', labels);
+        hideUnverified(
+          'Label measurement work budget exhausted',
+          labels,
+          !timeExhausted,
+        );
         diagnostics?.abort('measurement-budget', clock());
         return;
       }
@@ -369,20 +486,42 @@ export function createRoomLabelRegistry(
       const placements = outcome.placements;
       diagnostics?.solver(outcome);
       finalStatus = outcome.status;
+      cacheableOutcome = outcome.stats.exhaustion?.reason !== 'time';
+      finalPlacements = placements;
       remaining.maxOperations -= outcome.stats.operations;
       remaining.maxCandidates -= outcome.stats.candidates;
       remaining.maxNodes -= outcome.stats.nodes;
       // An oversized request returns no partial placements. No old action may
       // remain exposed as if it had been checked against this measured view.
       if (placements.length !== labels.length) {
-        hideUnverified('Label placement work budget exhausted', labels);
+        hideUnverified(
+          'Label placement work budget exhausted',
+          labels,
+          cacheableOutcome,
+        );
         diagnostics?.abort('placement-budget', clock());
         return;
       }
       diagnostics?.output(placements);
       diagnostics?.mark('dom-application-start', clock(), pass + 1);
+      const representedCodes = new Set(
+        placements
+          .filter((result) => result.visible)
+          .map(
+            (result) =>
+              labels.find((label) => label.id === result.id)?.locationCode,
+          ),
+      );
       for (const result of placements) {
-        charge();
+        if (!charge()) {
+          hideUnverified(
+            'Label application work budget exhausted',
+            labels,
+            !timeExhausted,
+          );
+          diagnostics?.abort('measurement-budget', clock());
+          return;
+        }
         const entry = entries.get(result.id);
         if (!entry) continue;
         const { element, leader, options } = entry;
@@ -427,12 +566,15 @@ export function createRoomLabelRegistry(
         element.style.visibility = result.visible ? 'visible' : 'hidden';
         element.style.pointerEvents =
           result.visible && options.interactive !== false ? 'auto' : 'none';
-        element.tabIndex =
-          result.visible && options.interactive !== false ? 0 : -1;
+        setFocusability(entry, result.visible);
         if (result.visible) element.removeAttribute('aria-hidden');
         else {
           suppressed += 1;
-          if (options.mandatory && options.locationCode)
+          if (
+            options.mandatory &&
+            options.locationCode &&
+            !representedCodes.has(options.locationCode)
+          )
             missing.push(options.locationCode);
           element.setAttribute('aria-hidden', 'true');
         }
@@ -445,61 +587,178 @@ export function createRoomLabelRegistry(
         }
       }
       diagnostics?.mark('dom-application-end', clock(), pass + 1);
-      // Force a final real measurement even when the chosen CSS variant stayed
-      // unchanged. A subsequent size-dependent pass is required after a change.
-      diagnostics?.mark('remeasurement-start', clock(), pass + 1);
-      const after = measure();
-      diagnostics?.mark('remeasurement-end', clock(), pass + 1);
-      finalLabels = after;
-      if (measurementExhausted) break;
-      const dimensionsStable =
-        labels.length === after.length &&
-        labels.every(
-          (label, index) =>
-            Math.abs(label.width - after[index].width) <= DIMENSION_NOISE &&
-            Math.abs(label.height - after[index].height) <= DIMENSION_NOISE,
-        );
-      if (!variantChanged && dimensionsStable) {
-        settled = true;
-        break;
-      }
-    }
-    if (!settled) {
-      hideUnverified(
-        measurementExhausted
-          ? 'Label remeasurement work budget exhausted'
-          : 'Unstable label dimensions after four placement passes',
-        finalLabels,
-      );
-      diagnostics?.abort(
-        measurementExhausted ? 'measurement-budget' : 'unstable-dimensions',
-        clock(),
-      );
-      return;
-    }
-    if (canvas) canvas.dataset.labelLayoutStatus = finalStatus;
-    if (finalStatus === 'complete') {
-      failedMeasurement = '';
-      reportIssue([]);
-    } else {
-      failedMeasurement = measuredKey(finalLabels);
-      reportIssue(missing);
-    }
-    if (lastSummary !== summary) {
-      lastSummary = summary;
-      onReadSummaryChange?.(summary);
-    }
-    if (suppressed !== lastSuppressed || missing.join('|') !== lastMissing) {
-      lastSuppressed = suppressed;
-      lastMissing = missing.join('|');
-      onSuppressionChange(suppressed, missing);
-    }
-    if (canvas) {
-      delete canvas.dataset.labelLayoutError;
-      canvas.dataset.labelLayoutRevision = String(++revision);
-      canvas.dataset.labelLayoutPending = 'false';
-    }
-    diagnostics?.finish(true, clock(), finalStatus);
+      const validate = () => {
+        diagnostics?.mark('remeasurement-start', clock(), pass + 1);
+        // Every attempt is one whole authoritative DOM snapshot in this frame.
+        // A partial attempt is discarded; it is never combined across frames.
+        const beforeMatches = hiddenForValidation ? sameGeometry() : true;
+        if (!beforeMatches && !measurementExhausted) {
+          continuation = null;
+          schedule();
+          return;
+        }
+        const after = measurementExhausted ? [] : measure();
+        diagnostics?.mark('remeasurement-end', clock(), pass + 1);
+        finalLabels = after;
+        const geometryMatches = hiddenForValidation ? sameGeometry() : true;
+        if (
+          canvas !== originalCanvas ||
+          identityRevision !== originalRevision ||
+          !beforeMatches ||
+          !geometryMatches
+        ) {
+          if (!measurementExhausted) {
+            continuation = null;
+            schedule();
+            return;
+          }
+        }
+        const dimensionsStable =
+          labels.length === after.length &&
+          labels.every(
+            (label, index) =>
+              label.id === after[index].id &&
+              label.selected === after[index].selected &&
+              label.priority === after[index].priority &&
+              label.locationCode === after[index].locationCode &&
+              label.mandatory === after[index].mandatory &&
+              label.presentation === after[index].presentation &&
+              label.preferFull === after[index].preferFull &&
+              label.hovered === after[index].hovered &&
+              (!hiddenForValidation ||
+                (label.left === after[index].left &&
+                  label.top === after[index].top)) &&
+              Math.abs(label.width - after[index].width) <= DIMENSION_NOISE &&
+              Math.abs(label.height - after[index].height) <= DIMENSION_NOISE,
+          );
+        const actualGeometry = () => {
+          const occupied = [...reserved];
+          for (const result of finalPlacements) {
+            if (!result.visible) continue;
+            if (!charge()) return false;
+            const area = measuredBounds.get(result.id);
+            if (
+              !area ||
+              !Object.values(area).every(Number.isFinite) ||
+              area.left < viewport.left + 2 ||
+              area.top < viewport.top + 2 ||
+              area.right > viewport.right - 2 ||
+              area.bottom > viewport.bottom - 2
+            )
+              return false;
+            for (const other of occupied) {
+              if (!charge()) return false;
+              if (!(
+                area.left >= other.right + 3 ||
+                area.right + 3 <= other.left ||
+                area.top >= other.bottom + 3 ||
+                area.bottom + 3 <= other.top
+              ))
+                return false;
+            }
+            occupied.push(area);
+          }
+          return true;
+        };
+        const actualFits =
+          !measurementExhausted && (!hiddenForValidation || actualGeometry());
+        if (measurementExhausted) {
+          if (
+            timeExhausted &&
+            remaining.maxOperations >= 0 &&
+            continuationCount < MAX_VALIDATION_CONTINUATIONS
+          ) {
+            continuationCount++;
+            hiddenForValidation = true;
+            for (const entry of entries.values()) {
+              releaseFocus(entry.element);
+              entry.element.style.visibility = 'hidden';
+              entry.element.style.pointerEvents = 'none';
+              setFocusability(entry);
+              entry.element.setAttribute('aria-hidden', 'true');
+              entry.element.dataset.labelSuppressed = 'true';
+              entry.leader.style.display = 'none';
+            }
+            diagnostics?.frame(frameStartedAt, clock(), continuationCount);
+            continuation = () => {
+              frameStartedAt = clock();
+              deadline = frameStartedAt + limits.maxMilliseconds;
+              measurementExhausted = false;
+              timeExhausted = false;
+              validate();
+            };
+            schedule();
+            return;
+          }
+          hideUnverified(
+            'Label remeasurement work budget exhausted',
+            after,
+            !timeExhausted,
+          );
+          diagnostics?.frame(frameStartedAt, clock(), continuationCount);
+          diagnostics?.abort('measurement-budget', clock());
+          return;
+        }
+        if (!variantChanged && dimensionsStable && actualFits) {
+          if (hiddenForValidation) {
+            for (const result of finalPlacements) {
+              if (!charge()) {
+                hideUnverified(
+                  'Label validation commit work budget exhausted',
+                  after,
+                  !timeExhausted,
+                );
+                diagnostics?.frame(frameStartedAt, clock(), continuationCount);
+                diagnostics?.abort('measurement-budget', clock());
+                return;
+              }
+              const entry = entries.get(result.id);
+              if (!entry) continue;
+              const visible =
+                result.visible &&
+                sceneLabelVisible(entry.element, host) &&
+                entry.options.isVisible?.() !== false;
+              entry.element.style.visibility = visible ? 'visible' : 'hidden';
+              entry.element.style.pointerEvents =
+                visible && entry.options.interactive !== false
+                  ? 'auto'
+                  : 'none';
+              setFocusability(entry, visible);
+              entry.element.dataset.labelSuppressed = String(!visible);
+              if (visible) entry.element.removeAttribute('aria-hidden');
+              else entry.element.setAttribute('aria-hidden', 'true');
+              entry.leader.style.display =
+                visible && Math.hypot(entry.dx, entry.dy) >= 4
+                  ? 'block'
+                  : 'none';
+            }
+          }
+          if (hiddenForValidation && clock() >= deadline) {
+            hideUnverified(
+              'Label validation commit work budget exhausted',
+              after,
+              false,
+            );
+            diagnostics?.frame(frameStartedAt, clock(), continuationCount);
+            diagnostics?.abort('measurement-budget', clock());
+            return;
+          }
+          diagnostics?.frame(frameStartedAt, clock(), continuationCount);
+          finish();
+        } else if (pass < 3) {
+          runPass(pass + 1);
+        } else {
+          hideUnverified(
+            'Unstable label dimensions after four placement passes',
+            after,
+          );
+          diagnostics?.frame(frameStartedAt, clock(), continuationCount);
+          diagnostics?.abort('unstable-dimensions', clock());
+        }
+      };
+      validate();
+    };
+    runPass(0);
   };
   const schedule = () => {
     if (canvas && pending === null) {
@@ -516,7 +775,10 @@ export function createRoomLabelRegistry(
     invalidateLayout,
     hide(id: string) {
       const entry = entries.get(id);
-      if (entry) hideEntry(entry);
+      if (entry) {
+        if (entry.element.dataset.roomExposed !== 'false') identityRevision++;
+        hideEntry(entry);
+      }
     },
     retry() {
       failedMeasurement = '';
@@ -528,6 +790,30 @@ export function createRoomLabelRegistry(
       leader: HTMLElement,
       options: LabelOptions,
     ) {
+      if (options.presentation === 'occupied-marker') {
+        if (
+          element.tagName !== 'SPAN' ||
+          element.hasAttribute('contenteditable') ||
+          (element.getAttribute('role') !== null &&
+            element.getAttribute('role') !== 'img') ||
+          options.priority >= 4
+        )
+          throw new Error(
+            'Occupied markers require an unselected readonly span',
+          );
+        // Presentation metadata never turns a small badge into a DOM action.
+        options = {
+          ...options,
+          interactive: false,
+          compact: true,
+          preferFull: false,
+          inspection: null,
+          pointer: undefined,
+        };
+        element.removeAttribute('tabindex');
+        element.style.pointerEvents = 'none';
+      }
+      identityRevision++;
       const entry = {
         element,
         leader,
@@ -552,12 +838,20 @@ export function createRoomLabelRegistry(
       schedule();
       return () => {
         if (entries.get(id) !== entry) return;
+        identityRevision++;
         entries.delete(id);
         observer?.unobserve(element);
         schedule();
       };
     },
-    connect(element: HTMLCanvasElement, invalidateScene?: () => void) {
+    connect(
+      element: HTMLCanvasElement,
+      invalidateScene?: () => void,
+      readGeometryIdentity?: () => GeometryIdentity,
+    ) {
+      identityRevision++;
+      continuation = null;
+      geometryIdentity = readGeometryIdentity;
       canvas = element;
       invalidateGeometry = invalidateScene;
       let connected = true;
@@ -565,7 +859,20 @@ export function createRoomLabelRegistry(
         if (!connected) return;
         invalidateLayout();
       };
-      observer = new ResizeObserver(changed);
+      observer = new ResizeObserver((records) => {
+        const labels = new Set(
+          [...entries.values()].map((entry) => entry.element),
+        );
+        if (
+          continuation &&
+          records.length > 0 &&
+          records.every((record) => labels.has(record.target as HTMLElement))
+        ) {
+          // Placement writes can resize Html labels. Request the retained whole
+          // validation; that pass detects external dimension/anchor changes.
+          schedule();
+        } else changed();
+      });
       observer.observe(element);
       for (const entry of entries.values()) observer.observe(entry.element);
       const surface = element.closest('[data-room-surface]');
@@ -590,6 +897,9 @@ export function createRoomLabelRegistry(
       schedule();
       return () => {
         connected = false;
+        identityRevision++;
+        continuation = null;
+        geometryIdentity = undefined;
         invalidateGeometry = undefined;
         delete element.dataset.labelLayoutPending;
         delete element.dataset.labelLayoutRevision;
@@ -639,11 +949,19 @@ export function LabelLayoutDriver({
 }: {
   registry: RoomLabelRegistry;
 }) {
-  const { gl, invalidate } = useThree();
+  const { gl, invalidate, get } = useThree();
   useFrame(registry.schedule);
   useEffect(
-    () => registry.connect(gl.domElement, invalidate),
-    [registry, gl, invalidate],
+    () =>
+      registry.connect(gl.domElement, invalidate, () => {
+        const camera = get().camera;
+        return {
+          camera,
+          projection: [...camera.projectionMatrix.elements],
+          world: [...camera.matrixWorld.elements],
+        };
+      }),
+    [registry, gl, invalidate, get],
   );
   return null;
 }

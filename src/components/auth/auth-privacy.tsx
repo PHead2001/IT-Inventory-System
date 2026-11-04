@@ -1115,24 +1115,34 @@ function PrivacyController({
             },
             admission: (destination: string) => {
               const ticket = state.navigationTicket;
-              if (
-                ticket &&
-                ticket.capture.destination === destination &&
-                visible &&
-                document.visibilityState !== 'hidden' &&
-                ticket.capture.revocation === readPrivacyRevocationRevision() &&
-                ticket.capture.callbacks === assignmentEpoch() &&
-                (key.navigation === ticket.capture.source ||
-                  key.navigation === ticket.capture.destination) &&
-                ticket.capture.binding === bindingRevision &&
-                ticket.capture.serverRevision === serverRevision &&
-                ticket.capture.revision === revision &&
-                ticket.capture.generation === state.generation
-              ) {
-                if (ticket.status === 'pending')
-                  return { ready: false, wait: ticket.promise };
+              if (ticket?.capture.destination === destination) {
+                const live = tickets.snapshot();
+                // A published view can outlive synchronous provider retirement.
+                // A matching target must not borrow the old current-key grant.
+                if (
+                  !live ||
+                  live.capture !== ticket.capture ||
+                  !ticketCurrent(live) ||
+                  !visible ||
+                  document.visibilityState === 'hidden' ||
+                  ticket.capture.revocation !==
+                    readPrivacyRevocationRevision() ||
+                  ticket.capture.callbacks !== assignmentEpoch() ||
+                  (key.navigation !== ticket.capture.source &&
+                    key.navigation !== ticket.capture.destination) ||
+                  ticket.capture.binding !== bindingRevision ||
+                  ticket.capture.serverRevision !== serverRevision ||
+                  ticket.capture.revision !== revision ||
+                  ticket.capture.generation !== state.generation
+                )
+                  return { ready: false };
+                if (ticket.status === 'pending' && live.status === 'pending')
+                  return { ready: false, wait: live.promise };
                 return {
-                  ready: ticket.status === 'verified' && !state.uncertain,
+                  ready:
+                    ticket.status === 'verified' &&
+                    live.status === 'verified' &&
+                    !state.uncertain,
                   verifiedEpoch: ticket.capture.callbacks,
                 };
               }
@@ -1159,6 +1169,7 @@ function PrivacyController({
       retireTarget,
       state.uncertain,
       state.navigationTicket,
+      ticketCurrent,
       taskQuery,
       taskContinuity,
     ],

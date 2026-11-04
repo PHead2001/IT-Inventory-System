@@ -4,16 +4,22 @@ import { roomSchema, type RoomNode } from '../../src/features/room/schema';
 import { buildRoomBindings } from '../../src/features/room/bindings';
 import { toScenePosition } from '../../src/features/room/coordinates';
 import { revealOffset } from '../../src/features/room/scene/spatial-reveal';
-import {
-  occupancyText,
-  type RoomOccupancy,
-} from '../../src/features/room/occupancy-contract';
+import { occupancyText } from '../../src/features/room/occupancy-contract';
 import {
   acceptanceCommand,
   acceptanceFixtures,
   acceptanceLogin,
 } from './audit-three-acceptance-fixtures';
 import { chooseLocation } from './location-picker';
+import {
+  observeRoomOccupancy,
+  readCommittedRoomOccupancy,
+  ROOM_OCCUPANCY_RETIRED,
+  roomOccupancyLabelState,
+  roomOccupancyLabelNamePattern,
+  type RoomOccupancyLabelObservation,
+  type RoomOccupancyCommit,
+} from './room-occupancy-snapshot';
 import { installRoomDrawObservation } from './room-draw-observation';
 import { chooseRevealWitness } from './spatial-witness-choice';
 import {
@@ -515,33 +521,142 @@ for (const motion of ['no-preference', 'reduce'] as const) {
       await observeSpatialComposition(page);
       await page.emulateMedia({ reducedMotion: motion });
       await acceptanceLogin(page);
+      const origin = new URL(page.url()).origin;
+      const capture = observeRoomOccupancy(page, origin, 'it-closet');
       await page.goto('/room');
       const viewer = page.getByTestId('room-viewer');
       const canvas = await sceneReady(viewer);
+      let previousGeneration: string | null = null;
       for (const code of codes) {
         const node = revealNode(code);
         await expectRevealPosition(canvas, node.id, [0, 0, 0]);
-        const snapshot = page.waitForResponse(
-          (response) =>
-            response.url().includes('/api/room/occupancy?') &&
-            response.status() === 200,
-        );
         await selectRoom(page, code);
-        const counts: { counts: RoomOccupancy } = await (await snapshot).json();
         await expect(canvas).toHaveAttribute('data-spatial-phase', 'settled');
         await expectRevealPosition(
           canvas,
           node.id,
           toScenePosition(revealOffset(node)),
         );
+        // Non-waiting identity reads also retire a disappearing viewer promptly.
+        const readCurrent = () =>
+          viewer.evaluateAll((hosts) => {
+            const host = hosts.length === 1 ? hosts[0] : null;
+            return {
+              code: host?.getAttribute('data-selected-code') ?? '',
+              status: host?.getAttribute('data-occupancy-status') ?? 'off',
+              generation: host?.getAttribute('data-occupancy-generation') ?? '',
+            };
+          });
+        const adopted: {
+          generation: string;
+          observation: RoomOccupancyLabelObservation;
+        } = await readCommittedRoomOccupancy<RoomOccupancyLabelObservation>({
+          capture,
+          origin,
+          spaceId: 'it-closet',
+          code,
+          previousGeneration,
+          readCommit: async () => {
+            let commit!: RoomOccupancyCommit;
+            await expect
+              .poll(async () => {
+                commit = await readCurrent();
+                return commit.code === code &&
+                  commit.status === 'ready' &&
+                  commit.generation !== previousGeneration
+                  ? commit.generation
+                  : '';
+              })
+              .toMatch(/^[0-9a-f-]{36}$/);
+            return commit;
+          },
+          observe: async (counts, captured) => {
+            const badge = viewer.locator(
+              '[data-room-label-code="' + code + '"]',
+            );
+            const expected = occupancyText(counts[code], true);
+            let observation: RoomOccupancyLabelObservation = {
+              expected,
+              text: null,
+              accessible: false,
+              visible: false,
+            };
+            const progress: { state: 'pending' | 'matched' | 'retired' } = {
+              state: 'pending',
+            };
+            await expect
+              .poll(async () => {
+                const before = await readCurrent();
+                progress.state = roomOccupancyLabelState(
+                  captured,
+                  before,
+                  before,
+                  null,
+                );
+                if (progress.state === 'retired') return progress.state;
+                // These are non-waiting reads. Retirement is checked on both sides.
+                const published = await badge.evaluateAll((elements) => {
+                  const full =
+                    elements.length === 1
+                      ? elements[0].querySelector(
+                          '[data-room-label-full="true"]',
+                        )
+                      : null;
+                  const countSpans = full?.querySelectorAll(':scope > span');
+                  return {
+                    label: full
+                      ? Array.from(full.childNodes)
+                          .filter((node) => node.nodeType === Node.TEXT_NODE)
+                          .map((node) => node.textContent ?? '')
+                          .join('')
+                      : null,
+                    text:
+                      countSpans?.length === 1
+                        ? countSpans[0].textContent
+                        : null,
+                  };
+                });
+                observation = {
+                  expected,
+                  text: published.text,
+                  accessible:
+                    published.label !== null &&
+                    (await badge
+                      .and(
+                        page.getByRole('button', {
+                          name: roomOccupancyLabelNamePattern(
+                            published.label,
+                            code,
+                            expected,
+                          ),
+                        }),
+                      )
+                      .count()) === 1,
+                  visible: await badge.isVisible(),
+                };
+                progress.state = roomOccupancyLabelState(
+                  captured,
+                  before,
+                  await readCurrent(),
+                  observation,
+                );
+                return progress.state;
+              })
+              .toMatch(/^(matched|retired)$/);
+            return progress.state === 'retired'
+              ? ROOM_OCCUPANCY_RETIRED
+              : observation;
+          },
+        });
+        previousGeneration = adopted.generation;
+
         const badge = viewer.locator('[data-room-label-code="' + code + '"]');
         await expect(badge).toBeVisible();
-        await expect(badge).toContainText(
-          occupancyText(counts.counts[code], true),
-        );
-        await expect(badge).toHaveAccessibleName(
-          new RegExp(occupancyText(counts.counts[code], true)),
-        );
+        expect(adopted.observation.text).toBe(adopted.observation.expected);
+        expect(
+          adopted.observation.accessible,
+          'the committed badge has its exact computed accessible count name',
+        ).toBe(true);
         await viewer.getByRole('button', { name: 'More map controls' }).click();
         await expect(
           viewer.getByRole('button', { name: 'Show item counts' }),
@@ -784,6 +899,7 @@ test('W14 actual Full flight precedes reveal, newer selection retires it, and Re
   });
   // Real toolbar input interrupts before the older drawer flight can reveal.
   await selectRoom(page, 'ITC-D01');
+  await expectAcceptedRequest('ITC-D01');
   await page.clock.runFor(100);
   await viewer.getByRole('button', { name: 'More map controls' }).click();
   await viewer.getByRole('button', { name: 'Pan right' }).click();
@@ -794,6 +910,7 @@ test('W14 actual Full flight precedes reveal, newer selection retires it, and Re
   await viewer.getByRole('button', { name: 'More map controls' }).click();
   await page.emulateMedia({ reducedMotion: 'reduce' });
   await selectRoom(page, 'ITC-S1A');
+  await expectAcceptedRequest('ITC-S1A');
   await page.clock.runFor(32);
   await expect(canvas).toHaveAttribute('data-spatial-phase', 'settled');
   await expectRevealPosition(
@@ -906,3 +1023,122 @@ test('A303 cold compact scene chunk preserves the normal phone preview and downs
     await page.unroute(pattern);
   }
 });
+
+for (const reducedMotion of ['no-preference', 'reduce'] as const) {
+  test(
+    '390px map location browser preserves readable long identities (' +
+      reducedMotion +
+      ')',
+    async ({ page }, testInfo) => {
+      test.setTimeout(120_000);
+      await page.setViewportSize({ width: 390, height: 844 });
+      await page.emulateMedia({ reducedMotion });
+      const owned = await acceptanceFixtures();
+      try {
+        const item = await owned.quantity(
+          'Long location picker ' + owned.suffix,
+          await owned.location('ITC-S1A'),
+          2,
+        );
+        const unmodeled = await owned.ownedLocation(
+          'Fictional test fixture - ITIA42-PR56-FIXTURE-NOV2 unmodeled location',
+        );
+        await acceptanceLogin(page);
+        await page.goto('/inventory/quantity/' + item);
+        const form = await receiveForm(page);
+        await chooseLocation(form, 'Receive at', 'ITC-S1A');
+        await form.getByRole('button', { name: 'Pick on map' }).click();
+        const dialog = page.getByRole('dialog', {
+          name: 'Pick a storage location',
+        });
+        await sceneReady(dialog);
+        const browser = dialog.getByRole('combobox', {
+          name: 'Choose location in browser',
+          exact: true,
+        });
+        const checkRow = async (
+          row: Locator,
+          capture: string,
+          insideList = true,
+        ) => {
+          await row.scrollIntoViewIfNeeded();
+          await expect(row).toBeVisible();
+          const measured = await row.evaluate(
+            (element, identity) => {
+              const spans = [...element.querySelectorAll('span')];
+              const name = spans
+                .toReversed()
+                .find((span) =>
+                  span.textContent?.trim().startsWith(identity.name),
+                );
+              const code = spans.find(
+                (span) => span.textContent?.trim() === identity.code,
+              );
+              if (!name || !code)
+                throw new Error('Location identity is missing');
+              const rowRect = element.getBoundingClientRect();
+              const nameRect = name.getBoundingClientRect();
+              const codeRect = code.getBoundingClientRect();
+              const list = element.closest<HTMLElement>(
+                '[role="tree"], [role="listbox"]',
+              );
+              return {
+                nameWidth: nameRect.width,
+                rowWidth: rowRect.width,
+                nameLines:
+                  nameRect.height /
+                  Number.parseFloat(getComputedStyle(name).lineHeight),
+                codeBelowName: codeRect.top >= nameRect.bottom - 1,
+                codeContained:
+                  codeRect.left >= rowRect.left - 1 &&
+                  codeRect.right <= rowRect.right + 1,
+                rowFits: element.scrollWidth <= element.clientWidth + 1,
+                hasList: !!list,
+                listFits: !list || list.scrollWidth <= list.clientWidth + 1,
+              };
+            },
+            { name: unmodeled.name, code: unmodeled.code },
+          );
+          expect(measured.nameWidth).toBeGreaterThanOrEqual(
+            measured.rowWidth * 0.6,
+          );
+          expect(measured.nameLines).toBeLessThanOrEqual(4);
+          expect(measured.codeBelowName).toBe(true);
+          expect(measured.codeContained).toBe(true);
+          expect(measured.rowFits).toBe(true);
+          expect(measured.hasList).toBe(insideList);
+          expect(measured.listFits).toBe(true);
+          await expect(row).toContainText(unmodeled.name);
+          await expect(row).toContainText(unmodeled.code);
+          await row.screenshot({ path: testInfo.outputPath(capture) });
+        };
+        await browser.click();
+        const search = dialog.getByRole('combobox', {
+          name: 'Search locations',
+        });
+        await search.fill(unmodeled.code);
+        const option = dialog
+          .getByRole('option')
+          .filter({ hasText: unmodeled.code });
+        await checkRow(option, 'long-location-search-390.png');
+        await option.click();
+        await expect(browser).toContainText(unmodeled.code);
+        await checkRow(browser, 'long-location-trigger-390.png', false);
+        await browser.click();
+        const treeRow = dialog
+          .getByRole('treeitem')
+          .filter({ hasText: unmodeled.code });
+        await checkRow(treeRow, 'long-location-tree-390.png');
+        await treeRow.press('Escape');
+        await dialog
+          .getByRole('button', { name: 'Cancel', exact: true })
+          .click();
+        await expect(
+          form.getByRole('combobox', { name: 'Receive at', exact: true }),
+        ).toContainText('ITC-S1A');
+      } finally {
+        await owned.cleanup();
+      }
+    },
+  );
+}

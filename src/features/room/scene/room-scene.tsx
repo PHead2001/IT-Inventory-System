@@ -412,6 +412,11 @@ function CameraFacingLabel({
             selected={prioritySelected}
             priority={prioritySelected ? 3 : hovered ? 2 : 1}
             occupancy={occupancy}
+            presentation={
+              !prioritySelected && occupiedLocation(occupancy)
+                ? 'occupied-marker'
+                : undefined
+            }
             isVisible={isVisible}
             pickReservation={pickReservation}
             onSelect={onSelect}
@@ -591,8 +596,9 @@ function NodeVisual({
   const interactive = !!node.locationCode && !!node.interaction?.selectable;
   const proxy = selectionEnabled ? roomSelectionBox(node) : null;
   const click = (event: ThreeEvent<MouseEvent>) => {
-    event.stopPropagation();
     const code = actualOwner(event);
+    if (!interactive || code !== node.locationCode) return;
+    event.stopPropagation();
     if (
       pointerOwner.click(
         code,
@@ -623,8 +629,10 @@ function NodeVisual({
           onPointerDown={
             selectionEnabled
               ? (event) => {
+                  const code = actualOwner(event);
+                  if (!interactive || code !== node.locationCode) return;
                   event.stopPropagation();
-                  pointerOwner.down(actualOwner(event), event.pointerId);
+                  pointerOwner.down(code, event.pointerId);
                 }
               : undefined
           }
@@ -1880,7 +1888,15 @@ export default function RoomScene(props: RoomSceneProps) {
       tooltipButton.current,
       hoverLeader.current,
       {
-        priority: activeHover.target.code === props.selectedCode ? 4 : 2,
+        priority:
+          activeHover.target.code === props.selectedCode
+            ? 4
+            : showCounts &&
+                occupiedLocation(
+                  props.locationOccupancy?.[activeHover.target.code],
+                )
+              ? 3.5
+              : 2,
         locationCode: activeHover.target.code,
       },
     );
@@ -1889,6 +1905,8 @@ export default function RoomScene(props: RoomSceneProps) {
     activeHover?.needsTooltip,
     activeHover?.target.code,
     props.selectedCode,
+    props.locationOccupancy,
+    showCounts,
     tooltipSize,
   ]);
   useEffect(() => {
@@ -2067,6 +2085,7 @@ export default function RoomScene(props: RoomSceneProps) {
               ref={tooltipButton}
               type={hoverSelectable ? 'button' : undefined}
               data-hover-tooltip="true"
+              data-room-representation-code={activeHover.target.code}
               data-location-code={activeHover.target.code}
               aria-label={
                 hoverSelectable

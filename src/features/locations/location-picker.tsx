@@ -627,8 +627,8 @@ export function LocationPicker({
           }}
           className="flex min-h-11 w-full items-center justify-between gap-2 rounded-md border border-slate-600 bg-slate-950 px-3 py-2 text-left text-sm text-slate-100 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-cyan-400 disabled:opacity-50"
         >
-          <span className="min-w-0">
-            <span className="block font-medium">
+          <span className="min-w-0 flex-1">
+            <span className="block font-medium break-words">
               {selected?.name ??
                 (selectedValue
                   ? mode === 'browse'
@@ -638,12 +638,20 @@ export function LocationPicker({
                     ? emptyLabel
                     : 'Select a location')}
             </span>
+            {selected && (
+              <span
+                aria-hidden="true"
+                className="experience-code mt-1 block max-w-full text-sm break-all text-slate-400"
+              >
+                {selected.code}
+              </span>
+            )}
             {unavailable && (
               <span className="block text-xs text-amber-200">Unavailable</span>
             )}
           </span>
           <span aria-hidden="true" className="shrink-0 text-xs text-slate-400">
-            {selected?.code ?? '⌄'}
+            ⌄
           </span>
         </button>
         {name && <input type="hidden" name={name} value={selectedValue} />}
@@ -872,8 +880,8 @@ export function LocationPicker({
                             (index === activeOptionIndex ? 'bg-slate-800 ' : '')
                           }
                         >
-                          <span className="min-w-0">
-                            <span className="block font-medium text-slate-100">
+                          <span className="min-w-0 flex-1">
+                            <span className="block font-medium break-words text-slate-100">
                               {location?.name ?? emptyLabel}
                               {selectedValue === optionValue ? ' ✓' : ''}
                             </span>
@@ -888,12 +896,12 @@ export function LocationPicker({
                                 {stockLabel(location)}
                               </span>
                             )}
+                            {location && (
+                              <span className="experience-code mt-1 block w-fit max-w-full rounded bg-slate-900 px-1.5 py-0.5 text-sm font-normal break-all text-slate-400">
+                                {location.code}
+                              </span>
+                            )}
                           </span>
-                          {location && (
-                            <span className="experience-code shrink-0 rounded bg-slate-900 px-1.5 py-0.5 text-xs text-slate-400">
-                              {location.code}
-                            </span>
-                          )}
                         </button>
                       </div>
                     );
@@ -1000,8 +1008,10 @@ export function LocationPicker({
                             {row?.hasChildren ? (isExpanded ? '⌄' : '›') : '·'}
                           </span>
                           <span className="min-w-0 flex-1 font-medium break-words">
-                            {location?.name ?? emptyLabel}
-                            {selectedRow ? ' ✓' : ''}
+                            <span className="block">
+                              {location?.name ?? emptyLabel}
+                              {selectedRow ? ' ✓' : ''}
+                            </span>
                             {!isNavigation && stockLabel(location) && (
                               <span className="block text-sm font-normal text-slate-300">
                                 {stockLabel(location)}
@@ -1015,12 +1025,12 @@ export function LocationPicker({
                                   : 'eligible locations'}
                               </span>
                             )}
+                            {location && (
+                              <span className="experience-code mt-1 block w-fit max-w-full rounded bg-slate-900 px-1.5 py-0.5 text-sm font-normal break-all text-slate-400">
+                                {location.code}
+                              </span>
+                            )}
                           </span>
-                          {location && (
-                            <span className="experience-code shrink-0 rounded bg-slate-900 px-1.5 py-0.5 text-xs text-slate-400">
-                              {location.code}
-                            </span>
-                          )}
                         </button>
                       </div>
                     );
