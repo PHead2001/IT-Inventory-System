@@ -4611,16 +4611,6 @@ test('375px populated room shows every occupied target with passive badges and s
         const point = await currentUncoveredRoomPoint(page, attempt);
         await page.mouse.click(point.x, point.y);
         await selected(page, code);
-        // Selection owns a fresh occupancy generation. Judge its adopted body,
-        // not the snapshot from before the native selection.
-        snapshot = await committedRoomCounts(
-          page,
-          viewer,
-          occupancyCapture,
-          null,
-          code,
-        );
-        counts = snapshot.counts;
       } catch (error) {
         await reportRoomLayoutFailure(
           page,
@@ -4637,6 +4627,18 @@ test('375px populated room shows every occupied target with passive badges and s
       await canvas.scrollIntoViewIfNeeded();
       await settledLabels(page);
       await assertMoreOutsideCanvas();
+      // Navigation may finish its privacy verification during the map actions.
+      // Bind the adopted body only after those actions, then freeze this judgment.
+      snapshot = await committedRoomCounts(
+        page,
+        viewer,
+        occupancyCapture,
+        null,
+        code,
+      );
+      counts = snapshot.counts;
+      await settledLabels(page);
+      await assertCurrentGeneration();
       const selectedScene = await captureRoomWitness(page);
       const selectedWitnesses = await assertCurrentRepresentations(
         selectedScene,
@@ -4795,14 +4797,6 @@ test('375px populated room shows every occupied target with passive badges and s
   await redControl.press('Enter');
   await expect(viewer).toHaveAttribute('data-selected-code', 'ITC-RED');
   await expect(page).toHaveURL(/location=ITC-RED(?:&|$)/);
-  snapshot = await committedRoomCounts(
-    page,
-    viewer,
-    occupancyCapture,
-    null,
-    'ITC-RED',
-  );
-  counts = snapshot.counts;
   await page.getByRole('button', { name: 'Fit room', exact: true }).click();
   await more.click();
   await canvas.scrollIntoViewIfNeeded();
@@ -4815,6 +4809,16 @@ test('375px populated room shows every occupied target with passive badges and s
   await expect(
     menu.getByRole('button', { name: 'Show item counts', exact: true }),
   ).toHaveAttribute('aria-pressed', 'true');
+  snapshot = await committedRoomCounts(
+    page,
+    viewer,
+    occupancyCapture,
+    null,
+    'ITC-RED',
+  );
+  counts = snapshot.counts;
+  await settledLabels(page);
+  await assertCurrentGeneration();
   await assertCurrentRepresentations(
     await captureRoomWitness(page),
     'selected-red-before-resize',
@@ -5034,20 +5038,22 @@ test('375px populated room shows every occupied target with passive badges and s
       touchPoints: [],
     });
     await selected(page, touchCode);
-    snapshot = await committedRoomCounts(
-      page,
-      viewer,
-      occupancyCapture,
-      null,
-      touchCode,
-    );
-    counts = snapshot.counts;
   } finally {
     await cdp.send('Emulation.setTouchEmulationEnabled', { enabled: false });
     await cdp.detach();
   }
   await canvas.scrollIntoViewIfNeeded();
   await settledLabels(page);
+  snapshot = await committedRoomCounts(
+    page,
+    viewer,
+    occupancyCapture,
+    null,
+    touchCode,
+  );
+  counts = snapshot.counts;
+  await settledLabels(page);
+  await assertCurrentGeneration();
   expect(
     roomVisibilityWitnesses(await captureRoomWitness(page)).has(touchCode),
     'conventionally selected target remains independently exposed',
