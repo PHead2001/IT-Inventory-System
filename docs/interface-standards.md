@@ -487,7 +487,7 @@ before acceptance. A jsdom children adapter is only an environment fallback.
 
 ## 8. Forms and controls
 
-- Pickers and popovers are at least as wide as their trigger, anchor below it and never cover their own label.
+- Pickers and popovers are at least as wide as their trigger, anchor below it and never cover their own label. The room More controls are an explicit exception: their compact panel anchors above narrow toolbar rows when its complete scroll envelope fits; otherwise it enters normal flow between the toolbar row and canvas.
 - File inputs use one styled drop zone with a browse button and show the selected file name and thumbnail. Do not render the native "Choose File" control.
 - File selection explains **Nothing uploads until you choose Upload and review.**
 - Drop and Browse share local type/size/name validation. Image previews use revocable local object URLs; PDFs show a filename/document marker and are never embedded before review. Selection grants no publication or inspection trust. Existing upload, inspection, review, replacement and cleanup boundaries remain authoritative.
@@ -501,7 +501,7 @@ before acceptance. A jsdom children adapter is only an environment fallback.
 
 Follows the 2.5D interaction rules in `AGENTS.md`. In addition:
 
-- **Toolbar:** one compact row of icon buttons with tooltips and accessible names at every width. Fit, Center selected, zoom, Interact and More stay visible with 44px targets at 375px; labels, counts and grouped camera controls go in a compact anchored nonmodal popover. The toolbar never covers the selected object after a camera focus.
+- **Toolbar:** one compact row of icon buttons with tooltips and accessible names at every width. Fit, Center selected, zoom, Interact and More stay visible with 44px targets at 375px; labels, counts and grouped camera controls go in a compact anchored nonmodal popover. At row widths of 720px or less, retain an above-toolbar popover only when its complete scroll envelope fits above the row; otherwise place that same scrollable panel in normal flow between the row and canvas. Once inline, keep it inline until closing or changing width class to avoid scroll/resize oscillation. Preserve canvas dimensions, camera state and 44px control targets. The toolbar never covers the selected object after a camera focus.
 - **Labels:** every visible label and badge goes through the shared `layoutLabels` pass, including section markers. A representation shifted from its anchor gets a leader line. Selected readable text has first priority, then one occupied marker per exposed occupied location; optional text may cull. An eligible readable full representation may replace a badge only for the same logical location. Measure wrapped text and interactive 44px footprints. Explicit read-only occupied badges use a measured 24px span with the existing 22px Boxes glyph; they have no activation, focus or pointer interception and are not touch targets. The selected location never becomes a passive badge. Ordinary keyboard/touch selection controls retain their 44px minimum and exact product, unit and asset counts. Opaque occlusion is preserved; crowded unsupported views explicitly list affected locations.
 - **Selection:** outline or glow in the accent color, with unselected geometry slightly dimmed. Clearing the selection restores it.
 - **Information:** occupied locations may show count badges, which follow the same collision rules.

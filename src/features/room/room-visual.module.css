@@ -285,6 +285,12 @@
   background: var(--room-menu-background);
   scrollbar-color: var(--room-border) var(--room-menu-background);
 }
+/* Preserve the scrollable panel and canvas dimensions when above cannot fit. */
+.moreMenu[data-placement='inline'] {
+  position: relative;
+  margin-top: 5px;
+  margin-left: auto;
+}
 .toolbarHost {
   position: relative;
   min-width: 0;

@@ -1,4 +1,5 @@
 import { readFileSync, writeFileSync } from 'node:fs';
+import { canvasGestureCandidates } from './canvas-gesture';
 import {
   expect,
   test,
@@ -724,25 +725,31 @@ async function settledLabels(page: Page, afterRevision?: number) {
 }
 
 async function uncoveredCanvasGesture(page: Page, dx: number, dy: number) {
-  return page.locator('[aria-label="Interactive room canvas"] canvas').evaluate(
-    (canvas, delta) => {
-      const rect = canvas.getBoundingClientRect();
-      // Labels are genuine DOM controls above the canvas. A canvas gesture must
-      // start on the canvas, with its whole initial path inside the viewport.
-      for (const yPart of [0.5, 0.3, 0.7, 0.15, 0.85])
-        for (const xPart of [0.5, 0.3, 0.7, 0.15, 0.85]) {
-          const x = rect.x + rect.width * xPart;
-          const y = rect.y + rect.height * yPart;
-          const uncovered = Array.from({ length: 9 }, (_, step) => {
-            const px = x + (delta.dx * step) / 8;
-            const py = y + (delta.dy * step) / 8;
-            return document.elementFromPoint(px, py) === canvas;
-          }).every(Boolean);
-          if (uncovered) return { x, y };
-        }
+  const canvas = page.locator('[aria-label="Interactive room canvas"] canvas');
+  const geometry = await canvas.evaluate((element) => ({
+    canvas: element.getBoundingClientRect().toJSON(),
+    viewport: { width: innerWidth, height: innerHeight },
+  }));
+  const candidates = canvasGestureCandidates(
+    geometry.canvas,
+    geometry.viewport,
+    { dx, dy },
+  );
+  return canvas.evaluate(
+    (element, gesture) => {
+      // Preserve the full gesture extent and prove every sampled physical hit.
+      // DOM labels remain genuine controls; no pointer event is forced through.
+      for (const point of gesture.candidates) {
+        const uncovered = Array.from({ length: 9 }, (_, step) => {
+          const px = point.x + (gesture.dx * step) / 8;
+          const py = point.y + (gesture.dy * step) / 8;
+          return document.elementFromPoint(px, py) === element;
+        }).every(Boolean);
+        if (uncovered) return point;
+      }
       throw new Error('No uncovered native canvas gesture path');
     },
-    { dx, dy },
+    { candidates, dx, dy },
   );
 }
 
@@ -4240,14 +4247,13 @@ test('375px populated room shows every occupied target with passive badges and s
     name: 'More map controls',
     exact: true,
   });
-  const assertMoreOutsideCanvasWhenAboveFits = async () => {
+  const assertMoreOutsideCanvas = async () => {
     const panel = page.getByRole('region', {
       name: 'More map controls',
       exact: true,
     });
-    // Scroll/resize schedules popup placement on rAF. Read every rectangle and
-    // the resulting placement together on each retry, never reuse a below-menu
-    // rectangle captured before awaiting the later "above" attribute.
+    // Read placement and geometry together after each scheduled layout. Inline
+    // stays latched across page scrolling and must occupy its own scrollable row.
     await expect
       .poll(() =>
         panel.evaluate((element) => {
@@ -4260,33 +4266,62 @@ test('375px populated room shows every occupied target with passive badges and s
             ?.getBoundingClientRect();
           if (!bar || !frame) return false;
           const popup = element.getBoundingClientRect();
+          const css = getComputedStyle(element);
+          const outsideCanvas = popup.bottom <= frame.top;
+          const scrollable =
+            ['auto', 'scroll'].includes(css.overflowY) &&
+            element.clientHeight > 0 &&
+            element.scrollHeight > element.clientHeight;
+          if (
+            !outsideCanvas ||
+            !scrollable ||
+            popup.left < bar.left ||
+            popup.right > bar.right
+          )
+            return false;
+          if (element.getAttribute('data-placement') === 'inline')
+            return css.position === 'relative' && popup.top >= bar.bottom;
           const top = window.visualViewport?.offsetTop ?? 0;
-          const fullHeight = Math.min(
-            parseFloat(
-              getComputedStyle(element).getPropertyValue('--room-menu-height'),
-            ) || 200,
-            (window.visualViewport?.height ?? window.innerHeight) * 0.35,
-            element.scrollHeight + 2,
-          );
           return (
-            bar.top - top - 9 < fullHeight ||
-            (element.getAttribute('data-placement') === 'above' &&
-              popup.top >= top + 4 &&
-              popup.bottom <= bar.top - 5 &&
-              popup.bottom <= frame.top)
+            element.getAttribute('data-placement') === 'above' &&
+            popup.top >= top + 4 &&
+            popup.bottom <= bar.top - 5
           );
         }),
       )
       .toBe(true);
   };
   await more.click();
-  await assertMoreOutsideCanvasWhenAboveFits();
+  await assertMoreOutsideCanvas();
 
   await page
     .getByRole('button', { name: 'Show item counts', exact: true })
     .click();
   let snapshot = await committedRoomCounts(page, viewer, occupancyCapture);
   let counts: RoomOccupancy = snapshot.counts;
+  const assertCurrentGeneration = async () => {
+    await expect(viewer).toHaveAttribute('data-occupancy-status', 'ready');
+    await expect(viewer).toHaveAttribute(
+      'data-occupancy-generation',
+      snapshot.generation,
+    );
+  };
+  const assertCurrentRepresentations = async (
+    scene: WitnessSnapshot,
+    stage: RoomLayoutWitnessStage,
+    witnesses = roomVisibilityWitnesses(scene),
+  ) => {
+    await assertCurrentGeneration();
+    const result = await assertOccupiedWitnessRepresentationsWithDiagnostics(
+      page,
+      scene,
+      counts,
+      stage,
+      witnesses,
+    );
+    await assertCurrentGeneration();
+    return result;
+  };
   expect(Object.keys(counts)).toHaveLength(28);
   for (const value of Object.values(counts))
     expect(BigInt(value.quantity_unit_count)).toBeGreaterThan(0n);
@@ -4294,8 +4329,8 @@ test('375px populated room shows every occupied target with passive badges and s
   await page.getByRole('button', { name: 'Fit room', exact: true }).click();
   await canvas.scrollIntoViewIfNeeded();
   await settledLabels(page);
-  // Page scrolling flips More across the canvas without moving the camera.
-  // Its old opaque mask must not keep independently visible actions hidden.
+  // The narrow More panel moves into page flow when above cannot fit. Native
+  // page scrolling must preserve its latch, the camera and every required label.
   await page.setViewportSize({ width: 390, height: 844 });
   await page.getByRole('button', { name: 'Fit room', exact: true }).click();
   await more.click();
@@ -4304,6 +4339,24 @@ test('375px populated room shows every occupied target with passive badges and s
     name: 'More map controls',
     exact: true,
   });
+  await menu.hover();
+  const controlsScroll = await menu.evaluate((element) => element.scrollTop);
+  const controlsCamera = await camera(page);
+  await page.mouse.wheel(0, 160);
+  await expect
+    .poll(() => menu.evaluate((element) => element.scrollTop))
+    .toBeGreaterThan(controlsScroll);
+  await page.mouse.wheel(0, -160);
+  await expect
+    .poll(() => menu.evaluate((element) => element.scrollTop))
+    .toBe(controlsScroll);
+  const controlsCameraAfter = await camera(page);
+  near(controlsCameraAfter.position, controlsCamera.position);
+  near(controlsCameraAfter.target, controlsCamera.target);
+  expect(controlsCameraAfter.zoom).toBeCloseTo(controlsCamera.zoom, 6);
+  await canvas.scrollIntoViewIfNeeded();
+  await settledLabels(page);
+  await assertMoreOutsideCanvas();
   const scrollFrame = await canvas.boundingBox();
   expect(scrollFrame).not.toBeNull();
   const scrollBadge = viewer
@@ -4312,6 +4365,8 @@ test('375px populated room shows every occupied target with passive badges and s
   const scrollBadgeBox = await scrollBadge.boundingBox();
   expect(scrollBadgeBox).not.toBeNull();
   const beforePassiveWheel = await camera(page);
+  const selectionBeforeScroll = await viewer.getAttribute('data-selected-code');
+  const pageScrollBefore = await page.evaluate(() => scrollY);
   const scrollPoint = { x: scrollBadgeBox!.x + 12, y: scrollBadgeBox!.y + 12 };
   await page.mouse.move(scrollPoint.x, scrollPoint.y);
   // Await installation before input. Passive map policy stops wheel listeners
@@ -4359,7 +4414,7 @@ test('375px populated room shows every occupied target with passive badges and s
     scrollPoint,
   );
   try {
-    await page.mouse.wheel(0, scrollFrame!.y - 149);
+    await page.mouse.wheel(0, Math.max(200, scrollFrame!.y));
     expect(
       await trustedPassiveWheel.evaluate((observation) => observation.result),
       'a trusted wheel over the passive badge reaches the canvas',
@@ -4376,40 +4431,48 @@ test('375px populated room shows every occupied target with passive badges and s
   near(afterPassiveWheel.target, beforePassiveWheel.target);
   expect(afterPassiveWheel.zoom).toBeCloseTo(beforePassiveWheel.zoom, 6);
   await expect
-    .poll(async () => Math.abs((await canvas.boundingBox())!.y - 149))
-    .toBeLessThan(5);
-  await expect(menu).toHaveAttribute('data-placement', 'below');
+    .poll(() => page.evaluate(() => scrollY))
+    .toBeGreaterThan(pageScrollBefore);
+  await expect(menu).toHaveAttribute('data-placement', 'inline');
+  await assertMoreOutsideCanvas();
   await settledLabels(page);
-  const coveredScene = await captureRoomWitness(page);
-  const coveredWitnesses =
-    await assertOccupiedWitnessRepresentationsWithDiagnostics(
-      page,
-      coveredScene,
-      counts,
-      'scroll-more-overlapping-canvas',
-    );
-  const unchangedCamera = await camera(page);
-  const scrollRevision = Number(
-    await canvas.getAttribute('data-label-layout-revision'),
+  const scrolledFrame = await canvas.boundingBox();
+  expect(scrolledFrame!.width).toBe(scrollFrame!.width);
+  expect(scrolledFrame!.height).toBe(scrollFrame!.height);
+  await expect(viewer).toHaveAttribute(
+    'data-selected-code',
+    selectionBeforeScroll!,
   );
+  await assertCurrentRepresentations(
+    await captureRoomWitness(page),
+    'scroll-more-outside-canvas-without-reopening',
+  );
+  const pageScrollAfter = await page.evaluate(() => scrollY);
+  const returnPoint = await uncoveredCanvasGesture(page, 0, 0);
+  await page.mouse.move(returnPoint.x, returnPoint.y);
   await page.mouse.wheel(0, -250);
-  await expect(menu).toHaveAttribute('data-placement', 'above');
-  await assertMoreOutsideCanvasWhenAboveFits();
-  await settledLabels(page, scrollRevision);
+  await expect
+    .poll(() => page.evaluate(() => scrollY))
+    .toBeLessThan(pageScrollAfter);
+  await expect(menu).toHaveAttribute('data-placement', 'inline');
+  await assertMoreOutsideCanvas();
+  await settledLabels(page);
   await expect(more).toHaveAttribute('aria-expanded', 'true');
   const restoredCamera = await camera(page);
-  near(restoredCamera.position, unchangedCamera.position);
-  near(restoredCamera.target, unchangedCamera.target);
-  expect(restoredCamera.zoom).toBeCloseTo(unchangedCamera.zoom, 5);
-  const uncoveredScene = await captureRoomWitness(page);
-  const restoredWitnesses =
-    await assertOccupiedWitnessRepresentationsWithDiagnostics(
-      page,
-      uncoveredScene,
-      counts,
-      'scroll-more-outside-canvas-without-reopening',
-    );
-  expect(restoredWitnesses.size).toBeGreaterThan(coveredWitnesses.size);
+  near(restoredCamera.position, beforePassiveWheel.position);
+  near(restoredCamera.target, beforePassiveWheel.target);
+  expect(restoredCamera.zoom).toBeCloseTo(beforePassiveWheel.zoom, 6);
+  const restoredFrame = await canvas.boundingBox();
+  expect(restoredFrame!.width).toBe(scrollFrame!.width);
+  expect(restoredFrame!.height).toBe(scrollFrame!.height);
+  await expect(viewer).toHaveAttribute(
+    'data-selected-code',
+    selectionBeforeScroll!,
+  );
+  await assertCurrentRepresentations(
+    await captureRoomWitness(page),
+    'scroll-more-outside-canvas-without-reopening',
+  );
   await more.click();
   await page.setViewportSize({ width: 375, height: 812 });
   await canvas.scrollIntoViewIfNeeded();
@@ -4477,16 +4540,14 @@ test('375px populated room shows every occupied target with passive badges and s
       await more.click();
     await canvas.scrollIntoViewIfNeeded();
     await settledLabels(page);
-    if (open) await assertMoreOutsideCanvasWhenAboveFits();
+    if (open) await assertMoreOutsideCanvas();
     const scene = await captureRoomWitness(page);
     expect(scene.frame.width).toBe(initialSize!.width);
     expect(scene.frame.height).toBe(initialSize!.height);
     const report = roomVisibilityWitnessReport(scene);
     report.partiallyExposedCodes.forEach((code) => partialCodes.add(code));
-    const witnesses = await assertOccupiedWitnessRepresentationsWithDiagnostics(
-      page,
+    const witnesses = await assertCurrentRepresentations(
       scene,
-      counts,
       scenario,
       report.witnesses,
     );
@@ -4550,6 +4611,16 @@ test('375px populated room shows every occupied target with passive badges and s
         const point = await currentUncoveredRoomPoint(page, attempt);
         await page.mouse.click(point.x, point.y);
         await selected(page, code);
+        // Selection owns a fresh occupancy generation. Judge its adopted body,
+        // not the snapshot from before the native selection.
+        snapshot = await committedRoomCounts(
+          page,
+          viewer,
+          occupancyCapture,
+          null,
+          code,
+        );
+        counts = snapshot.counts;
       } catch (error) {
         await reportRoomLayoutFailure(
           page,
@@ -4565,15 +4636,12 @@ test('375px populated room shows every occupied target with passive badges and s
         await more.click();
       await canvas.scrollIntoViewIfNeeded();
       await settledLabels(page);
-      await assertMoreOutsideCanvasWhenAboveFits();
+      await assertMoreOutsideCanvas();
       const selectedScene = await captureRoomWitness(page);
-      const selectedWitnesses =
-        await assertOccupiedWitnessRepresentationsWithDiagnostics(
-          page,
-          selectedScene,
-          counts,
-          'fit-open-selected-before-long-text',
-        );
+      const selectedWitnesses = await assertCurrentRepresentations(
+        selectedScene,
+        'fit-open-selected-before-long-text',
+      );
       expect(
         selectedWitnesses.has(code),
         'selected target is independently witnessed after reopening More',
@@ -4594,10 +4662,8 @@ test('375px populated room shows every occupied target with passive badges and s
       await settledLabels(page);
       // Same captured physical scene and overlay: text-only stress cannot remove
       // neighbors from the independently required visible set.
-      await assertOccupiedWitnessRepresentationsWithDiagnostics(
-        page,
+      await assertCurrentRepresentations(
         selectedScene,
-        counts,
         'fit-open-selected-long-text',
       );
       await expect(label).toBeVisible();
@@ -4729,22 +4795,28 @@ test('375px populated room shows every occupied target with passive badges and s
   await redControl.press('Enter');
   await expect(viewer).toHaveAttribute('data-selected-code', 'ITC-RED');
   await expect(page).toHaveURL(/location=ITC-RED(?:&|$)/);
+  snapshot = await committedRoomCounts(
+    page,
+    viewer,
+    occupancyCapture,
+    null,
+    'ITC-RED',
+  );
+  counts = snapshot.counts;
   await page.getByRole('button', { name: 'Fit room', exact: true }).click();
   await more.click();
   await canvas.scrollIntoViewIfNeeded();
   await page.mouse.move(15, 15);
   await settledLabels(page);
-  await assertMoreOutsideCanvasWhenAboveFits();
+  await assertMoreOutsideCanvas();
   await expect(
     menu.getByRole('button', { name: 'Show labels', exact: true }),
   ).toHaveAttribute('aria-pressed', 'true');
   await expect(
     menu.getByRole('button', { name: 'Show item counts', exact: true }),
   ).toHaveAttribute('aria-pressed', 'true');
-  await assertOccupiedWitnessRepresentationsWithDiagnostics(
-    page,
+  await assertCurrentRepresentations(
     await captureRoomWitness(page),
-    counts,
     'selected-red-before-resize',
   );
 
@@ -4759,7 +4831,7 @@ test('375px populated room shows every occupied target with passive badges and s
   await canvas.scrollIntoViewIfNeeded();
   await page.mouse.move(15, 15);
   await settledLabels(page);
-  await assertMoreOutsideCanvasWhenAboveFits();
+  await assertMoreOutsideCanvas();
   await expect(viewer).toHaveAttribute('data-selected-code', 'ITC-RED');
   await expect(red).toHaveAttribute('aria-pressed', 'true');
   await expect(red).toHaveAttribute('data-label-compact', 'false');
@@ -4770,12 +4842,14 @@ test('375px populated room shows every occupied target with passive badges and s
     resizedRequiredWitnesses.has('ITC-S4C'),
     'the previously missing action is independently exposed after mounted resize',
   ).toBe(true);
+  await assertCurrentGeneration();
   const resizedWitnesses = await assertOccupiedWitnessRepresentations(
     page,
     resizedScene,
     counts,
     resizedRequiredWitnesses,
   );
+  await assertCurrentGeneration();
   await testInfo.attach('390-after-mounted-resize-opaque-witnesses', {
     body: JSON.stringify({
       viewport: page.viewportSize(),
@@ -4960,6 +5034,14 @@ test('375px populated room shows every occupied target with passive badges and s
       touchPoints: [],
     });
     await selected(page, touchCode);
+    snapshot = await committedRoomCounts(
+      page,
+      viewer,
+      occupancyCapture,
+      null,
+      touchCode,
+    );
+    counts = snapshot.counts;
   } finally {
     await cdp.send('Emulation.setTouchEmulationEnabled', { enabled: false });
     await cdp.detach();
@@ -4976,6 +5058,7 @@ test('375px populated room shows every occupied target with passive badges and s
   await expect(touchLabel).toBeVisible();
   await expect(touchLabel).toHaveAttribute('aria-pressed', 'true');
   await expect(touchLabel).toHaveAttribute('data-label-compact', 'false');
+  await assertCurrentGeneration();
   const selectedCounts = counts[touchCode];
   const formatCount = (value: string, word: string) =>
     BigInt(value).toLocaleString('en-US') +
@@ -4992,6 +5075,7 @@ test('375px populated room shows every occupied target with passive badges and s
     ),
   );
 
+  await assertCurrentGeneration();
   expect(await canvas.getAttribute('data-label-layout-error')).toBeNull();
   expect(pageErrors).toEqual([]);
 });
