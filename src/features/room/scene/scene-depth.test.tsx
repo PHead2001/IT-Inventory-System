@@ -102,13 +102,19 @@ vi.mock('react/jsx-dev-runtime', async () => {
   };
 });
 
-describe('baked footprint visibility', () => {
+describe('static corner grounding visibility', () => {
   it.each([0, 0.5])(
     'keeps an exposed target with footprint overlap offset %s visible in projected fallback',
     (offset) => {
       const view = render(<SceneDepth room={loadItCloset()} />);
       try {
-        expect(state.footprints).toHaveLength(6);
+        expect(state.footprints).toHaveLength(4);
+        expect(
+          state.footprints.every(
+            (mesh) =>
+              mesh.userData.hoverPassThrough && mesh.userData.roomEffectHelper,
+          ),
+        ).toBe(true);
         const scene = new Group(),
           owner = new Group(),
           origin = new Group();

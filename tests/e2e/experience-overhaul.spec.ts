@@ -933,7 +933,7 @@ test('a user camera pan is restored after leaving and returning to the modeled s
       expect(restored[key][index]).toBeCloseTo(moved[key][index], 2);
 });
 
-test('Back into a selected modeled space focuses from its saved camera baseline', async ({
+test('Back into a selected modeled space restores its camera and Center selected explicitly refocuses', async ({
   page,
 }) => {
   await page.emulateMedia({ reducedMotion: 'reduce' });
@@ -966,8 +966,25 @@ test('Back into a selected modeled space focuses from its saved camera baseline'
   await expect(viewer).toHaveCount(0);
   await page.goBack();
   await expect(viewer).toHaveAttribute('data-focused-code', 'ITC-S1A');
+  const restored = await readyCameraSnapshot(viewer);
+  expect(restored.mode).toBe(displaced.mode);
+  expect(restored.zoom).toBeCloseTo(displaced.zoom, 3);
+  for (const key of ['position', 'target'] as const)
+    for (let index = 0; index < 3; index++)
+      expect(restored[key][index]).toBeCloseTo(displaced[key][index], 2);
+  await expect(viewer).toHaveAttribute('data-selected-code', 'ITC-S1A');
+  const completed = Number(await viewer.getAttribute('data-focus-count'));
+  await viewer
+    .getByRole('button', { name: 'Center selected', exact: true })
+    .click();
+  await expect
+    .poll(async () => Number(await viewer.getAttribute('data-focus-count')))
+    .toBeGreaterThan(completed);
+  await expect(viewer).toHaveAttribute('data-focused-code', 'ITC-S1A');
   const focused = await readyCameraSnapshot(viewer);
   expect(focused.target).not.toEqual(displaced.target);
+  for (let index = 0; index < 3; index++)
+    expect(focused.target[index]).toBeCloseTo(beforePan.target[index], 2);
   await expect(viewer).toHaveAttribute('data-selected-code', 'ITC-S1A');
 });
 

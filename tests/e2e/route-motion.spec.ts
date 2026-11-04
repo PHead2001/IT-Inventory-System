@@ -15,6 +15,8 @@ import {
 import {
   routePresentationTiming,
   pairedBodyCrossfade,
+  visibleRouteContentFades,
+  type RouteVisibleCapture,
   type RouteEffectTiming,
 } from './route-presentation-timing';
 import { documentRecordRoute } from '../../src/lib/document-route';
@@ -42,11 +44,17 @@ import {
 
 type Capture = {
   name: string;
+  region: string;
+  bounds: { x: number; y: number; width: number; height: number };
+  viewport: { width: number; height: number; scrollY: number };
   tag: string;
   canvas: boolean;
   shell: boolean;
   primary?: boolean;
   primaryHeading?: 'Inventory' | 'Inventory history';
+};
+type RegionLayout = Pick<Capture, 'tag' | 'bounds' | 'viewport' | 'name'> & {
+  candidate: 'primary-wrapper' | 'heading' | 'section';
 };
 type ColdTitleGeometry = {
   x: number;
@@ -82,6 +90,8 @@ type Proof = {
   transitions: Array<{
     old: Capture[];
     next: Capture[];
+    layout: { old: RegionLayout[]; next: RegionLayout[] };
+    content: { old: RouteVisibleCapture[]; next: RouteVisibleCapture[] };
     ready: boolean;
     finished: boolean;
     completionMs?: number;
@@ -194,9 +204,17 @@ async function observeMotion(page: Page, unsupported = false) {
           const name = getComputedStyle(element).viewTransitionName;
           if (!name || name === 'none') return [];
           const heading = element.querySelector('h1')?.textContent?.trim();
+          const { x, y, width, height } = element.getBoundingClientRect();
           return [
             {
               name,
+              region: name.includes('-content')
+                ? name.split('-content')[1].replace(/^-/, '') || 'body'
+                : name.startsWith('inventory-title-')
+                  ? 'title'
+                  : 'other',
+              bounds: { x, y, width, height },
+              viewport: { width: innerWidth, height: innerHeight, scrollY },
               tag: element.tagName,
               canvas:
                 element.tagName === 'CANVAS' ||
@@ -214,6 +232,31 @@ async function observeMotion(page: Page, unsupported = false) {
             },
           ];
         });
+      // Include unnamed ordinary sections so a missing capture can be compared
+      // with real viewport geometry. Never read private text, form values or IDs.
+      const captureLayout = (): RegionLayout[] =>
+        Array.from(
+          document.querySelectorAll(
+            '.experience-paired-inventory-content, #main-content h1, #main-content section',
+          ),
+        )
+          .slice(0, 24)
+          .map((element) => {
+            const { x, y, width, height } = element.getBoundingClientRect();
+            return {
+              tag: element.tagName,
+              name: getComputedStyle(element).viewTransitionName,
+              candidate: element.classList.contains(
+                'experience-paired-inventory-content',
+              )
+                ? 'primary-wrapper'
+                : element.tagName === 'H1'
+                  ? 'heading'
+                  : 'section',
+              bounds: { x, y, width, height },
+              viewport: { width: innerWidth, height: innerHeight, scrollY },
+            };
+          });
       if (unsupported) {
         Object.defineProperty(document, 'startViewTransition', {
           configurable: true,
@@ -222,6 +265,22 @@ async function observeMotion(page: Page, unsupported = false) {
         return;
       }
       const native = document.startViewTransition.bind(document);
+      const captureContent = (): RouteVisibleCapture[] =>
+        Array.from(
+          document.querySelectorAll<HTMLElement>('[data-route-capture-region]'),
+        ).map((element) => {
+          const { x, y, width, height } = element.getBoundingClientRect();
+          return {
+            name: getComputedStyle(element).viewTransitionName,
+            region: element.dataset.routeCaptureRegion!,
+            bounds: { x, y, width, height },
+            viewport: { width: innerWidth, height: innerHeight },
+            hidden:
+              !!element.closest('[hidden], [aria-hidden="true"]') ||
+              getComputedStyle(element).display === 'none',
+            canvas: !!element.querySelector('canvas'),
+          };
+        });
       const tracked = new WeakMap<Animation, RouteEffectTiming>();
       const pause = Animation.prototype.pause;
       Animation.prototype.pause = function () {
@@ -255,6 +314,8 @@ async function observeMotion(page: Page, unsupported = false) {
         const entry: Proof['transitions'][number] = {
           old: capture(),
           next: [],
+          layout: { old: captureLayout(), next: [] },
+          content: { old: captureContent(), next: [] },
           ready: false,
           finished: false,
           effects: [],
@@ -268,6 +329,8 @@ async function observeMotion(page: Page, unsupported = false) {
         const wrapped = async () => {
           await update?.();
           entry.next = capture();
+          entry.layout.next = captureLayout();
+          entry.content.next = captureContent();
         };
         const transition = native(
           typeof options === 'function'
@@ -558,7 +621,7 @@ async function observeMotion(page: Page, unsupported = false) {
           options.pseudoElement?.startsWith(
             '::view-transition-group(inventory-title-',
           ) &&
-          !options.pseudoElement.endsWith('-content)')
+          !options.pseudoElement.includes('-content')
         ) {
           proof.replacements.push({
             pseudo: options.pseudoElement,
@@ -711,7 +774,7 @@ async function completedTitlePair(
     entry.old.some(
       (old) =>
         old.name.startsWith('inventory-title-') &&
-        !old.name.endsWith('-content') &&
+        !old.name.includes('-content') &&
         entry.next.some((next) => next.name === old.name),
     ),
   );
@@ -738,7 +801,25 @@ async function completedTitlePair(
         nextCount: entry.next.length,
         oldTags: tags(entry.old),
         nextTags: tags(entry.next),
-        effects: entry.effects.slice(0, 12),
+        old: entry.old
+          .slice(0, 12)
+          .map(({ name, region, bounds, viewport }) => ({
+            name,
+            region,
+            bounds,
+            viewport,
+          })),
+        next: entry.next
+          .slice(0, 12)
+          .map(({ name, region, bounds, viewport }) => ({
+            name,
+            region,
+            bounds,
+            viewport,
+          })),
+        layout: entry.layout,
+        content: entry.content,
+        effects: entry.effects.slice(0, 24),
       })),
     });
   if (settlementError) throw new Error(diagnostic, { cause: settlementError });
@@ -754,32 +835,53 @@ async function completedTitlePair(
   expect(presentation.durationMs, diagnostic).toBeLessThanOrEqual(250);
   const titleName = paired[0].old.find(
     (old) =>
-      old.name.startsWith('inventory-title-') && !old.name.endsWith('-content'),
+      old.name.startsWith('inventory-title-') && !old.name.includes('-content'),
   )!.name;
-  expect(pairedBodyCrossfade(observed.transitions, titleName), diagnostic).toBe(
-    true,
+  const coverage = visibleRouteContentFades(paired[0], titleName);
+  expect(coverage.checked, diagnostic).toBeGreaterThan(0);
+  expect(coverage.missing, diagnostic).toEqual([]);
+  const bodyVisibleOnBothSides = (['old', 'next'] as const).every((side) =>
+    paired[0].content[side].some(
+      ({ region, hidden, bounds: b, viewport: v }) =>
+        region === 'body' &&
+        !hidden &&
+        b.width > 0 &&
+        b.height > 0 &&
+        b.y < v.height &&
+        b.y + b.height > 0 &&
+        b.x < v.width &&
+        b.x + b.width > 0,
+    ),
   );
-  const incomingOpacity = paired[0].effects.find(
-    (effect) =>
-      effect.pseudo === `::view-transition-new(${titleName}-content)` &&
-      effect.opacityFrames?.length === 3,
-  );
-  expect(incomingOpacity, diagnostic).toMatchObject({
-    opacityFrames: [0, 0, 1],
-    opacityOffsets: [0, 0.5, 1],
-    easing: 'linear',
-    delay: 0,
-    activeDuration: 200,
-    endTime: 200,
-  });
-  const titleGeometry = paired[0].effects.find(
-    (effect) => effect.pseudo === `::view-transition-group(${titleName})`,
-  );
-  expect(titleGeometry, diagnostic).toBeDefined();
-  expect(incomingOpacity!.startTime, diagnostic).toBe(titleGeometry!.startTime);
-  // The linear native effect maps 0.5 to 100ms elapsed, rather than applying
-  // the title's ease-out to that offset. Forward and app Back both use this
-  // check; it does not claim arbitrary travelling rectangles never intersect.
+  if (bodyVisibleOnBothSides) {
+    expect(
+      pairedBodyCrossfade(observed.transitions, titleName),
+      diagnostic,
+    ).toBe(true);
+    const incomingOpacity = paired[0].effects.find(
+      (effect) =>
+        effect.pseudo === `::view-transition-new(${titleName}-content)` &&
+        effect.opacityFrames?.length === 3,
+    );
+    expect(incomingOpacity, diagnostic).toMatchObject({
+      opacityFrames: [0, 0, 1],
+      opacityOffsets: [0, 0.5, 1],
+      easing: 'linear',
+      delay: 0,
+      activeDuration: 200,
+      endTime: 200,
+    });
+    const titleGeometry = paired[0].effects.find(
+      (effect) => effect.pseudo === `::view-transition-group(${titleName})`,
+    );
+    expect(titleGeometry, diagnostic).toBeDefined();
+    expect(incomingOpacity!.startTime, diagnostic).toBe(
+      titleGeometry!.startTime,
+    );
+    // The linear native effect maps 0.5 to 100ms elapsed, rather than applying
+    // the title's ease-out to that offset. Forward and app Back both use this
+    // check; it does not claim arbitrary travelling rectangles never intersect.
+  }
   return observed;
 }
 
@@ -1815,7 +1917,7 @@ for (const width of [1280, 390]) {
       entry.old.filter(
         (old) =>
           old.name.startsWith('inventory-title-') &&
-          !old.name.endsWith('-content') &&
+          !old.name.includes('-content') &&
           entry.next.some((next) => next.name === old.name),
       ),
     );
@@ -1909,14 +2011,14 @@ for (const width of [1280, 390]) {
       entry.old.some(
         (old) =>
           old.name.startsWith('inventory-title-') &&
-          !old.name.endsWith('-content'),
+          !old.name.includes('-content'),
       ),
     )!;
     expect(
       pair.next.filter(
         (next) =>
           next.name.startsWith('inventory-title-') &&
-          !next.name.endsWith('-content'),
+          !next.name.includes('-content'),
       ),
     ).toHaveLength(1);
     expect(back.cls).toBe(0);

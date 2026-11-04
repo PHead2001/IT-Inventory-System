@@ -113,6 +113,38 @@ it('rejects old completions after A -> B -> A, even after A was ready', async ()
   await request.finish(2, '32');
   expect(view.result.current.counts).toEqual(counts('32'));
 });
+it('publishes only an adopted successful generation and clears it immediately on a selection key transition', async () => {
+  const request = deferredFetch();
+  const view = renderHook(
+    ({ selection, enabled }) =>
+      useRoomOccupancy(enabled, 'member', 'it-closet', selection, backend),
+    { initialProps: { selection: 'A', enabled: true } },
+  );
+  expect(view.result.current.acceptedGeneration).toBeNull();
+  await request.finish(0, '31');
+  const first = new URL(
+    request.requests[0].url,
+    location.origin,
+  ).searchParams.get('generation');
+  expect(view.result.current.acceptedGeneration).toBe(first);
+  view.rerender({ selection: 'B', enabled: true });
+  expect(view.result.current.status).toBe('loading');
+  expect(view.result.current.counts).toBeUndefined();
+  expect(view.result.current.acceptedGeneration).toBeNull();
+  await request.finish(1, '99', { generation: first! });
+  expect(view.result.current.status).toBe('error');
+  expect(view.result.current.acceptedGeneration).toBeNull();
+  view.rerender({ selection: 'C', enabled: true });
+  await request.finish(2, '32');
+  const current = new URL(
+    request.requests[2].url,
+    location.origin,
+  ).searchParams.get('generation');
+  expect(current).not.toBe(first);
+  expect(view.result.current.acceptedGeneration).toBe(current);
+  view.rerender({ selection: 'C', enabled: false });
+  expect(view.result.current.acceptedGeneration).toBeNull();
+});
 it('isolates same-origin backend changes and rejects actor, origin, backend and generation mismatches', async () => {
   const request = deferredFetch();
   const view = renderHook(

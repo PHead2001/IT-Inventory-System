@@ -81,6 +81,17 @@ export function placeRoomControls(
   };
 }
 
+// Narrow panels leave the canvas free when their full scroll envelope cannot
+// fit above the primary row.
+export function roomControlsNeedInline(
+  anchor: ControlsArea,
+  viewport: ControlsArea,
+  height: number,
+  narrow: boolean,
+) {
+  return narrow && anchor.top - 5 - (viewport.top + 4) < height;
+}
+
 export type ViewCommandKind =
   | 'fit'
   | 'recenter'
@@ -108,6 +119,7 @@ export function RoomToolbar({
   onCountsChange,
   interactionRef,
   onOverlayChange,
+  selectionEnabled = true,
 }: {
   active: boolean;
   onActiveChange(active: boolean): void;
@@ -122,24 +134,35 @@ export function RoomToolbar({
   onCountsChange(): void;
   interactionRef?: RefObject<HTMLButtonElement | null>;
   onOverlayChange?: () => void;
+  selectionEnabled?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const [help, setHelp] = useState(false);
   const host = useRef<HTMLDivElement>(null);
   const panel = useRef<HTMLDivElement>(null);
+  const toolbar = useRef<HTMLDivElement>(null);
   const more = useRef<HTMLButtonElement>(null);
   const localInteraction = useRef<HTMLButtonElement>(null);
   const interact = interactionRef ?? localInteraction;
   const panelId = useId();
+  const placementState = useRef<{ inline: boolean; narrow?: boolean }>({
+    inline: false,
+  });
   // Keep the same native action nodes; only the open panel's envelope moves.
   useLayoutEffect(() => {
-    if (!open) return;
+    if (!open) {
+      placementState.current = { inline: false };
+      return;
+    }
     let frame: number | null = null;
     const visual = window.visualViewport;
+    // Flow changes page height and scroll anchoring can move the row. Latch
+    // inline until close or a width-class change to avoid repeated reflows.
+    const state = placementState.current;
     const measure = () => {
       frame = null;
-      if (!host.current || !panel.current) return;
-      const anchor = host.current.getBoundingClientRect();
+      if (!host.current || !panel.current || !toolbar.current) return;
+      const anchor = toolbar.current.getBoundingClientRect();
       const viewport = {
         left: visual?.offsetLeft ?? 0,
         top: visual?.offsetTop ?? 0,
@@ -157,20 +180,26 @@ export function RoomToolbar({
         (viewport.bottom - viewport.top) * 0.35,
         panel.current.scrollHeight + 2,
       );
+      const narrow = anchor.width <= 720;
+      if (state.narrow !== narrow) state.inline = false;
+      state.narrow = narrow;
+      state.inline ||= roomControlsNeedInline(anchor, viewport, height, narrow);
+      const inline = state.inline;
       const placement = placeRoomControls(
         anchor,
         viewport,
         { width, height },
-        anchor.width <= 720,
+        narrow,
       );
       const style = panel.current.style;
       const values = {
-        left: placement.left - anchor.left,
-        top: placement.top - anchor.top,
+        left: inline ? 0 : placement.left - anchor.left,
+        top: inline ? 0 : placement.top - anchor.top,
         width: placement.width,
-        maxHeight: placement.maxHeight,
+        maxHeight: inline ? height : placement.maxHeight,
       };
-      let changed = panel.current.dataset.placement !== placement.side;
+      const side = inline ? 'inline' : placement.side;
+      let changed = panel.current.dataset.placement !== side;
       for (const [key, value] of Object.entries(values)) {
         const next = `${value}px`;
         if (
@@ -181,7 +210,7 @@ export function RoomToolbar({
           changed = true;
         }
       }
-      panel.current.dataset.placement = placement.side;
+      panel.current.dataset.placement = side;
       if (changed) onOverlayChange?.();
     };
     const schedule = () => {
@@ -192,7 +221,7 @@ export function RoomToolbar({
       typeof ResizeObserver === 'undefined'
         ? null
         : new ResizeObserver(schedule);
-    if (host.current) observer?.observe(host.current);
+    if (toolbar.current) observer?.observe(toolbar.current);
     if (panel.current) observer?.observe(panel.current);
     window.addEventListener('resize', schedule);
     window.addEventListener('scroll', schedule, true);
@@ -237,7 +266,20 @@ export function RoomToolbar({
   }, [open, onOverlayChange]);
   useEffect(() => {
     const escape = (event: KeyboardEvent) => {
-      if (event.key !== 'Escape' || (!active && !open)) return;
+      if (
+        event.defaultPrevented ||
+        event.key !== 'Escape' ||
+        (!active && !open)
+      )
+        return;
+      const ownerSelector =
+        'dialog[open], [role="dialog"][aria-modal="true"], [role="alertdialog"][aria-modal="true"]';
+      const target =
+        event.target instanceof Element ? event.target : document.activeElement;
+      const modal = target?.closest(ownerSelector);
+      // A focused foreground dialog owns Escape, including its native cancel
+      // default action. Toolbars inside that same dialog still handle their map.
+      if (modal && host.current?.closest(ownerSelector) !== modal) return;
       event.preventDefault();
       setOpen(false);
       setHelp(false);
@@ -257,6 +299,7 @@ export function RoomToolbar({
   return (
     <div ref={host} className={styles.toolbarHost}>
       <div
+        ref={toolbar}
         role="toolbar"
         aria-label="Room camera controls"
         className={styles.cameraToolbar}
@@ -424,8 +467,10 @@ export function RoomToolbar({
           {help && (
             <div className={styles.controlsHelp}>
               <p>
-                Click or tap a location to select it. Outside Interact mode,
-                scroll and swipe move the page.
+                {selectionEnabled
+                  ? 'Click or tap a location to select it.'
+                  : 'This preview shows the recorded location.'}{' '}
+                Outside Interact mode, scroll and swipe move the page.
               </p>
               <p>
                 Choose Interact with map to rotate by dragging, or zoom with an
@@ -441,10 +486,11 @@ export function RoomToolbar({
                 location browser works without the map.
               </p>
               <p>
-                Counts mark occupied visible locations. Focus or select a marker
-                for its products, units and individual assets at that leaf
-                location. Unknown counts are omitted. Hidden locations remain in
-                the location browser.
+                Counts mark occupied visible locations with read-only badges.
+                Select a location on the map or in the location browser to see
+                its distinct products, units and individual assets. Unknown
+                counts are omitted. Hidden locations remain in the location
+                browser.
               </p>
             </div>
           )}

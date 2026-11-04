@@ -1,5 +1,15 @@
 # Application architecture
 
+Optional record previews and storage-destination maps reuse the room's logical
+code selection, camera flight and visual opening controller. Form confirmation
+resolves the latest eligible UUID through the existing picker model and never
+dispatches inventory commands. The protected layout owns a single graphics lease
+covering initialization through actual Fiber disposal completion; original
+actor/backend/privacy authority binds each renderer, with synchronous DOM/portal
+masking and explicit context across its separate root. Detail readiness is
+independent of lazy graphics and counts. See [room navigation](room-navigation.md#shared-spatial-composition-and-embedded-maps)
+for the pinned failed-initialization adapter and remaining browser acceptance.
+
 Record and relevant settings/form routes stream only generic server metadata.
 Caller-authorized cached page readers remain the only source of private names.
 Successful page slots register those names with explicit server route paths in the
@@ -121,19 +131,77 @@ authorization and real visible readiness remain required. Supersede, cancellatio
 retire and settle the old ticket. Changed logout evidence starts distinct current-
 route recovery rather than rebasing the captured target proof.
 
-Successful inventory list, quantity detail and asset detail primaries explicitly
-opt into a consistently mounted paired body boundary inside their exact raw
-RouteReady identity. It shares `${intent.name}-content` while the matching title
-shares `intent.name`, so the body crossfade and title morph occupy one native
-capture even when the inner primary and outer pathname commit in either order.
-That accepted pair suppresses the outer generic fade. Capture consumes only its
-exact generic arrival approval; title/body effects finish together before retiring
-their intent. A body-only capture fades once and retires its unused title approval;
-a title without an opted-in body reveals instantly. Ordinary unpaired routes
-retain their generic arrival. No readiness or request state is granted by these
-presentation boundaries. The body inherits the accepted page's existing source
-and returns its outgoing native cleanup lease; it never mounts a competing source.
-Room, loading/error boundaries and mismatched/retired approvals do not opt in.
+Successful Inventory, History and Locations list primaries opt into a consistently mounted paired body
+boundary inside their exact raw RouteReady identity. Asset, quantity and location
+details instead declare `capture="regions"` on that same single canonical owner.
+Their explicit conventional header and record-body regions are siblings of the
+storage-preview section; the preview's heading/chooser, recorded breadcrumb and
+Show in room link have bounded regions inside that uncaptured section. No region
+contains its map slot, cold placeholder or canvas. Record-task launchers and
+conventional form controls use the same explicit capability and split around the
+inline map picker. The existing native map dialog portal and task/grid ownership
+are unchanged. The closed region inventory bounds capture names before lazy
+chunks load; DOM discovery never grants capture capability.
+
+React owns the shared title. Conventional body and supporting regions register
+their authored DOM refs with one provider-owned CSS participant controller;
+unmanaged callers retain the React body fallback. This prevents a visible
+incoming body being omitted when its outgoing counterpart was offscreen under
+a disabled ancestor. The authored body and React fallback never own the same
+root together. The controller observes
+before-native/returned-handle hooks inside the existing capture observer, without
+wrapping React's update callback or changing the native arguments, receiver,
+return value or exception. Naming requires the exact accepted approval, provider,
+epoch, source/destination identity, existing presentation grant, Full motion and
+explicit ready capability. The accepted source root/key and inherited presentation
+source are pinned before URL advance; destination refs use their explicit server
+capability, never an early readiness acknowledgment. Hidden, offscreen, duplicate,
+canvas-containing or externally named roots cannot participate. Incoming refs
+clear only this capture's outgoing names after the native handle has returned;
+ready seals further assignment and clears remaining live CSS names.
+
+The body keeps `${intent.name}-content`; other regions use that exact name plus
+an explicit region suffix while the matching title shares `intent.name`. Shared
+and unmatched enter/exit regions crossfade concurrently with the title in one
+native capture, including either inner-primary/outer-pathname commit order. The
+shared document clock includes paired replacements and single-sided native fades.
+Every visible authored region fades on its actual old/new side; an offscreen
+counterpart needs no fabricated bitmap. A visible incoming body still fades when
+the outgoing viewport contains only the record header.
+The accepted pair suppresses the outer generic fade. One exact-approval completion
+receipt accepts actual auxiliary effects in its returned-handle ready reaction
+and React 19.3's synchronous native capture callbacks in the following reaction,
+then seals its participant names in a microtask and waits for all their effects.
+An auxiliary-only visible capture joins that same receipt even when title/body
+are offscreen. No dummy native trigger is introduced. The shared route motion
+keeps captured old-image size/position, fades it out, and fades/settles the new
+image by 8 px at its own intrinsic size; page bitmaps never morph dimensions.
+A presentation-only seal subscription withdraws title and region capture names
+immediately, even if the outer pathname already consumed the generic arrival.
+The exact intent remains only for effect completion, and native source leases
+remain until cleanup. A newly mounted local control cannot start another capture
+under that sealed approval.
+A duplicate or late callback cannot acquire another lease. A capture without an
+actual body region retires its unused title approval and reveals instantly.
+Ordinary unpaired routes retain their generic arrival. No readiness or request
+state is granted by presentation boundaries.
+
+Record tasks appear immediately after the complete header. Descriptions and
+manufacturer/model disclosures remain fully available after the task workspace,
+so supporting metadata does not push task access beyond the first phone screen.
+
+Each outgoing React region inherits the accepted page's existing source and
+acquires a single-use lease from its committed immutable exit descriptor. The
+auxiliary capture additionally acquires one exact pinned source exit lease before
+the native call, including when no outgoing auxiliary ref is present. Neither ref
+unmount nor ready settlement releases that native lease. The original source remains
+eligible through the final exact native `transition.finished` cleanup; privacy
+withdrawal and supersession dispose all leases immediately. Old callbacks and
+cleanups cannot borrow a renewed source or a later approval. Room and
+loading/error boundaries remain excluded. These source contracts do not accept
+D303.2, W13 or A303 without the required real browser/WebGL and exact-candidate
+proof.
+
 The main History list and ordinary Locations browser/detail primaries use the
 same title/body ownership. Title targets distinguish a real inventory holding,
 a history event kind/UUID and its record UUID, or a location UUID/stable code
@@ -171,8 +239,9 @@ do not acquire this capability. Successful History and Locations primaries use
 one identical raw key for canonical privacy and readiness; unavailable/error
 responses never opt in.
 
-The mounted inner body shares the exact primary arrival name and inherits its
-source handoff. Capture consumes only that exact approval; real visible primary
+The mounted inner body or explicit detail regions share the exact primary
+arrival name (plus bounded region suffixes) and inherit the source handoff. The
+capture batch consumes only that exact approval after every region callback; real visible primary
 readiness releases its loading wait, never the approval or backend work. Outer
 pathname commits cannot animate or retire a primary approval. Redirect/query
 mismatch, terminal failure, native traversal, Reduced motion, privacy withdrawal

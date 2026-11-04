@@ -13,6 +13,10 @@ import {
 } from '@/features/inventory/components/retirement-reason';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import {
+  InventoryCaptureGroup,
+  InventoryCaptureRegion,
+} from '@/components/experience/inventory-capture-region';
 import { LocationPicker } from '@/features/locations/location-picker';
 import { pickerLocations } from '@/features/locations/picker-model';
 import type { LocationRef } from '@/features/inventory/contracts-ui';
@@ -547,144 +551,156 @@ function CustodyFields(latest: Props & { startAnother: () => void }) {
   };
   if (completed)
     return (
-      <section
-        className={panel + ' max-w-4xl space-y-4'}
-        aria-label="Custody completion"
-      >
-        {state.custody ? (
-          <>
-            <CustodyReceiptView
-              receipt={state.custody}
-              reviewedName={latest.onRecordPage ? 'This item' : reviewed?.name}
-            />
-          </>
-        ) : (
-          <>
-            <h3 className="text-lg font-semibold">
-              {state.changed
-                ? custodyEventLabel(action, kind)
-                : 'No change needed'}
-            </h3>
-            {reviewed?.name && (
-              <p className="break-words">
-                {latest.onRecordPage ? 'This item' : reviewed.name}
-              </p>
-            )}
-            <p>
-              {quantity && correction ? (
-                <>
-                  Count correction at{' '}
-                  {reviewedEndpoint(reviewed?.source, reviewed?.sourceStorage)}
-                </>
-              ) : (
-                <>
-                  {reviewedEndpoint(reviewed?.source, reviewed?.sourceStorage)}{' '}
-                  →{' '}
-                  {reviewedEndpoint(
-                    reviewed?.destination,
-                    reviewed?.destinationStorage,
-                  )}
-                </>
+      <InventoryCaptureRegion region="custody-completion">
+        <section
+          className={panel + ' max-w-4xl space-y-4'}
+          aria-label="Custody completion"
+        >
+          {state.custody ? (
+            <>
+              <CustodyReceiptView
+                receipt={state.custody}
+                reviewedName={
+                  latest.onRecordPage ? 'This item' : reviewed?.name
+                }
+              />
+            </>
+          ) : (
+            <>
+              <h3 className="text-lg font-semibold">
+                {state.changed
+                  ? custodyEventLabel(action, kind)
+                  : 'No change needed'}
+              </h3>
+              {reviewed?.name && (
+                <p className="break-words">
+                  {latest.onRecordPage ? 'This item' : reviewed.name}
+                </p>
               )}
+              <p>
+                {quantity && correction ? (
+                  <>
+                    Count correction at{' '}
+                    {reviewedEndpoint(
+                      reviewed?.source,
+                      reviewed?.sourceStorage,
+                    )}
+                  </>
+                ) : (
+                  <>
+                    {reviewedEndpoint(
+                      reviewed?.source,
+                      reviewed?.sourceStorage,
+                    )}{' '}
+                    →{' '}
+                    {reviewedEndpoint(
+                      reviewed?.destination,
+                      reviewed?.destinationStorage,
+                    )}
+                  </>
+                )}
+              </p>
+              <p>
+                {quantity
+                  ? correction
+                    ? `Observed count: ${reviewed?.quantity} units`
+                    : `${reviewed?.quantity} units`
+                  : '1 individual asset'}
+              </p>
+              {reviewed?.reference && (
+                <p>Ticket number reference: {reviewed.reference}</p>
+              )}
+              <p className="text-sm text-slate-300">
+                {state.changed
+                  ? 'The transaction is confirmed. The event receipt is not available yet; current holdings are not its receipt balances.'
+                  : 'No balance change was needed.'}
+              </p>
+              {state.eventId && actorId && (
+                <Button
+                  type="button"
+                  disabled={pending || actorMismatch}
+                  onClick={() =>
+                    startTask(async () => {
+                      const detail = await loadCustodyReceipt({
+                        kind,
+                        entityId,
+                        eventId: state.eventId,
+                        expectedActorId: actorId,
+                      });
+                      if (detail) setState({ ...state, custody: detail });
+                    })
+                  }
+                >
+                  Load confirmed receipt
+                </Button>
+              )}
+            </>
+          )}
+          {state.refreshFailed && (
+            <p role="status" className="text-sm text-amber-200">
+              Saved successfully. Receipt details or page refresh could not be
+              loaded. Refresh to check current holdings; do not submit this
+              operation again.
             </p>
-            <p>
-              {quantity
-                ? correction
-                  ? `Observed count: ${reviewed?.quantity} units`
-                  : `${reviewed?.quantity} units`
-                : '1 individual asset'}
-            </p>
-            {reviewed?.reference && (
-              <p>Ticket number reference: {reviewed.reference}</p>
-            )}
-            <p className="text-sm text-slate-300">
-              {state.changed
-                ? 'The transaction is confirmed. The event receipt is not available yet; current holdings are not its receipt balances.'
-                : 'No balance change was needed.'}
-            </p>
-            {state.eventId && actorId && (
+          )}
+          <div className="flex flex-wrap gap-3">
+            {!closed && (
               <Button
                 type="button"
-                disabled={pending || actorMismatch}
-                onClick={() =>
-                  startTask(async () => {
-                    const detail = await loadCustodyReceipt({
-                      kind,
-                      entityId,
-                      eventId: state.eventId,
-                      expectedActorId: actorId,
-                    });
-                    if (detail) setState({ ...state, custody: detail });
-                  })
-                }
+                onClick={() => {
+                  if (resetTask) resetTask();
+                  else setClosed(true);
+                }}
               >
-                Load confirmed receipt
+                Done
               </Button>
             )}
-          </>
-        )}
-        {state.refreshFailed && (
-          <p role="status" className="text-sm text-amber-200">
-            Saved successfully. Receipt details or page refresh could not be
-            loaded. Refresh to check current holdings; do not submit this
-            operation again.
-          </p>
-        )}
-        <div className="flex flex-wrap gap-3">
-          {!closed && (
-            <Button
-              type="button"
-              onClick={() => {
-                if (resetTask) resetTask();
-                else setClosed(true);
-              }}
+            {kind === 'quantity' && (
+              <Button
+                type="button"
+                variant="outline"
+                disabled={
+                  actorMismatch ||
+                  latest.version !== state.version ||
+                  unavailable ||
+                  (action === 'issue' &&
+                    !storageBalances.some((balance) => balance.quantity > 0))
+                }
+                onClick={latest.startAnother}
+              >
+                {action === 'issue' || action === 'assign'
+                  ? 'Issue another'
+                  : action === 'return'
+                    ? 'Return more'
+                    : action === 'transfer'
+                      ? 'Transfer more'
+                      : action === 'correct'
+                        ? 'Correct another count'
+                        : action === 'opening'
+                          ? 'Record another holding'
+                          : 'Write off more'}
+              </Button>
+            )}
+            <Link
+              className="inline-flex min-h-11 items-center text-cyan-300 underline"
+              href={`/inventory/${kind === 'quantity' ? 'quantity' : 'assets'}/${entityId}`}
             >
-              Done
-            </Button>
+              View record
+            </Link>
+          </div>
+          {closed && (
+            <p role="status">
+              Done. The completed operation is retained above.
+            </p>
           )}
-          {kind === 'quantity' && (
-            <Button
-              type="button"
-              variant="outline"
-              disabled={
-                actorMismatch ||
-                latest.version !== state.version ||
-                unavailable ||
-                (action === 'issue' &&
-                  !storageBalances.some((balance) => balance.quantity > 0))
-              }
-              onClick={latest.startAnother}
-            >
-              {action === 'issue' || action === 'assign'
-                ? 'Issue another'
-                : action === 'return'
-                  ? 'Return more'
-                  : action === 'transfer'
-                    ? 'Transfer more'
-                    : action === 'correct'
-                      ? 'Correct another count'
-                      : action === 'opening'
-                        ? 'Record another holding'
-                        : 'Write off more'}
-            </Button>
+          {latest.version !== state.version && (
+            <p className="text-sm text-slate-300">
+              Refresh and review current holdings before starting another
+              operation.
+            </p>
           )}
-          <Link
-            className="inline-flex min-h-11 items-center text-cyan-300 underline"
-            href={`/inventory/${kind === 'quantity' ? 'quantity' : 'assets'}/${entityId}`}
-          >
-            View record
-          </Link>
-        </div>
-        {closed && (
-          <p role="status">Done. The completed operation is retained above.</p>
-        )}
-        {latest.version !== state.version && (
-          <p className="text-sm text-slate-300">
-            Refresh and review current holdings before starting another
-            operation.
-          </p>
-        )}
-      </section>
+        </section>
+      </InventoryCaptureRegion>
     );
   return (
     <form
@@ -694,47 +710,57 @@ function CustodyFields(latest: Props & { startAnother: () => void }) {
       onSubmit={submit}
       noValidate
     >
-      {!resetTask && (
-        <h3 className="text-lg font-semibold">{titles[action]}</h3>
-      )}
-      {['write_off', 'retire'].includes(action) && (
-        <p className="text-sm text-slate-300">
-          {kind === 'quantity'
-            ? 'Write off removes missing or consumed quantity stock. A reason is required.'
-            : action === 'retire'
-              ? 'Retire ends this individual asset’s service and closes its site assignment. A reason is required.'
-              : 'Write off records the loss of this individual asset and closes its site assignment. A reason is required.'}
-        </p>
-      )}
-      {actorMismatch && (
-        <p role="alert">
-          Return to the original signed-in account to continue or resolve this
-          operation.
-        </p>
-      )}
-      {unavailable && (
-        <div role="note" className="experience-feedback text-sm">
-          <p>
-            {noDestination
-              ? sites.length === 0
-                ? 'No sites are configured. This operation needs a destination site.'
-                : !sites.some((site) => site.active)
-                  ? 'No active sites are available for this operation.'
-                  : 'No other active site is available as a destination.'
-              : 'There is no recorded holding at a site to use as the source for this operation.'}
-          </p>
-          {noDestination &&
-            (canManageConfiguration ? (
-              <Link href="/settings/sites" className="text-cyan-300 underline">
-                Open site settings
-              </Link>
-            ) : (
+      {(!resetTask ||
+        ['write_off', 'retire'].includes(action) ||
+        actorMismatch ||
+        unavailable) && (
+        <InventoryCaptureGroup region="custody-intro" className="space-y-4">
+          {!resetTask && (
+            <h3 className="text-lg font-semibold">{titles[action]}</h3>
+          )}
+          {['write_off', 'retire'].includes(action) && (
+            <p className="text-sm text-slate-300">
+              {kind === 'quantity'
+                ? 'Write off removes missing or consumed quantity stock. A reason is required.'
+                : action === 'retire'
+                  ? 'Retire ends this individual asset’s service and closes its site assignment. A reason is required.'
+                  : 'Write off records the loss of this individual asset and closes its site assignment. A reason is required.'}
+            </p>
+          )}
+          {actorMismatch && (
+            <p role="alert">
+              Return to the original signed-in account to continue or resolve
+              this operation.
+            </p>
+          )}
+          {unavailable && (
+            <div role="note" className="experience-feedback text-sm">
               <p>
-                Ask a configuration maintainer to add or restore a suitable
-                site.
+                {noDestination
+                  ? sites.length === 0
+                    ? 'No sites are configured. This operation needs a destination site.'
+                    : !sites.some((site) => site.active)
+                      ? 'No active sites are available for this operation.'
+                      : 'No other active site is available as a destination.'
+                  : 'There is no recorded holding at a site to use as the source for this operation.'}
               </p>
-            ))}
-        </div>
+              {noDestination &&
+                (canManageConfiguration ? (
+                  <Link
+                    href="/settings/sites"
+                    className="text-cyan-300 underline"
+                  >
+                    Open site settings
+                  </Link>
+                ) : (
+                  <p>
+                    Ask a configuration maintainer to add or restore a suitable
+                    site.
+                  </p>
+                ))}
+            </div>
+          )}
+        </InventoryCaptureGroup>
       )}
       <fieldset
         disabled={
@@ -748,10 +774,12 @@ function CustodyFields(latest: Props & { startAnother: () => void }) {
         className="space-y-4"
       >
         {action === 'opening' && (
-          <p className="text-sm text-slate-300">
-            Opening holdings describe equipment already at a site. No past
-            closet issue or date is invented.
-          </p>
+          <InventoryCaptureRegion region="custody-opening-help">
+            <p className="text-sm text-slate-300">
+              Opening holdings describe equipment already at a site. No past
+              closet issue or date is invented.
+            </p>
+          </InventoryCaptureRegion>
         )}
         {fromStorage && (
           <LocationPicker
@@ -806,7 +834,10 @@ function CustodyFields(latest: Props & { startAnother: () => void }) {
               }
             />
             {!quantity && (
-              <>
+              <InventoryCaptureGroup
+                region="custody-location-help"
+                className="space-y-4"
+              >
                 <Button
                   type="button"
                   variant="outline"
@@ -828,243 +859,250 @@ function CustodyFields(latest: Props & { startAnother: () => void }) {
                           ? 'The previous storage location is no longer available. Choose a destination.'
                           : 'The storage origin for this assignment is unavailable. Choose a destination.'}
                 </p>
-              </>
+              </InventoryCaptureGroup>
             )}
           </>
         )}
-        {fromSite && (
+        <InventoryCaptureGroup region="custody-inputs" className="space-y-4">
+          {fromSite && (
+            <label className="block space-y-2">
+              Source site
+              <RequiredMark />
+              <select
+                id={scope + '-source-site'}
+                aria-label="Source site"
+                {...validation.props(scope + '-source-site')}
+                className={field}
+                required
+                value={values.source_site_id}
+                onChange={(event) =>
+                  update('source_site_id', event.target.value)
+                }
+              >
+                <option value="">Choose site</option>
+                {sourceSites.map((site) => (
+                  <option key={site.id} value={site.id}>
+                    {site.name} ({site.code})
+                  </option>
+                ))}
+              </select>
+              {validation.error(scope + '-source-site')}
+            </label>
+          )}
+          {toSite && !(quantity && correction) && (
+            <label className="block space-y-2">
+              Destination site
+              <RequiredMark />
+              <select
+                id={scope + '-destination-site'}
+                aria-label="Destination site"
+                {...validation.props(scope + '-destination-site')}
+                className={field}
+                required
+                value={values.destination_site_id}
+                onChange={(event) =>
+                  update('destination_site_id', event.target.value)
+                }
+              >
+                <option value="">Choose site</option>
+                {destinationSites.map((site) => (
+                  <option key={site.id} value={site.id}>
+                    {site.name} ({site.code})
+                  </option>
+                ))}
+              </select>
+              {validation.error(scope + '-destination-site')}
+            </label>
+          )}
+          {quantity &&
+            (correction ? (
+              <label className="block space-y-2">
+                Observed units at site
+                <RequiredMark />
+                <Input
+                  id={scope + '-observed'}
+                  aria-label="Observed units at site"
+                  {...validation.props(scope + '-observed')}
+                  type="number"
+                  min={0}
+                  max={2147483647}
+                  step={1}
+                  required
+                  value={values.observed_quantity}
+                  onChange={(e) => update('observed_quantity', e.target.value)}
+                />
+                {validation.error(scope + '-observed')}
+              </label>
+            ) : (
+              <label className="block space-y-2">
+                Units
+                <RequiredMark />
+                <Input
+                  id={scope + '-quantity'}
+                  aria-label="Units"
+                  {...validation.props(scope + '-quantity')}
+                  type="number"
+                  min={1}
+                  max={2147483647}
+                  step={1}
+                  required
+                  value={values.quantity}
+                  onChange={(e) => update('quantity', e.target.value)}
+                />
+                {validation.error(scope + '-quantity')}
+              </label>
+            ))}
+          {retiring && (
+            <RetirementReasonPresets
+              reason={values.reason}
+              onChange={(value) => update('reason', value)}
+            />
+          )}
           <label className="block space-y-2">
-            Source site
-            <RequiredMark />
-            <select
-              id={scope + '-source-site'}
-              aria-label="Source site"
-              {...validation.props(scope + '-source-site')}
-              className={field}
-              required
-              value={values.source_site_id}
-              onChange={(event) => update('source_site_id', event.target.value)}
-            >
-              <option value="">Choose site</option>
-              {sourceSites.map((site) => (
-                <option key={site.id} value={site.id}>
-                  {site.name} ({site.code})
-                </option>
-              ))}
-            </select>
-            {validation.error(scope + '-source-site')}
-          </label>
-        )}
-        {toSite && !(quantity && correction) && (
-          <label className="block space-y-2">
-            Destination site
-            <RequiredMark />
-            <select
-              id={scope + '-destination-site'}
-              aria-label="Destination site"
-              {...validation.props(scope + '-destination-site')}
-              className={field}
-              required
-              value={values.destination_site_id}
-              onChange={(event) =>
-                update('destination_site_id', event.target.value)
+            Reason {requiresReason ? '(required)' : '(optional)'}
+            <textarea
+              id={scope + '-reason'}
+              aria-label={
+                requiresReason ? 'Reason (required)' : 'Reason (optional)'
               }
-            >
-              <option value="">Choose site</option>
-              {destinationSites.map((site) => (
-                <option key={site.id} value={site.id}>
-                  {site.name} ({site.code})
-                </option>
-              ))}
-            </select>
-            {validation.error(scope + '-destination-site')}
+              {...validation.props(scope + '-reason')}
+              className={field}
+              required={requiresReason}
+              maxLength={2000}
+              value={values.reason}
+              onChange={(e) => update('reason', e.target.value)}
+            />
+            {validation.error(scope + '-reason')}
           </label>
-        )}
-        {quantity &&
-          (correction ? (
-            <label className="block space-y-2">
-              Observed units at site
-              <RequiredMark />
-              <Input
-                id={scope + '-observed'}
-                aria-label="Observed units at site"
-                {...validation.props(scope + '-observed')}
-                type="number"
-                min={0}
-                max={2147483647}
-                step={1}
-                required
-                value={values.observed_quantity}
-                onChange={(e) => update('observed_quantity', e.target.value)}
-              />
-              {validation.error(scope + '-observed')}
-            </label>
-          ) : (
-            <label className="block space-y-2">
-              Units
-              <RequiredMark />
-              <Input
-                id={scope + '-quantity'}
-                aria-label="Units"
-                {...validation.props(scope + '-quantity')}
-                type="number"
-                min={1}
-                max={2147483647}
-                step={1}
-                required
-                value={values.quantity}
-                onChange={(e) => update('quantity', e.target.value)}
-              />
-              {validation.error(scope + '-quantity')}
-            </label>
-          ))}
-        {retiring && (
-          <RetirementReasonPresets
-            reason={values.reason}
-            onChange={(value) => update('reason', value)}
-          />
-        )}
-        <label className="block space-y-2">
-          Reason {requiresReason ? '(required)' : '(optional)'}
-          <textarea
-            id={scope + '-reason'}
-            aria-label={
-              requiresReason ? 'Reason (required)' : 'Reason (optional)'
-            }
-            {...validation.props(scope + '-reason')}
-            className={field}
-            required={requiresReason}
-            maxLength={2000}
-            value={values.reason}
-            onChange={(e) => update('reason', e.target.value)}
-          />
-          {validation.error(scope + '-reason')}
-        </label>
-        {retiring && (
-          <RetirementNote
-            id={scope + '-retirement-note'}
-            value={values.retirement_note}
-            onChange={(value) => update('retirement_note', value)}
-          />
-        )}
-        <label className="block space-y-2">
-          Ticket number reference (optional)
-          <Input
-            id={scope + '-reference'}
-            {...validation.props(scope + '-reference')}
-            maxLength={200}
-            value={values.reference}
-            onChange={(e) => update('reference', e.target.value)}
-          />
-          {validation.error(scope + '-reference')}
-        </label>
+          {retiring && (
+            <RetirementNote
+              id={scope + '-retirement-note'}
+              value={values.retirement_note}
+              onChange={(value) => update('retirement_note', value)}
+            />
+          )}
+          <label className="block space-y-2">
+            Ticket number reference (optional)
+            <Input
+              id={scope + '-reference'}
+              {...validation.props(scope + '-reference')}
+              maxLength={200}
+              value={values.reference}
+              onChange={(e) => update('reference', e.target.value)}
+            />
+            {validation.error(scope + '-reference')}
+          </label>
+        </InventoryCaptureGroup>
       </fieldset>
-      <ValidationSummary issues={validation.issues} />
-      {reviewed && !uncertain && (
-        <section aria-label="Review changes" className={panel}>
-          <h3 id={scope + '-review-context'} className="font-semibold">
-            Review changes for{' '}
-            {latest.onRecordPage && !['write_off', 'retire'].includes(action)
-              ? 'this item'
-              : (reviewed.name ?? latest.entityName ?? 'this record')}
-          </h3>
-          {['write_off', 'retire'].includes(action) && (
-            <p className="text-sm text-[var(--warning)]">
-              Warning: confirm this removal for the named record before saving.
+      <InventoryCaptureGroup region="custody-completion" className="space-y-4">
+        <ValidationSummary issues={validation.issues} />
+        {reviewed && !uncertain && (
+          <section aria-label="Review changes" className={panel}>
+            <h3 id={scope + '-review-context'} className="font-semibold">
+              Review changes for{' '}
+              {latest.onRecordPage && !['write_off', 'retire'].includes(action)
+                ? 'this item'
+                : (reviewed.name ?? latest.entityName ?? 'this record')}
+            </h3>
+            {['write_off', 'retire'].includes(action) && (
+              <p className="text-sm text-[var(--warning)]">
+                Warning: confirm this removal for the named record before
+                saving.
+              </p>
+            )}
+            <p>
+              {latest.onRecordPage
+                ? 'This item'
+                : (reviewed.name ?? 'This record')}{' '}
+              · {quantity ? `${reviewed.quantity} units` : '1 individual asset'}
             </p>
-          )}
-          <p>
-            {latest.onRecordPage
-              ? 'This item'
-              : (reviewed.name ?? 'This record')}{' '}
-            · {quantity ? `${reviewed.quantity} units` : '1 individual asset'}
-          </p>
-          <p>{reviewedRoute}</p>
-          {reviewed.reference && (
-            <p>Ticket number reference: {reviewed.reference}</p>
-          )}
-          {finalReason && <p>Reason: {finalReason}</p>}
-        </section>
-      )}
-      {state && (
-        <p
-          role="status"
-          className="experience-feedback"
-          data-tone={state.ok ? 'success' : 'error'}
-        >
-          {state.ok
-            ? 'Custody saved. Current holdings and history will refresh.'
-            : state.message}
-        </p>
-      )}
-      {stale && !uncertain && !completed && (
-        <div role="alert">
-          <p>
-            {newerSnapshot
-              ? 'This record changed. Review the latest holdings before submitting; your entries are retained.'
-              : 'The latest holdings have not loaded. Refresh to try again; your entries are retained.'}
-          </p>
-          <Button
-            type="button"
-            variant="outline"
-            disabled={pending || actorMismatch}
-            onClick={() => {
-              if (!newerSnapshot) {
-                refreshHoldings();
-                return;
-              }
-              setBaseline(latest);
-              setRejectedVersion(null);
-              setReviewed(null);
-              setState(null);
-            }}
+            <p>{reviewedRoute}</p>
+            {reviewed.reference && (
+              <p>Ticket number reference: {reviewed.reference}</p>
+            )}
+            {finalReason && <p>Reason: {finalReason}</p>}
+          </section>
+        )}
+        {state && (
+          <p
+            role="status"
+            className="experience-feedback"
+            data-tone={state.ok ? 'success' : 'error'}
           >
-            {newerSnapshot
-              ? 'Review latest holdings'
-              : 'Refresh latest holdings'}
-          </Button>
-        </div>
-      )}
-      <Button
-        aria-describedby={
-          reviewed && !uncertain ? scope + '-review-context' : undefined
-        }
-        className={
-          ['write_off', 'retire'].includes(action)
-            ? 'experience-danger-action'
-            : undefined
-        }
-        disabled={
-          pending || actorMismatch || (!uncertain && (unavailable || stale))
-        }
-        type="submit"
-      >
-        {pending
-          ? 'Saving…'
-          : uncertain
-            ? 'Retry same custody transaction'
-            : reviewed
-              ? {
-                  issue: 'Issue to site',
-                  assign: 'Assign to site',
-                  return: 'Return to storage',
-                  transfer: 'Transfer between sites',
-                  opening: 'Record site holding',
-                  correct: 'Save correction',
-                  write_off: 'Write off at site',
-                  retire: 'Retire asset at site',
-                }[action]
-              : {
-                  issue: 'Review issue',
-                  assign: 'Review assignment',
-                  return: 'Review return',
-                  transfer: 'Review transfer',
-                  opening: 'Review site holding',
-                  correct: 'Review correction',
-                  write_off: 'Review write-off',
-                  retire: 'Review retirement',
-                }[action]}
-      </Button>
+            {state.ok
+              ? 'Custody saved. Current holdings and history will refresh.'
+              : state.message}
+          </p>
+        )}
+        {stale && !uncertain && !completed && (
+          <div role="alert">
+            <p>
+              {newerSnapshot
+                ? 'This record changed. Review the latest holdings before submitting; your entries are retained.'
+                : 'The latest holdings have not loaded. Refresh to try again; your entries are retained.'}
+            </p>
+            <Button
+              type="button"
+              variant="outline"
+              disabled={pending || actorMismatch}
+              onClick={() => {
+                if (!newerSnapshot) {
+                  refreshHoldings();
+                  return;
+                }
+                setBaseline(latest);
+                setRejectedVersion(null);
+                setReviewed(null);
+                setState(null);
+              }}
+            >
+              {newerSnapshot
+                ? 'Review latest holdings'
+                : 'Refresh latest holdings'}
+            </Button>
+          </div>
+        )}
+        <Button
+          aria-describedby={
+            reviewed && !uncertain ? scope + '-review-context' : undefined
+          }
+          className={
+            ['write_off', 'retire'].includes(action)
+              ? 'experience-danger-action'
+              : undefined
+          }
+          disabled={
+            pending || actorMismatch || (!uncertain && (unavailable || stale))
+          }
+          type="submit"
+        >
+          {pending
+            ? 'Saving…'
+            : uncertain
+              ? 'Retry same custody transaction'
+              : reviewed
+                ? {
+                    issue: 'Issue to site',
+                    assign: 'Assign to site',
+                    return: 'Return to storage',
+                    transfer: 'Transfer between sites',
+                    opening: 'Record site holding',
+                    correct: 'Save correction',
+                    write_off: 'Write off at site',
+                    retire: 'Retire asset at site',
+                  }[action]
+                : {
+                    issue: 'Review issue',
+                    assign: 'Review assignment',
+                    return: 'Review return',
+                    transfer: 'Review transfer',
+                    opening: 'Review site holding',
+                    correct: 'Review correction',
+                    write_off: 'Review write-off',
+                    retire: 'Review retirement',
+                  }[action]}
+        </Button>
+      </InventoryCaptureGroup>
     </form>
   );
 }

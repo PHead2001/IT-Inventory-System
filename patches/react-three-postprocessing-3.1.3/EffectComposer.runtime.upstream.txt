@@ -1,0 +1,149 @@
+var EffectComposer = /* @__PURE__ */ memo(function EffectComposer({ children, camera: _camera, scene: _scene, resolutionScale, enabled = true, renderPriority = 1, autoClear = true, autoRenderToScreen = true, depthBuffer, enableNormalPass, stencilBuffer, multisampling = 8, frameBufferType = HalfFloatType, renderPass = defaultRenderPass, mergeMode = "auto", ref }) {
+	const { gl, scene: defaultScene, camera: defaultCamera } = useThree();
+	const scene = _scene || defaultScene;
+	const camera = _camera || defaultCamera;
+	gl.getSize(glSize);
+	const [composerState, setComposerState] = useState(null);
+	const [, requestRebuild] = useReducer((c) => c + 1, 0);
+	useEffect(() => {
+		autoClearGuard.acquire(gl, false);
+		const effectComposer = new EffectComposer$1(gl, {
+			depthBuffer,
+			stencilBuffer,
+			multisampling,
+			frameBufferType
+		});
+		effectComposer.autoRenderToScreen = autoRenderToScreen;
+		effectComposer.addPass(renderPass(scene, camera));
+		let normalPass = null;
+		let downSamplingPass = null;
+		if (enableNormalPass) {
+			normalPass = new NormalPass(scene, camera);
+			normalPass.enabled = false;
+			effectComposer.addPass(normalPass);
+			if (resolutionScale !== void 0) {
+				downSamplingPass = new DepthDownsamplingPass({
+					normalBuffer: normalPass.texture,
+					resolutionScale
+				});
+				downSamplingPass.enabled = false;
+				effectComposer.addPass(downSamplingPass);
+			}
+		}
+		effectComposer.setSize(glSize.width, glSize.height);
+		setComposerState({
+			composer: effectComposer,
+			normalPass,
+			downSamplingPass
+		});
+		return () => {
+			for (const pass of effectComposer.passes) disposeGeneratedPass(pass);
+			effectComposer.dispose();
+			autoClearGuard.release(gl);
+		};
+	}, [
+		camera,
+		gl,
+		depthBuffer,
+		stencilBuffer,
+		multisampling,
+		frameBufferType,
+		autoRenderToScreen,
+		renderPass,
+		scene,
+		enableNormalPass,
+		resolutionScale
+	]);
+	const appliedSizeRef = useRef({
+		width: -1,
+		height: -1,
+		pixelRatio: -1
+	});
+	useFrame((_, delta) => {
+		if (!enabled || !composerState) return;
+		const { composer } = composerState;
+		gl.getSize(glSize);
+		const pixelRatio = gl.getPixelRatio();
+		const applied = appliedSizeRef.current;
+		if (glSize.width !== applied.width || glSize.height !== applied.height || pixelRatio !== applied.pixelRatio) {
+			composer.setSize(glSize.width, glSize.height);
+			applied.width = glSize.width;
+			applied.height = glSize.height;
+			applied.pixelRatio = pixelRatio;
+		}
+		const currentAutoClear = gl.autoClear;
+		gl.autoClear = autoClear;
+		if (stencilBuffer && !autoClear) gl.clearStencil();
+		composer.render(delta);
+		gl.autoClear = currentAutoClear;
+	}, enabled ? renderPriority : 0);
+	const group = useRef(null);
+	const nodesRef = useRef([]);
+	const [nodesVersion, setNodesVersion] = useState(0);
+	useLayoutEffect(() => {
+		if (!composerState) return;
+		const nodes = readGroupChildren(group.current, (object) => object instanceof Effect || object instanceof Pass);
+		if (updateIfChanged(nodesRef, nodes)) setNodesVersion((v) => v + 1);
+	});
+	useLayoutEffect(() => {
+		if (!composerState) return;
+		const { composer, normalPass, downSamplingPass } = composerState;
+		const passes = buildPasses(nodesRef.current, camera, mergeMode);
+		if (passes.some((pass) => groupPasses.has(pass))) {
+			const trailingCopyPass = new CopyPass();
+			generatedPasses.add(trailingCopyPass);
+			passes.push(trailingCopyPass);
+		}
+		for (const pass of passes) composer.addPass(pass);
+		if (passes.length) {
+			if (normalPass) normalPass.enabled = true;
+			if (downSamplingPass) downSamplingPass.enabled = true;
+		}
+		return () => {
+			for (const pass of passes) {
+				composer.removePass(pass);
+				disposeGeneratedPass(pass);
+			}
+			if (normalPass) normalPass.enabled = false;
+			if (downSamplingPass) downSamplingPass.enabled = false;
+		};
+	}, [
+		composerState,
+		nodesVersion,
+		camera,
+		mergeMode
+	]);
+	useEffect(() => {
+		toneMappingGuard.acquire(gl, NoToneMapping);
+		gl.toneMapping = NoToneMapping;
+		return () => {
+			toneMappingGuard.release(gl);
+		};
+	}, [gl]);
+	const state = useMemo(() => composerState ? {
+		composer: composerState.composer,
+		normalPass: composerState.normalPass,
+		downSamplingPass: composerState.downSamplingPass,
+		resolutionScale,
+		camera,
+		scene,
+		requestRebuild,
+		autoClear
+	} : null, [
+		composerState,
+		resolutionScale,
+		camera,
+		scene,
+		requestRebuild,
+		autoClear
+	]);
+	useImperativeHandle(ref, () => composerState?.composer, [composerState]);
+	if (!state) return null;
+	return /* @__PURE__ */ jsx(EffectComposerContext.Provider, {
+		value: state,
+		children: /* @__PURE__ */ jsx("group", {
+			ref: group,
+			children
+		})
+	});
+});

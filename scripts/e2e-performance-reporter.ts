@@ -28,13 +28,34 @@ function sourceFile(file: string) {
 }
 
 export function failureMetadata(test: TestCase, result: TestResult) {
+  const source = sourceFile(test.location.file);
   // Source coordinates only, never titles, errors, attachments, stdout or bodies.
   const integer = (value: number) =>
     Number.isSafeInteger(value) && value >= 0 && value <= 1_000_000
       ? value
       : null;
+  const assertionLocations = result.errors.slice(0, 3).map((error) => {
+    if (source === 'unavailable') return null;
+    // Only coordinates in this known test file may leave the serialized stack.
+    // Never recover expected/actual values or matcher names from rendered text.
+    const suffix = source.replace(/[.*+?^\u0024{}()|[\]\\]/g, '\\$&');
+    const frame = new RegExp(
+      '(?:^|/)' + suffix + ':([0-9]{1,6}):([0-9]{1,6})\\)?$',
+    );
+    const location = (error.stack ?? '')
+      .slice(0, 65_536)
+      .replace(/\u001b\[[0-9;]*m/g, '')
+      .replaceAll('\\', '/')
+      .split('\n')
+      .map((line) => frame.exec(line.trim()))
+      .find(Boolean);
+    return location && Number(location[1]) > 0 && Number(location[2]) > 0
+      ? { line: Number(location[1]), column: Number(location[2]) }
+      : null;
+  });
   return {
-    file: sourceFile(test.location.file),
+    assertionLocations,
+    file: source,
     line: integer(test.location.line),
     status: ['failed', 'timedOut', 'interrupted'].includes(result.status)
       ? result.status
@@ -344,8 +365,12 @@ export default class PerformanceReporter {
     this.phases[phase].record(result);
     if (['failed', 'timedOut', 'interrupted'].includes(result.status)) {
       this.failureCount++;
-      if (this.failures.length < MAX_FAILURE_RECORDS)
-        this.failures.push(failureMetadata(test, result));
+      if (this.failures.length < MAX_FAILURE_RECORDS) {
+        const failure = failureMetadata(test, result);
+        this.failures.push(failure);
+        // Preserve bounded source evidence even when cancellation prevents onEnd.
+        console.log('E2E failed attempt: ' + JSON.stringify(failure));
+      }
     }
     this.finalTests.set(test.id, {
       result: result.status,

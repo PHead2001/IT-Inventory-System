@@ -1,4 +1,9 @@
-import { act, render, screen, waitFor } from '@testing-library/react';
+import {
+  act,
+  render as renderTree,
+  screen,
+  waitFor,
+} from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import type { LocationRef } from '../inventory/contracts-ui';
@@ -21,7 +26,7 @@ vi.mock('next/dynamic', () => ({
       selectedCode: string | null;
       highlightedCodes: string[];
       onSelect: (code: string) => void;
-      focusRequest: { requestId: number };
+      focusRequest: { requestId: number; preserveView?: boolean };
       focusOnRestore: boolean;
       initialView?: CameraView | null;
       onViewChange?: (view: CameraView) => void;
@@ -41,9 +46,11 @@ vi.mock('next/dynamic', () => ({
         <div
           data-testid="scene-selection"
           data-counts={JSON.stringify(props.locationOccupancy ?? null)}
+          data-optional-counts={String(props.showCounts)}
           data-code={props.selectedCode ?? ''}
           data-highlights={JSON.stringify(props.highlightedCodes)}
           data-focus={props.focusRequest.requestId}
+          data-preserve-view={String(props.focusRequest.preserveView)}
           data-focus-on-restore={String(props.focusOnRestore)}
           data-initial-view={JSON.stringify(props.initialView ?? null)}
         >
@@ -62,7 +69,7 @@ vi.mock('next/dynamic', () => ({
           <button onClick={() => props.onFailure?.('Graphics failed.')}>
             Fail room
           </button>
-          <button onClick={props.onFocusCancel}>Cancel focus</button>
+          <button onClick={() => props.onFocusCancel?.()}>Cancel focus</button>
           <button
             onClick={() =>
               props.onViewChange?.({
@@ -92,6 +99,30 @@ import {
   assignmentEpoch,
   readPrivacyRevocationRevision,
 } from '@/features/scan/assign-batch';
+
+// Production full-room reads require the protected layout's verified authority.
+function render(ui: Parameters<typeof renderTree>[0]) {
+  return renderTree(ui, {
+    wrapper: ({ children }) => (
+      <PrivacyReadinessContext
+        value={{
+          ready: true,
+          visible: true,
+          generation: 'workspace-test',
+          revocationRevision: readPrivacyRevocationRevision(),
+          verifiedEpoch: assignmentEpoch(),
+        }}
+      >
+        <RoomCameraSnapshotProvider
+          actorId="test-user"
+          backend="https://backend.example"
+        >
+          {children}
+        </RoomCameraSnapshotProvider>
+      </PrivacyReadinessContext>
+    ),
+  });
+}
 
 const locations: LocationRef[] = [
   {
@@ -822,7 +853,7 @@ it('restores URL selection on Back and refocuses a repeated selection', async ()
   );
 });
 
-it('replays focus for a modeled location reached through browser history', async () => {
+it('preserves camera history intent while restoring the modeled selection and reveal', async () => {
   window.history.replaceState(null, '', '/room?location=ITC-S1A');
   vi.stubGlobal(
     'fetch',
@@ -852,8 +883,14 @@ it('replays focus for a modeled location reached through browser history', async
     '/room?space=it-closet&location=ITC-S1A',
   );
   act(() => window.dispatchEvent(new PopStateEvent('popstate')));
+  // Audit W14 preserves Back and existing per-space camera context. A history
+  // restoration reuses that view; explicit Center selected still requests flight.
   expect(screen.getByTestId('scene-selection')).toHaveAttribute(
     'data-focus-on-restore',
+    'false',
+  );
+  expect(screen.getByTestId('scene-selection')).toHaveAttribute(
+    'data-preserve-view',
     'true',
   );
   expect(
@@ -918,6 +955,9 @@ it.each([
     const savedView = screen
       .getByTestId('scene-selection')
       .getAttribute('data-initial-view');
+    const previousFocus = Number(
+      screen.getByTestId('scene-selection').getAttribute('data-focus'),
+    );
     const staleFocus = focusCallbacks.at(-1)!;
     view.rerender(workspace('hidden'));
     expect(screen.getByTestId('scene-selection')).not.toBeVisible();
@@ -946,7 +986,11 @@ it.each([
     expect(scene).toHaveAttribute('data-code', code);
     expect(scene).toHaveAttribute('data-highlights', JSON.stringify([code]));
     expect(scene).toHaveAttribute('data-initial-view', savedView);
-    expect(scene).toHaveAttribute('data-focus-on-restore', 'true');
+    expect(scene).toHaveAttribute('data-focus-on-restore', 'false');
+    expect(scene).toHaveAttribute('data-preserve-view', 'true');
+    expect(Number(scene.getAttribute('data-focus'))).toBeGreaterThan(
+      previousFocus,
+    );
     act(() => staleFocus(initialCode));
     expect(screen.getByTestId('room-viewer')).toHaveAttribute(
       'data-focused-code',
@@ -1026,18 +1070,21 @@ it('accepts the current URL over cached server props on remount and retires an i
   }[] = [];
   vi.stubGlobal(
     'fetch',
-    vi.fn(
-      (url: string, options: { signal: AbortSignal }) =>
-        new Promise((resolve) => {
-          pending.push({
-            code: new URL(url, window.location.origin).searchParams.get(
-              'location',
-            )!,
-            signal: options.signal,
-            resolve,
-          });
-        }),
-    ),
+    vi.fn((url: string, options: { signal: AbortSignal }) => {
+      // Selected count reads are independent of the contents lifecycle under
+      // test. Keep them out of the owned interrupted-request queue.
+      if (url.startsWith('/api/room/occupancy?'))
+        return Promise.resolve({ ok: false });
+      return new Promise((resolve) => {
+        pending.push({
+          code: new URL(url, window.location.origin).searchParams.get(
+            'location',
+          )!,
+          signal: options.signal,
+          resolve,
+        });
+      });
+    }),
   );
   const workspace = (
     <SpacesWorkspace
@@ -1535,7 +1582,87 @@ it('announces deferred occupancy outside busy geometry and replaces it with fail
     screen.queryByText('private occupancy detail'),
   ).not.toBeInTheDocument();
 });
-it('loads counts only when enabled and refreshes counts and contents together on return', async () => {
+it('binds the occupancy witness to the same committed selection and hides the old generation while the next read is pending', async () => {
+  const requests: { url: string; resolve: (value: unknown) => void }[] = [];
+  vi.stubGlobal(
+    'fetch',
+    vi.fn((url: string) => {
+      if (url.startsWith('/api/room/occupancy?'))
+        return new Promise((resolve) => requests.push({ url, resolve }));
+      const code = new URL(url, location.origin).searchParams.get('location')!;
+      return Promise.resolve(response('Current stock', code));
+    }),
+  );
+  const user = userEvent.setup();
+  render(
+    <SpacesWorkspace
+      backend="https://backend.example"
+      locations={locations}
+      userId="test-user"
+      initialSpace={spaces[0]}
+      initialCode="ITC-D01"
+    />,
+  );
+  const viewer = screen.getByTestId('room-viewer');
+  expect(viewer).toHaveAttribute('data-selected-code', 'ITC-D01');
+  expect(viewer).toHaveAttribute('data-occupancy-status', 'loading');
+  expect(viewer).toHaveAttribute('data-occupancy-generation', '');
+  const finish = async (index: number) => {
+    const generation = new URL(
+      requests[index].url,
+      location.origin,
+    ).searchParams.get('generation');
+    await act(async () =>
+      requests[index].resolve({
+        ok: true,
+        headers: new Headers({ 'content-type': 'application/json' }),
+        json: async () => ({
+          identity: {
+            userId: 'test-user',
+            environment: location.origin,
+            backend: 'https://backend.example',
+            generation,
+            spaceId: 'it-closet',
+            filter: 'type=all;status=active',
+          },
+          counts: {
+            'ITC-D01': {
+              quantity_product_count: '1',
+              quantity_unit_count: '31',
+              asset_count: '0',
+            },
+            'ITC-S1A': {
+              quantity_product_count: '2',
+              quantity_unit_count: '44',
+              asset_count: '3',
+            },
+          },
+        }),
+      }),
+    );
+    return generation!;
+  };
+  const first = await finish(0);
+  expect(viewer).toHaveAttribute('data-occupancy-status', 'ready');
+  expect(viewer).toHaveAttribute('data-occupancy-generation', first);
+  await user.click(
+    screen.getByRole('button', { name: 'Choose shelf 1A in scene' }),
+  );
+  expect(viewer).toHaveAttribute('data-selected-code', 'ITC-S1A');
+  expect(viewer).toHaveAttribute('data-occupancy-status', 'loading');
+  expect(viewer).toHaveAttribute('data-occupancy-generation', '');
+  expect(screen.getByTestId('scene-selection')).toHaveAttribute(
+    'data-counts',
+    'null',
+  );
+  const next = await finish(1);
+  expect(next).not.toBe(first);
+  expect(viewer).toHaveAttribute('data-selected-code', 'ITC-S1A');
+  expect(viewer).toHaveAttribute('data-occupancy-status', 'ready');
+  expect(viewer).toHaveAttribute('data-occupancy-generation', next);
+});
+
+it('loads selected reveal counts with the optional overlay off and refreshes both snapshots on return', async () => {
   const user = userEvent.setup();
   const fetcher = vi.fn().mockImplementation((url: string) => {
     if (url.startsWith('/api/room/occupancy?'))
@@ -1577,7 +1704,13 @@ it('loads counts only when enabled and refreshes counts and contents together on
   await screen.findByText('Cable');
   expect(
     fetcher.mock.calls.filter(([url]) => String(url).includes('/occupancy?')),
-  ).toHaveLength(0);
+  ).toHaveLength(1);
+  // Audit W13 requires the opened selected target's count independently of the
+  // optional all-location overlay. The overlay still starts and stays off.
+  expect(screen.getByTestId('scene-selection')).toHaveAttribute(
+    'data-optional-counts',
+    'false',
+  );
   await user.click(screen.getByRole('button', { name: 'Toggle item counts' }));
   await waitFor(() =>
     expect(screen.getByTestId('scene-selection')).toHaveAttribute(
@@ -1595,17 +1728,30 @@ it('loads counts only when enabled and refreshes counts and contents together on
   );
   expect(countsExplanation).toHaveAttribute('role', 'status');
   expect(countsExplanation).toBeVisible();
-  expect(countsExplanation).toHaveTextContent(/counts are a snapshot/);
+  expect(countsExplanation).toHaveTextContent(
+    'Badges mark occupied locations.',
+  );
+  expect(countsExplanation).toHaveTextContent(
+    'Select a location on the map or in the location browser to see its distinct products, units and individual assets.',
+  );
+  expect(countsExplanation).toHaveTextContent(
+    'Hidden locations remain in the browser; counts are a snapshot.',
+  );
+  expect(countsExplanation).not.toHaveTextContent(/Focus or select a marker/i);
   await user.click(screen.getByRole('button', { name: 'Refresh inventory' }));
   await waitFor(() => expect(fetcher.mock.calls.length).toBe(before + 4));
   await user.click(screen.getByRole('button', { name: 'Toggle item counts' }));
   await waitFor(() =>
     expect(screen.getByTestId('scene-selection')).toHaveAttribute(
       'data-counts',
-      'null',
+      '{"ITC-D01":{"quantity_product_count":"1","quantity_unit_count":"31","asset_count":"2"}}',
     ),
   );
   expect(countsExplanation).not.toBeInTheDocument();
+  expect(screen.getByTestId('scene-selection')).toHaveAttribute(
+    'data-optional-counts',
+    'false',
+  );
   expect(
     screen.queryByText(
       'Counts show quantity items with stock and active individual assets at each storage location.',

@@ -20,6 +20,10 @@ import {
   useFormValidation,
   ValidationSummary,
 } from '@/components/forms/validation';
+import {
+  InventoryCaptureGroup,
+  InventoryCaptureRegion,
+} from '@/components/experience/inventory-capture-region';
 import { LocationPicker } from '@/features/locations/location-picker';
 import { pickerLocations } from '@/features/locations/picker-model';
 import {
@@ -242,33 +246,35 @@ function MoveRecovery(props: Props) {
   };
   if (!loaded)
     return (
-      <div className="space-y-3">
-        {error ? (
-          <>
-            <p role="alert" className="text-sm text-red-300">
-              {error}
-            </p>
-            <Button
-              type="button"
-              disabled={recoveryPending}
-              onClick={() => {
-                if (invalidPointer) {
-                  discardInvalidPointer();
-                  return;
-                }
-                setError('');
-                setAttempt((n) => n + 1);
-              }}
-            >
-              {invalidPointer
-                ? 'Discard invalid receipt reference'
-                : 'Retry loading move receipt'}
-            </Button>
-          </>
-        ) : (
-          <p role="status">Checking the previous move receipt…</p>
-        )}
-      </div>
+      <InventoryCaptureRegion region="mutation-intro">
+        <div className="space-y-3">
+          {error ? (
+            <>
+              <p role="alert" className="text-sm text-red-300">
+                {error}
+              </p>
+              <Button
+                type="button"
+                disabled={recoveryPending}
+                onClick={() => {
+                  if (invalidPointer) {
+                    discardInvalidPointer();
+                    return;
+                  }
+                  setError('');
+                  setAttempt((n) => n + 1);
+                }}
+              >
+                {invalidPointer
+                  ? 'Discard invalid receipt reference'
+                  : 'Retry loading move receipt'}
+              </Button>
+            </>
+          ) : (
+            <p role="status">Checking the previous move receipt…</p>
+          )}
+        </div>
+      </InventoryCaptureRegion>
     );
   return (
     <MutationFormFields
@@ -1258,61 +1264,70 @@ function MutationFormFields({
       className="space-y-4"
       noValidate
     >
-      {lastMove && (
-        <details className="text-sm">
-          <summary className="min-h-11 cursor-pointer py-2 font-semibold">
-            Last move
-            {lastMove.movement?.createdAt && (
-              <>
-                {' '}
-                · <OperationalTimestamp value={lastMove.movement.createdAt} />
-              </>
-            )}
-          </summary>
-          <p>
-            {onRecordPage
-              ? 'This item'
-              : (lastMove.movement?.itemName ?? item?.name)}
-            : move completed.
-          </p>
-          {lastMove.movement ? (
-            <>
+      {(lastMove ||
+        ['asset_move', 'asset_correct_location', 'asset_retire'].includes(
+          operation,
+        )) && (
+        <InventoryCaptureGroup region="mutation-intro" className="space-y-4">
+          {lastMove && (
+            <details className="text-sm">
+              <summary className="min-h-11 cursor-pointer py-2 font-semibold">
+                Last move
+                {lastMove.movement?.createdAt && (
+                  <>
+                    {' '}
+                    ·{' '}
+                    <OperationalTimestamp value={lastMove.movement.createdAt} />
+                  </>
+                )}
+              </summary>
               <p>
-                Moved {countLabel(lastMove.movement.quantity, 'unit')} from{' '}
-                {lastMove.movement.source.name} to{' '}
-                {lastMove.movement.destination.name}.
+                {onRecordPage
+                  ? 'This item'
+                  : (lastMove.movement?.itemName ?? item?.name)}
+                : move completed.
               </p>
-              <p>
-                After this move: {lastMove.movement.source.name}{' '}
-                {countLabel(lastMove.movement.source.after, 'unit')};{' '}
-                {lastMove.movement.destination.name}{' '}
-                {countLabel(lastMove.movement.destination.after, 'unit')}.
-              </p>
-              <p>Later transactions may change current balances.</p>
-              {lastMove.movement.createdAt && (
-                <OperationalTimestamp
-                  value={lastMove.movement.createdAt}
-                  relative
-                />
+              {lastMove.movement ? (
+                <>
+                  <p>
+                    Moved {countLabel(lastMove.movement.quantity, 'unit')} from{' '}
+                    {lastMove.movement.source.name} to{' '}
+                    {lastMove.movement.destination.name}.
+                  </p>
+                  <p>
+                    After this move: {lastMove.movement.source.name}{' '}
+                    {countLabel(lastMove.movement.source.after, 'unit')};{' '}
+                    {lastMove.movement.destination.name}{' '}
+                    {countLabel(lastMove.movement.destination.after, 'unit')}.
+                  </p>
+                  <p>Later transactions may change current balances.</p>
+                  {lastMove.movement.createdAt && (
+                    <OperationalTimestamp
+                      value={lastMove.movement.createdAt}
+                      relative
+                    />
+                  )}
+                </>
+              ) : (
+                <p>
+                  The move is saved. Its committed receipt is currently
+                  unavailable.
+                </p>
               )}
-            </>
-          ) : (
-            <p>
-              The move is saved. Its committed receipt is currently unavailable.
+            </details>
+          )}
+          {['asset_move', 'asset_correct_location'].includes(operation) && (
+            <p className="text-sm text-slate-300">
+              Move physically relocates this asset. Correct updates its recorded
+              location without moving equipment.
             </p>
           )}
-        </details>
-      )}
-      {['asset_move', 'asset_correct_location'].includes(operation) && (
-        <p className="text-sm text-slate-300">
-          Move physically relocates this asset. Correct updates its recorded
-          location without moving equipment.
-        </p>
-      )}
-      {operation === 'asset_retire' && (
-        <p className="text-sm text-slate-300">
-          Retire ends this individual asset’s service. A reason is required.
-        </p>
+          {operation === 'asset_retire' && (
+            <p className="text-sm text-slate-300">
+              Retire ends this individual asset’s service. A reason is required.
+            </p>
+          )}
+        </InventoryCaptureGroup>
       )}
       <fieldset
         disabled={pending || uncertain}
@@ -1320,7 +1335,10 @@ function MutationFormFields({
         hidden={completed}
       >
         {metadata && (
-          <>
+          <InventoryCaptureGroup
+            region="mutation-metadata"
+            className="space-y-4"
+          >
             {input('name', 'Name', { required: true, max: 200 })}
             <div className="space-y-2">
               <label htmlFor={operation + '-category'}>
@@ -1435,7 +1453,7 @@ function MutationFormFields({
                 )}
               </>
             )}
-          </>
+          </InventoryCaptureGroup>
         )}
         {operation === 'quantity_create' && (
           <>
@@ -1450,56 +1468,62 @@ function MutationFormFields({
         {operation === 'quantity_receive' && (
           <>
             {selectLocation('location_id', 'Receive at')}
-            {input('quantity', 'Quantity to receive', {
-              required: true,
-              numeric: true,
-              min: 1,
-            })}
+            <InventoryCaptureGroup region="mutation-receive">
+              {input('quantity', 'Quantity to receive', {
+                required: true,
+                numeric: true,
+                min: 1,
+              })}
+            </InventoryCaptureGroup>
           </>
         )}
         {moving && (
           <>
             {selectLocation('source_location_id', 'Source location', true)}
             {selectLocation('destination_location_id', 'Destination location')}
-            <p
-              id={operation + '-availability'}
-              className="text-sm text-slate-400"
-            >
-              Recorded source availability:{' '}
-              {displayStock.balances === undefined
-                ? 'unavailable'
-                : displayedSource
-                  ? countLabel(displayedSource.quantity, 'unit')
-                  : values.source_location_id
-                    ? 'unavailable'
-                    : 'choose a source'}
-              .
-            </p>
-            <label className="flex min-h-11 items-center gap-3">
-              <input
-                type="checkbox"
-                checked={values.move_all === 'true'}
-                onChange={(event) =>
-                  update('move_all', String(event.target.checked))
-                }
-              />
-              Move All from this source location
-            </label>
-            {values.move_all !== 'true' &&
-              input('quantity', 'Quantity to move', {
-                required: true,
-                numeric: true,
-                min: 1,
-              })}
+            <InventoryCaptureGroup region="mutation-move" className="space-y-4">
+              <p
+                id={operation + '-availability'}
+                className="text-sm text-slate-400"
+              >
+                Recorded source availability:{' '}
+                {displayStock.balances === undefined
+                  ? 'unavailable'
+                  : displayedSource
+                    ? countLabel(displayedSource.quantity, 'unit')
+                    : values.source_location_id
+                      ? 'unavailable'
+                      : 'choose a source'}
+                .
+              </p>
+              <label className="flex min-h-11 items-center gap-3">
+                <input
+                  type="checkbox"
+                  checked={values.move_all === 'true'}
+                  onChange={(event) =>
+                    update('move_all', String(event.target.checked))
+                  }
+                />
+                Move All from this source location
+              </label>
+              {values.move_all !== 'true' &&
+                input('quantity', 'Quantity to move', {
+                  required: true,
+                  numeric: true,
+                  min: 1,
+                })}
+            </InventoryCaptureGroup>
           </>
         )}
         {operation === 'quantity_adjust' && (
           <>
             {selectLocation('location_id', 'Counted location')}
-            {input('observed_quantity', 'Observed physical count', {
-              required: true,
-              numeric: true,
-            })}
+            <InventoryCaptureGroup region="mutation-adjust">
+              {input('observed_quantity', 'Observed physical count', {
+                required: true,
+                numeric: true,
+              })}
+            </InventoryCaptureGroup>
           </>
         )}
         {[
@@ -1514,266 +1538,275 @@ function MutationFormFields({
               ? 'Confirmed current location'
               : 'Destination location',
           )}
-        {operation === 'asset_restore' &&
-          currentLocation?.id === values.location_id &&
-          values.location_id && (
-            <p className="text-sm text-slate-400">
-              Last recorded storage location. Confirm it or choose another
-              location.
-            </p>
-          )}
-        {!metadata && (
-          <div className="space-y-2">
-            {operation === 'asset_retire' && (
-              <RetirementReasonPresets
-                reason={values.reason}
-                onChange={(value) => update('reason', value)}
-              />
+        <InventoryCaptureGroup region="mutation-reason" className="space-y-4">
+          {operation === 'asset_restore' &&
+            currentLocation?.id === values.location_id &&
+            values.location_id && (
+              <p className="text-sm text-slate-400">
+                Last recorded storage location. Confirm it or choose another
+                location.
+              </p>
             )}
-            <label htmlFor={operation + '-reason'}>
-              Reason{requiresReason ? ' (required)' : ' (optional)'}
-            </label>
-            <textarea
-              className={field}
-              id={operation + '-reason'}
-              {...validation.props(operation + '-reason')}
-              rows={2}
-              maxLength={2000}
-              required={requiresReason}
-              value={values.reason}
-              onChange={(event) => update('reason', event.target.value)}
-            />
-            {validation.error(operation + '-reason')}
-            {operation === 'asset_retire' && (
-              <RetirementNote
-                id={operation + '-retirement-note'}
-                value={values.retirement_note}
-                onChange={(value) => update('retirement_note', value)}
+          {!metadata && (
+            <div className="space-y-2">
+              {operation === 'asset_retire' && (
+                <RetirementReasonPresets
+                  reason={values.reason}
+                  onChange={(value) => update('reason', value)}
+                />
+              )}
+              <label htmlFor={operation + '-reason'}>
+                Reason{requiresReason ? ' (required)' : ' (optional)'}
+              </label>
+              <textarea
+                className={field}
+                id={operation + '-reason'}
+                {...validation.props(operation + '-reason')}
+                rows={2}
+                maxLength={2000}
+                required={requiresReason}
+                value={values.reason}
+                onChange={(event) => update('reason', event.target.value)}
               />
+              {validation.error(operation + '-reason')}
+              {operation === 'asset_retire' && (
+                <RetirementNote
+                  id={operation + '-retirement-note'}
+                  value={values.retirement_note}
+                  onChange={(value) => update('retirement_note', value)}
+                />
+              )}
+            </div>
+          )}
+        </InventoryCaptureGroup>
+      </fieldset>
+      <InventoryCaptureGroup region="mutation-completion" className="space-y-4">
+        <ValidationSummary issues={validation.issues} />
+        {refreshRequested && (
+          <p role="status" className="text-sm text-cyan-200">
+            Loading the latest record before another submission…
+          </p>
+        )}
+        {refreshedVersion !== null && !completed && (
+          <p className="text-sm text-amber-200">
+            The record has been updated. Your entries are preserved; review them
+            against the updated record before confirming.
+          </p>
+        )}
+        {validReview && !completed && (
+          <section aria-label="Review changes" className={panel}>
+            <h3 id={reviewContextId} className="font-semibold">
+              Review changes for{' '}
+              {onRecordPage && !destructive
+                ? 'this item'
+                : (item?.name ?? asset?.name ?? values.name ?? 'this record')}
+            </h3>
+            {destructive && (
+              <p className="text-sm text-[var(--warning)]">
+                Warning: confirm this lifecycle change for the named record
+                before saving.
+              </p>
+            )}
+            <ul className="mt-2 space-y-2 text-sm">
+              {summary().map((line, index) => (
+                <li className="break-words" key={index}>
+                  {line}
+                </li>
+              ))}
+            </ul>
+            {finalReason && (
+              <p className="mt-2 break-words text-sm">Reason: {finalReason}</p>
+            )}
+          </section>
+        )}
+        {state && !state.ok && (
+          <div role="alert" className="space-y-2 text-sm text-red-300">
+            <p>{state.message}</p>
+            {state.fieldErrors &&
+              Object.entries(state.fieldErrors).map(([key, value]) => (
+                <p key={key}>
+                  {key}: {value}
+                </p>
+              ))}
+            {(state.code === 'stale_version' ||
+              (moving && state.code === 'insufficient_stock')) && (
+              <>
+                <p>
+                  Another change was saved. Refresh the latest record, review
+                  the updated quantities, and submit again. Your input stays in
+                  this form.
+                </p>
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => {
+                    if (moving && actorId) {
+                      refreshMove(false);
+                      return;
+                    }
+                    setReview(false);
+                    setRefreshRequested(true);
+                    router.refresh();
+                  }}
+                >
+                  Refresh latest record
+                </Button>
+              </>
             )}
           </div>
         )}
-      </fieldset>
-      <ValidationSummary issues={validation.issues} />
-      {refreshRequested && (
-        <p role="status" className="text-sm text-cyan-200">
-          Loading the latest record before another submission…
-        </p>
-      )}
-      {refreshedVersion !== null && !completed && (
-        <p className="text-sm text-amber-200">
-          The record has been updated. Your entries are preserved; review them
-          against the updated record before confirming.
-        </p>
-      )}
-      {validReview && !completed && (
-        <section aria-label="Review changes" className={panel}>
-          <h3 id={reviewContextId} className="font-semibold">
-            Review changes for{' '}
-            {onRecordPage && !destructive
-              ? 'this item'
-              : (item?.name ?? asset?.name ?? values.name ?? 'this record')}
-          </h3>
-          {destructive && (
-            <p className="text-sm text-[var(--warning)]">
-              Warning: confirm this lifecycle change for the named record before
-              saving.
-            </p>
-          )}
-          <ul className="mt-2 space-y-2 text-sm">
-            {summary().map((line, index) => (
-              <li className="break-words" key={index}>
-                {line}
-              </li>
-            ))}
-          </ul>
-          {finalReason && (
-            <p className="mt-2 break-words text-sm">Reason: {finalReason}</p>
-          )}
-        </section>
-      )}
-      {state && !state.ok && (
-        <div role="alert" className="space-y-2 text-sm text-red-300">
-          <p>{state.message}</p>
-          {state.fieldErrors &&
-            Object.entries(state.fieldErrors).map(([key, value]) => (
-              <p key={key}>
-                {key}: {value}
-              </p>
-            ))}
-          {(state.code === 'stale_version' ||
-            (moving && state.code === 'insufficient_stock')) && (
-            <>
-              <p>
-                Another change was saved. Refresh the latest record, review the
-                updated quantities, and submit again. Your input stays in this
-                form.
-              </p>
-              <Button
-                type="button"
-                variant="outline"
-                onClick={() => {
-                  if (moving && actorId) {
-                    refreshMove(false);
-                    return;
-                  }
-                  setReview(false);
-                  setRefreshRequested(true);
-                  router.refresh();
-                }}
-              >
-                Refresh latest record
-              </Button>
-            </>
-          )}
-        </div>
-      )}
-      {state?.ok && (
-        <div
-          ref={completionRef}
-          tabIndex={-1}
-          role="status"
-          className="space-y-2 text-sm text-cyan-200"
-        >
-          {moving ? (
-            <>
-              {previousReceipt && <p>Previous move receipt</p>}
-              <p className="font-semibold">
-                {onRecordPage
-                  ? 'This item'
-                  : (state.movement?.itemName ?? item?.name)}
-                : move completed.
-              </p>
-              {state.movement ? (
-                <>
-                  <p>
-                    Moved {state.movement.quantity}{' '}
-                    {state.movement.quantity === 1 ? 'unit' : 'units'} from{' '}
-                    {state.movement.source.name} to{' '}
-                    {state.movement.destination.name}.
-                  </p>
-                  <p>
-                    After this move: {state.movement.source.name}{' '}
-                    {state.movement.source.after}{' '}
-                    {state.movement.source.after === 1 ? 'unit' : 'units'};{' '}
-                    {state.movement.destination.name}{' '}
-                    {state.movement.destination.after}{' '}
-                    {state.movement.destination.after === 1 ? 'unit' : 'units'}.
-                  </p>
-                  <p>Later transactions may change current balances.</p>
-                  {state.movement.createdAt && (
-                    <p>
-                      <OperationalTimestamp value={state.movement.createdAt} />
-                    </p>
-                  )}
-                </>
-              ) : (
-                <p>
-                  The move is saved. Its committed receipt is currently
-                  unavailable.
+        {state?.ok && (
+          <div
+            ref={completionRef}
+            tabIndex={-1}
+            role="status"
+            className="space-y-2 text-sm text-cyan-200"
+          >
+            {moving ? (
+              <>
+                {previousReceipt && <p>Previous move receipt</p>}
+                <p className="font-semibold">
+                  {onRecordPage
+                    ? 'This item'
+                    : (state.movement?.itemName ?? item?.name)}
+                  : move completed.
                 </p>
-              )}
-            </>
-          ) : (
-            <>
-              {state.changed
-                ? 'Saved successfully.'
-                : 'No change: the recorded state already matches.'}
-            </>
-          )}
-        </div>
-      )}
-      {completedError && (
-        <p role="alert" className="text-sm text-red-300">
-          {completedError}
-        </p>
-      )}
-      {storageWarning && (
-        <p role="alert" className="text-sm text-amber-200">
-          {storageWarning}
-        </p>
-      )}
-      {completed && !moving ? (
-        <Button
-          type="button"
-          className="hover:translate-y-0 active:scale-100"
-          onClick={() => {
-            if (resetTask) {
-              resetTask();
-              return;
-            }
-            setClosed(true);
-          }}
-        >
-          Done
-        </Button>
-      ) : completed ? (
-        <div className="flex flex-wrap gap-3">
+                {state.movement ? (
+                  <>
+                    <p>
+                      Moved {state.movement.quantity}{' '}
+                      {state.movement.quantity === 1 ? 'unit' : 'units'} from{' '}
+                      {state.movement.source.name} to{' '}
+                      {state.movement.destination.name}.
+                    </p>
+                    <p>
+                      After this move: {state.movement.source.name}{' '}
+                      {state.movement.source.after}{' '}
+                      {state.movement.source.after === 1 ? 'unit' : 'units'};{' '}
+                      {state.movement.destination.name}{' '}
+                      {state.movement.destination.after}{' '}
+                      {state.movement.destination.after === 1
+                        ? 'unit'
+                        : 'units'}
+                      .
+                    </p>
+                    <p>Later transactions may change current balances.</p>
+                    {state.movement.createdAt && (
+                      <p>
+                        <OperationalTimestamp
+                          value={state.movement.createdAt}
+                        />
+                      </p>
+                    )}
+                  </>
+                ) : (
+                  <p>
+                    The move is saved. Its committed receipt is currently
+                    unavailable.
+                  </p>
+                )}
+              </>
+            ) : (
+              <>
+                {state.changed
+                  ? 'Saved successfully.'
+                  : 'No change: the recorded state already matches.'}
+              </>
+            )}
+          </div>
+        )}
+        {completedError && (
+          <p role="alert" className="text-sm text-red-300">
+            {completedError}
+          </p>
+        )}
+        {storageWarning && (
+          <p role="alert" className="text-sm text-amber-200">
+            {storageWarning}
+          </p>
+        )}
+        {completed && !moving ? (
           <Button
             type="button"
             className="hover:translate-y-0 active:scale-100"
             onClick={() => {
-              if (!clearCompletionPointer()) return;
-              if (resetTask) resetTask();
-              else setClosed(true);
+              if (resetTask) {
+                resetTask();
+                return;
+              }
+              setClosed(true);
             }}
           >
             Done
           </Button>
-          <Button
-            type="button"
-            disabled={pending || !taskEligible}
-            onClick={() => refreshMove(true)}
-            variant="outline"
-            className="hover:translate-y-0 active:scale-100"
-          >
-            Move more
-          </Button>
-          <Button
-            type="button"
-            variant="outline"
-            disabled={pending}
-            onClick={() => refreshMove(false)}
-          >
-            Refresh balances
-          </Button>
-          {!state.movement && state.eventId && (
+        ) : completed ? (
+          <div className="flex flex-wrap gap-3">
+            <Button
+              type="button"
+              className="hover:translate-y-0 active:scale-100"
+              onClick={() => {
+                if (!clearCompletionPointer()) return;
+                if (resetTask) resetTask();
+                else setClosed(true);
+              }}
+            >
+              Done
+            </Button>
+            <Button
+              type="button"
+              disabled={pending || !taskEligible}
+              onClick={() => refreshMove(true)}
+              variant="outline"
+              className="hover:translate-y-0 active:scale-100"
+            >
+              Move more
+            </Button>
             <Button
               type="button"
               variant="outline"
               disabled={pending}
-              onClick={refreshReceipt}
+              onClick={() => refreshMove(false)}
             >
-              Load move receipt
+              Refresh balances
             </Button>
-          )}
-        </div>
-      ) : (
-        <>
-          {moving && moveSnapshotChanged && !uncertain && (
-            <p role="status" className="text-sm text-amber-200">
-              Recorded stock changed. Refresh the latest record before
-              reviewing.
-            </p>
-          )}
-          <Button
-            type="submit"
-            aria-describedby={validReview ? reviewContextId : undefined}
-            className={destructive ? 'experience-danger-action' : undefined}
-            disabled={pending || refreshRequested}
-          >
-            {pending
-              ? 'Saving…'
-              : uncertain
-                ? moving
-                  ? 'Retry this move safely'
-                  : 'Retry same transaction'
-                : validReview
-                  ? 'Confirm ' + labels[operation].toLowerCase()
-                  : 'Review ' + labels[operation].toLowerCase()}
-          </Button>
-        </>
-      )}
+            {!state.movement && state.eventId && (
+              <Button
+                type="button"
+                variant="outline"
+                disabled={pending}
+                onClick={refreshReceipt}
+              >
+                Load move receipt
+              </Button>
+            )}
+          </div>
+        ) : (
+          <>
+            {moving && moveSnapshotChanged && !uncertain && (
+              <p role="status" className="text-sm text-amber-200">
+                Recorded stock changed. Refresh the latest record before
+                reviewing.
+              </p>
+            )}
+            <Button
+              type="submit"
+              aria-describedby={validReview ? reviewContextId : undefined}
+              className={destructive ? 'experience-danger-action' : undefined}
+              disabled={pending || refreshRequested}
+            >
+              {pending
+                ? 'Saving…'
+                : uncertain
+                  ? moving
+                    ? 'Retry this move safely'
+                    : 'Retry same transaction'
+                  : validReview
+                    ? 'Confirm ' + labels[operation].toLowerCase()
+                    : 'Review ' + labels[operation].toLowerCase()}
+            </Button>
+          </>
+        )}
+      </InventoryCaptureGroup>
     </form>
   );
 }

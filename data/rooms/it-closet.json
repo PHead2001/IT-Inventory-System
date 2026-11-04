@@ -97,7 +97,8 @@
                 "color": "#475569",
                 "opacity": 1,
                 "edges": true,
-                "style": "shelf-section"
+                "style": "shelf-section",
+                "reveal": { "offset": [0, 0, 1] }
               },
               "interaction": {
                 "selectable": true,
@@ -118,7 +119,8 @@
                 "color": "#475569",
                 "opacity": 1,
                 "edges": true,
-                "style": "shelf-section"
+                "style": "shelf-section",
+                "reveal": { "offset": [0, 0, 1] }
               },
               "interaction": {
                 "selectable": true,
@@ -139,7 +141,8 @@
                 "color": "#475569",
                 "opacity": 1,
                 "edges": true,
-                "style": "shelf-section"
+                "style": "shelf-section",
+                "reveal": { "offset": [0, 0, 1] }
               },
               "interaction": {
                 "selectable": true,
@@ -169,7 +172,8 @@
                 "color": "#475569",
                 "opacity": 1,
                 "edges": true,
-                "style": "shelf-section"
+                "style": "shelf-section",
+                "reveal": { "offset": [0, 0, 1] }
               },
               "interaction": {
                 "selectable": true,
@@ -190,7 +194,8 @@
                 "color": "#475569",
                 "opacity": 1,
                 "edges": true,
-                "style": "shelf-section"
+                "style": "shelf-section",
+                "reveal": { "offset": [0, 0, 1] }
               },
               "interaction": {
                 "selectable": true,
@@ -211,7 +216,8 @@
                 "color": "#475569",
                 "opacity": 1,
                 "edges": true,
-                "style": "shelf-section"
+                "style": "shelf-section",
+                "reveal": { "offset": [0, 0, 1] }
               },
               "interaction": {
                 "selectable": true,
@@ -234,7 +240,8 @@
             "color": "#334155",
             "opacity": 1,
             "edges": true,
-            "style": "drawer"
+            "style": "drawer",
+            "reveal": { "offset": [5.6, 0, 0] }
           },
           "interaction": {
             "selectable": true,
@@ -256,7 +263,8 @@
             "color": "#334155",
             "opacity": 1,
             "edges": true,
-            "style": "drawer"
+            "style": "drawer",
+            "reveal": { "offset": [5.6, 0, 0] }
           },
           "interaction": {
             "selectable": true,
@@ -278,7 +286,8 @@
             "color": "#334155",
             "opacity": 1,
             "edges": true,
-            "style": "drawer"
+            "style": "drawer",
+            "reveal": { "offset": [5.6, 0, 0] }
           },
           "interaction": {
             "selectable": true,
@@ -300,7 +309,8 @@
             "color": "#334155",
             "opacity": 1,
             "edges": true,
-            "style": "drawer"
+            "style": "drawer",
+            "reveal": { "offset": [5.6, 0, 0] }
           },
           "interaction": {
             "selectable": true,
@@ -322,7 +332,8 @@
             "color": "#334155",
             "opacity": 1,
             "edges": true,
-            "style": "drawer"
+            "style": "drawer",
+            "reveal": { "offset": [5.6, 0, 0] }
           },
           "interaction": {
             "selectable": true,
@@ -344,7 +355,8 @@
             "color": "#334155",
             "opacity": 1,
             "edges": true,
-            "style": "drawer"
+            "style": "drawer",
+            "reveal": { "offset": [5.6, 0, 0] }
           },
           "interaction": {
             "selectable": true,
@@ -436,7 +448,8 @@
                 "color": "#475569",
                 "opacity": 1,
                 "edges": true,
-                "style": "shelf-section"
+                "style": "shelf-section",
+                "reveal": { "offset": [0, 0, 1] }
               },
               "interaction": {
                 "selectable": true,
@@ -457,7 +470,8 @@
                 "color": "#475569",
                 "opacity": 1,
                 "edges": true,
-                "style": "shelf-section"
+                "style": "shelf-section",
+                "reveal": { "offset": [0, 0, 1] }
               },
               "interaction": {
                 "selectable": true,
@@ -478,7 +492,8 @@
                 "color": "#475569",
                 "opacity": 1,
                 "edges": true,
-                "style": "shelf-section"
+                "style": "shelf-section",
+                "reveal": { "offset": [0, 0, 1] }
               },
               "interaction": {
                 "selectable": true,
@@ -508,7 +523,8 @@
                 "color": "#475569",
                 "opacity": 1,
                 "edges": true,
-                "style": "shelf-section"
+                "style": "shelf-section",
+                "reveal": { "offset": [0, 0, 1] }
               },
               "interaction": {
                 "selectable": true,
@@ -529,7 +545,8 @@
                 "color": "#475569",
                 "opacity": 1,
                 "edges": true,
-                "style": "shelf-section"
+                "style": "shelf-section",
+                "reveal": { "offset": [0, 0, 1] }
               },
               "interaction": {
                 "selectable": true,
@@ -550,7 +567,8 @@
                 "color": "#475569",
                 "opacity": 1,
                 "edges": true,
-                "style": "shelf-section"
+                "style": "shelf-section",
+                "reveal": { "offset": [0, 0, 1] }
               },
               "interaction": {
                 "selectable": true,
@@ -573,7 +591,8 @@
             "color": "#334155",
             "opacity": 1,
             "edges": true,
-            "style": "drawer"
+            "style": "drawer",
+            "reveal": { "offset": [-5.6, 0, 0] }
           },
           "interaction": {
             "selectable": true,
@@ -595,7 +614,8 @@
             "color": "#334155",
             "opacity": 1,
             "edges": true,
-            "style": "drawer"
+            "style": "drawer",
+            "reveal": { "offset": [-5.6, 0, 0] }
           },
           "interaction": {
             "selectable": true,
@@ -617,7 +637,8 @@
             "color": "#334155",
             "opacity": 1,
             "edges": true,
-            "style": "drawer"
+            "style": "drawer",
+            "reveal": { "offset": [-5.6, 0, 0] }
           },
           "interaction": {
             "selectable": true,
@@ -639,7 +660,8 @@
             "color": "#334155",
             "opacity": 1,
             "edges": true,
-            "style": "drawer"
+            "style": "drawer",
+            "reveal": { "offset": [-5.6, 0, 0] }
           },
           "interaction": {
             "selectable": true,
@@ -661,7 +683,8 @@
             "color": "#334155",
             "opacity": 1,
             "edges": true,
-            "style": "drawer"
+            "style": "drawer",
+            "reveal": { "offset": [-5.6, 0, 0] }
           },
           "interaction": {
             "selectable": true,
@@ -683,7 +706,8 @@
             "color": "#334155",
             "opacity": 1,
             "edges": true,
-            "style": "drawer"
+            "style": "drawer",
+            "reveal": { "offset": [-5.6, 0, 0] }
           },
           "interaction": {
             "selectable": true,
@@ -780,7 +804,8 @@
         "color": "#b91c1c",
         "opacity": 1,
         "edges": true,
-        "style": "container"
+        "style": "container",
+        "reveal": { "offset": [4, 0, 0] }
       },
       "interaction": {
         "selectable": true,
@@ -800,7 +825,8 @@
         "color": "#171717",
         "opacity": 1,
         "edges": true,
-        "style": "container"
+        "style": "container",
+        "reveal": { "offset": [-4, 0, 0] }
       },
       "interaction": {
         "selectable": true,
@@ -820,7 +846,8 @@
         "color": "#cbd5e1",
         "opacity": 1,
         "edges": true,
-        "style": "container"
+        "style": "container",
+        "reveal": { "offset": [-4, 0, 0] }
       },
       "interaction": {
         "selectable": true,

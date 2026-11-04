@@ -137,6 +137,7 @@ export type RoomLayoutWitnessStage =
   | 'overhead-open'
   | 'underside-open'
   | 'fit-open-selected-before-long-text'
+  | 'selected-red-before-resize'
   | 'fit-open-selected-long-text';
 export async function enableRoomLayoutDiagnostics(page: Page) {
   await page.addInitScript(() => {

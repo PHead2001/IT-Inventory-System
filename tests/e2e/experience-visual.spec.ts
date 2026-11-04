@@ -1156,48 +1156,8 @@ test('configuration and inventory creation surfaces render at desktop and phone 
       page.getByRole('region', { name: 'Forms and fields' }),
     ).toBeVisible();
     if (viewport.width > 390) {
-      await page
-        .getByRole('button', { name: 'Add field', exact: true })
-        .click();
-      const addition = page.getByRole('dialog', { name: 'Add field' });
-      await addition
-        .getByRole('button', { name: 'Short text', exact: true })
-        .click();
-      await addition
-        .getByLabel('Field name', { exact: true })
-        .fill('Visual check field');
-      await addition
-        .getByRole('button', { name: 'Add to form', exact: true })
-        .click();
-      await expect(
-        page.getByRole('complementary', { name: 'Designer inspector' }),
-      ).toBeVisible();
-      const fieldLabel = page
-        .getByRole('complementary', { name: 'Designer inspector' })
-        .getByLabel('Field name', { exact: true });
-      await expect(fieldLabel).toBeVisible();
-      await fieldLabel.fill('Visual check field');
-      await expect(
-        page
-          .locator('[data-control-id]')
-          .filter({ hasText: 'Visual check field' }),
-      ).toBeVisible();
-      const inspectorClearance = await page
-        .getByTestId('designer-inspector')
-        .evaluate((inspector) => {
-          const toolbar = document.querySelector<HTMLElement>(
-            '[role="toolbar"][aria-label="Form designer"]',
-          )!;
-          return {
-            top: inspector.getBoundingClientRect().top,
-            toolbarBottom: toolbar.getBoundingClientRect().bottom,
-          };
-        });
-      expect(inspectorClearance.top).toBeGreaterThanOrEqual(
-        inspectorClearance.toolbarBottom + 15,
-      );
-      // Sticky settings deliberately stay above a scrolled canvas. Compare the
-      // initial panel alignment separately, with the document at its origin.
+      // Check initial alignment before adding a field intentionally scrolls
+      // and hands focus to its placement. Editing owns a different scroll state.
       await page.evaluate(() =>
         window.scrollTo({ top: 0, behavior: 'instant' }),
       );
@@ -1263,6 +1223,46 @@ test('configuration and inventory creation surfaces render at desktop and phone 
       );
       for (const label of labelLines)
         expect(label.lines.at(-1)!.length, label.name).toBeGreaterThan(1);
+      await page
+        .getByRole('button', { name: 'Add field', exact: true })
+        .click();
+      const addition = page.getByRole('dialog', { name: 'Add field' });
+      await addition
+        .getByRole('button', { name: 'Short text', exact: true })
+        .click();
+      await addition
+        .getByLabel('Field name', { exact: true })
+        .fill('Visual check field');
+      await addition
+        .getByRole('button', { name: 'Add to form', exact: true })
+        .click();
+      await expect(
+        page.getByRole('complementary', { name: 'Designer inspector' }),
+      ).toBeVisible();
+      const fieldLabel = page
+        .getByRole('complementary', { name: 'Designer inspector' })
+        .getByLabel('Field name', { exact: true });
+      await expect(fieldLabel).toBeVisible();
+      await fieldLabel.fill('Visual check field');
+      await expect(
+        page
+          .locator('[data-control-id]')
+          .filter({ hasText: 'Visual check field' }),
+      ).toBeVisible();
+      const inspectorClearance = await page
+        .getByTestId('designer-inspector')
+        .evaluate((inspector) => {
+          const toolbar = document.querySelector<HTMLElement>(
+            '[role="toolbar"][aria-label="Form designer"]',
+          )!;
+          return {
+            top: inspector.getBoundingClientRect().top,
+            toolbarBottom: toolbar.getBoundingClientRect().bottom,
+          };
+        });
+      expect(inspectorClearance.top).toBeGreaterThanOrEqual(
+        inspectorClearance.toolbarBottom + 15,
+      );
     }
     await noHorizontalOverflow(page);
     await page.screenshot({

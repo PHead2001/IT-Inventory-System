@@ -1,6 +1,65 @@
 import { expect, it } from 'vitest';
 import { createRoutePresentationLifetime } from './route-presentation-lifetime';
 
+it.each(['forward', 'reverse'])(
+  'keeps the exact outgoing source until the final region lease finishes (%s)',
+  (order) => {
+    const store = createRoutePresentationLifetime(),
+      source = Symbol();
+    const unmount = store.mount(source);
+    const exits = Array.from({ length: 3 }, () => store.exitCallback(source));
+    let owner = true;
+    const ticket = store.capture(
+      source,
+      () => owner,
+      () => true,
+    )!;
+    store.navigation();
+    owner = false;
+    unmount();
+    store.mount(Symbol());
+    const finishes = exits.map((exit) => exit()!);
+    expect(finishes.every((finish) => typeof finish === 'function')).toBe(true);
+    expect(exits.every((exit) => exit() === undefined)).toBe(true);
+    for (const finish of (order === 'forward'
+      ? finishes
+      : [...finishes].reverse()
+    ).slice(0, -1)) {
+      finish();
+      finish(); // An already released participant cannot decrement another lease.
+      expect(ticket.current()).toBe(true);
+    }
+    (order === 'forward' ? finishes.at(-1)! : finishes[0])();
+    expect(ticket.current()).toBe(false);
+  },
+);
+
+it('privacy withdrawal disposes every region lease and old cleanups cannot affect renewed work', () => {
+  const store = createRoutePresentationLifetime(),
+    source = Symbol();
+  store.mount(source);
+  const old = store.capture(
+    source,
+    () => true,
+    () => true,
+  )!;
+  const exits = Array.from({ length: 3 }, () => store.exitCallback(source));
+  const finishes = exits.map((exit) => exit()!);
+  store.invalidate();
+  const next = store.capture(
+    source,
+    () => true,
+    () => true,
+  )!;
+  const nextFinish = store.exitCallback(source)()!;
+  finishes.forEach((finish) => finish());
+  expect(exits.every((exit) => exit() === undefined)).toBe(true);
+  expect(old.current()).toBe(false);
+  expect(next.current()).toBe(true);
+  nextFinish();
+  expect(next.current()).toBe(false);
+});
+
 it('transfers a previously captured source after React cleanup to its exact native exit and expires on matching cleanup', () => {
   const store = createRoutePresentationLifetime();
   const source = Symbol();

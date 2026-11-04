@@ -1,9 +1,18 @@
 'use client';
 
-import { createContext, useContext, useMemo, type ReactNode } from 'react';
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useState,
+  type ReactNode,
+} from 'react';
 import { useThree } from '@react-three/fiber';
 import { Edges } from '@react-three/drei';
-import { Color } from 'three';
+import { Color, type Light } from 'three';
+import { useSceneCurrent } from './scene-current';
+import { useOptionalSceneEffects } from './scene-effects-context';
 
 const paletteTokens = {
   selectionEmissive: '--room-selection-emissive',
@@ -15,7 +24,10 @@ const paletteTokens = {
   grid: '--room-grid',
 } as const;
 type ScenePalette = { [Key in keyof typeof paletteTokens]: Color };
-const PaletteContext = createContext<ScenePalette | null>(null);
+const PaletteContext = createContext<{
+  palette: ScenePalette;
+  revision: number;
+} | null>(null);
 
 export function readScenePalette(element: Element): ScenePalette {
   const style = getComputedStyle(element);
@@ -41,35 +53,106 @@ export function readScenePalette(element: Element): ScenePalette {
   ) as ScenePalette;
 }
 
+export function useLiveScenePalette(element: Element) {
+  const effects = useOptionalSceneEffects();
+  const isCurrent = useSceneCurrent(effects);
+  const [state, setState] = useState(() => ({
+    palette: isCurrent()
+      ? readScenePalette(element)
+      : (Object.fromEntries(
+          Object.keys(paletteTokens).map((key) => [key, new Color()]),
+        ) as ScenePalette),
+    revision: 0,
+  }));
+  useEffect(() => {
+    let disposed = false;
+    let queued = false;
+    const refresh = () => {
+      if (!isCurrent() || queued || disposed) return;
+      queued = true;
+      queueMicrotask(() => {
+        queued = false;
+        if (disposed || !isCurrent()) return;
+        let next: ScenePalette;
+        try {
+          next = readScenePalette(element);
+          (element as HTMLElement).dataset.paletteStatus = 'current';
+        } catch {
+          // Keep the last supported palette if a future theme commits unsupported
+          // color syntax; report the boundary without taking down the Canvas.
+          (element as HTMLElement).dataset.paletteStatus = 'unsupported-token';
+          return;
+        }
+        setState((previous) => {
+          const changed = Object.keys(paletteTokens).some(
+            (key) =>
+              !previous.palette[key as keyof ScenePalette].equals(
+                next[key as keyof ScenePalette],
+              ),
+          );
+          return changed
+            ? { palette: next, revision: previous.revision + 1 }
+            : previous;
+        });
+      });
+    };
+    if (!isCurrent()) return;
+    const observer = new MutationObserver(refresh);
+    observer.observe(document.documentElement, {
+      attributes: true,
+      attributeFilter: ['class', 'style', 'data-theme'],
+    });
+    const media =
+      typeof window.matchMedia === 'function'
+        ? window.matchMedia('(prefers-color-scheme: dark)')
+        : null;
+    media?.addEventListener('change', refresh);
+    return () => {
+      disposed = true;
+      observer.disconnect();
+      media?.removeEventListener('change', refresh);
+    };
+  }, [element, isCurrent]);
+  return state;
+}
+
 export function ScenePaletteProvider({ children }: { children: ReactNode }) {
-  const { gl } = useThree();
-  // Read at the Canvas boundary, synchronously before any materials render.
-  // Rerenders and demand-frame callbacks reuse these same resolved Colors.
-  const palette = useMemo(
-    () => readScenePalette(gl.domElement),
-    [gl.domElement],
-  );
-  return <PaletteContext value={palette}>{children}</PaletteContext>;
+  const { gl, invalidate } = useThree();
+  const state = useLiveScenePalette(gl.domElement);
+  const effects = useOptionalSceneEffects();
+  const isCurrent = useSceneCurrent(effects);
+  useEffect(() => {
+    if (isCurrent()) invalidate();
+  }, [state.revision, invalidate, isCurrent]);
+  return <PaletteContext value={state}>{children}</PaletteContext>;
 }
 
 export function useScenePalette() {
   const palette = useContext(PaletteContext);
   if (!palette) throw new Error('Room scene palette provider is required');
-  return palette;
+  return palette.palette;
+}
+
+export function useScenePaletteRevision() {
+  const state = useContext(PaletteContext);
+  if (!state) throw new Error('Room scene palette provider is required');
+  return state.revision;
 }
 
 export function SelectionEdges({
   selected,
   dimmed,
+  hovered = false,
 }: {
   selected: boolean;
   dimmed: boolean;
+  hovered?: boolean;
 }) {
   const palette = useScenePalette();
   return (
     <Edges
       color={
-        selected
+        selected || hovered
           ? palette.selectedEdge
           : dimmed
             ? palette.dimmedEdge
@@ -82,12 +165,26 @@ export function SelectionEdges({
 
 export function ScenePaletteLighting() {
   const palette = useScenePalette();
+  const effects = useOptionalSceneEffects();
+  const ambient = useCallback(
+    (light: Light | null) => effects?.setLight('ambient', light),
+    [effects],
+  );
+  const key = useCallback(
+    (light: Light | null) => effects?.setLight('key', light),
+    [effects],
+  );
+  const fill = useCallback(
+    (light: Light | null) => effects?.setLight('fill', light),
+    [effects],
+  );
   return (
     <>
       <color attach="background" args={[palette.background]} />
-      <ambientLight intensity={1.1} />
-      <directionalLight position={[100, 220, 100]} intensity={2} />
+      <ambientLight ref={ambient} intensity={1.1} />
+      <directionalLight ref={key} position={[100, 220, 100]} intensity={2} />
       <directionalLight
+        ref={fill}
         position={[-80, 100, -100]}
         intensity={0.7}
         color={palette.fillLight}

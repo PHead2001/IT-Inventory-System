@@ -1,6 +1,12 @@
 'use client';
 import { useEffect, useState } from 'react';
 import { z } from 'zod';
+import type { usePrivacyReadiness } from '@/components/auth/privacy-readiness';
+import { freshPresentationGrant } from '@/components/experience/presentation-privacy';
+import {
+  subscribeAssignmentInvalidation,
+  subscribePrivacyRevocation,
+} from '@/features/scan/assign-batch';
 import { roomContentsFilter } from './contents-contract';
 import {
   locationOccupancySchema,
@@ -28,16 +34,22 @@ export function useRoomOccupancy(
   spaceId: string,
   refreshKey: string,
   backend: string,
+  privacy?: ReturnType<typeof usePrivacyReadiness>,
 ) {
+  const effectiveEnabled =
+    enabled && (!privacy || freshPresentationGrant(privacy));
   const environment =
     typeof window === 'undefined' ? '' : window.location.origin;
   const key = JSON.stringify([
-    enabled,
+    effectiveEnabled,
     userId,
     environment,
     backend,
     spaceId,
     refreshKey,
+    privacy?.generation,
+    privacy?.revocationRevision,
+    privacy?.verifiedEpoch,
   ]);
   const [attempt, setAttempt] = useState(() => ({
     key,
@@ -52,15 +64,26 @@ export function useRoomOccupancy(
   // appearing for even one committed paint when A -> B -> A or off -> on.
   if (attempt.key !== key) setAttempt({ key, generation: crypto.randomUUID() });
   useEffect(() => {
-    if (!enabled || attempt.key !== key) return;
+    if (!effectiveEnabled || attempt.key !== key) return;
     let active = true;
     const controller = new AbortController();
     const timer = setTimeout(() => {
-      if (!active) return;
+      if (!active || (privacy && !freshPresentationGrant(privacy))) return;
       active = false;
       controller.abort();
       setState({ generation: attempt.generation, error: true });
     }, 8000);
+    const retire = () => {
+      active = false;
+      clearTimeout(timer);
+      controller.abort();
+    };
+    const unsubscribe = privacy
+      ? [
+          subscribePrivacyRevocation(retire),
+          subscribeAssignmentInvalidation(retire),
+        ]
+      : [];
     fetch(
       '/api/room/occupancy?' +
         new URLSearchParams({ space: spaceId, generation: attempt.generation }),
@@ -85,26 +108,32 @@ export function useRoomOccupancy(
           data.identity.generation !== attempt.generation
         )
           throw new Error('Counts identity mismatch');
-        if (active)
+        if (active && (!privacy || freshPresentationGrant(privacy)))
           setState({ generation: attempt.generation, counts: data.counts });
       })
       .catch(() => {
-        if (active) setState({ generation: attempt.generation, error: true });
+        if (active && (!privacy || freshPresentationGrant(privacy)))
+          setState({ generation: attempt.generation, error: true });
       })
       .finally(() => clearTimeout(timer));
     return () => {
-      active = false;
-      clearTimeout(timer);
-      controller.abort();
+      unsubscribe.forEach((remove) => remove());
+      retire();
     };
-  }, [enabled, userId, spaceId, backend, key, attempt]);
+  }, [effectiveEnabled, userId, spaceId, backend, key, attempt, privacy]);
   const current =
     attempt.key === key && state?.generation === attempt.generation
       ? state
       : null;
   return {
-    counts: enabled ? current?.counts : undefined,
-    status: !enabled
+    counts: effectiveEnabled ? current?.counts : undefined,
+    // Diagnostic identity for successful counts adopted by this render. An
+    // in-flight attempt, retired key or failed response is never accepted.
+    acceptedGeneration:
+      effectiveEnabled && current?.counts && !current.error
+        ? current.generation
+        : null,
+    status: !effectiveEnabled
       ? 'off'
       : !current
         ? 'loading'

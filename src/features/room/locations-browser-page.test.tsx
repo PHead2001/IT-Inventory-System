@@ -72,12 +72,18 @@ it('an actual over-budget expansion keeps its notice in the browser column and p
   const grid = column.parentElement!;
   expect(column.nextElementSibling).toBe(panel);
   expect(grid.children).toHaveLength(2);
+  // Keep each real click/render, but resolve the stable controls once rather
+  // than repeating an accessibility walk over the growing tree 33 times.
+  const expandButtons = new Map(
+    screen
+      .getAllByRole('button', { name: /^Expand Group \d+$/ })
+      .map((button) => [button.getAttribute('aria-label'), button]),
+  );
+  expect(expandButtons.size).toBe(33);
   for (let index = 0; index < 32; index++)
-    fireEvent.click(
-      screen.getByRole('button', { name: `Expand Group ${index}` }),
-    );
+    fireEvent.click(expandButtons.get(`Expand Group ${index}`)!);
   const acceptedHref = runtime.replace.mock.calls.at(-1)![0];
-  fireEvent.click(screen.getByRole('button', { name: 'Expand Group 32' }));
+  fireEvent.click(expandButtons.get('Expand Group 32')!);
   act(() => vi.advanceTimersByTime(1000));
   const notice = screen.getByText(
     /This view has reached its saved-state limit/,

@@ -11,6 +11,12 @@ import type { createRouteReadiness } from './route-readiness';
 import { RouteContentIdentityContext } from './route-content-identity';
 import { afterTransitionCapture } from '@/components/forms/transition-capture';
 import { PairedInventoryContent } from './paired-inventory-content';
+import {
+  InventoryCaptureGroup,
+  InventoryCaptureRegionsContext,
+} from './inventory-capture-region';
+import { AuxiliaryRouteCaptureContext } from './auxiliary-route-context';
+import { RoutePresentationSourceContext } from './route-presentation-source';
 
 export const RouteReadyContext = createContext<ReturnType<
   typeof createRouteReadiness
@@ -24,6 +30,7 @@ export function RouteReady({
   ready = true,
   pairedInventory = false,
   conventionalPrimary = false,
+  capture = 'body',
 }: {
   actorId: string;
   routeKey: string;
@@ -36,9 +43,35 @@ export function RouteReady({
   pairedInventory?: boolean;
   /** Successful conventional primary capability, never canvas/loading/error. */
   conventionalPrimary?: boolean;
+  /** Explicit canvas-free sibling regions under this one canonical owner. */
+  capture?: 'body' | 'regions';
 }) {
   const readiness = useContext(RouteReadyContext);
   const root = useRef<HTMLDivElement>(null);
+  const auxiliary = useContext(AuxiliaryRouteCaptureContext);
+  const source = useContext(RoutePresentationSourceContext);
+  useLayoutEffect(() => {
+    if (
+      !ready ||
+      !(pairedInventory || conventionalPrimary) ||
+      !root.current ||
+      !source ||
+      !auxiliary
+    )
+      return;
+    // Identity only. The existing canonical readiness owner still decides which
+    // root is accepted; no new presentation source or acknowledgment is created.
+    // Conventional History/Locations roots can also supply a title pair; only
+    // the provider's exact accepted title approval may arm auxiliary capture.
+    return auxiliary.registerSource(root.current, routeKey, source);
+  }, [
+    auxiliary,
+    source,
+    routeKey,
+    ready,
+    pairedInventory,
+    conventionalPrimary,
+  ]);
   // This identity travels with the server primary. Next's opaque layout slot
   // can replace its children before an outer accepted pathname catches up.
   const identity = useMemo(
@@ -72,7 +105,23 @@ export function RouteReady({
   return (
     <RouteContentIdentityContext value={identity}>
       <div ref={root} data-route-ready="true" style={{ display: 'contents' }}>
-        {pairedInventory || conventionalPrimary ? (
+        {capture === 'regions' ||
+        (auxiliary && (pairedInventory || conventionalPrimary)) ? (
+          <InventoryCaptureRegionsContext
+            value={{ enabled: ready, pairedInventory, conventionalPrimary }}
+          >
+            {capture === 'regions' ? (
+              children
+            ) : (
+              <InventoryCaptureGroup
+                region="body"
+                className="experience-paired-inventory-content"
+              >
+                {children}
+              </InventoryCaptureGroup>
+            )}
+          </InventoryCaptureRegionsContext>
+        ) : pairedInventory || conventionalPrimary ? (
           <PairedInventoryContent
             enabled={ready}
             conventionalPrimary={conventionalPrimary}

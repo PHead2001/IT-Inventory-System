@@ -143,7 +143,11 @@ it('inherits the original source denial lease through body capture and releases 
   const cancelGeometry = vi.fn(() => expect(ticket.current()).toBe(true));
   vi.mocked(routeContentMotion).mockImplementationOnce((_instance, valid) => {
     expect(valid()).toBe(true);
-    expect(state.finish).not.toHaveBeenCalled();
+    // Exact approval is registered before the source handoff. Its deferred
+    // completion collector runs after these synchronous geometry replacements.
+    expect(state.finish).toHaveBeenCalledWith({
+      name: 'inventory-title-proof-content',
+    });
     return cancelGeometry;
   });
   let cleanup: unknown;
@@ -194,6 +198,101 @@ it('rejects unrelated or retired callbacks before acquiring a source handoff', (
   callback({ name: 'inventory-title-proof-content' } as never, []);
   expect(state.finish).not.toHaveBeenCalled();
   expect(routeContentMotion).not.toHaveBeenCalled();
+});
+
+it('rejects withdrawn exact approval before acquiring a source lease or replacing geometry', () => {
+  const lifetime = createRoutePresentationLifetime();
+  const source = Symbol('withdrawn-pair');
+  const unmount = lifetime.mount(source);
+  const handoff = vi.spyOn(lifetime, 'handoff');
+  render(
+    <RoutePresentationLifetimeContext value={lifetime}>
+      <RoutePresentationSourceContext value={source}>
+        <RouteContentIdentityContext value={identity('/inventory?q=++x++')}>
+          <PairedInventoryContent enabled>
+            <input aria-label="Retained withdrawn draft" defaultValue="draft" />
+          </PairedInventoryContent>
+        </RouteContentIdentityContext>
+      </RoutePresentationSourceContext>
+    </RoutePresentationLifetimeContext>,
+  );
+  const draft = screen.getByRole('textbox');
+  state.finish.mockReturnValueOnce(false);
+  const cleanup = state.boundaries.at(-1)!.onShare!(
+    { name: 'inventory-title-proof-content' } as never,
+    [],
+  );
+  expect(state.finish).toHaveBeenCalledOnce();
+  expect(handoff).not.toHaveBeenCalled();
+  expect(routeContentMotion).not.toHaveBeenCalled();
+  expect(cleanup).toBeUndefined();
+  expect(screen.getByRole('textbox')).toBe(draft);
+  expect(draft).toHaveValue('draft');
+  unmount();
+  handoff.mockRestore();
+});
+
+it('shares the body and fades unmatched header/task regions while retaining all exact source leases', () => {
+  const lifetime = createRoutePresentationLifetime(),
+    source = Symbol('regions');
+  const unmount = lifetime.mount(source);
+  let owner = true;
+  const ticket = lifetime.capture(
+    source,
+    () => owner,
+    () => true,
+  )!;
+  render(
+    <RoutePresentationLifetimeContext value={lifetime}>
+      <RoutePresentationSourceContext value={source}>
+        <RouteContentIdentityContext
+          value={identity('/inventory/quantity/one')}
+        >
+          {(['header', 'body', 'task-launcher'] as const).map((region) => (
+            <PairedInventoryContent
+              key={region}
+              enabled
+              region={region}
+              wrap={false}
+            >
+              <section>{region}</section>
+            </PairedInventoryContent>
+          ))}
+        </RouteContentIdentityContext>
+      </RoutePresentationSourceContext>
+    </RoutePresentationLifetimeContext>,
+  );
+  const regions = state.boundaries.slice(-3);
+  expect(regions.map((region) => region.name)).toEqual([
+    'inventory-title-proof-content-header',
+    'inventory-title-proof-content',
+    'inventory-title-proof-content-task-launcher',
+  ]);
+  expect(
+    regions.every(
+      (region) =>
+        region.share === 'route-content' &&
+        region.enter === 'route-content' &&
+        region.exit === 'route-content',
+    ),
+  ).toBe(true);
+  lifetime.navigation();
+  owner = false;
+  const finishes = regions.map((region, index) =>
+    (index === 1 ? region.onShare : region.onExit)!(
+      { name: region.name! } as never,
+      [],
+    ),
+  );
+  expect(finishes.every((finish) => typeof finish === 'function')).toBe(true);
+  for (const finish of finishes.slice(0, -1)) {
+    if (typeof finish === 'function') finish();
+    expect(ticket.current()).toBe(true);
+  }
+  const final = finishes.at(-1);
+  if (typeof final === 'function') final();
+  expect(ticket.current()).toBe(false);
+  unmount();
 });
 
 it('rejects an old exact primary callback before acquiring the renewed source exit lease', () => {

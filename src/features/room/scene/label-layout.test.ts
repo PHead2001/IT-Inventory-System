@@ -2,6 +2,8 @@ import capturedTransition from '../../../../tests/fixtures/room/selected-footpri
 import capturedActive from '../../../../tests/fixtures/room/more-active-labels.json';
 import capturedSelected from '../../../../tests/fixtures/room/more-selected-labels.json';
 import capturedMore from '../../../../tests/fixtures/room/more-labels.json';
+import actualBelow from '../../../../tests/fixtures/room/actual-80d-more-below.json';
+import actualInitial from '../../../../tests/fixtures/room/actual-80d-more-initial.json';
 import { describe, expect, it } from 'vitest';
 import {
   LABEL_PACKING_BUDGET,
@@ -28,6 +30,261 @@ const label = (
 });
 
 describe('scene label placement', () => {
+  it('completes every actual80d More target through shared geometry within the original work limits', () => {
+    expect(actualBelow.provenance.kind).toBe('actual-captured-below');
+    const { labels, viewport: bounds, reserved } = actualBelow.input;
+    expect(labels).toHaveLength(27);
+    expect(reserved).toHaveLength(28);
+    const original = structuredClone(labels);
+    const result = layoutLabelsDetailed(labels, bounds, reserved, {}, () => 0);
+    expect(result.status).toBe('complete');
+    expect(result.stats.greedyComplete).toBe(false);
+    expect(result.placements.filter((row) => row.visible)).toHaveLength(27);
+    expect(
+      new Set(
+        result.placements
+          .filter((row) => row.visible)
+          .map(
+            (row) => labels.find((label) => label.id === row.id)!.locationCode,
+          ),
+      ).size,
+    ).toBe(27);
+    expect(result.placements.every((row) => row.compact === true)).toBe(true);
+    expect(result.stats.operations).toBeLessThan(
+      LABEL_PACKING_BUDGET.maxOperations,
+    );
+    expect(result.stats.candidates).toBeLessThan(
+      LABEL_PACKING_BUDGET.maxCandidates,
+    );
+    expect(result.stats.nodes).toBeGreaterThan(0);
+    expect(result.stats.nodes).toBeLessThanOrEqual(
+      LABEL_PACKING_BUDGET.maxNodes,
+    );
+    expect(result.stats.exhaustion).toBeUndefined();
+    expect(labels).toEqual(original);
+    assertPacking(labels, result.placements, bounds, reserved);
+    expect(
+      layoutLabelsDetailed(
+        [...labels].reverse(),
+        bounds,
+        reserved,
+        {},
+        () => 0,
+      ),
+    ).toEqual(result);
+    const repeated = labels.map((label) => {
+      const placed = result.placements.find((row) => row.id === label.id)!;
+      return {
+        ...label,
+        previous: { dx: placed.dx, dy: placed.dy, compact: true },
+      };
+    });
+    const next = layoutLabelsDetailed(repeated, bounds, reserved, {}, () => 0);
+    expect(next.status).toBe('complete');
+    expect(next.stats.greedyComplete).toBe(true);
+    expect(next.placements).toEqual(result.placements);
+  });
+  it('keeps the actual initial successful preferred path and recorded placements unchanged', () => {
+    const pass = actualInitial.snapshot.passes.at(-1)!;
+    const result = layoutLabelsDetailed(
+      pass.labels,
+      pass.viewport,
+      pass.reserved,
+      {},
+      () => 0,
+    );
+    expect(result.status).toBe('complete');
+    expect(result.stats.greedyComplete).toBe(true);
+    expect(result.placements).toEqual(pass.output);
+    expect(result.stats.nodes).toBe(0);
+    assertPacking(pass.labels, result.placements, pass.viewport, pass.reserved);
+  });
+  it('retains actual protected focused/hovered positions and uses heterogeneous recovery for a selected full footprint', () => {
+    const input = actualBelow.input;
+    const base = layoutLabelsDetailed(
+      input.labels,
+      input.viewport,
+      input.reserved,
+      {},
+      () => 0,
+    );
+    for (const inspection of ['focused', 'hovered'] as const) {
+      const pin = base.placements[0];
+      const labels = input.labels.map((label) =>
+        label.id === pin.id
+          ? {
+              ...label,
+              [inspection]: true,
+              previous: { dx: pin.dx, dy: pin.dy, compact: true },
+            }
+          : label,
+      );
+      const result = layoutLabelsDetailed(
+        labels,
+        input.viewport,
+        input.reserved,
+        {},
+        () => 0,
+      );
+      expect(result.placements.find((row) => row.id === pin.id)).toMatchObject({
+        visible: true,
+        dx: pin.dx,
+        dy: pin.dy,
+        compact: true,
+      });
+      assertPacking(labels, result.placements, input.viewport, input.reserved);
+    }
+    const labels = input.labels.map((label, index) =>
+      index === 0 ? { ...label, selected: true, width: 91, height: 44 } : label,
+    );
+    const result = layoutLabelsDetailed(
+      labels,
+      input.viewport,
+      input.reserved,
+      {},
+      () => 0,
+    );
+    const selected = result.placements.find((row) => row.id === labels[0].id)!;
+    if (selected.visible) expect(selected.compact).not.toBe(true);
+    assertPacking(labels, result.placements, input.viewport, input.reserved);
+  });
+  it('never treats capped shared-slot generation or zero search allowance as candidate infeasibility', () => {
+    const { labels, viewport: bounds, reserved } = actualBelow.input;
+    const exhausted = layoutLabelsDetailed(
+      labels,
+      bounds,
+      reserved,
+      { maxNodes: 0 },
+      () => 0,
+    );
+    expect(exhausted.status).toBe('budget-exhausted');
+    expect(exhausted.stats.nodes).toBe(0);
+    expect(exhausted.stats.exhaustion).toEqual({
+      reason: 'nodes',
+      phase: 'shared-slots',
+    });
+    assertPacking(labels, exhausted.placements, bounds, reserved);
+    const capped = layoutLabelsDetailed(
+      labels,
+      bounds,
+      reserved,
+      { maxOperations: 130000 },
+      () => 0,
+    );
+    expect(capped.status).toBe('budget-exhausted');
+    expect(capped.stats.operations).toBe(130000);
+    expect(capped.stats.exhaustion).toEqual({
+      reason: 'operations',
+      phase: 'shared-slots',
+    });
+    assertPacking(labels, capped.placements, bounds, reserved);
+    for (const limits of [
+      { maxCandidates: 10000 },
+      { maxCandidatesPerLabel: 1024 },
+    ]) {
+      const partial = layoutLabelsDetailed(
+        labels,
+        bounds,
+        reserved,
+        limits,
+        () => 0,
+      );
+      expect(partial.status).toBe('budget-exhausted');
+      expect(partial.stats.exhaustion).toEqual({
+        reason: 'maxCandidates' in limits ? 'candidates' : 'per-label',
+        phase: 'shared-slots',
+      });
+      expect(partial.stats.nodes).toBe(0);
+      assertPacking(labels, partial.placements, bounds, reserved);
+    }
+  });
+  it('does not clip open obstacle intervals into allowing a slot inside a reserved viewport edge', () => {
+    const labels = Array.from({ length: 6 }, (_, index) => ({
+      ...label('edge-' + index, 40, 40),
+      mandatory: true,
+      compact: { width: 44, height: 44 },
+    }));
+    const bounds = { left: 0, top: 0, right: 145, bottom: 145 },
+      reserved = [{ left: -20, top: -20, right: 45, bottom: 145 }];
+    const result = layoutLabelsDetailed(labels, bounds, reserved, {}, () => 0);
+    assertPacking(labels, result.placements, bounds, reserved);
+    for (const row of result.placements.filter((row) => row.visible))
+      expect(
+        labels.find((label) => label.id === row.id)!.left + row.dx,
+      ).toBeGreaterThanOrEqual(48);
+  });
+  it.each(['focused', 'hovered', 'mandatory'] as const)(
+    'treats omitted %s as false when choosing one same-code action',
+    (flag) => {
+      for (const inactive of [undefined, false]) {
+        const active = {
+          ...label('z-active', 30, 30),
+          locationCode: 'ITC-RACK',
+          [flag]: true,
+        };
+        const other = {
+          ...label('a-inactive', 80, 30),
+          locationCode: 'ITC-RACK',
+          [flag]: inactive,
+        };
+        const result = layoutLabelsDetailed([other, active], viewport);
+        expect(result.status).toBe('complete');
+        expect(
+          result.placements
+            .filter((entry) => entry.visible)
+            .map((entry) => entry.id),
+        ).toEqual(['z-active']);
+      }
+    },
+  );
+  it('keeps the mandatory selected anchor ahead of its same-code tooltip', () => {
+    // Sanitized exact hosted rack failure: both rectangles fit without overlap,
+    // but an omitted optional mandatory flag must compare as false, not NaN.
+    const rack: LabelRect = {
+      id: 'server-rack',
+      locationCode: 'ITC-RACK',
+      selected: true,
+      priority: 4,
+      mandatory: true,
+      focused: false,
+      hovered: false,
+      left: 483.65625,
+      top: 614.318359375,
+      width: 200.6875,
+      height: 48,
+    };
+    const tooltip: LabelRect = {
+      id: 'hover-tooltip',
+      locationCode: 'ITC-RACK',
+      selected: true,
+      priority: 4,
+      focused: false,
+      hovered: false,
+      left: 596,
+      top: 702,
+      width: 92.375,
+      height: 44,
+      previous: { dx: 0, dy: 0, compact: false },
+    };
+    const view = {
+      left: 286,
+      top: 463.859375,
+      right: 882,
+      bottom: 1011.859375,
+    };
+    for (const mandatory of [undefined, false]) {
+      for (const input of [
+        [rack, { ...tooltip, mandatory }],
+        [{ ...tooltip, mandatory }, rack],
+      ]) {
+        const result = layoutLabelsDetailed(input, view);
+        expect(result.status).toBe('complete');
+        expect(result.placements.filter((entry) => entry.visible)).toEqual([
+          { id: 'server-rack', visible: true, dx: 0, dy: 0 },
+        ]);
+      }
+    }
+  });
   function assertPacking(
     input: LabelRect[],
     placements: LabelPlacement[],
@@ -60,6 +317,93 @@ describe('scene label placement', () => {
         ).toBe(true);
     }
   }
+  it.each(['focused', 'hovered'] as const)(
+    'does not pin or expand a %s action across any physical pick reservation',
+    (inspection) => {
+      const input: LabelRect[] = [
+        {
+          ...label('selected', 100, 100, true),
+          width: 200,
+          height: 48,
+          mandatory: true,
+          previous: { dx: 0, dy: 0, compact: false },
+          [inspection]: true,
+          preferFull: true,
+        },
+        {
+          ...label('neighbor', 100, 200),
+          width: 200,
+          height: 48,
+          mandatory: true,
+          compact: { width: 44, height: 44 },
+          hovered: true,
+          preferFull: true,
+        },
+      ];
+      const bounds = { left: 0, top: 0, right: 500, bottom: 400 },
+        reserved = [
+          { left: 194, top: 118, right: 206, bottom: 130 },
+          { left: 194, top: 218, right: 206, bottom: 230 },
+        ];
+      const result = layoutLabelsDetailed(input, bounds, reserved, {}, () => 0);
+      expect(result.status).toBe('complete');
+      expect(result.placements.every((entry) => entry.visible)).toBe(true);
+      expect(
+        result.placements.find((entry) => entry.id === 'selected'),
+      ).not.toMatchObject({ dx: 0, dy: 0 });
+      assertPacking(input, result.placements, bounds, reserved);
+    },
+  );
+  it('packs all 28 mandatory targets with paired physical reservations and UI masks inside the unchanged 128-input cap', () => {
+    const input: LabelRect[] = Array.from({ length: 28 }, (_, index) => ({
+      ...label(
+        'target-' + index,
+        50 + (index % 4) * 300,
+        90 + Math.floor(index / 4) * 130,
+        index === 0,
+      ),
+      width: 200,
+      height: 48,
+      mandatory: true,
+      locationCode: 'ITC-T' + index,
+      compact: { width: 44, height: 44 },
+    }));
+    const reserved = input.map((entry) => ({
+      left: entry.left + 94,
+      top: entry.top + 18,
+      right: entry.left + 106,
+      bottom: entry.top + 30,
+    }));
+    reserved.push(
+      { left: 0, top: 0, right: 1280, bottom: 44 },
+      { left: 1210, top: 44, right: 1280, bottom: 1100 },
+    );
+    const bounds = { left: 0, top: 0, right: 1280, bottom: 1100 };
+    expect(input.length + reserved.length).toBeLessThanOrEqual(
+      LABEL_PACKING_BUDGET.maxInputs,
+    );
+    const result = layoutLabelsDetailed(input, bounds, reserved, {}, () => 0);
+    expect(result.status).toBe('complete');
+    expect(result.placements.every((entry) => entry.visible)).toBe(true);
+    expect(result.placements[0].compact ?? false).toBe(false);
+    expect(result.stats.operations).toBeLessThanOrEqual(
+      LABEL_PACKING_BUDGET.maxOperations,
+    );
+    assertPacking(input, result.placements, bounds, reserved);
+    const oversized = Array.from(
+      { length: LABEL_PACKING_BUDGET.maxInputs - input.length + 1 },
+      (_, index) => ({ left: index, top: 0, right: index + 1, bottom: 1 }),
+    );
+    const rejected = layoutLabelsDetailed(
+      input,
+      bounds,
+      oversized,
+      {},
+      () => 0,
+    );
+    expect(rejected.status).toBe('budget-exhausted');
+    expect(rejected.placements).toEqual([]);
+  });
   it('finds an off-rail 44px pocket adjacent to reserved edges', () => {
     const input = [
       { ...label('pocket', 300, 300), width: 44, height: 44, mandatory: true },

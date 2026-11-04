@@ -111,6 +111,7 @@ describe('bounded browser failure fallback', () => {
 
   it('retains source coordinates and failure state without assertion or attachment data', () => {
     expect(failureMetadata(testCase, result)).toEqual({
+      assertionLocations: [null],
       file: 'tests/e2e/inventory.spec.ts',
       line: 41,
       status: 'timedOut',
@@ -122,6 +123,64 @@ describe('bounded browser failure fallback', () => {
     expect(JSON.stringify(failureMetadata(testCase, result))).not.toContain(
       sentinel,
     );
+  });
+
+  it('retains only known-file assertion coordinates from bounded serialized stacks', () => {
+    const stack = [
+      'Error: PRIVATE_SENTINEL',
+      '    at helper (C:\\private\\PRIVATE_SENTINEL.ts:9:2)',
+      '    at run (' + resolve('tests/e2e/inventory.spec.ts') + ':1482:24)',
+      '    at forged (' + resolve('tests/e2e/other.spec.ts') + ':77:1)',
+    ].join('\n');
+    const metadata = failureMetadata(testCase, {
+      ...result,
+      errors: [{ stack }],
+    } as TestResult);
+    expect(metadata.assertionLocations).toEqual([{ line: 1482, column: 24 }]);
+    expect(JSON.stringify(metadata)).not.toContain(sentinel);
+    const oversized = failureMetadata(testCase, {
+      ...result,
+      errors: Array.from({ length: 20 }, () => ({ stack })),
+    } as TestResult);
+    expect(oversized.assertionLocations).toHaveLength(3);
+    for (const value of [
+      'at run (' + resolve('tests/e2e/other.spec.ts') + ':77:1)',
+      'at run (' + resolve('tests/e2e/inventory.spec.ts') + ':0:1)',
+      'at run (' + resolve('tests/e2e/inventory.spec.ts') + ':77:0)',
+      'at run (' +
+        resolve('tests/e2e/inventory.spec.ts') +
+        ':77:1?PRIVATE_SENTINEL)',
+      'x'.repeat(65_536) + '\n' + stack,
+    ])
+      expect(
+        failureMetadata(testCase, {
+          ...result,
+          errors: [{ stack: value }],
+        } as TestResult).assertionLocations,
+      ).toEqual([null]);
+  });
+
+  it('emits sanitized attempts before finalization and caps immediate output', () => {
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+    vi.mocked(appendFileSync).mockClear();
+    const reporter = new PerformanceReporter();
+    for (let index = 0; index < 22; index++)
+      reporter.onTestEnd(
+        {
+          ...testCase,
+          id: String(index),
+          outcome: () => 'unexpected',
+        } as TestCase,
+        result,
+      );
+    expect(log).toHaveBeenCalledTimes(20);
+    expect(
+      log.mock.calls.every(([value]) =>
+        String(value).startsWith('E2E failed attempt: '),
+      ),
+    ).toBe(true);
+    expect(JSON.stringify(log.mock.calls)).not.toContain(sentinel);
+    expect(appendFileSync).not.toHaveBeenCalled();
   });
 
   it('omits untrusted paths and invalid coordinates rather than dumping them', () => {
@@ -371,14 +430,24 @@ describe('bounded E2E timing evidence', () => {
   it('reports per-spec retries and phase overlap without leaking raw project names, IDs or titles', () => {
     const log = vi.spyOn(console, 'log').mockImplementation(() => {});
     const reporter = new PerformanceReporter();
-    const parallel = reporterTest('tests/e2e/room.spec.ts');
+    const parallel = reporterTest('tests/e2e/00-room.spec.ts');
     reporter.onBegin(
       { workers: 2 } as FullConfig,
       {
         allTests: () => [parallel],
       } as unknown as Suite,
     );
-    reporter.onTestEnd(parallel, reportedAttempt(1000, 3000, 'failed'));
+    reporter.onTestEnd(parallel, {
+      ...reportedAttempt(1000, 3000, 'failed'),
+      errors: [
+        {
+          stack:
+            'PRIVATE_SENTINEL\n    at journey (' +
+            resolve('tests/e2e/00-room.spec.ts') +
+            ':1482:24)',
+        },
+      ],
+    });
     reporter.onTestEnd(parallel, reportedAttempt(5000, 1000));
     reporter.onTestEnd(
       reporterTest('tests/e2e/inventory.spec.ts'),
@@ -407,7 +476,7 @@ describe('bounded E2E timing evidence', () => {
     expect(summary.timing.phases.unclassified.skippedAttempts).toBe(1);
     expect(
       summary.timing.specs.find(
-        ({ file }: { file: string }) => file === 'tests/e2e/room.spec.ts',
+        ({ file }: { file: string }) => file === 'tests/e2e/00-room.spec.ts',
       ),
     ).toMatchObject({
       attempts: 2,
@@ -415,6 +484,16 @@ describe('bounded E2E timing evidence', () => {
       activeIntervalSeconds: 4,
       elapsedSeconds: 5,
     });
+    const failure = log.mock.calls.find(([value]) =>
+      String(value).startsWith('E2E failed attempt: '),
+    )?.[0];
+    expect(
+      JSON.parse(String(failure).slice('E2E failed attempt: '.length)),
+    ).toMatchObject({
+      file: 'tests/e2e/00-room.spec.ts',
+      assertionLocations: [{ line: 1482, column: 24 }],
+    });
+    expect(JSON.stringify(log.mock.calls)).not.toContain('PRIVATE_SENTINEL');
     expect(JSON.stringify(summary)).not.toContain('PRIVATE_SENTINEL');
     const output = log.mock.calls.find(([value]) =>
       String(value).startsWith('E2E performance: '),

@@ -138,7 +138,7 @@ it('keeps installation automatic and verifies the correction before production c
     readFileSync(new URL('../../package.json', import.meta.url), 'utf8'),
   );
   expect(packageJson.scripts.postinstall).toBe(
-    'node scripts/patch-next-route-cache.mjs',
+    'node scripts/patch-postprocessing.mjs && node scripts/patch-next-route-cache.mjs',
   );
   expect(packageJson.scripts.prebuild).toBe(
     'node scripts/patch-next-route-cache.mjs --check',

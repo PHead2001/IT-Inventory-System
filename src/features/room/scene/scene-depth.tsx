@@ -8,11 +8,10 @@ import {
   Float32BufferAttribute,
 } from 'three';
 import type { RoomDefinition } from '../schema';
-import { toScenePosition } from '../coordinates';
-import { buildRoomBindings } from '../bindings';
 import { useScenePalette } from './scene-palette';
+import { SCENE_EFFECTS } from './scene-effects-state';
 
-/** A reusable baked alpha footprint: no shadow camera, light map or extra passes. */
+/** Static corner grounding and grid. Furniture contacts belong to the cached capture. */
 export function SceneDepth({ room }: { room: RoomDefinition }) {
   const palette = useScenePalette();
   const texture = useMemo(() => {
@@ -33,20 +32,6 @@ export function SceneDepth({ room }: { room: RoomDefinition }) {
     return result;
   }, []);
   useEffect(() => () => texture.dispose(), [texture]);
-  const footprints = useMemo(
-    () =>
-      buildRoomBindings(room).filter((binding) =>
-        [
-          'ITC-L',
-          'ITC-R',
-          'ITC-RACK',
-          'ITC-RED',
-          'ITC-BLACK',
-          'ITC-CLEAR',
-        ].includes(binding.code),
-      ),
-    [room],
-  );
   const grid = useMemo(() => {
     const [width, depth] = room.dimensions;
     const points: number[] = [];
@@ -60,26 +45,30 @@ export function SceneDepth({ room }: { room: RoomDefinition }) {
   }, [room]);
   useEffect(() => () => grid.dispose(), [grid]);
   return (
-    <group>
-      {footprints.map((binding) => {
-        const { min, max } = binding.bounds;
-        return (
-          <mesh
-            key={binding.nodeId}
-            position={toScenePosition([
-              (min[0] + max[0]) / 2,
-              (min[1] + max[1]) / 2,
-              0.03,
-            ])}
-            rotation={[-Math.PI / 2, 0, 0]}
-            userData={{ hoverPassThrough: true }}
-            raycast={() => {}}
-          >
-            <planeGeometry args={[max[0] - min[0] + 8, max[1] - min[1] + 8]} />
-            <meshBasicMaterial map={texture} transparent depthWrite={false} />
-          </mesh>
-        );
-      })}
+    <group userData={{ roomEffectHelper: true }}>
+      {[
+        [3, 3],
+        [room.dimensions[0] - 3, 3],
+        [3, room.dimensions[1] - 3],
+        [room.dimensions[0] - 3, room.dimensions[1] - 3],
+      ].map(([x, y], index) => (
+        <mesh
+          key={index}
+          position={[x, 0.025, -y]}
+          rotation={[-Math.PI / 2, 0, 0]}
+          userData={{ roomEffectHelper: true, hoverPassThrough: true }}
+          raycast={() => {}}
+        >
+          <planeGeometry args={[12, 12]} />
+          <meshBasicMaterial
+            map={texture}
+            color={palette.grid}
+            transparent
+            depthWrite={false}
+            opacity={0.35 * SCENE_EFFECTS.intensity}
+          />
+        </mesh>
+      ))}
       <lineSegments geometry={grid} raycast={() => {}}>
         <lineBasicMaterial color={palette.grid} transparent opacity={0.45} />
       </lineSegments>

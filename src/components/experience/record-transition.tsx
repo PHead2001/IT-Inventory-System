@@ -70,6 +70,7 @@ export function InventoryRecordLink({
     finishTitleAfterSnapshot,
     current,
     rejectTitleSnapshot,
+    captureAvailable,
     registerReturnSource,
   } = useRouteMotion();
   const source = useRef<HTMLAnchorElement>(null);
@@ -84,6 +85,7 @@ export function InventoryRecordLink({
       return registerReturnSource(target, source.current);
   });
   const matches =
+    captureAvailable !== false &&
     intent &&
     target &&
     sameRecord(intent, record) &&
@@ -97,13 +99,12 @@ export function InventoryRecordLink({
       share={matches ? 'record-title' : 'none'}
       name={matches ? intent?.name : undefined}
       onShare={(instance) => {
-        if (!current()) return;
+        if (!current() || finishTitleAfterSnapshot(instance) === false) return;
         const cleanup = sharedTitleMotion(
           instance,
           validNow,
           rejectTitleSnapshot,
         );
-        finishTitleAfterSnapshot(instance);
         return cleanup;
       }}
     >
@@ -143,6 +144,7 @@ export function RecordTitle({
     finishTitleAfterSnapshot,
     current,
     rejectTitleSnapshot,
+    captureAvailable,
   } = useRouteMotion();
   const privacy = usePrivacyReadiness();
   const heading = useRef<HTMLHeadingElement>(null);
@@ -150,6 +152,7 @@ export function RecordTitle({
   useImperativeHandle(ref, () => heading.current!, []);
   const contentIdentity = useContext(RouteContentIdentityContext);
   const matches =
+    captureAvailable !== false &&
     sameRecord(intent, record) &&
     (contentIdentity ? contentIdentity.pathname : pathname) ===
       intent?.detailPath;
@@ -196,13 +199,12 @@ export function RecordTitle({
       share={matches ? 'record-title' : 'none'}
       name={matches ? intent!.name : undefined}
       onShare={(instance) => {
-        if (!current()) return;
+        if (!current() || finishTitleAfterSnapshot(instance) === false) return;
         const cleanup = sharedTitleMotion(
           instance,
           validNow,
           rejectTitleSnapshot,
         );
-        finishTitleAfterSnapshot(instance);
         return cleanup;
       }}
     >
@@ -285,24 +287,25 @@ export function HistoryRecordLink({
     returnTo,
     identity?.rawRouteKey,
   );
-  const matches = scopedSourceMatches(
-    motion.intent,
-    target,
-    identity?.rawRouteKey,
-  );
+  const matches =
+    motion.captureAvailable !== false &&
+    scopedSourceMatches(motion.intent, target, identity?.rawRouteKey);
   return (
     <ViewTransition
       default="none"
       share={matches ? 'record-title' : 'none'}
       name={matches ? motion.intent!.name : undefined}
       onShare={(instance) => {
-        if (!motion.current()) return;
+        if (
+          !motion.current() ||
+          motion.finishTitleAfterSnapshot(instance) === false
+        )
+          return;
         const cleanup = sharedTitleMotion(
           instance,
           motion.validNow,
           motion.rejectTitleSnapshot,
         );
-        motion.finishTitleAfterSnapshot(instance);
         return cleanup;
       }}
     >
@@ -342,11 +345,9 @@ export function LocationTitleSourceName({
     returnTo,
     identity?.rawRouteKey,
   );
-  const matches = scopedSourceMatches(
-    motion.intent,
-    target,
-    identity?.rawRouteKey,
-  );
+  const matches =
+    motion.captureAvailable !== false &&
+    scopedSourceMatches(motion.intent, target, identity?.rawRouteKey);
   // Even a mismatched/unfresh draft preserves one stable occurrence anchor.
   const anchor = `location-row-${occurrence}-${location.id}`;
   return (
@@ -355,13 +356,16 @@ export function LocationTitleSourceName({
       share={matches ? 'record-title' : 'none'}
       name={matches ? motion.intent!.name : undefined}
       onShare={(instance) => {
-        if (!motion.current()) return;
+        if (
+          !motion.current() ||
+          motion.finishTitleAfterSnapshot(instance) === false
+        )
+          return;
         const cleanup = sharedTitleMotion(
           instance,
           motion.validNow,
           motion.rejectTitleSnapshot,
         );
-        motion.finishTitleAfterSnapshot(instance);
         return cleanup;
       }}
     >

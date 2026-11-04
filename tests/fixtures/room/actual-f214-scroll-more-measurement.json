@@ -1,0 +1,899 @@
+{
+  "provenance": {
+    "sourceHead": "f2143d4577f597cf50a644b59fde68cd6e7e53c3",
+    "workingTreeOverlaysPresent": true,
+    "stage": "scroll-more-overlapping-canvas",
+    "transaction": 41,
+    "transactionComplete": false,
+    "settled": false,
+    "runtimeFailure": "measurement-budget",
+    "solverComplete": true,
+    "solverElapsedMs": 11.599999999627471,
+    "remeasurementEndMs": 19,
+    "worldTriangleGeometryCaptured": false
+  },
+  "input": {
+    "labels": [
+      {
+        "id": "shelf-1a",
+        "selected": false,
+        "left": 79.18437194824219,
+        "top": 346.5435606401714,
+        "width": 145.9375,
+        "height": 44,
+        "locationCode": "ITC-S1A",
+        "priority": 3,
+        "mandatory": true,
+        "preferFull": false,
+        "focused": false,
+        "hovered": false,
+        "holdCompact": false,
+        "compact": {
+          "width": 44,
+          "height": 44
+        }
+      },
+      {
+        "id": "shelf-1b",
+        "selected": false,
+        "left": 95.45130157470703,
+        "top": 309.9331817626953,
+        "width": 139.203125,
+        "height": 44,
+        "locationCode": "ITC-S1B",
+        "priority": 3,
+        "mandatory": true,
+        "preferFull": false,
+        "focused": false,
+        "hovered": false,
+        "holdCompact": false,
+        "compact": {
+          "width": 44,
+          "height": 44
+        }
+      },
+      {
+        "id": "shelf-1c",
+        "selected": false,
+        "left": 111.7182388305664,
+        "top": 273.3227844238281,
+        "width": 139.203125,
+        "height": 44,
+        "locationCode": "ITC-S1C",
+        "priority": 3,
+        "mandatory": true,
+        "preferFull": false,
+        "focused": false,
+        "hovered": false,
+        "holdCompact": false,
+        "compact": {
+          "width": 44,
+          "height": 44
+        }
+      },
+      {
+        "id": "shelf-2a",
+        "selected": false,
+        "left": 79.18437194824219,
+        "top": 382.9169857822959,
+        "width": 139.203125,
+        "height": 44,
+        "locationCode": "ITC-S2A",
+        "priority": 3,
+        "mandatory": true,
+        "preferFull": false,
+        "focused": false,
+        "hovered": false,
+        "holdCompact": false,
+        "compact": {
+          "width": 44,
+          "height": 44
+        }
+      },
+      {
+        "id": "shelf-2b",
+        "selected": false,
+        "left": 102.5366439819336,
+        "top": 369.0546810947959,
+        "width": 139.20313262939453,
+        "height": 44.000030517578125,
+        "locationCode": "ITC-S2B",
+        "priority": 3,
+        "mandatory": true,
+        "preferFull": false,
+        "focused": false,
+        "hovered": false,
+        "holdCompact": false,
+        "compact": {
+          "width": 44,
+          "height": 44
+        }
+      },
+      {
+        "id": "shelf-2c",
+        "selected": false,
+        "left": 118.80357360839844,
+        "top": 332.4442837559287,
+        "width": 139.203125,
+        "height": 44.000030517578125,
+        "locationCode": "ITC-S2C",
+        "priority": 3,
+        "mandatory": true,
+        "preferFull": false,
+        "focused": false,
+        "hovered": false,
+        "holdCompact": false,
+        "compact": {
+          "width": 44,
+          "height": 44
+        }
+      },
+      {
+        "id": "drawer-1",
+        "selected": false,
+        "left": 98.14877390841804,
+        "top": 382.0139096104209,
+        "width": 145.9375,
+        "height": 44,
+        "locationCode": "ITC-D01",
+        "priority": 3,
+        "mandatory": true,
+        "preferFull": false,
+        "focused": false,
+        "hovered": false,
+        "holdCompact": false,
+        "compact": {
+          "width": 44,
+          "height": 44
+        }
+      },
+      {
+        "id": "drawer-2",
+        "selected": false,
+        "left": 114.41571282226289,
+        "top": 345.40351547415577,
+        "width": 139.203125,
+        "height": 44,
+        "locationCode": "ITC-D02",
+        "priority": 3,
+        "mandatory": true,
+        "preferFull": false,
+        "focused": false,
+        "hovered": false,
+        "holdCompact": false,
+        "compact": {
+          "width": 44,
+          "height": 44
+        }
+      },
+      {
+        "id": "drawer-3",
+        "selected": false,
+        "left": 126.65786217529023,
+        "top": 323.2158018511089,
+        "width": 139.203125,
+        "height": 44,
+        "locationCode": "ITC-D03",
+        "priority": 3,
+        "mandatory": true,
+        "preferFull": false,
+        "focused": false,
+        "hovered": false,
+        "holdCompact": false,
+        "compact": {
+          "width": 44,
+          "height": 44
+        }
+      },
+      {
+        "id": "drawer-4",
+        "selected": false,
+        "left": 90.01530769167343,
+        "top": 404.86577728620216,
+        "width": 139.20313262939453,
+        "height": 44,
+        "locationCode": "ITC-D04",
+        "priority": 3,
+        "mandatory": true,
+        "preferFull": false,
+        "focused": false,
+        "hovered": false,
+        "holdCompact": false,
+        "compact": {
+          "width": 44,
+          "height": 44
+        }
+      },
+      {
+        "id": "drawer-5",
+        "selected": false,
+        "left": 106.2822494506836,
+        "top": 368.255383149937,
+        "width": 139.203125,
+        "height": 44,
+        "locationCode": "ITC-D05",
+        "priority": 3,
+        "mandatory": true,
+        "preferFull": false,
+        "focused": false,
+        "hovered": false,
+        "holdCompact": false,
+        "compact": {
+          "width": 44,
+          "height": 44
+        }
+      },
+      {
+        "id": "drawer-6",
+        "selected": false,
+        "left": 122.54917907714844,
+        "top": 331.64501953125,
+        "width": 139.203125,
+        "height": 44,
+        "locationCode": "ITC-D06",
+        "priority": 3,
+        "mandatory": true,
+        "preferFull": false,
+        "focused": false,
+        "hovered": false,
+        "holdCompact": false,
+        "compact": {
+          "width": 44,
+          "height": 44
+        }
+      },
+      {
+        "id": "shelf-3b",
+        "selected": false,
+        "left": 243.77081298828125,
+        "top": 320.4704525791709,
+        "width": 139.203125,
+        "height": 44.000030517578125,
+        "locationCode": "ITC-S3B",
+        "priority": 3,
+        "mandatory": true,
+        "preferFull": false,
+        "focused": false,
+        "hovered": false,
+        "holdCompact": false,
+        "compact": {
+          "width": 44,
+          "height": 44
+        }
+      },
+      {
+        "id": "shelf-3c",
+        "selected": false,
+        "left": 227.50387573242188,
+        "top": 357.08083465924904,
+        "width": 139.203125,
+        "height": 44,
+        "locationCode": "ITC-S3C",
+        "priority": 3,
+        "mandatory": true,
+        "preferFull": false,
+        "focused": false,
+        "hovered": false,
+        "holdCompact": false,
+        "compact": {
+          "width": 44,
+          "height": 44
+        }
+      },
+      {
+        "id": "shelf-4b",
+        "selected": false,
+        "left": 255.9573211669922,
+        "top": 352.0233090244834,
+        "width": 139.203125,
+        "height": 44,
+        "locationCode": "ITC-S4B",
+        "priority": 3,
+        "mandatory": true,
+        "preferFull": false,
+        "focused": false,
+        "hovered": false,
+        "holdCompact": false,
+        "compact": {
+          "width": 44,
+          "height": 44
+        }
+      },
+      {
+        "id": "drawer-7",
+        "selected": false,
+        "left": 269.4031961120809,
+        "top": 326.1997006260459,
+        "width": 139.203125,
+        "height": 44,
+        "locationCode": "ITC-D07",
+        "priority": 3,
+        "mandatory": true,
+        "preferFull": false,
+        "focused": false,
+        "hovered": false,
+        "holdCompact": false,
+        "compact": {
+          "width": 44,
+          "height": 44
+        }
+      },
+      {
+        "id": "drawer-8",
+        "selected": false,
+        "left": 255.957330264645,
+        "top": 356.1911251865928,
+        "width": 139.203125,
+        "height": 44,
+        "locationCode": "ITC-D08",
+        "priority": 3,
+        "mandatory": true,
+        "preferFull": false,
+        "focused": false,
+        "hovered": false,
+        "holdCompact": false,
+        "compact": {
+          "width": 44,
+          "height": 44
+        }
+      },
+      {
+        "id": "drawer-9",
+        "selected": false,
+        "left": 239.6903930087856,
+        "top": 392.8015072666709,
+        "width": 139.203125,
+        "height": 44,
+        "locationCode": "ITC-D09",
+        "priority": 3,
+        "mandatory": true,
+        "preferFull": false,
+        "focused": false,
+        "hovered": false,
+        "holdCompact": false,
+        "compact": {
+          "width": 44,
+          "height": 44
+        }
+      },
+      {
+        "id": "drawer-10",
+        "selected": false,
+        "left": 272.2242768078844,
+        "top": 325.6429531895225,
+        "width": 139.203125,
+        "height": 44.000030517578125,
+        "locationCode": "ITC-D10",
+        "priority": 3,
+        "mandatory": true,
+        "preferFull": false,
+        "focused": false,
+        "hovered": false,
+        "holdCompact": false,
+        "compact": {
+          "width": 44,
+          "height": 44
+        }
+      },
+      {
+        "id": "drawer-11",
+        "selected": false,
+        "left": 255.95732429323593,
+        "top": 362.25335052838966,
+        "width": 139.203125,
+        "height": 44,
+        "locationCode": "ITC-D11",
+        "priority": 3,
+        "mandatory": true,
+        "preferFull": false,
+        "focused": false,
+        "hovered": false,
+        "holdCompact": false,
+        "compact": {
+          "width": 44,
+          "height": 44
+        }
+      },
+      {
+        "id": "drawer-12",
+        "selected": false,
+        "left": 239.69038988254187,
+        "top": 398.8637326084678,
+        "width": 139.203125,
+        "height": 44,
+        "locationCode": "ITC-D12",
+        "priority": 3,
+        "mandatory": true,
+        "preferFull": false,
+        "focused": false,
+        "hovered": false,
+        "holdCompact": false,
+        "compact": {
+          "width": 44,
+          "height": 44
+        }
+      },
+      {
+        "id": "server-rack",
+        "selected": false,
+        "left": 179.49101569948593,
+        "top": 323.40690292532764,
+        "width": 139.203125,
+        "height": 44,
+        "locationCode": "ITC-RACK",
+        "priority": 3,
+        "mandatory": true,
+        "preferFull": false,
+        "focused": false,
+        "hovered": false,
+        "holdCompact": false,
+        "compact": {
+          "width": 44,
+          "height": 44
+        }
+      },
+      {
+        "id": "black-container",
+        "selected": false,
+        "left": 280.3577139871285,
+        "top": 331.1320278965537,
+        "width": 139.20315551757812,
+        "height": 44,
+        "locationCode": "ITC-BLACK",
+        "priority": 3,
+        "mandatory": true,
+        "preferFull": false,
+        "focused": false,
+        "hovered": false,
+        "holdCompact": false,
+        "compact": {
+          "width": 44,
+          "height": 44
+        }
+      },
+      {
+        "id": "clear-container",
+        "selected": false,
+        "left": 241.27191586279764,
+        "top": 421.37200287213966,
+        "width": 139.203125,
+        "height": 44,
+        "locationCode": "ITC-CLEAR",
+        "priority": 3,
+        "mandatory": true,
+        "preferFull": false,
+        "focused": false,
+        "hovered": false,
+        "holdCompact": false,
+        "compact": {
+          "width": 44,
+          "height": 44
+        }
+      },
+      {
+        "id": "red-container",
+        "selected": false,
+        "left": 97.16650703249374,
+        "top": 437.2908566319053,
+        "width": 139.203125,
+        "height": 44,
+        "locationCode": "ITC-RED",
+        "priority": 3,
+        "mandatory": true,
+        "preferFull": false,
+        "focused": false,
+        "hovered": false,
+        "holdCompact": false,
+        "compact": {
+          "width": 44,
+          "height": 44
+        }
+      },
+      {
+        "id": "shelf-4c",
+        "selected": false,
+        "left": 239.69039916992188,
+        "top": 388.63372802734375,
+        "width": 139.203125,
+        "height": 44,
+        "locationCode": "ITC-S4C",
+        "priority": 3,
+        "mandatory": true,
+        "preferFull": false,
+        "focused": false,
+        "hovered": false,
+        "holdCompact": false,
+        "compact": {
+          "width": 44,
+          "height": 44
+        }
+      },
+      {
+        "id": "shelf-4a",
+        "selected": false,
+        "left": 268.49786376953125,
+        "top": 323.92635788138233,
+        "width": 139.203125,
+        "height": 44,
+        "locationCode": "ITC-S4A",
+        "priority": 3,
+        "mandatory": true,
+        "preferFull": false,
+        "focused": false,
+        "hovered": false,
+        "holdCompact": false,
+        "compact": {
+          "width": 44,
+          "height": 44
+        }
+      }
+    ],
+    "viewport": {
+      "left": 30,
+      "top": 149.046875,
+      "right": 360,
+      "bottom": 557.046875
+    },
+    "reserved": [
+      {
+        "left": 141,
+        "top": 142.046875,
+        "right": 361,
+        "bottom": 342.046875
+      },
+      {
+        "left": 95.18437193486663,
+        "top": 362.5435661985041,
+        "right": 107.18437193486663,
+        "bottom": 374.5435661985041
+      },
+      {
+        "left": 111.45130515969639,
+        "top": 325.9331779004158,
+        "right": 123.45130515969639,
+        "bottom": 337.9331779004158
+      },
+      {
+        "left": 127.71823838452616,
+        "top": 289.3227896023275,
+        "right": 139.71823838452616,
+        "bottom": 301.3227896023275
+      },
+      {
+        "left": 95.18437193486663,
+        "top": 398.91697781001074,
+        "right": 107.18437193486663,
+        "bottom": 410.91697781001074
+      },
+      {
+        "left": 118.53664044354166,
+        "top": 385.0546816618232,
+        "right": 130.53664044354167,
+        "bottom": 397.0546816618232
+      },
+      {
+        "left": 134.80357366837146,
+        "top": 348.44429336373486,
+        "right": 146.80357366837146,
+        "bottom": 360.44429336373486
+      },
+      {
+        "left": 114.14878248073938,
+        "top": 398.0139194653789,
+        "right": 126.14878248073938,
+        "bottom": 410.0139194653789
+      },
+      {
+        "left": 130.41571570556914,
+        "top": 361.40353116729057,
+        "right": 142.41571570556914,
+        "bottom": 373.40353116729057
+      },
+      {
+        "left": 142.65786955826422,
+        "top": 339.21581964964616,
+        "right": 154.65786955826422,
+        "bottom": 351.21581964964616
+      },
+      {
+        "left": 106.0153158683245,
+        "top": 420.8657900658613,
+        "right": 118.0153158683245,
+        "bottom": 432.8657900658613
+      },
+      {
+        "left": 122.28224909315429,
+        "top": 384.2554017677731,
+        "right": 134.2822490931543,
+        "bottom": 396.2554017677731
+      },
+      {
+        "left": 138.54918231798405,
+        "top": 347.6450134696847,
+        "right": 150.54918231798405,
+        "bottom": 359.6450134696847
+      },
+      {
+        "left": 259.77080599662463,
+        "top": 336.4704661960204,
+        "right": 271.77080599662463,
+        "bottom": 348.4704661960204
+      },
+      {
+        "left": 243.50387277179485,
+        "top": 373.0808544941086,
+        "right": 255.50387277179485,
+        "bottom": 385.0808544941086
+      },
+      {
+        "left": 271.95732769881846,
+        "top": 368.02332888353317,
+        "right": 283.95732769881846,
+        "bottom": 380.02332888353317
+      },
+      {
+        "left": 285.40319830446253,
+        "top": 342.1996998275281,
+        "right": 297.40319830446253,
+        "bottom": 354.1996998275281
+      },
+      {
+        "left": 271.9573276988186,
+        "top": 372.1911156306849,
+        "right": 283.9573276988186,
+        "bottom": 384.1911156306849
+      },
+      {
+        "left": 255.69039447398876,
+        "top": 408.80150392877306,
+        "right": 267.69039447398876,
+        "bottom": 420.80150392877306
+      },
+      {
+        "left": 288.22426092364856,
+        "top": 341.6429626011811,
+        "right": 300.22426092364856,
+        "bottom": 353.6429626011811
+      },
+      {
+        "left": 271.9573276988186,
+        "top": 378.2533508992692,
+        "right": 283.9573276988186,
+        "bottom": 390.2533508992692
+      },
+      {
+        "left": 255.6903944739887,
+        "top": 414.8637391973576,
+        "right": 267.6903944739887,
+        "bottom": 426.8637391973576
+      },
+      {
+        "left": 195.49101943533395,
+        "top": 339.4069022817212,
+        "right": 207.49101943533395,
+        "bottom": 351.4069022817212
+      },
+      {
+        "left": 296.3577275360632,
+        "top": 347.1320418790723,
+        "right": 308.3577275360632,
+        "bottom": 359.1320418790723
+      },
+      {
+        "left": 257.2719018708473,
+        "top": 437.3720075432538,
+        "right": 269.2719018708473,
+        "bottom": 449.3720075432538
+      },
+      {
+        "left": 113.16650078000626,
+        "top": 453.290850553708,
+        "right": 125.16650078000626,
+        "bottom": 465.290850553708
+      },
+      {
+        "left": 255.69039447398853,
+        "top": 404.6337171816218,
+        "right": 267.69039447398853,
+        "bottom": 416.6337171816218
+      },
+      {
+        "left": 284.4978505111446,
+        "top": 339.92636160180905,
+        "right": 296.4978505111446,
+        "bottom": 351.92636160180905
+      }
+    ]
+  },
+  "recordedOutput": [
+    {
+      "id": "black-container",
+      "visible": true,
+      "dx": 6.599613711690097,
+      "dy": 32.312265467181135,
+      "compact": true
+    },
+    {
+      "id": "clear-container",
+      "visible": true,
+      "dx": 30.999986008049632,
+      "dy": -10.927709508404803,
+      "compact": true
+    },
+    {
+      "id": "drawer-1",
+      "visible": true,
+      "dx": 31.00000857232135,
+      "dy": 28.430383753313947,
+      "compact": true
+    },
+    {
+      "id": "drawer-2",
+      "visible": true,
+      "dx": 31.00000288330625,
+      "dy": 18.04077788957909,
+      "compact": true
+    },
+    {
+      "id": "drawer-3",
+      "visible": true,
+      "dx": 65.75785353027891,
+      "dy": 40.228491512625965,
+      "compact": true
+    },
+    {
+      "id": "drawer-4",
+      "visible": true,
+      "dx": -58.01530769167343,
+      "dy": 5.578516077532697,
+      "compact": true
+    },
+    {
+      "id": "drawer-5",
+      "visible": true,
+      "dx": -74.2822494506836,
+      "dy": -4.81108978620216,
+      "compact": true
+    },
+    {
+      "id": "drawer-6",
+      "visible": true,
+      "dx": -43.54917907714844,
+      "dy": -86.59814453125,
+      "compact": true
+    },
+    {
+      "id": "drawer-7",
+      "visible": true,
+      "dx": -0.2366953320746461,
+      "dy": 131.24459273768895,
+      "compact": true
+    },
+    {
+      "id": "drawer-8",
+      "visible": true,
+      "dx": -79.80854778390562,
+      "dy": 54.25316817714207,
+      "compact": true
+    },
+    {
+      "id": "drawer-9",
+      "visible": true,
+      "dx": -17.523892228779346,
+      "dy": 64.64278609706395,
+      "compact": true
+    },
+    {
+      "id": "drawer-10",
+      "visible": true,
+      "dx": -5.224276807884394,
+      "dy": 178.80134017421238,
+      "compact": true
+    },
+    {
+      "id": "drawer-11",
+      "visible": true,
+      "dx": -80.79082351322967,
+      "dy": 95.1909428353452,
+      "compact": true
+    },
+    {
+      "id": "drawer-12",
+      "visible": true,
+      "dx": -19.690389882541865,
+      "dy": 105.58056075526707,
+      "compact": true
+    },
+    {
+      "id": "server-rack",
+      "visible": true,
+      "dx": -147.49101569948593,
+      "dy": -31.360027925327643,
+      "compact": true
+    },
+    {
+      "id": "red-container",
+      "visible": true,
+      "dx": 30.99999374751252,
+      "dy": 20.153436731829572,
+      "compact": true
+    },
+    {
+      "id": "shelf-1a",
+      "visible": true,
+      "dx": -0.1843719482421875,
+      "dy": -148.4966856401714,
+      "compact": true
+    },
+    {
+      "id": "shelf-1b",
+      "visible": true,
+      "dx": -63.45130157470703,
+      "dy": -64.88630676269531,
+      "compact": true
+    },
+    {
+      "id": "shelf-1c",
+      "visible": true,
+      "dx": -32.718238830566406,
+      "dy": -122.27590942382812,
+      "compact": true
+    },
+    {
+      "id": "shelf-2a",
+      "visible": true,
+      "dx": -0.1843719482421875,
+      "dy": 121.52730758143895,
+      "compact": true
+    },
+    {
+      "id": "shelf-2b",
+      "visible": true,
+      "dx": 23.463356018066406,
+      "dy": 135.38961226893895,
+      "compact": true
+    },
+    {
+      "id": "shelf-2c",
+      "visible": true,
+      "dx": -86.80357360839844,
+      "dy": 125.00000960780613,
+      "compact": true
+    },
+    {
+      "id": "shelf-3b",
+      "visible": true,
+      "dx": 70.22918701171875,
+      "dy": 183.97384078456395,
+      "compact": true
+    },
+    {
+      "id": "shelf-3c",
+      "visible": true,
+      "dx": -54.503875732421875,
+      "dy": 147.36345870448582,
+      "compact": true
+    },
+    {
+      "id": "shelf-4a",
+      "visible": true,
+      "dx": -236.49786376953125,
+      "dy": -125.87948288138233,
+      "compact": true
+    },
+    {
+      "id": "shelf-4b",
+      "visible": true,
+      "dx": -223.9573211669922,
+      "dy": 152.42098433925145,
+      "compact": true
+    },
+    {
+      "id": "shelf-4c",
+      "visible": true,
+      "dx": -207.69039916992188,
+      "dy": -237.58685302734375,
+      "compact": true
+    }
+  ]
+}

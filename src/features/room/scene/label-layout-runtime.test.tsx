@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import userEvent from '@testing-library/user-event';
 import * as placement from './label-layout';
+import * as diagnosticModule from './label-layout-diagnostics';
 import { createRoomLabelRegistry } from './label-layout-runtime';
 
 const viewport = {
@@ -71,6 +72,738 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 describe('unified room label registry', () => {
+  it('keeps collector overhead outside the solver deadline and measured solver interval', () => {
+    window.__roomLayoutDiagnosticsEnabled = true;
+    let now = 0;
+    const createDiagnostics = diagnosticModule.createLabelLayoutDiagnostics;
+    vi.spyOn(
+      diagnosticModule,
+      'createLabelLayoutDiagnostics',
+    ).mockImplementation((target) => {
+      const capture = createDiagnostics(target)!;
+      return {
+        ...capture,
+        mark(...args) {
+          // A deterministic stand-in for diagnostic validation/allocation.
+          if (args[0] === 'solver-entry') now += 5;
+          capture.mark(...args);
+        },
+      };
+    });
+    const host = document.createElement('div'),
+      canvas = document.createElement('canvas');
+    host.append(canvas);
+    document.body.append(host);
+    vi.spyOn(canvas, 'getBoundingClientRect').mockReturnValue(viewport);
+    const item = label(host);
+    let actualSolverEntry = -1,
+      actualSolverDeadline = -1;
+    const packing = vi
+      .spyOn(placement, 'layoutLabelsDetailed')
+      .mockImplementation(
+        (labels, _viewport, _reserved, allowance, solverClock) => {
+          actualSolverEntry = solverClock!();
+          actualSolverDeadline =
+            actualSolverEntry + allowance!.maxMilliseconds!;
+          now += 3;
+          return {
+            placements: labels.map(({ id }) => ({
+              id,
+              visible: true,
+              dx: 0,
+              dy: 0,
+              compact: false,
+            })),
+            status: 'complete',
+            stats: {
+              operations: 1,
+              candidates: 1,
+              nodes: 0,
+              backtracks: 0,
+              elapsedMs: 3,
+              greedyComplete: true,
+            },
+          };
+        },
+      );
+    const registry = createRoomLabelRegistry(vi.fn(), undefined, undefined, {
+      clock: () => now,
+    });
+    const cleanup = registry.connect(canvas);
+    registry.register('shelf-1a', item.element, item.leader, { priority: 4 });
+    flush();
+    expect({
+      entry: actualSolverEntry,
+      deadline: actualSolverDeadline,
+      elapsed:
+        window.__roomLabelLayoutSnapshot!.runtime!.timing.solverElapsedMs,
+    }).toEqual({ entry: 0, deadline: 16, elapsed: 3 });
+    expect(packing).toHaveBeenCalledOnce();
+    expect(window.__roomLabelLayoutSnapshot!.runtime).toMatchObject({
+      terminal: 'complete',
+      timing: { elapsedMs: 8, solverElapsedMs: 3 },
+    });
+    expect(
+      window.__roomLabelLayoutSnapshot!.runtime!.timing.stages.filter(
+        ({ stage }) => stage === 'solver-entry' || stage === 'solver-end',
+      ),
+    ).toMatchObject([
+      { stage: 'solver-entry', elapsedMs: 0, remainingMilliseconds: 16 },
+      { stage: 'solver-end', elapsedMs: 3 },
+    ]);
+    expect(item.element.dataset.labelSuppressed).toBe('false');
+    cleanup();
+  });
+  it('records the whole runtime transaction and shared solver allowances across CSS passes', () => {
+    window.__roomLayoutDiagnosticsEnabled = true;
+    const host = document.createElement('div'),
+      canvas = document.createElement('canvas');
+    host.append(canvas);
+    document.body.append(host);
+    let now = 100;
+    vi.spyOn(canvas, 'getBoundingClientRect').mockImplementation(() => {
+      expect(window.__roomLabelLayoutSnapshot).toMatchObject({
+        transaction: 1,
+        passes: [],
+        complete: false,
+        runtime: {
+          terminal: 'pending',
+          timing: { source: 'runtime', elapsedMs: 0 },
+        },
+      });
+      return viewport;
+    });
+    const item = label(host),
+      full = document.createElement('span');
+    full.dataset.roomLabelFull = 'true';
+    item.element.append(full);
+    const rect = {
+      ...viewport,
+      left: 50,
+      top: 30,
+      right: 95,
+      bottom: 48,
+      width: 45,
+      height: 18,
+    };
+    vi.mocked(item.element.getBoundingClientRect).mockImplementation(() => {
+      now += 0.5;
+      const dx = Number(item.element.dataset.labelDx ?? 0),
+        dy = Number(item.element.dataset.labelDy ?? 0);
+      return {
+        ...rect,
+        left: 50 + dx,
+        right: 95 + dx,
+        top: 30 + dy,
+        bottom: 48 + dy,
+      };
+    });
+    vi.spyOn(full, 'getBoundingClientRect').mockImplementation(() => {
+      now += 0.5;
+      return { ...viewport, width: 27, height: 32 };
+    });
+    let calls = 0;
+    const packing = vi
+      .spyOn(placement, 'layoutLabelsDetailed')
+      .mockImplementation((labels) => {
+        now += ++calls === 1 ? 2 : 3;
+        return {
+          placements: labels.map(({ id }) => ({
+            id,
+            visible: true,
+            dx: 0,
+            dy: 0,
+            compact: true,
+          })),
+          status: 'complete',
+          stats: {
+            operations: calls === 1 ? 12 : 7,
+            candidates: calls === 1 ? 4 : 2,
+            nodes: 1,
+            backtracks: 0,
+            elapsedMs: calls === 1 ? 2 : 3,
+            greedyComplete: true,
+          },
+        };
+      });
+    const clock = vi.fn(() => now);
+    const registry = createRoomLabelRegistry(vi.fn(), undefined, undefined, {
+      clock,
+    });
+    const cleanup = registry.connect(canvas);
+    registry.register('shelf-1a', item.element, item.leader, {
+      priority: 4,
+      mandatory: true,
+      compact: true,
+      locationCode: 'ITC-S1A',
+    });
+    flush();
+    const snapshot = window.__roomLabelLayoutSnapshot!;
+    expect(packing).toHaveBeenCalledTimes(2);
+    expect(item.element.getBoundingClientRect).toHaveBeenCalledTimes(5);
+    expect(full.getBoundingClientRect).toHaveBeenCalledTimes(4);
+    expect(snapshot.runtime).toMatchObject({
+      terminal: 'complete',
+      timing: { source: 'runtime', elapsedMs: 9.5, solverElapsedMs: 5 },
+    });
+    const entries = snapshot.runtime!.timing.stages.filter(
+      ({ stage }) => stage === 'solver-entry',
+    );
+    expect(entries).toEqual([
+      {
+        stage: 'solver-entry',
+        pass: 1,
+        elapsedMs: 1,
+        remainingMilliseconds: 15,
+        remainingOperations: 1_999_997,
+        remainingCandidates: 50_000,
+        remainingNodes: 4096,
+        remainingInputs: 128,
+        remainingCandidatesPerLabel: 4096,
+      },
+      {
+        stage: 'solver-entry',
+        pass: 2,
+        elapsedMs: 5.5,
+        remainingMilliseconds: 10.5,
+        remainingOperations: 1_999_978,
+        remainingCandidates: 49_996,
+        remainingNodes: 4095,
+        remainingInputs: 128,
+        remainingCandidatesPerLabel: 4096,
+      },
+    ]);
+    entries.forEach((entry, index) =>
+      expect(packing.mock.calls[index][3]).toMatchObject({
+        maxMilliseconds: entry.remainingMilliseconds,
+        maxOperations: entry.remainingOperations,
+        maxCandidates: entry.remainingCandidates,
+        maxNodes: entry.remainingNodes,
+      }),
+    );
+    expect(snapshot.runtime!.timing.stages.map(({ stage }) => stage)).toEqual([
+      'initial-measurement-start',
+      'initial-measurement-end',
+      'solver-entry',
+      'solver-end',
+      'dom-application-start',
+      'dom-application-end',
+      'remeasurement-start',
+      'remeasurement-end',
+      'pass-measurement-start',
+      'pass-measurement-end',
+      'solver-entry',
+      'solver-end',
+      'dom-application-start',
+      'dom-application-end',
+      'remeasurement-start',
+      'remeasurement-end',
+      'terminal',
+    ]);
+    expect(snapshot.lastAttempt).toMatchObject({
+      transaction: 1,
+      terminal: 'complete',
+      elapsedMs: 9.5,
+      solverElapsedMs: 5,
+      passCount: 2,
+    });
+    cleanup();
+  });
+  it('adds no clock calls, DOM reads, or solver calls with diagnostics disabled', () => {
+    const host = document.createElement('div'),
+      canvas = document.createElement('canvas');
+    host.append(canvas);
+    document.body.append(host);
+    vi.spyOn(canvas, 'getBoundingClientRect').mockReturnValue(viewport);
+    const item = label(host),
+      clock = vi.fn(() => 0);
+    const packing = vi
+      .spyOn(placement, 'layoutLabelsDetailed')
+      .mockImplementation((labels) => ({
+        placements: labels.map(({ id }) => ({
+          id,
+          visible: true,
+          dx: 0,
+          dy: 0,
+          compact: false,
+        })),
+        status: 'complete',
+        stats: {
+          operations: 1,
+          candidates: 1,
+          nodes: 0,
+          backtracks: 0,
+          elapsedMs: 0,
+          greedyComplete: true,
+        },
+      }));
+    const registry = createRoomLabelRegistry(vi.fn(), undefined, undefined, {
+      clock,
+    });
+    const cleanup = registry.connect(canvas);
+    registry.register('shelf-1a', item.element, item.leader, { priority: 4 });
+    flush();
+    expect(clock).toHaveBeenCalledTimes(9);
+    expect(item.element.getBoundingClientRect).toHaveBeenCalledTimes(2);
+    expect(packing).toHaveBeenCalledOnce();
+    expect(window.__roomLabelLayoutSnapshot).toBeUndefined();
+    cleanup();
+  });
+  it.each(['missing-host', 'unmeasured-viewport'] as const)(
+    'publishes the %s terminal path from the runtime clock',
+    (reason) => {
+      window.__roomLayoutDiagnosticsEnabled = true;
+      const canvas = document.createElement('canvas');
+      if (reason === 'unmeasured-viewport') {
+        const host = document.createElement('div');
+        host.append(canvas);
+        document.body.append(host);
+      }
+      let now = 7;
+      vi.spyOn(canvas, 'getBoundingClientRect').mockImplementation(() => {
+        now += 3;
+        return reason === 'unmeasured-viewport'
+          ? { ...viewport, width: 0 }
+          : viewport;
+      });
+      const registry = createRoomLabelRegistry(vi.fn(), undefined, undefined, {
+        clock: () => now,
+      });
+      const cleanup = registry.connect(canvas);
+      flush();
+      expect(window.__roomLabelLayoutSnapshot).toMatchObject({
+        transaction: 1,
+        complete: false,
+        passes: [],
+        failure: reason,
+        runtime: {
+          terminal: reason,
+          timing: { source: 'runtime', elapsedMs: 3, solverElapsedMs: 0 },
+        },
+        lastAttempt: {
+          transaction: 1,
+          terminal: reason,
+          elapsedMs: 3,
+          passCount: 0,
+        },
+      });
+      cleanup();
+    },
+  );
+
+  it('retains the last actual failed diagnostic attempt on suppressed keys and retries a changed obstruction', () => {
+    window.__roomLayoutDiagnosticsEnabled = true;
+    const host = document.createElement('div'),
+      canvas = document.createElement('canvas'),
+      obstruction = document.createElement('div');
+    host.dataset.roomSurface = 'true';
+    obstruction.dataset.roomObstruction = 'true';
+    host.append(canvas, obstruction);
+    document.body.append(host);
+    vi.spyOn(canvas, 'getBoundingClientRect').mockReturnValue(viewport);
+    let obstacle = { ...viewport, left: 120, top: 0, right: 150, bottom: 50 };
+    vi.spyOn(obstruction, 'getClientRects').mockImplementation(
+      () => [obstacle] as unknown as DOMRectList,
+    );
+    vi.spyOn(obstruction, 'getBoundingClientRect').mockImplementation(
+      () => obstacle,
+    );
+    const item = label(host);
+    const packing = vi
+      .spyOn(placement, 'layoutLabelsDetailed')
+      .mockImplementation((labels) => ({
+        placements: labels.map(({ id }) => ({
+          id,
+          visible: false,
+          dx: 0,
+          dy: 0,
+        })),
+        status: 'budget-exhausted',
+        stats: {
+          operations: 12,
+          candidates: 4,
+          nodes: 0,
+          backtracks: 0,
+          elapsedMs: 1,
+          greedyComplete: false,
+          exhaustion: { reason: 'per-label', phase: 'candidate-domain' },
+        },
+      }));
+    const registry = createRoomLabelRegistry(vi.fn(), undefined, undefined, {
+      clock: () => 0,
+    });
+    const cleanup = registry.connect(canvas);
+    registry.register('shelf-1a', item.element, item.leader, {
+      priority: 4,
+      locationCode: 'ITC-S1A',
+      mandatory: true,
+    });
+    flush();
+    const snapshot = window.__roomLabelLayoutSnapshot;
+    expect(snapshot).toMatchObject({
+      transaction: 1,
+      complete: true,
+      settled: true,
+      passes: [{}],
+    });
+    const revision = canvas.dataset.labelLayoutRevision;
+    for (let i = 0; i < 3; i++) {
+      registry.schedule();
+      flush();
+    }
+    expect(packing).toHaveBeenCalledOnce();
+    expect(window.__roomLabelLayoutSnapshot!.passes).toBe(snapshot!.passes);
+    expect(window.__roomLabelLayoutSnapshot!.runtime).toBe(snapshot!.runtime);
+    expect(window.__roomLabelLayoutSnapshot).toMatchObject({
+      transaction: 1,
+      passes: snapshot!.passes,
+      runtime: snapshot!.runtime,
+      lastAttempt: {
+        transaction: 4,
+        terminal: 'cached-suppression',
+        cacheSourceTransaction: 1,
+        passCount: 0,
+      },
+      recentTransactions: [
+        { transaction: 1, terminal: 'budget-exhausted' },
+        { transaction: 2, terminal: 'cached-suppression' },
+        { transaction: 3, terminal: 'cached-suppression' },
+        { transaction: 4, terminal: 'cached-suppression' },
+      ],
+    });
+    expect(snapshot!.passes[0].solver).toMatchObject({
+      status: 'budget-exhausted',
+      stats: {
+        nodes: 0,
+        exhaustion: { reason: 'per-label', phase: 'candidate-domain' },
+      },
+    });
+    expect(canvas.dataset.labelLayoutRevision).toBe(revision);
+    expect(canvas.dataset.labelLayoutStatus).toBe('budget-exhausted');
+    expect(canvas.dataset.labelLayoutPending).toBe('false');
+    obstacle = { ...obstacle, left: 121 };
+    registry.schedule();
+    flush();
+    expect(packing).toHaveBeenCalledTimes(2);
+    expect(window.__roomLabelLayoutSnapshot!.transaction).toBe(5);
+    expect(window.__roomLabelLayoutSnapshot!.passes[0].reserved[0].left).toBe(
+      121,
+    );
+    registry.retry();
+    flush();
+    expect(packing).toHaveBeenCalledTimes(3);
+    expect(window.__roomLabelLayoutSnapshot!.transaction).toBe(6);
+    expect(queue).toHaveLength(0);
+    cleanup();
+  });
+  it('publishes an explicit actual measurement failure without a fabricated complete pass or revision', () => {
+    window.__roomLayoutDiagnosticsEnabled = true;
+    const host = document.createElement('div'),
+      canvas = document.createElement('canvas');
+    host.append(canvas);
+    document.body.append(host);
+    vi.spyOn(canvas, 'getBoundingClientRect').mockReturnValue(viewport);
+    const item = label(host),
+      full = document.createElement('span');
+    full.dataset.roomLabelFull = 'true';
+    item.element.append(full);
+    let now = 0,
+      slow = false;
+    vi.spyOn(full, 'getBoundingClientRect').mockImplementation(() => {
+      if (slow) now += 20;
+      return { ...viewport, width: 27, height: 32 };
+    });
+    const registry = createRoomLabelRegistry(vi.fn(), undefined, undefined, {
+      clock: () => now,
+    });
+    const cleanup = registry.connect(canvas);
+    registry.register('shelf-1a', item.element, item.leader, {
+      priority: 4,
+      mandatory: true,
+      locationCode: 'ITC-S1A',
+    });
+    flush();
+    expect(window.__roomLabelLayoutSnapshot!.complete).toBe(true);
+    const revision = canvas.dataset.labelLayoutRevision;
+    slow = true;
+    registry.schedule();
+    flush();
+    expect(window.__roomLabelLayoutSnapshot).toMatchObject({
+      transaction: 2,
+      complete: false,
+      settled: false,
+      passes: [],
+      failure: 'measurement-budget',
+      runtime: {
+        terminal: 'measurement-budget',
+        timing: {
+          source: 'runtime',
+          elapsedMs: 20,
+          solverElapsedMs: 0,
+          stages: [
+            { stage: 'initial-measurement-start', elapsedMs: 0 },
+            { stage: 'initial-measurement-end', elapsedMs: 20 },
+            { stage: 'terminal', elapsedMs: 20 },
+          ],
+        },
+      },
+    });
+    expect(window.__roomLabelLayoutSnapshot!.error).toBeUndefined();
+    expect(canvas.dataset.labelLayoutRevision).toBe(revision);
+    expect(canvas.dataset.labelLayoutStatus).toBe('budget-exhausted');
+    expect(item.element).toHaveAttribute('aria-hidden', 'true');
+    expect(item.element.tabIndex).toBe(-1);
+    expect(queue).toHaveLength(0);
+    cleanup();
+  });
+
+  it.each(['placement-budget', 'measurement-budget'] as const)(
+    'records whole elapsed time at %s after solver work',
+    (reason) => {
+      window.__roomLayoutDiagnosticsEnabled = true;
+      const host = document.createElement('div'),
+        canvas = document.createElement('canvas');
+      host.append(canvas);
+      document.body.append(host);
+      vi.spyOn(canvas, 'getBoundingClientRect').mockReturnValue(viewport);
+      const item = label(host);
+      let now = 0,
+        reads = 0;
+      vi.mocked(item.element.getBoundingClientRect).mockImplementation(() => {
+        if (++reads > 1) now += 20;
+        return {
+          ...viewport,
+          left: 50,
+          top: 30,
+          right: 95,
+          bottom: 48,
+          width: 45,
+          height: 18,
+        };
+      });
+      const packing = vi
+        .spyOn(placement, 'layoutLabelsDetailed')
+        .mockImplementation((labels) => {
+          now += 1;
+          return {
+            placements:
+              reason === 'placement-budget'
+                ? []
+                : labels.map(({ id }) => ({
+                    id,
+                    visible: true,
+                    dx: 0,
+                    dy: 0,
+                    compact: false,
+                  })),
+            status: 'budget-exhausted',
+            stats: {
+              operations: 2,
+              candidates: 1,
+              nodes: 0,
+              backtracks: 0,
+              elapsedMs: 1,
+              greedyComplete: false,
+            },
+          };
+        });
+      const registry = createRoomLabelRegistry(vi.fn(), undefined, undefined, {
+        clock: () => now,
+      });
+      const cleanup = registry.connect(canvas);
+      registry.register('shelf-1a', item.element, item.leader, { priority: 4 });
+      flush();
+      if (reason === 'measurement-budget') {
+        expect(canvas.dataset.labelLayoutPending).toBe('true');
+        expect(item.element).toHaveAttribute('aria-hidden', 'true');
+        for (let frame = 0; frame < 4; frame++) flush();
+      }
+      const snapshot = window.__roomLabelLayoutSnapshot!;
+      expect(snapshot).toMatchObject({
+        complete: false,
+        settled: false,
+        failure: reason,
+        runtime: {
+          terminal: reason,
+          timing: {
+            source: 'runtime',
+            elapsedMs: reason === 'placement-budget' ? 1 : 101,
+            solverElapsedMs: 1,
+          },
+        },
+        lastAttempt: { transaction: 1, terminal: reason, passCount: 1 },
+      });
+      expect(snapshot.runtime!.timing.stages.at(-1)).toMatchObject({
+        stage: 'terminal',
+        elapsedMs: reason === 'placement-budget' ? 1 : 101,
+      });
+      expect(packing).toHaveBeenCalledOnce();
+      expect(item.element.getBoundingClientRect).toHaveBeenCalledTimes(
+        reason === 'placement-budget' ? 1 : 6,
+      );
+      expect(item.element).toHaveAttribute('aria-hidden', 'true');
+      expect(canvas.dataset.labelLayoutPending).toBe('false');
+      cleanup();
+    },
+  );
+  it('physical pick reservation keeps its own label off the current exposed mesh point', () => {
+    const host = document.createElement('div'),
+      canvas = document.createElement('canvas');
+    host.append(canvas);
+    document.body.append(host);
+    vi.spyOn(canvas, 'getBoundingClientRect').mockReturnValue(viewport);
+    const item = label(host),
+      reservation = { left: 66.5, top: 33, right: 78.5, bottom: 45 };
+    const registry = createRoomLabelRegistry(vi.fn(), undefined, undefined, {
+      clock: () => 0,
+    });
+    const cleanup = registry.connect(canvas);
+    registry.register('self', item.element, item.leader, {
+      priority: 4,
+      mandatory: true,
+      locationCode: 'ITC-RED',
+      pickReservation: () => reservation,
+    });
+    item.element.focus();
+    flush();
+    expect(item.element.dataset.labelSuppressed).toBe('false');
+    expect(item.element).toHaveFocus();
+    const actual = item.element.getBoundingClientRect();
+    expect(
+      actual.right + 3 <= reservation.left ||
+        actual.left >= reservation.right + 3 ||
+        actual.bottom + 3 <= reservation.top ||
+        actual.top >= reservation.bottom + 3,
+    ).toBe(true);
+    cleanup();
+  });
+  it('physical pick reservation survives same-code action dedup and remains shared by tooltip labels', () => {
+    const host = document.createElement('div'),
+      canvas = document.createElement('canvas');
+    host.append(canvas);
+    document.body.append(host);
+    vi.spyOn(canvas, 'getBoundingClientRect').mockReturnValue(viewport);
+    const anchor = label(host),
+      tooltip = label(host),
+      reservation = { left: 66.5, top: 33, right: 78.5, bottom: 45 };
+    const registry = createRoomLabelRegistry(vi.fn(), undefined, undefined, {
+      clock: () => 0,
+    });
+    const cleanup = registry.connect(canvas);
+    registry.register('anchor', anchor.element, anchor.leader, {
+      priority: 4,
+      locationCode: 'ITC-RED',
+      pickReservation: () => reservation,
+    });
+    registry.register('tooltip', tooltip.element, tooltip.leader, {
+      priority: 4,
+      locationCode: 'ITC-RED',
+    });
+    tooltip.element.focus();
+    const packing = vi.spyOn(placement, 'layoutLabelsDetailed');
+    flush();
+    expect(tooltip.element.dataset.labelSuppressed).toBe('false');
+    expect(anchor.element.dataset.labelSuppressed).toBe('true');
+    expect(packing.mock.calls[0][2]).toContainEqual(reservation);
+    const actual = tooltip.element.getBoundingClientRect();
+    expect(
+      actual.right + 3 <= reservation.left ||
+        actual.left >= reservation.right + 3 ||
+        actual.bottom + 3 <= reservation.top ||
+        actual.top >= reservation.bottom + 3,
+    ).toBe(true);
+    cleanup();
+  });
+  it('physical pick reservation refreshes failed measurements on movement and removes hidden anchors', () => {
+    const host = document.createElement('div'),
+      canvas = document.createElement('canvas');
+    host.append(canvas);
+    document.body.append(host);
+    vi.spyOn(canvas, 'getBoundingClientRect').mockReturnValue(viewport);
+    const item = label(host);
+    let reservation = { left: 66, top: 33, right: 78, bottom: 45 },
+      exposed = true;
+    const registry = createRoomLabelRegistry(vi.fn(), undefined, undefined, {
+      clock: () => 0,
+      limits: { maxInputs: 0 },
+    });
+    const cleanup = registry.connect(canvas),
+      packing = vi.spyOn(placement, 'layoutLabelsDetailed');
+    registry.register('moving', item.element, item.leader, {
+      priority: 4,
+      mandatory: true,
+      locationCode: 'ITC-RED',
+      isVisible: () => exposed,
+      pickReservation: () => reservation,
+    });
+    flush();
+    expect(packing).toHaveBeenCalledOnce();
+    registry.schedule();
+    flush();
+    expect(packing).toHaveBeenCalledOnce();
+    reservation = { left: 106, top: 33, right: 118, bottom: 45 };
+    registry.schedule();
+    flush();
+    expect(packing).toHaveBeenCalledTimes(2);
+    expect(packing.mock.lastCall?.[2]).toContainEqual(reservation);
+    exposed = false;
+    registry.schedule();
+    flush();
+    expect(packing.mock.lastCall?.[2]).toEqual([]);
+    cleanup();
+  });
+  it('keeps the selected mandatory anchor while retaining focused and occluded-anchor tooltip fallback', () => {
+    const surface = document.createElement('div'),
+      host = document.createElement('div'),
+      canvas = document.createElement('canvas');
+    surface.dataset.roomSurface = 'true';
+    host.append(canvas);
+    surface.append(host);
+    document.body.append(surface);
+    vi.spyOn(canvas, 'getBoundingClientRect').mockReturnValue(viewport);
+    const anchored = label(host),
+      tooltip = label(surface);
+    let exposed = true;
+    const registry = createRoomLabelRegistry(vi.fn());
+    const cleanup = registry.connect(canvas);
+    registry.register('hover-tooltip', tooltip.element, tooltip.leader, {
+      priority: 4,
+      locationCode: 'ITC-RACK',
+    });
+    registry.register('server-rack', anchored.element, anchored.leader, {
+      priority: 4,
+      mandatory: true,
+      locationCode: 'ITC-RACK',
+      isVisible: () => exposed,
+    });
+    const assertOwner = (owner: typeof anchored, hidden: typeof anchored) => {
+      expect(owner.element.dataset.labelSuppressed).toBe('false');
+      expect(owner.element).not.toHaveAttribute('aria-hidden');
+      expect(owner.element.tabIndex).toBe(0);
+      expect(hidden.element.dataset.labelSuppressed).toBe('true');
+      expect(hidden.element).toHaveAttribute('aria-hidden', 'true');
+      expect(hidden.element.tabIndex).toBe(-1);
+    };
+    flush();
+    assertOwner(anchored, tooltip);
+    exposed = false;
+    registry.schedule();
+    flush();
+    assertOwner(tooltip, anchored);
+    // Focus only the live fallback, then restore the anchored action. Its
+    // recovery must preserve that existing keyboard interaction until blur.
+    tooltip.element.focus();
+    exposed = true;
+    registry.schedule();
+    flush();
+    assertOwner(tooltip, anchored);
+    expect(tooltip.element).toHaveFocus();
+    tooltip.element.blur();
+    registry.schedule();
+    flush();
+    assertOwner(anchored, tooltip);
+    cleanup();
+  });
   it('refreshes cached scene exposure after viewport movement and overlay placement without camera motion', () => {
     const surface = document.createElement('div'),
       host = document.createElement('div'),
@@ -193,7 +926,7 @@ describe('unified room label registry', () => {
     expect(queue).toHaveLength(0);
     cleanup();
   });
-  it('counts DOM remeasurement against the deadline and blurs before concealing unverified results', () => {
+  it('counts DOM remeasurement, blurs before concealment, and publishes only after fresh validation', () => {
     const host = document.createElement('div'),
       canvas = document.createElement('canvas');
     host.append(canvas);
@@ -220,6 +953,7 @@ describe('unified room label registry', () => {
       mandatory: true,
     });
     flush();
+    const revision = Number(canvas.dataset.labelLayoutRevision);
     item.element.focus();
     const blur = vi.fn(() =>
       expect(item.element.style.visibility).toBe('visible'),
@@ -227,12 +961,31 @@ describe('unified room label registry', () => {
     item.element.addEventListener('blur', blur);
     slow = true;
     registry.schedule();
+    expect(canvas.dataset.labelLayoutPending).toBe('true');
     flush();
     expect(blur).toHaveBeenCalledOnce();
     expect(item.element).toHaveAttribute('aria-hidden', 'true');
     expect(item.element.tabIndex).toBe(-1);
-    expect(issues).toHaveBeenLastCalledWith(['ITC-S1A']);
-    expect(canvas.dataset.labelLayoutStatus).toBe('budget-exhausted');
+    expect(issues).not.toHaveBeenCalled();
+    expect(canvas.dataset.labelLayoutError).toBeUndefined();
+    expect(canvas.dataset.labelLayoutPending).toBe('true');
+    expect(canvas.dataset.labelLayoutRevision).toBe(String(revision));
+    expect(item.element.style.visibility).toBe('hidden');
+    expect(item.element.style.pointerEvents).toBe('none');
+    expect(item.leader.style.display).toBe('none');
+    expect(queue).toHaveLength(1);
+    flush();
+    expect(canvas.dataset.labelLayoutPending).toBe('false');
+    expect(canvas.dataset.labelLayoutStatus).toBe('complete');
+    expect(canvas.dataset.labelLayoutError).toBeUndefined();
+    expect(canvas.dataset.labelLayoutRevision).toBe(String(revision + 1));
+    expect(item.element).not.toHaveAttribute('aria-hidden');
+    expect(item.element.tabIndex).toBe(0);
+    expect(item.element.style.visibility).toBe('visible');
+    expect(item.element.style.pointerEvents).toBe('auto');
+    expect(item.element).not.toHaveFocus();
+    expect(blur).toHaveBeenCalledOnce();
+    expect(issues).not.toHaveBeenCalled();
     expect(queue).toHaveLength(0);
     cleanup();
   });
@@ -733,17 +1486,32 @@ describe('unified room label registry', () => {
         mandatory: true,
       });
       flush();
-      expect(canvas.dataset.labelLayoutPending).toBe(String(!settles));
+      // Both success and terminal instability finish their bounded work.
+      expect(canvas.dataset.labelLayoutPending).toBe('false');
       expect(reads).toBe(settles ? 2 : 8);
-      if (settles) expect(canvas.dataset.labelLayoutError).toBeUndefined();
-      else
+      expect(queue).toHaveLength(0);
+      if (settles) {
+        expect(canvas.dataset.labelLayoutError).toBeUndefined();
+        expect(canvas.dataset.labelLayoutStatus).toBe('complete');
+        expect(item.element.dataset.labelSuppressed).toBe('false');
+      } else {
         expect(canvas.dataset.labelLayoutError).toMatch(
           /four placement passes/,
         );
+        expect(canvas.dataset.labelLayoutStatus).toBe('budget-exhausted');
+        expect(canvas.dataset.labelLayoutRevision).toBeUndefined();
+        expect(item.element.dataset.labelSuppressed).toBe('true');
+        expect(item.element.style.visibility).toBe('hidden');
+        expect(item.element.style.pointerEvents).toBe('none');
+        expect(item.element.tabIndex).toBe(-1);
+        expect(item.element).toHaveAttribute('aria-hidden', 'true');
+        expect(item.leader.style.display).toBe('none');
+      }
       cleanup();
     },
   );
   it('fails explicitly at the synchronous remeasurement bound instead of publishing unstable placement', () => {
+    window.__roomLayoutDiagnosticsEnabled = true;
     const host = document.createElement('div'),
       canvas = document.createElement('canvas');
     host.append(canvas);
@@ -760,17 +1528,33 @@ describe('unified room label registry', () => {
       height: 18,
     }));
     const notify = vi.fn(),
-      registry = createRoomLabelRegistry(notify),
+      registry = createRoomLabelRegistry(notify, undefined, undefined, {
+        clock: () => 0,
+      }),
       cleanup = registry.connect(canvas);
-    registry.register('unstable', item.element, item.leader, {
+    registry.register('shelf-1a', item.element, item.leader, {
       priority: 4,
       mandatory: true,
     });
     flush();
     expect(reads).toBe(8);
-    expect(canvas.dataset.labelLayoutPending).toBe('true');
+    expect(window.__roomLabelLayoutSnapshot).toMatchObject({
+      failure: 'unstable-dimensions',
+      lastAttempt: { passCount: 4 },
+    });
+    expect(
+      window.__roomLabelLayoutSnapshot!.runtime!.timing.stages,
+    ).toHaveLength(33);
+    expect(canvas.dataset.labelLayoutPending).toBe('false');
+    expect(canvas.dataset.labelLayoutStatus).toBe('budget-exhausted');
     expect(canvas.dataset.labelLayoutError).toMatch(/four placement passes/);
     expect(canvas.dataset.labelLayoutRevision).toBeUndefined();
+    expect(item.element.dataset.labelSuppressed).toBe('true');
+    expect(item.element.style.visibility).toBe('hidden');
+    expect(item.element.style.pointerEvents).toBe('none');
+    expect(item.element.tabIndex).toBe(-1);
+    expect(item.element).toHaveAttribute('aria-hidden', 'true');
+    expect(item.leader.style.display).toBe('none');
     expect(notify).not.toHaveBeenCalled();
     expect(queue).toHaveLength(0);
     vi.mocked(full.getBoundingClientRect).mockReturnValue({
@@ -779,9 +1563,18 @@ describe('unified room label registry', () => {
       height: 18,
     });
     registry.schedule();
+    expect(canvas.dataset.labelLayoutPending).toBe('true');
+    expect(queue).toHaveLength(1);
     flush();
     expect(canvas.dataset.labelLayoutPending).toBe('false');
+    expect(canvas.dataset.labelLayoutStatus).toBe('complete');
     expect(canvas.dataset.labelLayoutError).toBeUndefined();
+    expect(item.element.dataset.labelSuppressed).toBe('false');
+    expect(item.element.style.pointerEvents).toBe('auto');
+    expect(item.element.tabIndex).toBe(0);
+    expect(item.element).not.toHaveAttribute('aria-hidden');
+    expect(notify).toHaveBeenCalledOnce();
+    expect(queue).toHaveLength(0);
     cleanup();
   });
   it('remeasures after font readiness and font changes, then removes that subscription', async () => {

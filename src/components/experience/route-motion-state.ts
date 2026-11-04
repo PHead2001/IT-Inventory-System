@@ -447,7 +447,16 @@ export function createRouteMotionState() {
   };
 }
 
+const snapshotWithdrawals = new Set<() => void>();
+export function observeRouteSnapshotWithdrawal(withdraw: () => void) {
+  snapshotWithdrawals.add(withdraw);
+  return () => {
+    snapshotWithdrawals.delete(withdraw);
+  };
+}
+
 export function cancelRouteSnapshots() {
+  snapshotWithdrawals.forEach((withdraw) => withdraw());
   // activeViewTransition is progressive. Cancel pseudo-element animations too
   // for browsers that implement snapshots without the active handle.
   (

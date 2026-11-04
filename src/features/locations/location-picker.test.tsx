@@ -6,10 +6,53 @@ import {
   waitFor,
 } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { LocationRef } from '../inventory/contracts-ui';
 import { LocationPicker } from './location-picker';
 import { holdTransitionCapture } from '../../../tests/helpers/transition-capture';
+
+// Hold expansion updaters until after the open handler has returned. Replaying
+// the updater with the same prior state also checks React's purity contract.
+const deferredExpansion = vi.hoisted(() => ({
+  enabled: false,
+  replay: false,
+  pending: [] as (() => void)[],
+}));
+vi.mock('react', async (importOriginal) => {
+  const react = await importOriginal<typeof import('react')>();
+  return {
+    ...react,
+    // Preserve the existing tests/setup.ts jsdom transition adapter.
+    ViewTransition: ({ children }: { children: import('react').ReactNode }) =>
+      children,
+    useState<T>(initial: T | (() => T)) {
+      const result = react.useState(initial);
+      const [state, setState] = result;
+      if (!(state instanceof Set) || !deferredExpansion.enabled) return result;
+      return [
+        state,
+        (update: import('react').SetStateAction<T>) => {
+          if (!deferredExpansion.enabled || typeof update !== 'function') {
+            setState(update);
+            return;
+          }
+          const apply = update as (current: T) => T;
+          deferredExpansion.pending.push(() =>
+            setState((current) => {
+              if (deferredExpansion.replay) apply(current);
+              return apply(current);
+            }),
+          );
+        },
+      ] as const;
+    },
+  };
+});
+afterEach(() => {
+  deferredExpansion.enabled = false;
+  deferredExpansion.replay = false;
+  deferredExpansion.pending.length = 0;
+});
 
 const root: LocationRef = {
   id: 'root',
@@ -69,6 +112,97 @@ const leftDrawer: LocationRef = {
 };
 
 describe('LocationPicker', () => {
+  it.each(['tree', 'search'] as const)(
+    'keeps the complete long location identity selectable in the %s',
+    async (view) => {
+      const user = userEvent.setup();
+      const changed = vi.fn();
+      const longLocation: LocationRef = {
+        ...drawer,
+        id: 'long-unmodeled',
+        code: 'ITIA42-PR56-FIXTURE-NOV2-UNMODELED',
+        name: 'Fictional test fixture - ITIA42-PR56-FIXTURE-NOV2 unmodeled location',
+        breadcrumb:
+          'IT Closet / Fictional test fixture - ITIA42-PR56-FIXTURE-NOV2 unmodeled location',
+      };
+      render(
+        <LocationPicker
+          mode="destination"
+          label="Destination"
+          locations={[root, longLocation]}
+          onValueChange={changed}
+        />,
+      );
+      await user.click(screen.getByLabelText('Destination'));
+      if (view === 'search')
+        await user.type(
+          screen.getByRole('combobox', { name: 'Search locations' }),
+          longLocation.code,
+        );
+      const row = screen.getByRole(view === 'tree' ? 'treeitem' : 'option', {
+        name: new RegExp(longLocation.code),
+      });
+      expect(row).toHaveTextContent(longLocation.name);
+      expect(row).toHaveTextContent(longLocation.code);
+      if (view === 'tree') expect(row).toHaveAttribute('aria-level', '2');
+      else expect(row).toHaveTextContent(longLocation.breadcrumb);
+      await user.click(row);
+      expect(changed).toHaveBeenCalledExactlyOnceWith(longLocation.id);
+      const trigger = screen.getByRole('combobox', {
+        name: 'Destination',
+      });
+      expect(trigger).toHaveAttribute('aria-expanded', 'false');
+      expect(trigger).toHaveTextContent(longLocation.name);
+      expect(trigger).toHaveTextContent(longLocation.code);
+    },
+  );
+  it.each([false, true])(
+    'expands the first open with a deferred updater (replayed: %s) and preserves manual collapse',
+    async (replay) => {
+      deferredExpansion.enabled = true;
+      deferredExpansion.replay = replay;
+      const flushExpansion = () =>
+        act(() => {
+          const updates = deferredExpansion.pending.splice(0);
+          expect(updates.length).toBeGreaterThan(0);
+          updates.forEach((apply) => apply());
+        });
+      render(
+        <LocationPicker
+          mode="browse"
+          label="Location"
+          locations={[root, right, nestedDrawer]}
+        />,
+      );
+      fireEvent.click(screen.getByLabelText('Location'));
+      const room = screen.getByRole('treeitem', { name: /IT Closet/ });
+      expect(room).toHaveAttribute('aria-expanded', 'false');
+      expect(
+        screen.queryByRole('treeitem', { name: /Right Storage/ }),
+      ).not.toBeInTheDocument();
+      flushExpansion();
+      expect(room).toHaveAttribute('aria-expanded', 'true');
+      expect(
+        screen.getByRole('treeitem', { name: /Right Storage/ }),
+      ).toHaveAttribute('aria-expanded', 'false');
+      expect(
+        screen.queryByRole('treeitem', { name: /Drawer 7/ }),
+      ).not.toBeInTheDocument();
+      fireEvent.click(room.querySelector('[data-disclosure]')!);
+      flushExpansion();
+      expect(room).toHaveAttribute('aria-expanded', 'false');
+      fireEvent.keyDown(
+        screen.getByRole('combobox', { name: 'Search locations' }),
+        { key: 'Escape' },
+      );
+      fireEvent.click(screen.getByLabelText('Location'));
+      flushExpansion();
+      expect(
+        screen.getByRole('treeitem', { name: /IT Closet/ }),
+      ).toHaveAttribute('aria-expanded', 'false');
+    },
+  );
+
   it.each(['release', 'close', 'unmount'])(
     'retains picker autofocus until capture completes and cancels on %s',
     async (outcome) => {

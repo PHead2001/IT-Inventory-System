@@ -220,7 +220,7 @@
 .scene {
   position: relative;
   display: grid;
-  gap: 11px;
+  gap: var(--room-scene-gap, 11px);
   container-type: inline-size;
 }
 .cameraToolbar {
@@ -284,6 +284,12 @@
   border-radius: 10px;
   background: var(--room-menu-background);
   scrollbar-color: var(--room-border) var(--room-menu-background);
+}
+/* Preserve the scrollable panel and canvas dimensions when above cannot fit. */
+.moreMenu[data-placement='inline'] {
+  position: relative;
+  margin-top: 5px;
+  margin-left: auto;
 }
 .toolbarHost {
   position: relative;
@@ -368,6 +374,21 @@
   transform-origin: left center;
   pointer-events: none;
 }
+.occupiedMarker {
+  visibility: hidden;
+  position: relative;
+  display: grid;
+  place-items: center;
+  box-sizing: border-box;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 1px solid var(--room-label-border);
+  border-radius: 6px;
+  background: var(--room-label-background);
+  color: var(--foreground);
+  pointer-events: none;
+}
 .locationLabel,
 .decorativeLabel {
   visibility: hidden;
@@ -408,6 +429,16 @@
   color: var(--muted);
   font-size: 12px;
 }
+/* The selected full label shares the Html root's canvas-relative cap. Ordinary
+   labels, compact markers and focus/hover expansion retain their own bounds. */
+.selectedLabel {
+  max-width: var(--room-selected-label-width);
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+.selectedLabel .labelFull {
+  max-width: var(--room-selected-label-text-width);
+}
 .locationLabel[data-room-occupied='true']:not([data-label-compact='true']) {
   padding-block: 3px;
 }
@@ -427,6 +458,57 @@
     var(--room-stage-glow) 0,
     var(--room-stage-background) 65%
   );
+}
+
+.compact,
+.compactPreviewSlot {
+  --room-scene-gap: 11px;
+  --room-compact-toolbar-height: 44px;
+  --room-compact-canvas-height: 280px;
+  --room-compact-text-line: 19.5px;
+  --room-compact-status-height: calc(
+    5 * var(--room-compact-text-line) + 2 * var(--room-scene-gap)
+  );
+  --room-compact-height: calc(
+    var(--room-compact-toolbar-height) + var(--room-compact-canvas-height) + 2 *
+      var(--room-scene-gap) + var(--room-compact-status-height)
+  );
+}
+.compact .canvasFrame {
+  height: var(--room-compact-canvas-height);
+}
+.compactPreviewSlot {
+  min-height: calc(var(--room-compact-height) + 2px);
+}
+.sceneMessages {
+  display: contents;
+}
+.compact .sceneMessages {
+  display: grid;
+  align-content: start;
+  gap: var(--room-scene-gap);
+  min-height: var(--room-compact-status-height);
+  font-size: 13px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+.compactCountStatus {
+  min-height: calc(2 * var(--room-compact-text-line));
+}
+.compact .cameraToolbar {
+  min-height: var(--room-compact-toolbar-height);
+}
+.compactToolbarPlaceholder {
+  height: var(--room-compact-toolbar-height);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--muted) 18%, var(--surface));
+}
+.compactCanvasPlaceholder {
+  opacity: 0.65;
+}
+.compactLoadingBoundary {
+  border: 1px solid var(--room-border);
+  border-radius: 12px;
 }
 .sceneStatus {
   color: var(--foreground);
