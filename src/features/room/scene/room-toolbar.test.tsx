@@ -492,7 +492,7 @@ describe('narrow controls leave the canvas clear', () => {
     );
     vi.spyOn(HTMLElement.prototype, 'scrollHeight', 'get').mockReturnValue(600);
     vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(
-      function () {
+      function (this: HTMLElement) {
         if (this.querySelector('[role="toolbar"]')) hostReads++;
         return {
           ...row,
