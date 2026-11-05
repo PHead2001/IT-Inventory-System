@@ -145,6 +145,66 @@ Dark/Light/System first paint, native circle/System crossfade, rendered contrast
 print/PDF and live media/GPU continuity require separate runtime proof. Authored
 browser probes are not execution evidence. No acceptance row is promoted here.
 
+### PR62 History targets and resized-click diagnostic checkpoint, 2026-11-05
+
+Pre-join source `13af3f39af14201c5fc172af49b37f685188f611` adds the existing
+44px text-target treatment to History links and 44px saved-link controls. The
+eight-path focused gate passed 31 tests in three suites (History 16, saved links
+8, native-click diagnostics 7), canonical Next type generation/TypeScript,
+changed-path zero-warning lint and formatting. This is source-level evidence,
+not populated-screen inspection or browser execution. The History browser case
+retains 1280/390px Full/Reduced native hit-surface and overflow assertions.
+
+Exact-`8886a73effc434807d670e70dfbfda102289d0dd` CI run `41983830476` failed
+the mounted 375→390 room click with S1A expected and Red selected. The diagnostic
+retains the logical target, one native click and selection/URL/details assertions,
+uses the canonical uncovered native-click witnesses, and separately records the
+original hover agreement and raw pointer phases. Event-phase geometry owners
+remain explicitly unbound; older captured geometry cannot establish them.
+Passing unit tests do not establish the browser failure's cause or remediation.
+
+The prepared join with PR57 passive diagnostic source
+`7e3bd76b94367bb9823448ef39763402d331f098` has no final merge SHA or new gate
+result yet. Final-source focused browser execution, populated visual inspection,
+complete pre-push validation, exact-SHA CI and fresh review remain required.
+
+## Opt-in room demand attribution
+
+The existing `__roomLayoutDiagnosticsEnabled` test gate also enables read-only
+`window.__readRoomDemandSnapshot(canvas)` counters. The existing label-driver connection
+binds its raw Fiber invalidate function to that canvas; calls before connection
+are unobserved (`preconnectObserved: false` in every snapshot). This measures the connected settle window, not all renderer
+activity. No Fiber/global invalidation wrapper, extra frame driver, observer,
+React state or DOM attribute write is installed. Recorded calls retain their
+existing guards, arguments, ordering and hook dependencies.
+Fiber's internal property/commit invalidations and Drei's own control requests
+are outside these application callsite counters.
+
+The fixed schema contains 47 source/classification counters plus a binding count,
+each capped at 1,000,000 with an overflow flag, in at most 4 KiB. Snapshots are
+immutable copies; reads do not increment counters. Same-canvas reconnects retain
+counters and increment the binding count; stale cleanup cannot remove a newer
+binding. Teardown retires only its own binding and invalidate mapping. The read-only
+window function returns null for unbound/disabled canvases and malformed input;
+a blocked or foreign reader property disables observation without affecting the scene.
+Eight CameraRig input/effect calls share `camera-update`; contact allocation and
+refresh share `contact-update`; bloom overlay success/failure share `bloom-overlay`.
+Frame continuations retain separate counters. Resize deliveries record target
+class and first/changed/identical content width/height via weak references only;
+raw dimensions, identifiers, labels, HTML, errors, URLs, stacks and timestamps are
+not retained. Mutation callbacks classify geometry change, unmeasurable inputs,
+obstruction touches and ignored churn. Font, window and visual viewport event
+origins remain separate. These counters attribute requests; a request count does
+not establish that Fiber submitted a draw or caused the failure.
+
+The existing `settledLabels` canvas evaluation reads the snapshot without adding
+an evaluation, animation frame or poll. Only failures report up to eight samples
+within the existing 16 KiB `ROOM_LABEL_SETTLE_FAILURE` bound. Diagnostic fields
+do not participate in readiness, cadence, timeout or assertion decisions. This
+instrumentation does not establish the cause of the Linux CI settle failure;
+actual failing-environment evidence and final exact-SHA certification remain
+required.
+
 ## Spatial composition source slice
 
 ### Occupancy snapshots and flight interruption witnesses
