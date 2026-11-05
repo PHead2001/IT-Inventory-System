@@ -5,7 +5,15 @@ import {
 } from './label-layout-test-harness';
 
 const labels: LabelRect[] = [
-  { id: 'one', left: 10, top: 10, width: 44, height: 44, mandatory: true },
+  {
+    id: 'one',
+    left: 10,
+    top: 10,
+    width: 44,
+    height: 44,
+    selected: false,
+    mandatory: true,
+  },
 ];
 const viewport = { left: 0, top: 0, right: 160, bottom: 100 };
 
