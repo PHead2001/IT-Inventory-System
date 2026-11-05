@@ -1,4 +1,8 @@
 import { canvasGestureCandidates } from './canvas-gesture';
+import {
+  roomDemandSnapshot,
+  type RoomDemandSnapshot,
+} from './room-demand-snapshot';
 import { writeFileSync } from 'node:fs';
 import { expect, test, type Page, type TestInfo } from '@playwright/test';
 import { createClient } from '@supabase/supabase-js';
@@ -370,6 +374,7 @@ export function registerRoomTestSupport() {
       projectionChanged: boolean;
     };
     const recent: Observation[] = [];
+    const demandSamples: (RoomDemandSnapshot | null)[] = [];
     let last:
       | (Observation & { view: number[] | null; projection: number[] | null })
       | null = null;
@@ -390,6 +395,7 @@ export function registerRoomTestSupport() {
             phase,
             sceneFrames,
             composerFrames,
+            demand,
           } = await canvas.evaluate(async (element) => {
             // Let the requested control update project and measure before accepting
             // a settled flag that could still belong to the previous camera frame.
@@ -413,6 +419,12 @@ export function registerRoomTestSupport() {
                 ? number
                 : null;
             };
+            let demand: RoomDemandSnapshot | null = null;
+            try {
+              demand = window.__readRoomDemandSnapshot?.(element) ?? null;
+            } catch {
+              /* A blocked diagnostic reader cannot change readiness. */
+            }
             try {
               const statuses = [
                 'complete',
@@ -431,6 +443,7 @@ export function registerRoomTestSupport() {
               );
               return {
                 current,
+                demand,
                 phase: [
                   'idle',
                   'flying',
@@ -464,6 +477,7 @@ export function registerRoomTestSupport() {
             } catch {
               return {
                 current,
+                demand: null,
                 status: 'unavailable',
                 layoutError: 'unavailable',
                 phase: null,
@@ -501,6 +515,8 @@ export function registerRoomTestSupport() {
                 previousFrame !== undefined &&
                 current.frame[1] !== previousFrame[1],
             };
+            demandSamples.push(roomDemandSnapshot(demand));
+            if (demandSamples.length > 8) demandSamples.shift();
             observations++;
             pendingObservations += Number(observation.pending === 'true');
             revisionChanges += Number(
@@ -534,23 +550,32 @@ export function registerRoomTestSupport() {
         .toBe(true);
     } catch (error) {
       try {
-        console.error(
-          'ROOM_LABEL_SETTLE_FAILURE ' +
-            JSON.stringify({
-              schema: 1,
-              elapsedMs: Date.now() - startedAt,
-              afterRevision: Number.isSafeInteger(afterRevision)
-                ? afterRevision
-                : null,
-              observations,
-              pendingObservations,
-              revisionChanges,
-              viewChanges,
-              projectionChanges,
-              last,
-              recent,
-            }),
-        );
+        const failure = {
+          schema: 1,
+          elapsedMs: Date.now() - startedAt,
+          afterRevision: Number.isSafeInteger(afterRevision)
+            ? afterRevision
+            : null,
+          observations,
+          pendingObservations,
+          revisionChanges,
+          viewChanges,
+          projectionChanges,
+          last,
+          recent,
+          demandSamples,
+        };
+        // Keep source attribution bounded even at maximum counter saturation.
+        const prefix = 'ROOM_LABEL_SETTLE_FAILURE ';
+        let report = JSON.stringify(failure);
+        while (
+          prefix.length + report.length > 16 * 1024 &&
+          failure.demandSamples.length
+        ) {
+          failure.demandSamples.shift();
+          report = JSON.stringify(failure);
+        }
+        console.error(prefix + report);
       } catch {
         /* Preserve the original assertion even if reporting fails. */
       }

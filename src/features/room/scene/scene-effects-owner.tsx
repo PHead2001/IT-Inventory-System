@@ -1,5 +1,6 @@
 /* eslint-disable react-hooks/immutability -- Passive telemetry belongs to the owned imperative renderer boundary. */
 'use client';
+import { recordRoomDemand } from './room-demand-diagnostics';
 import {
   addAfterEffect,
   addTail,
@@ -141,6 +142,7 @@ export function SceneEffectsOwner({
     if (!isCurrent()) return;
     effects.clearHover();
     effects.invalidateHover();
+    recordRoomDemand(invalidate, 'effects-selection');
     invalidate();
   }, [effects, selectedCode, invalidate, isCurrent]);
   useEffect(() => {
@@ -166,6 +168,7 @@ export function SceneEffectsOwner({
     gl.domElement.dataset.paletteRevision = String(paletteRevision);
     gl.domElement.dataset.contactCaptures = String(state.captures);
     gl.domElement.dataset.contactCaptureMs = String(state.captureMs ?? '');
+    recordRoomDemand(invalidate, 'effects-publication');
     invalidate();
   }, [
     gl,
