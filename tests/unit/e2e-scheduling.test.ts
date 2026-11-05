@@ -1,5 +1,6 @@
 import { readFileSync, readdirSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
+import { stripVTControlCharacters } from 'node:util';
 import ts from 'typescript';
 import { describe, expect, it } from 'vitest';
 import { e2eScheduling, parallelSpecs } from '../../scripts/e2e-scheduling';
@@ -76,8 +77,56 @@ function discover(
       maxBuffer: 4 * 1024 * 1024,
     },
   );
-  if (result.error || result.status !== 0)
-    throw new Error('Browser discovery did not complete successfully.');
+  if (result.error || result.status !== 0) {
+    const excerpt = (value: unknown) => {
+      const text = stripVTControlCharacters(String(value ?? ''))
+        .replace(
+          /\b(?:postgres(?:ql)?|https?):\/\/[^\s\/]+:[^\s@]+@[^\s]+/gi,
+          '[redacted credential URL]',
+        )
+        .replace(
+          /\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\b/g,
+          '[redacted token]',
+        )
+        .replace(
+          /((?:authorization|password|token|secret)\s*["']?\s*[:=]\s*)[^\r\n,}]+/gi,
+          '$1[redacted]',
+        );
+      return text.length <= 4096
+        ? text
+        : text.slice(0, 2048) + '\n[truncated]\n' + text.slice(-2048);
+    };
+    let discoveryErrors: string[] | undefined;
+    try {
+      const report = JSON.parse(result.stdout.slice(result.stdout.indexOf('{')));
+      discoveryErrors = report.errors?.slice(0, 3).map((error: { message?: string }) =>
+        excerpt(error.message ?? error),
+      );
+    } catch {
+      // Non-JSON output retains the bounded diagnostic excerpt below.
+    }
+    throw new Error(
+      'Browser discovery did not complete successfully: ' +
+        JSON.stringify({
+          fullSuite,
+          captureEvidence,
+          args,
+          status: result.status,
+          signal: result.signal,
+          error: result.error
+            ? {
+                name: result.error.name,
+                code: (result.error as NodeJS.ErrnoException).code,
+                message: excerpt(result.error.message),
+              }
+            : null,
+          stdout: discoveryErrors?.length
+            ? discoveryErrors
+            : excerpt(result.stdout),
+          stderr: excerpt(result.stderr),
+        }),
+    );
+  }
   const report = JSON.parse(result.stdout.slice(result.stdout.indexOf('{')));
   if (report.errors?.length)
     throw new Error('Browser discovery reported errors.');

@@ -1,6 +1,6 @@
 import { build } from 'esbuild';
 import { resolve } from 'node:path';
-import { browserVariantModules } from 'next/dist/build/browser-variant-modules';
+import { browserVariantModules } from 'next/dist/build/browser-variant-modules.js';
 
 /** Renderer initiation only. Approval is supplied by this fictional fixture;
  * provider authorization/lifetime has separate real-provider component tests. */
