@@ -193,8 +193,15 @@ it('keeps a successful solver proposal suppressed through the exhausted frame an
   expect(f.notify).not.toHaveBeenCalled();
   expect(f.solver).toHaveBeenCalledOnce();
   f.invalidateScene.mockClear();
+  const demandBefore = window.__readRoomDemandSnapshot!(f.canvas)!;
   f.ownResize();
   expect(f.invalidateScene).not.toHaveBeenCalled();
+  expect(
+    window.__readRoomDemandSnapshot!(f.canvas)!.counters['resize-continuation'],
+  ).toBe(demandBefore.counters['resize-continuation'] + 1);
+  expect(
+    window.__readRoomDemandSnapshot!(f.canvas)!.counters['resize-scene'],
+  ).toBe(demandBefore.counters['resize-scene']);
   f.frame(40);
   expect(f.canvas.dataset.labelLayoutPending).toBe('false');
   expect(f.canvas.dataset.labelLayoutRevision).toBe('1');

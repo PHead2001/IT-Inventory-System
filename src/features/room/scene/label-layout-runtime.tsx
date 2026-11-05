@@ -9,6 +9,12 @@ import {
   type LabelArea,
   type LabelPlacement,
 } from './label-layout';
+import {
+  bindRoomDemand,
+  recordRoomDemand,
+  recordRoomResize,
+  type RoomDemandReason,
+} from './room-demand-diagnostics';
 import { createLabelLayoutDiagnostics } from './label-layout-diagnostics';
 
 export type LabelOptions = {
@@ -766,7 +772,8 @@ export function createRoomLabelRegistry(
       pending = requestAnimationFrame(place);
     }
   };
-  const invalidateLayout = () => {
+  const invalidateLayout = (reason: RoomDemandReason = 'layout-external') => {
+    if (invalidateGeometry) recordRoomDemand(canvas, reason);
     invalidateGeometry?.();
     schedule();
   };
@@ -813,6 +820,7 @@ export function createRoomLabelRegistry(
         element.removeAttribute('tabindex');
         element.style.pointerEvents = 'none';
       }
+      recordRoomDemand(canvas, 'label-register');
       identityRevision++;
       const entry = {
         element,
@@ -839,6 +847,7 @@ export function createRoomLabelRegistry(
       return () => {
         if (entries.get(id) !== entry) return;
         identityRevision++;
+        recordRoomDemand(canvas, 'label-unregister');
         entries.delete(id);
         observer?.unobserve(element);
         schedule();
@@ -854,15 +863,26 @@ export function createRoomLabelRegistry(
       geometryIdentity = readGeometryIdentity;
       canvas = element;
       invalidateGeometry = invalidateScene;
+      const releaseDemand = bindRoomDemand(element, invalidateScene);
       let connected = true;
-      const changed = () => {
+      const changed = (reason: RoomDemandReason) => {
         if (!connected) return;
-        invalidateLayout();
+        invalidateLayout(reason);
       };
       observer = new ResizeObserver((records) => {
         const labels = new Set(
           [...entries.values()].map((entry) => entry.element),
         );
+        for (const record of records)
+          recordRoomResize(
+            element,
+            record,
+            record.target === element
+              ? 'canvas'
+              : labels.has(record.target as HTMLElement)
+                ? 'label'
+                : 'obstruction',
+          );
         if (
           continuation &&
           records.length > 0 &&
@@ -870,8 +890,9 @@ export function createRoomLabelRegistry(
         ) {
           // Placement writes can resize Html labels. Request the retained whole
           // validation; that pass detects external dimension/anchor changes.
+          recordRoomDemand(element, 'resize-continuation');
           schedule();
-        } else changed();
+        } else changed('resize-scene');
       });
       observer.observe(element);
       for (const entry of entries.values()) observer.observe(entry.element);
@@ -975,23 +996,35 @@ export function createRoomLabelRegistry(
         // Cache before demanding a frame. Unrelated Html/status child writes
         // cannot feed scene demand when actual canvas/obstruction inputs match.
         previousObstructions = snapshot;
-        if (!unchanged || touchesObstruction) changed();
+        if (!snapshot) recordRoomDemand(element, 'mutation-unmeasurable');
+        else if (!unchanged) recordRoomDemand(element, 'mutation-geometry');
+        if (touchesObstruction)
+          recordRoomDemand(element, 'mutation-obstruction');
+        else if (unchanged) recordRoomDemand(element, 'mutation-ignored');
+        if (!unchanged || touchesObstruction) changed('mutation-scene');
       };
       if (surface) {
         overlays = new MutationObserver(observeOverlays);
         overlays.observe(surface, { childList: true, subtree: true });
         observeOverlays();
       }
-      document.fonts?.addEventListener('loadingdone', changed);
-      void document.fonts?.ready.then(changed);
+      const fontLoaded = () => changed('font-loaded');
+      const fontReady = () => changed('font-ready');
+      const windowScroll = () => changed('window-scroll');
+      const windowResize = () => changed('window-resize');
+      const visualScroll = () => changed('visual-scroll');
+      const visualResize = () => changed('visual-resize');
+      document.fonts?.addEventListener('loadingdone', fontLoaded);
+      void document.fonts?.ready.then(fontReady);
       const visual = window.visualViewport;
-      window.addEventListener('scroll', changed, true);
-      window.addEventListener('resize', changed);
-      visual?.addEventListener('scroll', changed);
-      visual?.addEventListener('resize', changed);
+      window.addEventListener('scroll', windowScroll, true);
+      window.addEventListener('resize', windowResize);
+      visual?.addEventListener('scroll', visualScroll);
+      visual?.addEventListener('resize', visualResize);
       schedule();
       return () => {
         connected = false;
+        releaseDemand();
         identityRevision++;
         continuation = null;
         geometryIdentity = undefined;
@@ -1005,11 +1038,11 @@ export function createRoomLabelRegistry(
         observer = null;
         overlays?.disconnect();
         overlays = null;
-        document.fonts?.removeEventListener('loadingdone', changed);
-        window.removeEventListener('scroll', changed, true);
-        window.removeEventListener('resize', changed);
-        visual?.removeEventListener('scroll', changed);
-        visual?.removeEventListener('resize', changed);
+        document.fonts?.removeEventListener('loadingdone', fontLoaded);
+        window.removeEventListener('scroll', windowScroll, true);
+        window.removeEventListener('resize', windowResize);
+        visual?.removeEventListener('scroll', visualScroll);
+        visual?.removeEventListener('resize', visualResize);
         if (pending !== null) cancelAnimationFrame(pending);
         pending = null;
       };
@@ -1045,7 +1078,10 @@ export function LabelLayoutDriver({
   registry: RoomLabelRegistry;
 }) {
   const { gl, invalidate, get } = useThree();
-  useFrame(registry.schedule);
+  useFrame(() => {
+    recordRoomDemand(invalidate, 'driver-schedule');
+    registry.schedule();
+  });
   useEffect(
     () =>
       registry.connect(gl.domElement, invalidate, () => {

@@ -1,5 +1,6 @@
 /* eslint-disable react-hooks/immutability -- Canvas pointer telemetry and raycasting are imperative graphics operations. */
 'use client';
+import { recordRoomDemand } from './room-demand-diagnostics';
 import { useSceneCurrent } from './scene-current';
 import { useFrame, useThree } from '@react-three/fiber';
 import { useCallback, useEffect, useRef } from 'react';
@@ -173,6 +174,7 @@ export function VisibleHoverTracker({
         known: true,
       };
       sample(true);
+      recordRoomDemand(invalidate, 'pointer-sample');
       invalidate();
     };
     const leave = () => {

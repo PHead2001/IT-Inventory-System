@@ -1,4 +1,5 @@
 'use client';
+import { recordRoomDemand } from './room-demand-diagnostics';
 import { useSceneCurrent } from './scene-current';
 import { useFrame, useThree } from '@react-three/fiber';
 import {
@@ -103,6 +104,7 @@ export function HoveredBody({
         finish,
       };
     }
+    recordRoomDemand(invalidate, 'hover-effect');
     invalidate();
   }, [effects, node.id, hovered, fine, reduced, scene, invalidate, isCurrent]);
   useEffect(
@@ -129,6 +131,7 @@ export function HoveredBody({
       motion.current = null;
       current.finish();
     }
+    recordRoomDemand(invalidate, 'hover-frame');
     invalidate();
   }, -1.9);
   return (

@@ -80,6 +80,43 @@ repair removes a timing vulnerability; unavailable historical assertion details 
 not establish it as the cause of the prior failure. Exact-candidate canonical
 browser execution and full certification are required separately.
 
+### Opt-in room demand attribution
+
+The existing `__roomLayoutDiagnosticsEnabled` test gate also enables read-only
+`window.__readRoomDemandSnapshot(canvas)` counters. The existing label-driver connection
+binds its raw Fiber invalidate function to that canvas; calls before connection
+are unobserved (`preconnectObserved: false` in every snapshot). This measures the connected settle window, not all renderer
+activity. No Fiber/global invalidation wrapper, extra frame driver, observer,
+React state or DOM attribute write is installed. Recorded calls retain their
+existing guards, arguments, ordering and hook dependencies.
+Fiber's internal property/commit invalidations and Drei's own control requests
+are outside these application callsite counters.
+
+The fixed schema contains 47 source/classification counters plus a binding count,
+each capped at 1,000,000 with an overflow flag, in at most 4 KiB. Snapshots are
+immutable copies; reads do not increment counters. Same-canvas reconnects retain
+counters and increment the binding count; stale cleanup cannot remove a newer
+binding. Teardown retires only its own binding and invalidate mapping. The read-only
+window function returns null for unbound/disabled canvases and malformed input;
+a blocked or foreign reader property disables observation without affecting the scene.
+Eight CameraRig input/effect calls share `camera-update`; contact allocation and
+refresh share `contact-update`; bloom overlay success/failure share `bloom-overlay`.
+Frame continuations retain separate counters. Resize deliveries record target
+class and first/changed/identical content width/height via weak references only;
+raw dimensions, identifiers, labels, HTML, errors, URLs, stacks and timestamps are
+not retained. Mutation callbacks classify geometry change, unmeasurable inputs,
+obstruction touches and ignored churn. Font, window and visual viewport event
+origins remain separate. These counters attribute requests; a request count does
+not establish that Fiber submitted a draw or caused the failure.
+
+The existing `settledLabels` canvas evaluation reads the snapshot without adding
+an evaluation, animation frame or poll. Only failures report up to eight samples
+within the existing 16 KiB `ROOM_LABEL_SETTLE_FAILURE` bound. Diagnostic fields
+do not participate in readiness, cadence, timeout or assertion decisions. This
+instrumentation does not establish the cause of the Linux CI settle failure;
+actual failing-environment evidence and final exact-SHA certification remain
+required.
+
 ## Spatial composition source slice
 
 ### Occupancy snapshots and flight interruption witnesses

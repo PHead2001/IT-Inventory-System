@@ -37,6 +37,7 @@ function resizeEntry(target: Element): ResizeObserverEntry {
   };
 }
 beforeEach(() => {
+  window.__roomLayoutDiagnosticsEnabled = true;
   frames = new Map();
   serial = 0;
   observed = [];
@@ -80,6 +81,7 @@ beforeEach(() => {
 afterEach(() => {
   for (const cleanup of cleanups) cleanup();
   cleanups.clear();
+  Reflect.deleteProperty(window, '__roomLayoutDiagnosticsEnabled');
   if (originalFonts) Object.defineProperty(document, 'fonts', originalFonts);
   else Reflect.deleteProperty(document, 'fonts');
   document.body.replaceChildren();
@@ -313,4 +315,79 @@ it('never accepts repeated unmeasurable canvas geometry as an unchanged signatur
   mutation(f.host, [document.createTextNode('one')]);
   mutation(f.host, [document.createTextNode('two')]);
   expect(f.demand).toHaveBeenCalledTimes(2);
+});
+
+it('attributes existing RO, MO and viewport demand without changing callback invalidation counts', async () => {
+  const f = await fixture();
+  const before = window.__readRoomDemandSnapshot!(f.canvas)!;
+  const callback = () => resize([resizeEntry(f.element)], {} as ResizeObserver);
+  callback();
+  callback();
+  f.text();
+  callback();
+  expect(f.demand).toHaveBeenCalledTimes(3);
+  const resized = window.__readRoomDemandSnapshot!(f.canvas)!;
+  expect(
+    resized.counters['resize-scene'] - before.counters['resize-scene'],
+  ).toBe(3);
+  expect(
+    resized.counters['resize-label'] - before.counters['resize-label'],
+  ).toBe(3);
+  expect(
+    resized.counters['resize-first'] - before.counters['resize-first'],
+  ).toBe(1);
+  expect(
+    resized.counters['resize-identical'] - before.counters['resize-identical'],
+  ).toBe(1);
+  expect(
+    resized.counters['resize-changed'] - before.counters['resize-changed'],
+  ).toBe(1);
+  flush();
+  f.demand.mockClear();
+  const ignored = window.__readRoomDemandSnapshot!(f.canvas)!;
+  mutation(f.host, [document.createTextNode('unrelated status')]);
+  expect(f.demand).not.toHaveBeenCalled();
+  expect(
+    window.__readRoomDemandSnapshot!(f.canvas)!.counters['mutation-ignored'],
+  ).toBe(ignored.counters['mutation-ignored'] + 1);
+  const callbacks = [
+    ['font-loaded', () => fonts.dispatchEvent(new Event('loadingdone'))],
+    ['window-scroll', () => window.dispatchEvent(new Event('scroll'))],
+    ['window-resize', () => window.dispatchEvent(new Event('resize'))],
+  ] as const;
+  for (const [key, callback] of callbacks) {
+    const before = window.__readRoomDemandSnapshot!(f.canvas)!.counters[key];
+    f.demand.mockClear();
+    callback();
+    expect(f.demand).toHaveBeenCalledOnce();
+    expect(window.__readRoomDemandSnapshot!(f.canvas)!.counters[key]).toBe(
+      before + 1,
+    );
+  }
+});
+
+it('preserves callback demand and scheduled work when diagnostics are disabled or enabled', async () => {
+  const run = async (enabled: boolean) => {
+    window.__roomLayoutDiagnosticsEnabled = enabled;
+    const f = await fixture();
+    const results: { calls: number; frames: number }[] = [];
+    for (const callback of [
+      () => resize([resizeEntry(f.canvas)], {} as ResizeObserver),
+      () => resize([resizeEntry(f.element)], {} as ResizeObserver),
+      () => mutation(f.host, [document.createTextNode('status')]),
+      () => fonts.dispatchEvent(new Event('loadingdone')),
+      () => window.dispatchEvent(new Event('resize')),
+    ]) {
+      f.demand.mockClear();
+      callback();
+      results.push({ calls: f.demand.mock.calls.length, frames: frames.size });
+      flush();
+    }
+    const revision = f.canvas.dataset.labelLayoutRevision;
+    for (const cleanup of cleanups) cleanup();
+    cleanups.clear();
+    document.body.replaceChildren();
+    return { results, revision };
+  };
+  expect(await run(true)).toEqual(await run(false));
 });

@@ -1,4 +1,5 @@
 'use client';
+import { recordRoomDemand } from './room-demand-diagnostics';
 import { useFrame, useThree } from '@react-three/fiber';
 import {
   createContext,
@@ -205,11 +206,15 @@ export function RoomVisibilityProvider({
       publication.current = key;
       onUnresolvedChange(codes);
     }
-    if (batch.needsFrame) invalidate();
+    if (batch.needsFrame) {
+      recordRoomDemand(invalidate, 'visibility-continuation');
+      invalidate();
+    }
   }, 0);
   useEffect(() => {
     const retry = () => {
       batch.retry();
+      recordRoomDemand(invalidate, 'visibility-retry');
       invalidate();
     };
     retryRef.current = retry;

@@ -1,5 +1,6 @@
 /* eslint-disable react-hooks/immutability -- Owned WebGL capture and receiver lifetime boundary. */
 'use client';
+import { recordRoomDemand } from './room-demand-diagnostics';
 import { useFrame, useThree } from '@react-three/fiber';
 import { useEffect, useRef } from 'react';
 import { DoubleSide, Mesh, type MeshBasicMaterial } from 'three';
@@ -56,6 +57,7 @@ export function CachedContactShadows({
         material.current.map = owned.texture;
         material.current.needsUpdate = true;
       }
+      recordRoomDemand(invalidate, 'contact-update');
       invalidate();
     } catch {
       failed.current = true;
@@ -94,6 +96,7 @@ export function CachedContactShadows({
   useEffect(() => {
     if (!isCurrent()) return;
     if (receiver.current) receiver.current.visible = false;
+    recordRoomDemand(invalidate, 'contact-update');
     invalidate();
   }, [paletteRevision, quality, invalidate, isCurrent]);
   useFrame(() => {
@@ -109,6 +112,7 @@ export function CachedContactShadows({
     if (cachedKey.current === key) return;
     // Wait for the furniture commit and one normal scene frame, never an idle probe.
     if (++readyFrames.current < 2) {
+      recordRoomDemand(invalidate, 'contact-wait');
       invalidate();
       return;
     }
@@ -126,6 +130,7 @@ export function CachedContactShadows({
       effects.recordCapture(performance.now() - started);
       gl.domElement.dataset.contactStatus = 'cached';
       gl.domElement.dataset.contactCacheKey = key;
+      recordRoomDemand(invalidate, 'contact-capture');
       invalidate();
     } catch {
       failed.current = true;

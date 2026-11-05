@@ -1,5 +1,6 @@
 /* eslint-disable react-hooks/immutability -- Three.js camera objects are intentionally mutated inside effects/frame callbacks at this imperative graphics boundary. */
 'use client';
+import { recordRoomDemand } from './room-demand-diagnostics';
 import { useFrame, useThree, type ThreeEvent } from '@react-three/fiber';
 import { OrbitControls } from '@react-three/drei';
 import {
@@ -390,6 +391,7 @@ function CameraFacingLabel({
       anchor.current.position.distanceToSquared(new Vector3(...next)) > 1e-6
     ) {
       anchor.current.position.set(...next);
+      recordRoomDemand(invalidate, 'anchor');
       invalidate();
     }
   }, -0.25);
@@ -475,6 +477,7 @@ export function RevealedBody({
         started: performance.now(),
       };
     }
+    recordRoomDemand(invalidate, 'reveal-effect');
     invalidate();
   }, [
     open,
@@ -513,6 +516,7 @@ export function RevealedBody({
       finishMotion.current = null;
     }
     // One last frame permits hover/label drivers to observe the endpoint.
+    recordRoomDemand(invalidate, 'reveal-frame');
     invalidate();
   }, -2);
   return (
@@ -1028,6 +1032,7 @@ export function CameraRig({
     animation.current = null;
     revealController.interrupt(token);
     if (token) onFocusCancel?.(token);
+    recordRoomDemand(invalidate, 'camera-update');
     invalidate();
   }, [revealController, onFocusCancel, invalidate]);
   const currentFrame = useCallback(() => {
@@ -1131,6 +1136,7 @@ export function CameraRig({
     emitView();
     revealController.finishFlight(motion.token, performance.now(), true);
     onFocusComplete(motion.token.code, motion.token);
+    recordRoomDemand(invalidate, 'camera-update');
     invalidate();
   }, [
     reduced,
@@ -1146,6 +1152,7 @@ export function CameraRig({
     if (reduced) {
       const state = revealController.getSnapshot();
       if (state.token) revealController.settle(state.token);
+      recordRoomDemand(invalidate, 'camera-update');
       invalidate();
     }
   }, [reduced, revealController, invalidate]);
@@ -1240,6 +1247,7 @@ export function CameraRig({
     controls.current.update();
     writeTelemetry();
     emitView();
+    recordRoomDemand(invalidate, 'camera-update');
     invalidate();
   }, [
     camera,
@@ -1298,6 +1306,7 @@ export function CameraRig({
       control.update();
       writeTelemetry();
       emitView();
+      recordRoomDemand(invalidate, 'camera-update');
       invalidate();
     } else emitView();
   }, [
@@ -1348,6 +1357,7 @@ export function CameraRig({
     ) {
       revealController.finishFlight(requestToken, performance.now(), true);
       onFocusComplete(focusRequest.code, requestToken);
+      recordRoomDemand(invalidate, 'camera-update');
       invalidate();
       return;
     }
@@ -1405,6 +1415,7 @@ export function CameraRig({
         started: performance.now(),
         token: requestToken,
       };
+    recordRoomDemand(invalidate, 'camera-update');
     invalidate();
   }, [
     focusRequest,
@@ -1502,6 +1513,7 @@ export function CameraRig({
     control.update();
     writeTelemetry();
     emitView();
+    recordRoomDemand(invalidate, 'camera-update');
     invalidate();
   }, [
     command,
@@ -1530,6 +1542,7 @@ export function CameraRig({
         onReady();
       } else {
         renderedOnce.current = true;
+        recordRoomDemand(invalidate, 'camera-ready');
         invalidate();
       }
     }
@@ -1537,7 +1550,10 @@ export function CameraRig({
     if (reveal.phase === 'revealing' && reveal.token) {
       if (performance.now() - reveal.started >= SPATIAL_MOTION.revealMs)
         revealController.settle(reveal.token);
-      else invalidate();
+      else {
+        recordRoomDemand(invalidate, 'camera-reveal');
+        invalidate();
+      }
     }
     if (
       !animation.current ||
@@ -1569,8 +1585,12 @@ export function CameraRig({
       emitView();
       revealController.finishFlight(motion.token, performance.now(), reduced);
       onFocusComplete(motion.token.code, motion.token);
+      recordRoomDemand(invalidate, 'camera-flight-end');
       invalidate();
-    } else invalidate();
+    } else {
+      recordRoomDemand(invalidate, 'camera-flight');
+      invalidate();
+    }
   }, -0.75);
   return (
     <OrbitControls
