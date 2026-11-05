@@ -876,11 +876,106 @@ export function createRoomLabelRegistry(
       observer.observe(element);
       for (const entry of entries.values()) observer.observe(entry.element);
       const surface = element.closest('[data-room-surface]');
-      const observeOverlays = () => {
-        surface
-          ?.querySelectorAll('[data-room-obstruction]')
-          .forEach((panel) => observer?.observe(panel));
-        changed();
+      const obstructionElements = new Set<Element>();
+      type ObstructionSnapshot = {
+        canvas: number[];
+        panels: {
+          element: Element;
+          rendered: boolean;
+          rect: number[] | null;
+        }[];
+      };
+      let previousObstructions: ObstructionSnapshot | null = null;
+      const rectValues = (rect: DOMRect) => {
+        const values = [
+          rect.left,
+          rect.top,
+          rect.right,
+          rect.bottom,
+          rect.width,
+          rect.height,
+        ];
+        return values.every(Number.isFinite) &&
+          rect.width > 0 &&
+          rect.height > 0
+          ? values
+          : null;
+      };
+      const observeOverlays = (records: MutationRecord[] = []) => {
+        const panels = [
+          ...(surface?.querySelectorAll('[data-room-obstruction]') ?? []),
+        ];
+        const nextElements = new Set(panels);
+        const labelElements = new Set(
+          [...entries.values()].map((entry) => entry.element),
+        );
+        for (const panel of obstructionElements) {
+          if (!nextElements.has(panel)) {
+            if (panel !== element && !labelElements.has(panel as HTMLElement))
+              observer?.unobserve(panel);
+            obstructionElements.delete(panel);
+          }
+        }
+        for (const panel of panels) {
+          if (!obstructionElements.has(panel)) {
+            if (panel !== element && !labelElements.has(panel as HTMLElement))
+              observer?.observe(panel);
+            obstructionElements.add(panel);
+          }
+        }
+        let snapshot: ObstructionSnapshot | null = null;
+        try {
+          const canvasRect = rectValues(element.getBoundingClientRect());
+          const measured = panels.map((panel) => {
+            const rendered = panel.getClientRects().length > 0;
+            return {
+              element: panel,
+              rendered,
+              rect: rendered ? rectValues(panel.getBoundingClientRect()) : null,
+            };
+          });
+          if (
+            canvasRect &&
+            measured.every((panel) => !panel.rendered || panel.rect)
+          )
+            snapshot = { canvas: canvasRect, panels: measured };
+        } catch {
+          /* Unmeasurable geometry remains a conservative invalidation. */
+        }
+        const sameNumbers = (left: number[], right: number[]) =>
+          left.length === right.length &&
+          left.every((value, index) => value === right[index]);
+        const unchanged =
+          snapshot &&
+          previousObstructions &&
+          sameNumbers(snapshot.canvas, previousObstructions.canvas) &&
+          snapshot.panels.length === previousObstructions.panels.length &&
+          snapshot.panels.every((panel, index) => {
+            const previous = previousObstructions!.panels[index];
+            return (
+              panel.element === previous.element &&
+              panel.rendered === previous.rendered &&
+              (panel.rect
+                ? !!previous.rect && sameNumbers(panel.rect, previous.rect)
+                : previous.rect === null)
+            );
+          });
+        const containsObstruction = (node: Node) =>
+          node instanceof Element &&
+          (node.matches('[data-room-obstruction]') ||
+            !!node.querySelector('[data-room-obstruction]'));
+        const touchesObstruction = records.some(
+          (record) =>
+            (record.target instanceof Element &&
+              !!record.target.closest('[data-room-obstruction]')) ||
+            [...record.addedNodes, ...record.removedNodes].some(
+              containsObstruction,
+            ),
+        );
+        // Cache before demanding a frame. Unrelated Html/status child writes
+        // cannot feed scene demand when actual canvas/obstruction inputs match.
+        previousObstructions = snapshot;
+        if (!unchanged || touchesObstruction) changed();
       };
       if (surface) {
         overlays = new MutationObserver(observeOverlays);
