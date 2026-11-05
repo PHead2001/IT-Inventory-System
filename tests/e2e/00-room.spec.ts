@@ -1,3 +1,7 @@
+import {
+  readRoomLabelSettleState,
+  type RoomLabelDomSnapshot,
+} from './room-label-dom-observation';
 import { readFileSync, writeFileSync } from 'node:fs';
 import {
   roomDemandSnapshot,
@@ -553,6 +557,7 @@ async function settledLabels(page: Page, afterRevision?: number) {
   };
   const recent: Observation[] = [];
   const demandSamples: (RoomDemandSnapshot | null)[] = [];
+  const domSamples: (RoomLabelDomSnapshot | null)[] = [];
   let last:
     | (Observation & { view: number[] | null; projection: number[] | null })
     | null = null;
@@ -574,94 +579,8 @@ async function settledLabels(page: Page, afterRevision?: number) {
           sceneFrames,
           composerFrames,
           demand,
-        } = await canvas.evaluate(async (element) => {
-          // Let the requested control update project and measure before accepting
-          // a settled flag that could still belong to the previous camera frame.
-          await new Promise<void>((resolve) =>
-            requestAnimationFrame(() => resolve()),
-          );
-          const current = {
-            pending: element.dataset.labelLayoutPending,
-            revision: Number(element.dataset.labelLayoutRevision ?? 0),
-            frame: [
-              element.dataset.cameraViewMatrix,
-              element.dataset.cameraProjectionMatrix,
-            ],
-          };
-          const counter = (value: string | undefined) => {
-            const number = Number(value);
-            return value !== undefined &&
-              Number.isSafeInteger(number) &&
-              number >= 0 &&
-              number <= 1_000_000
-              ? number
-              : null;
-          };
-          let demand: RoomDemandSnapshot | null = null;
-          try {
-            demand = window.__readRoomDemandSnapshot?.(element) ?? null;
-          } catch {
-            /* A blocked diagnostic reader cannot change readiness. */
-          }
-          try {
-            const statuses = [
-              'complete',
-              'candidate-infeasible',
-              'budget-exhausted',
-            ];
-            const errors = [
-              'Room viewport is not measured',
-              'Label measurement work budget exhausted',
-              'Label placement work budget exhausted',
-              'Label remeasurement work budget exhausted',
-              'Unstable label dimensions after four placement passes',
-            ];
-            const errorIndex = errors.indexOf(
-              element.dataset.labelLayoutError ?? '',
-            );
-            return {
-              current,
-              demand,
-              phase: [
-                'idle',
-                'flying',
-                'revealing',
-                'settled',
-                'cancelled',
-              ].includes(element.dataset.spatialPhase ?? '')
-                ? element.dataset.spatialPhase!
-                : null,
-              sceneFrames: counter(element.dataset.sceneEffectFrames),
-              composerFrames: counter(element.dataset.composerFrames),
-              status: statuses.includes(element.dataset.labelLayoutStatus ?? '')
-                ? element.dataset.labelLayoutStatus!
-                : 'unknown',
-              // Only fixed codes leave the browser, never arbitrary attribute text.
-              layoutError:
-                errorIndex >= 0
-                  ? [
-                      'viewport-unmeasured',
-                      'measurement-budget',
-                      'placement-budget',
-                      'remeasurement-budget',
-                      'unstable-dimensions',
-                    ][errorIndex]
-                  : element.dataset.labelLayoutError === undefined
-                    ? null
-                    : 'unknown',
-            };
-          } catch {
-            return {
-              current,
-              demand: null,
-              status: 'unavailable',
-              layoutError: 'unavailable',
-              phase: null,
-              sceneFrames: null,
-              composerFrames: null,
-            };
-          }
-        });
+          labelDom,
+        } = await canvas.evaluate(readRoomLabelSettleState);
         const key = JSON.stringify(current);
         const stable =
           current.pending === 'false' &&
@@ -691,6 +610,8 @@ async function settledLabels(page: Page, afterRevision?: number) {
               previousFrame !== undefined &&
               current.frame[1] !== previousFrame[1],
           };
+          domSamples.push(labelDom);
+          if (domSamples.length > 8) domSamples.shift();
           demandSamples.push(roomDemandSnapshot(demand));
           if (demandSamples.length > 8) demandSamples.shift();
           observations++;
@@ -740,15 +661,18 @@ async function settledLabels(page: Page, afterRevision?: number) {
         last,
         recent,
         demandSamples,
+        domSamples,
       };
       // Keep source attribution bounded even at maximum counter saturation.
       const prefix = 'ROOM_LABEL_SETTLE_FAILURE ';
       let report = JSON.stringify(failure);
       while (
         prefix.length + report.length > 16 * 1024 &&
-        failure.demandSamples.length
+        (failure.demandSamples.length || failure.domSamples.length)
       ) {
-        failure.demandSamples.shift();
+        if (failure.demandSamples.length >= failure.domSamples.length)
+          failure.demandSamples.shift();
+        else failure.domSamples.shift();
         report = JSON.stringify(failure);
       }
       console.error(prefix + report);
