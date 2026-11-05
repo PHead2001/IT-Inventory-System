@@ -1,11 +1,21 @@
 'use client';
+import { SpringDisclosure } from '@/components/experience/spring-disclosure';
+import {
+  ConfirmedSuccess,
+  useFeedbackOwner,
+} from '@/components/experience/confirmed-success';
+
 import { useRouteTask } from '@/components/experience/route-pending';
 import { useRouteRouter as useRouter } from '@/components/experience/route-pending';
 
 import { useRouteActionResult } from '@/components/experience/route-pending';
-import { useRef, useState } from 'react';
+import { useId, useRef, useState } from 'react';
 
-import { useReportTaskState, useTaskReset } from './task-state';
+import {
+  useReportTaskState,
+  useTaskReset,
+  useTaskInteraction,
+} from './task-state';
 import { Button } from '@/components/ui/button';
 import {
   useFormValidation,
@@ -31,7 +41,11 @@ export function ArchiveQuantityForm({
 }) {
   const observeRouteActionResult = useRouteActionResult();
   const resetTask = useTaskReset();
+  const canStartTask = useTaskInteraction();
+  const instanceId = useId();
+  const domScope = `${instanceId}-archive-clear`;
   const router = useRouter();
+  const successOwner = useFeedbackOwner(actorId);
   const [baseline, setBaseline] = useState(latestReview);
   const [reason, setReason] = useState('');
   const [acknowledged, setAcknowledged] = useState(false);
@@ -52,7 +66,7 @@ export function ArchiveQuantityForm({
       ? []
       : [
           {
-            id: 'archive-clear-acknowledgement',
+            id: domScope + '-acknowledgement',
             label: 'Stock removal acknowledgement',
             message: 'Acknowledge stock removal before continuing.',
           },
@@ -85,6 +99,7 @@ export function ArchiveQuantityForm({
   };
   const submit = (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+    if (!canStartTask()) return;
     if (
       pending ||
       inFlight.current ||
@@ -120,6 +135,7 @@ export function ArchiveQuantityForm({
     inFlight.current = true;
     reportTask({ pending: true });
     startTask(async () => {
+      if (!canStartTask()) return;
       try {
         const result = await observeRouteActionResult(submitInventory(command));
         const unresolved =
@@ -211,12 +227,12 @@ export function ArchiveQuantityForm({
           pending || uncertain || done || refreshRequested || newerVersion
         }
       >
-        <label className="mb-2 block" htmlFor="archive-clear-reason">
+        <label className="mb-2 block" htmlFor={domScope + '-reason'}>
           Reason (required)
         </label>
         <textarea
-          {...validation.props('archive-clear-reason')}
-          id="archive-clear-reason"
+          {...validation.props(domScope + '-reason')}
+          id={domScope + '-reason'}
           className={field}
           rows={2}
           maxLength={2000}
@@ -228,11 +244,11 @@ export function ArchiveQuantityForm({
             setState(null);
           }}
         />
-        {validation.error('archive-clear-reason')}
+        {validation.error(domScope + '-reason')}
         <label className="mt-3 flex min-h-11 items-center gap-3 text-sm">
           <input
-            {...validation.props('archive-clear-acknowledgement')}
-            id="archive-clear-acknowledgement"
+            {...validation.props(domScope + '-acknowledgement')}
+            id={domScope + '-acknowledgement'}
             type="checkbox"
             checked={acknowledged}
             required
@@ -245,14 +261,14 @@ export function ArchiveQuantityForm({
           I understand that all {displayCount(baseline.removed_total)} recorded
           units will be removed and restore will not recreate them.
         </label>
-        {validation.error('archive-clear-acknowledgement')}
+        {validation.error(domScope + '-acknowledgement')}
       </fieldset>
       {refreshRequested && (
         <p role="status">Loading the latest stock review…</p>
       )}
       {reviewing && (
         <section aria-label="Review changes" className={panel}>
-          <h3 id="archive-clear-review-context" className="font-semibold">
+          <h3 id={domScope + '-review-context'} className="font-semibold">
             Confirm stock removal for {itemName?.trim() || 'this quantity item'}
           </h3>
           <p className="text-sm text-[var(--warning)]">
@@ -281,7 +297,14 @@ export function ArchiveQuantityForm({
       )}
       {state?.ok && (
         <>
-          <p role="status">Stock removed and quantity item archived.</p>
+          <p role="status">
+            <ConfirmedSuccess
+              owner={successOwner}
+              eventId={state.eventId}
+              changed={state.changed}
+            />
+            Stock removed and quantity item archived.
+          </p>
           <Button
             type="button"
             className="hover:translate-y-0 active:scale-100"
@@ -293,9 +316,7 @@ export function ArchiveQuantityForm({
       )}
       <Button
         type="submit"
-        aria-describedby={
-          reviewing ? 'archive-clear-review-context' : undefined
-        }
+        aria-describedby={reviewing ? domScope + '-review-context' : undefined}
         className="experience-danger-action"
         disabled={
           pending || done || (!uncertain && (refreshRequested || newerVersion))
@@ -322,20 +343,19 @@ export function ArchiveQuantityPanel({
 }) {
   const [opened, setOpened] = useState(false);
   return (
-    <details
+    <SpringDisclosure
+      summaryProps={{ className: 'min-h-11 cursor-pointer font-medium' }}
+      summary={'Archive quantity item and clear stock'}
       className={panel}
       onToggle={(event) => {
         if (event.currentTarget.open) setOpened(true);
       }}
     >
-      <summary className="min-h-11 cursor-pointer font-medium">
-        Archive quantity item and clear stock
-      </summary>
       <div className="mt-4">
         {opened && (
           <ArchiveQuantityForm latestReview={review} itemName={itemName} />
         )}
       </div>
-    </details>
+    </SpringDisclosure>
   );
 }

@@ -1,3 +1,4 @@
+import { SpringDisclosure } from '@/components/experience/spring-disclosure';
 import type { Metadata } from '@/features/inventory/contracts-ui';
 import { OperationalTimestamp } from '@/components/operational-time';
 import { formatCustomValue, type MetadataDefinition } from './contracts';
@@ -77,10 +78,14 @@ export function CustomMetadataList({
                       </dd>
                     )}
                     <dd>
-                      <details className="mt-2 text-xs text-slate-400">
-                        <summary className="min-h-8 cursor-pointer py-1 text-cyan-200">
-                          Value provenance
-                        </summary>
+                      <SpringDisclosure
+                        className="mt-2 text-xs text-slate-400"
+                        summaryProps={{
+                          className:
+                            'min-h-8 cursor-pointer py-1 text-cyan-200',
+                        }}
+                        summary={<>Value provenance</>}
+                      >
                         <span className="break-all">
                           Field {id} · validated revision{' '}
                           {entry.validated_revision_id}
@@ -91,7 +96,7 @@ export function CustomMetadataList({
                             {formatCustomValue(entry.value, [])}
                           </span>
                         )}
-                      </details>
+                      </SpringDisclosure>
                     </dd>
                   </div>
                 ))}

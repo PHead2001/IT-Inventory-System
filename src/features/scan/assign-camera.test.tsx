@@ -10,9 +10,21 @@ import { AssignCamera } from './assign-camera';
 import { invalidateAssignmentCallbacks } from './assign-batch';
 import { QueueLogoutForm } from '@/features/labels/queue-logout-form';
 const mocks = vi.hoisted(() => ({
+  feedback: vi.fn(),
+  stopFeedback: vi.fn(),
   decode: vi.fn(),
   stop: vi.fn(),
   signOut: vi.fn(),
+}));
+vi.mock('@/components/experience/scan-feedback', () => ({
+  useScanFeedback: () =>
+    Object.assign(mocks.feedback, {
+      prime: vi.fn(),
+      stop: mocks.stopFeedback,
+    }),
+  primeScanFeedback: vi.fn(),
+  stopScanFeedback: vi.fn(),
+  scanReducedMotionNow: () => false,
 }));
 vi.mock('@/lib/auth/actions', () => ({
   signOutSession: mocks.signOut,
@@ -50,6 +62,24 @@ beforeEach(() => {
   mocks.decode.mockResolvedValue({ stop: mocks.stop });
 });
 afterEach(() => vi.unstubAllGlobals());
+it('cues only an accepted decode, rejects repeat callbacks and fences retired sessions', async () => {
+  const detected = vi.fn().mockReturnValueOnce(true).mockReturnValue(false);
+  const view = render(<AssignCamera onDetection={detected} scope="original" />);
+  fireEvent.click(screen.getByRole('button', { name: 'Start camera' }));
+  await waitFor(() => expect(mocks.decode).toHaveBeenCalledOnce());
+  const decoded = { getText: () => 'camera-code' };
+  act(() => {
+    mocks.decode.mock.calls[0][2](decoded);
+    mocks.decode.mock.calls[0][2](decoded);
+  });
+  expect(mocks.feedback).toHaveBeenCalledExactlyOnceWith(
+    'decode',
+    expect.stringMatching(/^decode:/),
+  );
+  view.rerender(<AssignCamera onDetection={detected} scope="new-context" />);
+  act(() => mocks.decode.mock.calls[0][2]({ getText: () => 'retired' }));
+  expect(mocks.feedback).toHaveBeenCalledOnce();
+});
 it('stops an active camera when the session is invalidated without a scope prop change', async () => {
   const track = { stop: vi.fn() };
   vi.stubGlobal(
@@ -91,7 +121,10 @@ it('starts only on user action, forwards decoded or missing frames and releases 
   });
   mocks.decode.mock.calls[0][2]({ getText: () => '/inventory/quantity/test' });
   mocks.decode.mock.calls[0][2](undefined);
-  expect(detected.mock.calls).toEqual([['/inventory/quantity/test'], [null]]);
+  expect(detected.mock.calls).toEqual([
+    ['/inventory/quantity/test', expect.any(Function)],
+    [null, expect.any(Function)],
+  ]);
   view.unmount();
   expect(mocks.stop).toHaveBeenCalledOnce();
 });

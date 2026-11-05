@@ -1,4 +1,5 @@
 'use client';
+import { PeekAnchor, PeekLink } from '@/features/peek/peek-link';
 
 import {
   ViewTransition,
@@ -94,36 +95,43 @@ export function InventoryRecordLink({
     listRouteKey(contentIdentity ? contentIdentity.listHref : listHref) ===
       targetListKey;
   return (
-    <ViewTransition
-      default="none"
-      share={matches ? 'record-title' : 'none'}
-      name={matches ? intent?.name : undefined}
-      onShare={(instance) => {
-        if (!current() || finishTitleAfterSnapshot(instance) === false) return;
-        const cleanup = sharedTitleMotion(
-          instance,
-          validNow,
-          rejectTitleSnapshot,
-        );
-        return cleanup;
-      }}
-    >
-      <Link
-        ref={source}
-        href={href}
-        className={className}
-        onNavigate={() => {
-          if (
-            target &&
-            document.querySelectorAll(`[id="${target.anchor}"]`).length === 1
-          )
-            arm(target);
-          else retireTitle();
-        }}
-      >
-        {children}
-      </Link>
-    </ViewTransition>
+    <PeekAnchor target={record}>
+      {(trigger) => (
+        <ViewTransition
+          default="none"
+          share={matches ? 'record-title' : 'none'}
+          name={matches ? intent?.name : undefined}
+          onShare={(instance) => {
+            if (!current() || finishTitleAfterSnapshot(instance) === false)
+              return;
+            const cleanup = sharedTitleMotion(
+              instance,
+              validNow,
+              rejectTitleSnapshot,
+            );
+            return cleanup;
+          }}
+        >
+          <Link
+            {...trigger}
+            ref={source}
+            href={href}
+            className={className}
+            onNavigate={() => {
+              if (
+                target &&
+                document.querySelectorAll(`[id="${target.anchor}"]`).length ===
+                  1
+              )
+                arm(target);
+              else retireTitle();
+            }}
+          >
+            {children}
+          </Link>
+        </ViewTransition>
+      )}
+    </PeekAnchor>
   );
 }
 
@@ -291,35 +299,41 @@ export function HistoryRecordLink({
     motion.captureAvailable !== false &&
     scopedSourceMatches(motion.intent, target, identity?.rawRouteKey);
   return (
-    <ViewTransition
-      default="none"
-      share={matches ? 'record-title' : 'none'}
-      name={matches ? motion.intent!.name : undefined}
-      onShare={(instance) => {
-        if (
-          !motion.current() ||
-          motion.finishTitleAfterSnapshot(instance) === false
-        )
-          return;
-        const cleanup = sharedTitleMotion(
-          instance,
-          motion.validNow,
-          motion.rejectTitleSnapshot,
-        );
-        return cleanup;
-      }}
-    >
-      <Link
-        href={href}
-        className={className}
-        onNavigate={() => {
-          if (target && visibleUniqueSource(target.anchor)) motion.arm(target);
-          else motion.retireTitle();
-        }}
-      >
-        {children}
-      </Link>
-    </ViewTransition>
+    <PeekAnchor target={record}>
+      {(trigger) => (
+        <ViewTransition
+          default="none"
+          share={matches ? 'record-title' : 'none'}
+          name={matches ? motion.intent!.name : undefined}
+          onShare={(instance) => {
+            if (
+              !motion.current() ||
+              motion.finishTitleAfterSnapshot(instance) === false
+            )
+              return;
+            const cleanup = sharedTitleMotion(
+              instance,
+              motion.validNow,
+              motion.rejectTitleSnapshot,
+            );
+            return cleanup;
+          }}
+        >
+          <Link
+            {...trigger}
+            href={href}
+            className={className}
+            onNavigate={() => {
+              if (target && visibleUniqueSource(target.anchor))
+                motion.arm(target);
+              else motion.retireTitle();
+            }}
+          >
+            {children}
+          </Link>
+        </ViewTransition>
+      )}
+    </PeekAnchor>
   );
 }
 export function LocationTitleSourceName({
@@ -402,7 +416,8 @@ export function LocationDetailLink({
   );
   const href = recordPathForLocation(location, returnTo);
   return (
-    <Link
+    <PeekLink
+      peekTarget={{ kind: 'location', code: location.code }}
       href={href}
       aria-label={'View ' + label + ' location details'}
       className={className}
@@ -413,7 +428,7 @@ export function LocationDetailLink({
       }}
     >
       {children}
-    </Link>
+    </PeekLink>
   );
 }
 function recordPathForLocation(location: LocationIdentity, returnTo: string) {

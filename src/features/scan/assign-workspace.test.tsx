@@ -1,3 +1,4 @@
+import { PeekProvider } from '@/features/peek/peek-provider';
 import {
   act,
   fireEvent,
@@ -27,6 +28,7 @@ import { ProtectedPrivacyContent } from '@/components/auth/privacy-content';
 import { useEffect } from 'react';
 import { holdTransitionCapture } from '../../../tests/helpers/transition-capture';
 const mocks = vi.hoisted(() => ({
+  feedback: vi.fn(),
   find: vi.fn(),
   inspect: vi.fn(),
   submit: vi.fn(),
@@ -39,6 +41,13 @@ const mocks = vi.hoisted(() => ({
   guardFailure: false,
   privacyRead: vi.fn(),
   identityRead: vi.fn(),
+}));
+vi.mock('@/components/experience/scan-feedback', () => ({
+  useScanFeedback: () =>
+    Object.assign(mocks.feedback, { prime: vi.fn(), stop: vi.fn() }),
+  primeScanFeedback: vi.fn(),
+  stopScanFeedback: vi.fn(),
+  scanReducedMotionNow: () => false,
 }));
 vi.mock('@/lib/supabase/browser', () => ({
   createSupabaseBrowserClient: () => ({
@@ -219,6 +228,93 @@ async function inspect() {
   fireEvent.submit(screen.getByRole('form', { name: 'Inspect equipment' }));
   await screen.findByRole('region', { name: 'Review assignment' });
 }
+it('emits assignment feedback only for the current changed commit and stays quiet for a restored receipt', async () => {
+  const view = render(<AssignmentWorkspace {...props} />);
+  await inspect();
+  let finish!: (result: unknown) => void;
+  const committed = mocks.submit.getMockImplementation()!();
+  mocks.submit.mockImplementationOnce(
+    () =>
+      new Promise((resolve) => {
+        finish = resolve;
+      }),
+  );
+  fireEvent.click(screen.getByRole('button', { name: 'Confirm assign' }));
+  expect(mocks.feedback).not.toHaveBeenCalled();
+  await act(async () => finish(await committed));
+  expect(mocks.feedback).toHaveBeenCalledExactlyOnceWith(
+    'assignment',
+    `assignment:${id(8)}`,
+  );
+  view.unmount();
+  mocks.feedback.mockClear();
+  render(<AssignmentWorkspace {...props} />);
+  await screen.findByRole('region', { name: 'Latest assignment receipt' });
+  expect(mocks.feedback).not.toHaveBeenCalled();
+});
+it.each(['no-op', 'retry'])(
+  'does not emit a new assignment cue for a %s result',
+  async (outcome) => {
+    const committed = await mocks.submit.getMockImplementation()!();
+    if (outcome === 'no-op')
+      mocks.submit.mockResolvedValue({ ...committed, changed: false });
+    else mocks.submit.mockRejectedValueOnce(new Error('unknown outcome'));
+    render(<AssignmentWorkspace {...props} />);
+    await inspect();
+    fireEvent.click(screen.getByRole('button', { name: 'Confirm assign' }));
+    if (outcome === 'retry') {
+      fireEvent.click(
+        await screen.findByRole('button', { name: 'Retry same assignment' }),
+      );
+    }
+    await screen.findByRole('region', { name: 'Latest assignment receipt' });
+    expect(mocks.feedback).not.toHaveBeenCalledWith(
+      'assignment',
+      expect.anything(),
+    );
+  },
+);
+it('distinguishes a fresh no-match from a blocked inspection', async () => {
+  mocks.find.mockResolvedValueOnce({
+    ok: true,
+    status: 'unknown',
+    matches: [],
+  });
+  render(<AssignmentWorkspace {...props} />);
+  fireEvent.change(screen.getByLabelText('Scan, paste, or search inventory'), {
+    target: { value: 'missing' },
+  });
+  fireEvent.submit(screen.getByRole('form', { name: 'Inspect equipment' }));
+  await waitFor(() =>
+    expect(mocks.feedback).toHaveBeenCalledWith('no-match', expect.any(String)),
+  );
+  mocks.inspect.mockResolvedValueOnce({
+    ok: true,
+    candidate: { ...candidate, sources: [] },
+  });
+  await inspect();
+  expect(mocks.feedback).toHaveBeenLastCalledWith(
+    'blocked',
+    expect.any(String),
+  );
+});
+it('suppresses an old lookup cue after the assignment scope retires', async () => {
+  let finish!: (result: unknown) => void;
+  mocks.find.mockImplementationOnce(
+    () =>
+      new Promise((resolve) => {
+        finish = resolve;
+      }),
+  );
+  render(<AssignmentWorkspace {...props} />);
+  fireEvent.change(screen.getByLabelText('Scan, paste, or search inventory'), {
+    target: { value: 'pending' },
+  });
+  fireEvent.submit(screen.getByRole('form', { name: 'Inspect equipment' }));
+  act(() => invalidateAssignmentPrivacy());
+  await act(async () => finish({ ok: true, status: 'unknown', matches: [] }));
+  expect(mocks.feedback).not.toHaveBeenCalled();
+});
 it.each(['manual', 'camera'])(
   'explicit serial %s mode keeps duplicates in the chooser until deliberate inspection',
   async (entry) => {
@@ -612,6 +708,10 @@ it('keeps one original request and one confirmed checklist entry for two Confirm
     status: 'success',
     eventId: id(8),
   });
+  expect(mocks.feedback).toHaveBeenCalledExactlyOnceWith(
+    'assignment',
+    `assignment:${id(8)}`,
+  );
   expect(
     screen.getAllByRole('link', {
       name: 'View committed history for Adapters',
@@ -3304,3 +3404,69 @@ it.each(['original', 'different'] as const)(
     expect(readAssignmentRecovery(scope).value).toBeNull();
   },
 );
+
+it('opens lazy current peeks from the inspection card and committed receipt without changing the assignment', async () => {
+  const { PrivacyReadinessContext } =
+    await import('@/components/auth/privacy-readiness');
+  const { assignmentEpoch, readPrivacyRevocationRevision } =
+    await import('./assign-batch');
+  vi.spyOn(HTMLElement.prototype, 'getClientRects').mockReturnValue([
+    new DOMRect(10, 20, 200, 30),
+  ] as unknown as DOMRectList);
+  const fetcher = vi.fn().mockImplementation(async () =>
+    Response.json({
+      actor: props.actorId,
+      backend: props.backend,
+      payload: {
+        target: { kind: 'quantity', id: candidate.id },
+        name: 'Current adapters',
+        status: 'active',
+        assetTag: null,
+        stock: { available: '2', assigned: '0', recorded: '2' },
+        locations: [],
+        moreLocations: false,
+        siteName: null,
+        photo: null,
+      },
+    }),
+  );
+  vi.stubGlobal('fetch', fetcher);
+  render(
+    <PrivacyReadinessContext
+      value={{
+        ready: true,
+        visible: true,
+        generation: 'assignment-peek',
+        verifiedEpoch: assignmentEpoch(),
+        revocationRevision: readPrivacyRevocationRevision(),
+      }}
+    >
+      <PeekProvider actor={props.actorId} backend={props.backend}>
+        <AssignmentWorkspace {...props} />
+      </PeekProvider>
+    </PrivacyReadinessContext>,
+  );
+  await inspect();
+  const link = screen.getByRole('link', { name: 'Open inventory record' });
+  expect(fetcher).not.toHaveBeenCalled();
+  act(() => link.focus());
+  expect(await screen.findByText('Current adapters')).toBeInTheDocument();
+  fireEvent.keyDown(link, { key: 'Escape' });
+  expect(mocks.submit).not.toHaveBeenCalled();
+  fireEvent.change(screen.getByLabelText('Units to assign'), {
+    target: { value: '1' },
+  });
+  fireEvent.click(screen.getByRole('button', { name: 'Confirm assign' }));
+  const receipt = await screen.findByRole('region', {
+    name: 'Latest assignment receipt',
+  });
+  const current = within(receipt).getByRole('link', {
+    name: 'Open current record',
+  });
+  act(() => current.focus());
+  expect(await screen.findByRole('dialog')).toHaveTextContent(
+    'Current adapters',
+  );
+  expect(current).toHaveAttribute('href', candidate.path);
+  expect(mocks.submit).toHaveBeenCalledOnce();
+});

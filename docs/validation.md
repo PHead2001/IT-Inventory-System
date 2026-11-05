@@ -1904,3 +1904,18 @@ Historical performance and acceptance captures retain their original ports.
 The command-palette timeout proof admits only the same canonical API 45321 and
 database 45322 targets; its unit regressions reject the retired 54321/54322 ports
 as well as URL host overrides before integration clients are constructed.
+
+## W11 current-host source integration
+
+Spring popovers, disclosures and retained task panels reuse the reviewed W11
+artifact over the current protected provider tree. Existing task eligibility,
+draft/pending/uncertain guards, route readiness and accepted writes remain the
+authority; outgoing task instances receive only a presentation retirement veto.
+Transient generic confirmations supplement committed inline receipts. Label
+additions preserve one success announcement, and canvas obstruction collection
+uses its actual Document while retaining physical picks and packing budgets.
+See [spring feedback](spring-feedback.md). Source integration does not establish
+runtime acceptance or promote any audit disposition. Focused tests, fresh review,
+populated desktop/390px Full/Reduced both-theme proof and canonical exact-SHA
+certification remain pending. W10 Overview hero/stat tilt remains an explicit
+extension gap until its current surface-owner adaptation is integrated and proved.

@@ -1,3 +1,5 @@
+import { TransientFeedbackProvider } from '@/components/experience/transient-feedback';
+import { PeekProvider } from '@/features/peek/peek-provider';
 import Link from '@/components/experience/route-link';
 import { Boxes } from 'lucide-react';
 import { requireMember } from '@/lib/auth/session.server';
@@ -77,7 +79,18 @@ export default async function ApplicationLayout({
                         )}
                       />
                     </ProtectedPrivacyContent>
-                    <ShellAtmosphere>
+                    <PeekProvider
+                      actor={member.user_id}
+                      backend={new URL(process.env.NEXT_PUBLIC_SUPABASE_URL ?? '').origin}
+                    >
+                    <TransientFeedbackProvider
+                      actorId={member.user_id}
+                      backend={new URL(process.env.NEXT_PUBLIC_SUPABASE_URL ?? '').origin}
+                    >
+                    <ShellAtmosphere
+                      actorId={member.user_id}
+                      backend={new URL(process.env.NEXT_PUBLIC_SUPABASE_URL ?? '').origin}
+                    >
                       <a href="#main-content" className="experience-skip-link">
                         Skip to content
                       </a>
@@ -139,6 +152,8 @@ export default async function ApplicationLayout({
                         }) && <PrivateSpeedInsights />}
                       </ProtectedPrivacyContent>
                     </ShellAtmosphere>
+                    </TransientFeedbackProvider>
+                    </PeekProvider>
                   </CommandProvider>
                 </RouteMotionProvider>
               </MotionPreference>

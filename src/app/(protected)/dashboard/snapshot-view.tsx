@@ -1,4 +1,6 @@
 'use client';
+import { CountTicker } from '@/components/experience/count-ticker';
+import { ListEntrance } from '@/components/experience/list-feedback';
 import { useRouteTask } from '@/components/experience/route-pending';
 
 import { useState } from 'react';
@@ -105,7 +107,11 @@ export function DashboardSnapshotView({
         </div>
       </div>
 
-      <dl className="experience-stat-grid">
+      <ListEntrance
+        as="dl"
+        identities={['restocking', 'out-of-stock', 'monitored']}
+        className="experience-stat-grid"
+      >
         <div className="experience-spotlight experience-stat experience-surface">
           <dt className="experience-muted text-xs">Needs restocking</dt>
 
@@ -115,7 +121,7 @@ export function DashboardSnapshotView({
             }
           >
             {result.configuredCount ? (
-              result.needsRestockingCount
+              <CountTicker value={result.needsRestockingCount} initialZero />
             ) : (
               <span className="text-base">Not configured</span>
             )}
@@ -131,7 +137,7 @@ export function DashboardSnapshotView({
             }
           >
             {result.configuredCount ? (
-              result.outOfStockCount
+              <CountTicker value={result.outOfStockCount} initialZero />
             ) : (
               <span className="text-base">Not configured</span>
             )}
@@ -141,9 +147,11 @@ export function DashboardSnapshotView({
         <div className="experience-spotlight experience-stat experience-surface">
           <dt className="experience-muted text-xs">Monitored active items</dt>
 
-          <dd>{result.configuredCount}</dd>
+          <dd>
+            <CountTicker value={result.configuredCount} initialZero />
+          </dd>
         </div>
-      </dl>
+      </ListEntrance>
 
       <p className="experience-muted text-sm">
         {countLabel(result.configuredCount, 'monitored active quantity item')}.{' '}
@@ -250,7 +258,10 @@ export function DashboardSnapshotView({
           </div>
         ) : (
           <>
-            <ul className="experience-surface overflow-hidden">
+            <ListEntrance
+              identities={result.rows.map((row) => row.id)}
+              className="experience-surface overflow-hidden"
+            >
               {result.rows.map((row) => (
                 <li
                   key={row.id}
@@ -296,7 +307,7 @@ export function DashboardSnapshotView({
                   </strong>
                 </li>
               ))}
-            </ul>
+            </ListEntrance>
 
             <Pagination result={result} base="/dashboard" params={params} />
           </>

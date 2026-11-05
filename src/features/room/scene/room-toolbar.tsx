@@ -1,4 +1,6 @@
 'use client';
+
+import { SpringPresence } from '@/components/experience/spring-presence';
 import { afterTransitionCapture } from '@/components/forms/transition-capture';
 import {
   useEffect,
@@ -382,9 +384,13 @@ export function RoomToolbar({
           <MoreHorizontal aria-hidden="true" size={19} />
         </Button>
       </div>
-      {open && (
-        <div
-          ref={panel}
+      <SpringPresence
+          open={open}
+          instanceKey={panelId}
+          kind="popover"
+          retainExit
+          surfaceRef={panel}
+          onPresentationChange={onOverlayChange}
           id={panelId}
           role="region"
           aria-label="More map controls"
@@ -497,8 +503,7 @@ export function RoomToolbar({
           <Button variant="outline" onClick={() => close()}>
             Close controls
           </Button>
-        </div>
-      )}
+      </SpringPresence>
     </div>
   );
 }

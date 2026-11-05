@@ -777,3 +777,18 @@ ordinary receipt/history text; local timestamp displays keep the recorded `dateT
 ## Shared screen palette and interactive transitions
 
 The dark screen palette is centralized in semantic custom properties in `globals.css`, including workspace, Labels, Scan, form-designer, inventory-row and closet-preview colors. Minimal interactive defaults scope the transition property list without supplying a duration. Existing animated controls opt into the shared feedback duration/easing; route and panel motion remain a separate implementation. UI scene colors retain `readScenePalette`'s Three-compatible formats and update through coalesced root/OS observations without replacing the mounted scene. Unchanged palettes request no frame; invalid tokens retain the previous supported palette, and disposal retires queued reads. Physical room data, geometry and material defaults are unchanged. Print/PDF/export ink remains independent of screen theme. [Theme preferences](theme-preferences.md) describes Dark/Light/System persistence, parser-blocking scoped prepaint and bounded native reveals. Those controls add presentation context only; existing Proxy claims, protected member checks and privacy/navigation ownership remain authoritative. Source/component coverage is not rendered or hosted acceptance. The current integration retains the existing PR56 scene-authority guard; real WebGL continuity remains an acceptance requirement.
+
+## W11 current-host source integration
+
+Spring popovers, disclosures and retained task panels reuse the reviewed W11
+artifact over the current protected provider tree. Existing task eligibility,
+draft/pending/uncertain guards, route readiness and accepted writes remain the
+authority; outgoing task instances receive only a presentation retirement veto.
+Transient generic confirmations supplement committed inline receipts. Label
+additions preserve one success announcement, and canvas obstruction collection
+uses its actual Document while retaining physical picks and packing budgets.
+See [spring feedback](spring-feedback.md). Source integration does not establish
+runtime acceptance or promote any audit disposition. Focused tests, fresh review,
+populated desktop/390px Full/Reduced both-theme proof and canonical exact-SHA
+certification remain pending. W10 Overview hero/stat tilt remains an explicit
+extension gap until its current surface-owner adaptation is integrated and proved.

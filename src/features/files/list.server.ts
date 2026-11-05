@@ -16,7 +16,23 @@ const summarySchema = z.array(
 export type FileListSummary = z.infer<typeof summarySchema>[number];
 
 export async function getFileListSummaries(rows: InventoryResult[]) {
-  const { supabase } = await requireMember();
+  return readSummaries(await requireMember(), rows, undefined, false);
+}
+
+/** Reuse the authenticated caller and the handler's cancellation deadline. */
+export async function readFileListSummaries(
+  context: Awaited<ReturnType<typeof requireMember>>,
+  rows: Pick<InventoryResult, 'kind' | 'id'>[],
+  signal?: AbortSignal,
+) {
+  return readSummaries(context, rows, signal, true);
+}
+async function readSummaries(
+  { supabase }: Awaited<ReturnType<typeof requireMember>>,
+  rows: Pick<InventoryResult, 'kind' | 'id'>[],
+  signal: AbortSignal | undefined,
+  rawErrors: boolean,
+) {
   if (rows.length === 0) return [];
   const assetIds = [
     ...new Set(rows.filter((row) => row.kind === 'asset').map((row) => row.id)),
@@ -31,15 +47,21 @@ export async function getFileListSummaries(rows: InventoryResult[]) {
   const rpc = supabase.rpc as unknown as (
     name: string,
     args: Record<string, unknown>,
-  ) => Promise<{ data: unknown; error: unknown }>;
-  const { data, error } = await rpc.call(
-    supabase,
-    'inventory_file_list_thumbnails',
-    {
-      p_asset_ids: assetIds,
-      p_quantity_ids: quantityIds,
-    },
-  );
-  if (error) throw new Error('Inventory file summaries could not be loaded.');
+  ) => PromiseLike<{ data: unknown; error: unknown }> & {
+    abortSignal(
+      signal: AbortSignal,
+    ): PromiseLike<{ data: unknown; error: unknown }>;
+  };
+  const request = rpc.call(supabase, 'inventory_file_list_thumbnails', {
+    p_asset_ids: assetIds,
+    p_quantity_ids: quantityIds,
+  });
+  const { data, error } = await (signal
+    ? request.abortSignal(signal)
+    : request);
+  if (error) {
+    if (rawErrors) throw error;
+    throw new Error('Inventory file summaries could not be loaded.');
+  }
   return summarySchema.parse(data);
 }

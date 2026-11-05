@@ -1,4 +1,12 @@
 'use client';
+import { useTransientFeedbackOwner } from '@/components/experience/transient-feedback';
+import type { FeedbackTicket } from '@/components/experience/transient-feedback-state';
+import { SpringDisclosure } from '@/components/experience/spring-disclosure';
+import {
+  ConfirmedSuccess,
+  useFeedbackOwner,
+} from '@/components/experience/confirmed-success';
+
 import { afterTransitionCapture } from '@/components/forms/transition-capture';
 import {
   LoadingReveal,
@@ -63,6 +71,7 @@ import { creationSummary, normalizeCreationIntent } from './creation-summary';
 import {
   useReportTaskState,
   useTaskReset,
+  useTaskInteraction,
   useTaskDiscard,
 } from '@/features/inventory/components/task-state';
 import { MetadataFieldInput } from './field-value-input';
@@ -273,6 +282,7 @@ export function MetadataForm({
   const creating = !latest;
   const scopeId = useId();
   const [formActor] = useState(actorId);
+  const successOwner = useFeedbackOwner(formActor);
   const [formBackend] = useState(recoveryBackend);
   const actorStale = formActor !== actorId || formBackend !== recoveryBackend;
   const [cleanCore, setCleanCore] = useState(() =>
@@ -280,6 +290,12 @@ export function MetadataForm({
   );
   const [discardOpen, setDiscardOpen] = useState(false);
   const formRef = useRef<HTMLFormElement>(null);
+  const transient = useTransientFeedbackOwner(formRef);
+  const [toastAnnounced, setToastAnnounced] = useState(false);
+  const toastOperation = useRef<{
+    retry: string;
+    ticket: FeedbackTicket | null;
+  } | null>(null);
   const creationReviewHeading = useRef<HTMLHeadingElement>(null);
   const [inputGeneration, setInputGeneration] = useState(0);
   const cancelRef = useRef<HTMLButtonElement>(null);
@@ -329,6 +345,7 @@ export function MetadataForm({
   const [ackLegacy, setAckLegacy] = useState(false);
   const [state, setState] = useState<MutationState | CustodyState | null>(null);
   const resetTask = useTaskReset();
+  const canStartTask = useTaskInteraction();
   const taskCompleted = Boolean(state?.ok && (resetTask || !creating));
   const [openingQuantity, setOpeningQuantity] = useState('1');
   const [openingReason, setOpeningReason] = useState('');
@@ -1869,6 +1886,7 @@ export function MetadataForm({
   const validation = useFormValidation(collectValidationIssues);
   const submit = (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+    if (!canStartTask()) return;
     if (taskCompleted || noChanges) return;
     if (
       !uncertain &&
@@ -1920,6 +1938,7 @@ export function MetadataForm({
       setReview(true);
       if (kind === 'asset' && core.serial_number.trim()) {
         startTask(async () => {
+          if (!canStartTask()) return;
           try {
             const matches = await findDuplicateSerials(
               core.serial_number,
@@ -2053,10 +2072,20 @@ export function MetadataForm({
       return true;
     };
     if (!persistEditCommand(commandPayload, requestId)) return;
+    if (!creating && toastOperation.current?.retry !== requestId)
+      toastOperation.current = {
+        retry: requestId,
+        ticket: transient.begin(requestId),
+      };
+    const completionTicket =
+      toastOperation.current?.retry === requestId
+        ? toastOperation.current.ticket
+        : null;
     setReceipt({ key, id: requestId });
     dispatched.current = true;
     reportTask({ pending: true });
     startTask(async () => {
+      if (!canStartTask()) return;
       let result: MutationState | CustodyState;
       try {
         result =
@@ -2321,6 +2350,13 @@ export function MetadataForm({
       );
       if (mountedActor.current !== formActor) return;
       setState(result);
+      if (result.ok && result.changed && result.eventId && !creating)
+        setToastAnnounced(
+          transient.confirm(completionTicket, requestId, {
+            kind: 'details-saved',
+            eventId: result.eventId,
+          }),
+        );
       if (result.ok) {
         setReview(false);
         setReceipt(null);
@@ -2995,10 +3031,13 @@ export function MetadataForm({
                         </div>
                       ))}
                     </dl>
-                    <details className="mt-3">
-                      <summary className="min-h-11 cursor-pointer py-2 font-semibold">
-                        Record details & custom answers
-                      </summary>
+                    <SpringDisclosure
+                      className="mt-3"
+                      summaryProps={{
+                        className: 'min-h-11 cursor-pointer py-2 font-semibold',
+                      }}
+                      summary={<>Record details & custom answers</>}
+                    >
                       <dl className="space-y-3">
                         {summary.details.map((row, index) => (
                           <div
@@ -3023,7 +3062,7 @@ export function MetadataForm({
                           </div>
                         ))}
                       </dl>
-                    </details>
+                    </SpringDisclosure>
                   </>
                 );
               })()
@@ -3137,7 +3176,15 @@ export function MetadataForm({
       )}
       {!preview && state?.ok && (
         <>
-          <p role="status">
+          <p
+            role={toastAnnounced ? undefined : 'status'}
+            className="experience-spotlight"
+          >
+            <ConfirmedSuccess
+              owner={successOwner}
+              eventId={state.eventId}
+              changed={state.changed}
+            />
             {state.changed ? 'Details saved.' : 'Nothing changed.'}
           </p>
           {!creating && (

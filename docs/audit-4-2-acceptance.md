@@ -839,3 +839,18 @@ Sign-out and fixture cleanup completed with zero unexpected writes. The new fict
 Earlier reference-performance evidence remains Git revision `b781b8530410494acb3dcf81d3514df775441731` ([receipt 6591034813](https://github.com/PHead2001/IT-Inventory-System/pull/56#issuecomment-6591034813)), reusable only for the unchanged scene/runtime component contract. The corrected retained evidence note has SHA-256 `08190930407E951F232EE75B4E20AFC2F97DCB0F29806E20F00E7481423581EB`; that digest is not a Git revision or performance result. Physical-phone, high-DPR, GPU execution and physical-printer verification remain unclaimed.
 
 PR57's local integration starts from `e4f28559ce8ec0c185447c2c79dd3cb1248c5114` and the main merge above. Automatic code/test merges and this acceptance reconciliation do not establish a passing joined candidate. The complete 76-row/75-base-ID scope, earlier per-ID histories, scoped dispositions and remaining gates are preserved, including main's merged PR52/E21 status for A304/A309 and PR57's command/evidence additions. A301/W20, PR62 and held scope still require their own exact-candidate and acceptance proof. No integrated staging release, production promotion or whole-goal completion is claimed.
+
+## W11 current-host source integration
+
+Spring popovers, disclosures and retained task panels reuse the reviewed W11
+artifact over the current protected provider tree. Existing task eligibility,
+draft/pending/uncertain guards, route readiness and accepted writes remain the
+authority; outgoing task instances receive only a presentation retirement veto.
+Transient generic confirmations supplement committed inline receipts. Label
+additions preserve one success announcement, and canvas obstruction collection
+uses its actual Document while retaining physical picks and packing budgets.
+See [spring feedback](spring-feedback.md). Source integration does not establish
+runtime acceptance or promote any audit disposition. Focused tests, fresh review,
+populated desktop/390px Full/Reduced both-theme proof and canonical exact-SHA
+certification remain pending. W10 Overview hero/stat tilt remains an explicit
+extension gap until its current surface-owner adaptation is integrated and proved.

@@ -1,4 +1,6 @@
 'use client';
+import { invalidatePeeks } from '@/features/peek/invalidation';
+import { usePeekScope } from '@/features/peek/peek-provider';
 import { afterTransitionCapture } from '@/components/forms/transition-capture';
 import {
   LoadingAnnouncement,
@@ -174,6 +176,8 @@ function BoundFilesPanel({
   parentName: string;
   initialState: InventoryFileCardsState;
 }) {
+  const peekScope = usePeekScope();
+  const panelHost = useRef<HTMLElement>(null);
   const [client] = useState(createSupabaseBrowserClient);
   const [cards, setCards] = useState<Card[]>(() =>
     initialState.status === 'ready' ? initialState.envelope.files : [],
@@ -447,6 +451,8 @@ function BoundFilesPanel({
   ) {
     if (!collectionKnown)
       throw new Error('Load current files before publishing.');
+    const presentationCurrent = peekScope?.captureCurrent();
+    const presentationHost = panelHost.current;
     const response = await fetch('/api/inventory-files/validate', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -477,6 +483,12 @@ function BoundFilesPanel({
       }
       throw new Error(body.message ?? 'Validation could not be confirmed.');
     }
+    if (
+      mounted.current &&
+      presentationHost?.isConnected &&
+      presentationCurrent?.()
+    )
+      invalidatePeeks();
     if (replacedId) {
       invalidatedFiles.current.add(replacedId);
       setReplace((current) => (current === replacedId ? '' : current));
@@ -664,6 +676,8 @@ function BoundFilesPanel({
   async function remove() {
     if (!removal || removalLock.current || removal.phase === 'stale') return;
     const intent = removal;
+    const presentationCurrent = peekScope?.captureCurrent();
+    const presentationHost = panelHost.current;
     removalLock.current = true;
     setBusy(true);
     setRemoval({ ...intent, phase: 'sending' });
@@ -704,6 +718,8 @@ function BoundFilesPanel({
         return;
       }
       // Acknowledgement is permanent logical success. Refresh/cleanup cannot undo it.
+      if (presentationHost?.isConnected && presentationCurrent?.())
+        invalidatePeeks();
       invalidatedFiles.current.add(intent.card.id);
       setCards((current) =>
         current.filter((entry) => entry.id !== intent.card.id),
@@ -802,6 +818,7 @@ function BoundFilesPanel({
         active={busy || loading}
       />
       <section
+        ref={panelHost}
         aria-label="Inventory files"
         aria-busy={busy || loading}
         className="experience-surface my-5 min-w-0 p-4"

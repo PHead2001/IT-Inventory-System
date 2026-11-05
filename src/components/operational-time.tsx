@@ -1,4 +1,5 @@
 'use client';
+import { SpringDisclosure } from '@/components/experience/spring-disclosure';
 
 import { CopyTechnicalDetails } from './copy-technical-details';
 import {
@@ -72,19 +73,24 @@ function RelativeTimestamp({
   if (!timestamp) return <span className={className}>Time unavailable</span>;
   const label = relativeTimeLabel(timestamp.dateTime, now) ?? timestamp.text;
   return (
-    <details className={className}>
-      <summary
-        className="min-h-11 cursor-pointer py-2 tabular-nums"
-        title={timestamp.text}
-      >
-        <time dateTime={timestamp.dateTime}>{label}</time>
-        <span className="sr-only"> Recorded {timestamp.accessibleText}</span>
-      </summary>
+    <SpringDisclosure
+      className={className}
+      summaryProps={{
+        className: 'min-h-11 cursor-pointer py-2 tabular-nums',
+        title: timestamp.text,
+      }}
+      summary={
+        <>
+          <time dateTime={timestamp.dateTime}>{label}</time>
+          <span className="sr-only"> Recorded {timestamp.accessibleText}</span>
+        </>
+      }
+    >
       <p className="max-w-full break-words text-xs">{timestamp.text}</p>
       <CopyTechnicalDetails
         details={`Recorded instant: ${timestamp.dateTime}`}
       />
-    </details>
+    </SpringDisclosure>
   );
 }
 function ExactTimestamp({

@@ -1,0 +1,15 @@
+# List, count and confirmed feedback
+
+This slice implements presentation over current verified server data. It does not change inventory authority, counts, mutation payloads, revisions or retry identity.
+
+ListEntrance fades the first10 new stable identities by8px,100ms each and30ms apart (370ms bound). Existing or reordered identities do not replay. The container keeps its original semantic role, focus/scroll owner and logical record keys. Current hosts are inventory holding rows, History events, Labels search, Sites, Settings cards, legacy Overview tiles/attention rows and conventional location browser/picker/settings trees. U303 grouped inventory, U313 replacement history filters and A403 replacement Overview must retain those opt-ins when they replace these hosts.
+
+CountTicker uses500ms integer BigInt interpolation. The exact final server string is always the only accessible value; visual intermediates and intrinsic endpoint footprints are aria-hidden. Unsafe numeric inputs do not gain invented precision. Only current Overview tiles opt into an initial0. Current adapters cover quantity available/assigned/recorded summaries, storage holding quantities and inventory matching-row/holding counts. Room S306 badges, assigned-site holding tickers and A501 totals are not claimed by this slice.
+
+ConfirmedSuccess appears only for a committed ok result with changed=true and an event identity. Owner memory retains one recent presentation identity per fixed channel; replayed/no-change/restored results do not replay celebration. Full uses a220ms two-stroke extension; Reduced keeps the static check. Changed verified holding snapshots use a140ms cyan pulse. This is a comparison of observed server snapshots, never a claim about which actor caused a change. The accent uses the existing theme token. No editable/control element is itself transformed by success feedback.
+
+Current receipt adapters cover normal Move/Receive/Count/Retire/Restore/Archive, custody completion and Details saved. Label additions bump only after accepted queue additions; a generated-sheet check requires current validated records and a successfully prepared sheet. Closing the browser print dialog never implies printed paper or PDF delivery. Scan-and-assign/A501 Finish batch and assigned-site pulse adapters remain separate work.
+
+Existing strict presentation admission owns hidden/inert/detached/privacy-generation/actor retirement and cancels stale callbacks. Motion is suppressed under effective Reduced or hidden state; data stays visible and exact. These existing shared donor helpers are extracted with their tests, not redesigned. Root and independent review must verify the presentation boundary on integration.
+
+Source tests are only part of acceptance. Populated desktop and390px, Full/Reduced and both themes, current count changes, errors and real label generation still require before/after browser evidence. No W05/W06/W07 is marked complete until every audit host and dependency has accepted evidence.

@@ -1,4 +1,5 @@
 'use client';
+import { PeekLink } from '@/features/peek/peek-link';
 import {
   LoadingAnnouncement,
   LoadingReveal,
@@ -57,7 +58,8 @@ import {
   type AssignmentRecovery,
   type AssignmentScope,
 } from './assign-recovery';
-import { AssignCamera } from './assign-camera';
+import { AssignCamera, type CameraOutcome } from './assign-camera';
+import { useScanFeedback } from '@/components/experience/scan-feedback';
 import { LocationPicker } from '@/features/locations/location-picker';
 import { countLabel } from '@/lib/count';
 import {
@@ -101,6 +103,9 @@ function AssignmentFields({
   initialSiteId,
   siteIssue,
 }: Props) {
+  const feedbackHost = useRef<HTMLDivElement>(null);
+  const feedback = useScanFeedback(feedbackHost, actorId + ':' + backend);
+  const [scanIssue, setScanIssue] = useState(false);
   const observeRouteActionResult = useRouteActionResult();
   const privacy = usePrivacyReadiness();
   const cleanupRevision = useAuthoritativeCleanupRevision();
@@ -128,6 +133,9 @@ function AssignmentFields({
   );
   const stateRef = useRef(state);
   const generation = useRef(0);
+  const cameraOutcome = useRef<{ token: number; cue: CameraOutcome } | null>(
+    null,
+  );
   const mounted = useRef(true);
   const submitting = useRef(false);
   const [input, setInput] = useState('');
@@ -718,6 +726,12 @@ function AssignmentFields({
     setRestoring(false);
     dispatch({ type: 'context', context, generation: ++generation.current });
   };
+  const lookupFeedback = (kind: 'no-match' | 'blocked', token: number) => {
+    const camera = cameraOutcome.current;
+    // A retired camera capability must stay silent, never borrow manual trust.
+    if (camera?.token === token) return camera.cue(kind, `lookup:${token}`);
+    return feedback(kind, `lookup:${token}`);
+  };
   const inspect = async (match: ScanMatch, token: number) => {
     const context = stateRef.current.context;
     if (!context) return;
@@ -729,6 +743,8 @@ function AssignmentFields({
       });
       if (!alive() || generation.current !== token) return;
       if (!result.ok) {
+        setScanIssue(true);
+        lookupFeedback('blocked', token);
         updateEntry(
           { status: 'failed', message: result.message.slice(0, 500) },
           { historical: null },
@@ -753,6 +769,10 @@ function AssignmentFields({
           });
           return;
         }
+        if (assignmentProblem(result.candidate, sourceId, '1')) {
+          setScanIssue(true);
+          lookupFeedback('blocked', token);
+        }
         dispatch({
           type: 'candidate',
           generation: token,
@@ -762,6 +782,8 @@ function AssignmentFields({
       }
     } catch {
       if (alive() && generation.current === token) {
+        setScanIssue(true);
+        lookupFeedback('blocked', token);
         updateEntry(
           { status: 'failed', message: 'Inspection could not complete.' },
           { historical: null },
@@ -780,6 +802,7 @@ function AssignmentFields({
     lookupMode = mode,
     page = 1,
     paging = false,
+    outcome?: CameraOutcome,
   ) => {
     const current = stateRef.current;
     if (
@@ -830,7 +853,9 @@ function AssignmentFields({
     cancelRef.current?.focus();
     resetReceiptRead();
     resolving.current = true;
+    setScanIssue(false);
     const token = ++generation.current;
+    cameraOutcome.current = outcome ? { token, cue: outcome } : null;
     dispatch({ type: 'lookup', generation: token });
     try {
       const resolution = await findAssignmentRecords({
@@ -841,6 +866,8 @@ function AssignmentFields({
       });
       if (!alive() || generation.current !== token) return;
       if (!resolution.ok) {
+        setScanIssue(true);
+        lookupFeedback('blocked', token);
         updateEntry({
           status: 'failed',
           message: resolution.message.slice(0, 500),
@@ -857,6 +884,10 @@ function AssignmentFields({
       )
         await inspect(resolution.matches[0], token);
       else {
+        if (!resolution.matches.length) {
+          setScanIssue(true);
+          lookupFeedback('no-match', token);
+        }
         if (!resolution.matches.length)
           updateEntry({
             status: 'failed',
@@ -883,6 +914,8 @@ function AssignmentFields({
       }
     } catch {
       if (alive() && generation.current === token) {
+        setScanIssue(true);
+        lookupFeedback('blocked', token);
         updateEntry({
           status: 'failed',
           message: 'Lookup could not complete.',
@@ -1062,6 +1095,8 @@ function AssignmentFields({
           setReady(false);
         } else recovered.current = null;
         dispatch({ type: 'committed', result });
+        if (result.changed && current.phase === 'review')
+          feedback('assignment', `assignment:${result.eventId}`);
         setInput('');
       } else if (
         custodyOutcomeUnresolved(result, current.phase === 'unknown')
@@ -1092,6 +1127,9 @@ function AssignmentFields({
           return;
         }
         recovered.current = null;
+        setScanIssue(true);
+        if (current.phase === 'review')
+          feedback('blocked', `rejected:${command.requestId}`);
         dispatch({
           type: 'rejected',
           message:
@@ -1243,7 +1281,7 @@ function AssignmentFields({
       </p>
     );
   return (
-    <div className="space-y-5">
+    <div ref={feedbackHost} className="space-y-5">
       <section
         aria-label="Assignment batch context"
         className={panel + ' space-y-3'}
@@ -1492,17 +1530,34 @@ function AssignmentFields({
       </section>
       {ready && !fatalStorageError && !batch?.finished && (
         <AssignCamera
-          scope={actorId + ':' + backend + ':' + mode}
-          onDetection={(value) => {
-            if (
-              gate.observe(
-                value,
-                freshReady &&
-                  stateRef.current.phase === 'ready' &&
-                  !!stateRef.current.context,
-              )
-            )
-              void lookup(value!, mode === 'serial' ? 'serial' : 'identifier');
+          scope={
+            actorId +
+            ':' +
+            backend +
+            ':' +
+            mode +
+            ':' +
+            JSON.stringify(state.context)
+          }
+          inspecting={state.phase === 'lookup' || restoring}
+          searching={state.phase === 'ready'}
+          failed={scanIssue || !!problem}
+          onDetection={(value, outcome) => {
+            const accepted = gate.observe(
+              value,
+              freshReady &&
+                stateRef.current.phase === 'ready' &&
+                !!stateRef.current.context,
+            );
+            if (accepted)
+              void lookup(
+                value!,
+                mode === 'serial' ? 'serial' : 'identifier',
+                1,
+                false,
+                outcome,
+              );
+            return accepted;
           }}
         />
       )}
@@ -1516,6 +1571,7 @@ function AssignmentFields({
         aria-busy={state.phase === 'lookup' || restoring}
         onSubmit={(e) => {
           e.preventDefault();
+          feedback.prime(e.nativeEvent.isTrusted);
           void lookup(input);
         }}
       >
@@ -1654,9 +1710,11 @@ function AssignmentFields({
                   aria-describedby={
                     match.context ? `assign-match-context-${index}` : undefined
                   }
-                  onClick={() => {
+                  onClick={(event) => {
                     if (!alive() || resolving.current || submitting.current)
                       return;
+                    feedback.prime(event.nativeEvent.isTrusted);
+                    cameraOutcome.current = null;
                     cancelRef.current?.focus();
                     resetReceiptRead();
                     resolving.current = true;
@@ -1831,7 +1889,10 @@ function AssignmentFields({
                   (state.phase !== 'unknown' &&
                     (!!problem || state.phase !== 'review'))
                 }
-                onClick={() => void confirm()}
+                onClick={(event) => {
+                  feedback.prime(event.nativeEvent.isTrusted);
+                  void confirm();
+                }}
               >
                 {state.phase === 'pending'
                   ? 'Assigning…'
@@ -1848,12 +1909,13 @@ function AssignmentFields({
                   Inspect current state
                 </Button>
               )}
-              <Link
+              <PeekLink
+                peekTarget={{ kind: candidate.kind, id: candidate.id }}
                 className="inline-flex min-h-11 items-center text-cyan-300 underline"
                 href={candidate.path}
               >
                 Open inventory record
-              </Link>
+              </PeekLink>
             </div>
           </section>
         )}
@@ -1948,6 +2010,20 @@ function AssignmentFields({
             </>
           )}
           {receiptIssue && <p role="status">{receiptIssue}</p>}
+          <PeekLink
+            peekTarget={{
+              kind: state.receipt.kind,
+              id: state.receipt.entityId,
+            }}
+            href={
+              '/inventory/' +
+              (state.receipt.kind === 'asset' ? 'assets/' : 'quantity/') +
+              state.receipt.entityId
+            }
+            className="inline-flex min-h-11 items-center text-cyan-300 underline"
+          >
+            Open current record
+          </PeekLink>
         </section>
       )}
     </div>

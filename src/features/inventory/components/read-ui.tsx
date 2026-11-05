@@ -1,3 +1,11 @@
+import { CountTicker } from '@/components/experience/count-ticker';
+import { ListEntrance } from '@/components/experience/list-feedback';
+import { PeekLink } from '@/features/peek/peek-link';
+import { SpringDisclosure } from '@/components/experience/spring-disclosure';
+import {
+  HoldingSnapshotList,
+  HoldingPulseGraphic,
+} from '@/components/experience/holding-feedback';
 import { CopyTechnicalDetails } from '@/components/copy-technical-details';
 import {
   historySummary,
@@ -57,7 +65,9 @@ export function InventoryCount({
 }) {
   return (
     <div className="experience-muted text-sm tabular-nums">
-      <p>{countLabel(result.total, 'matching row')}</p>
+      <p>
+        <CountTicker value={result.total} unit="matching row" />
+      </p>
       {result.rows.length > 0 &&
         (!compact ||
           result.rows.length > 1 ||
@@ -82,7 +92,8 @@ export function InventoryCount({
 export function LocationLink({ location }: { location: LocationRef }) {
   return (
     <span className="inline-flex min-w-0 max-w-full flex-wrap items-center gap-x-3 align-middle">
-      <Link
+      <PeekLink
+        peekTarget={{ kind: 'location', code: location.code }}
         className={`break-words text-cyan-300 underline ${styles.textTarget}`}
         aria-label={`${location.breadcrumb} (${location.code})`}
         href={'/locations/' + encodeURIComponent(location.code)}
@@ -96,7 +107,7 @@ export function LocationLink({ location }: { location: LocationRef }) {
             </span>
           </>
         )}
-      </Link>
+      </PeekLink>
       {location.code.length > 24 && <LocationCode code={location.code} />}
       <ShowInRoom location={location} />
     </span>
@@ -127,7 +138,20 @@ export function InventoryRows({
     if (key) holdingCounts.set(key, (holdingCounts.get(key) ?? 0) + 1);
   });
   return (
-    <ul className={`experience-surface ${styles.list}`}>
+    <HoldingSnapshotList
+      entrance
+      scope={returnTo ?? currentLocationId ?? 'inventory'}
+      snapshot={rows.map((row) => ({
+        id: JSON.stringify([
+          row.kind,
+          row.id,
+          row.location?.id ?? null,
+          row.site?.id ?? null,
+        ]),
+        value: String(row.quantity ?? 1),
+      }))}
+      className={`experience-surface ${styles.list}`}
+    >
       {rows.map((row, index) => {
         const summary = fileSummaries.find(
           (item) => item.kind === row.kind && item.id === row.id,
@@ -151,8 +175,9 @@ export function InventoryRows({
               (row.location?.id ?? '') +
               (row.site?.id ?? '')
             }
-            className={`experience-spotlight ${styles.row}`}
+            className={`experience-spotlight relative ${styles.row}`}
           >
+            <HoldingPulseGraphic />
             <div
               className={`${styles.rowGrid}${hideCurrentLocation ? ' ' + styles.rowGridWithoutLocation : ''}`}
             >
@@ -218,9 +243,11 @@ export function InventoryRows({
                     row.kind === 'asset' ? 'experience-code' : undefined
                   }
                 >
-                  {row.kind === 'quantity'
-                    ? countLabel(row.quantity ?? 0, 'unit')
-                    : row.assetTag || 'Untagged'}
+                  {row.kind === 'quantity' ? (
+                    <CountTicker value={row.quantity ?? 0} unit="unit" />
+                  ) : (
+                    row.assetTag || 'Untagged'
+                  )}
                 </strong>
                 {row.kind === 'quantity' &&
                   row.availableQuantity !== undefined && (
@@ -306,18 +333,22 @@ export function InventoryRows({
                       </span>
                     ))}
                   </span>
-                  <Link href={recordHref} className={styles.textTarget}>
+                  <PeekLink
+                    peekTarget={{ kind: row.kind, id: row.id }}
+                    href={recordHref}
+                    className={styles.textTarget}
+                  >
                     {row.customPreview.truncated
                       ? 'View all details'
                       : 'Full details'}
-                  </Link>
+                  </PeekLink>
                 </span>
               )}
             </div>
           </li>
         );
       })}
-    </ul>
+    </HoldingSnapshotList>
   );
 }
 export function Pagination({
@@ -366,6 +397,26 @@ export function Pagination({
     </nav>
   );
 }
+function HistoryDetails({
+  compact,
+  children,
+}: {
+  compact: boolean;
+  children: ReactNode;
+}) {
+  return compact ? (
+    <SpringDisclosure
+      summary="View event details"
+      summaryProps={{
+        className: 'min-h-11 cursor-pointer py-2 text-sm font-semibold',
+      }}
+    >
+      {children}
+    </SpringDisclosure>
+  ) : (
+    <div>{children}</div>
+  );
+}
 export function HistoryList({
   events,
   compact = false,
@@ -379,11 +430,14 @@ export function HistoryList({
   /** Main history list only; detail/event timelines remain ordinary. */
   returnTo?: string;
 }) {
-  const DetailTag = compact ? 'details' : 'div';
   if (!events.length)
     return <p className={panel}>No history matches these filters.</p>;
   return (
-    <ol className="space-y-3">
+    <ListEntrance
+      as="ol"
+      identities={events.map((event) => event.kind + ':' + event.id)}
+      className="space-y-3"
+    >
       {events.map((event) => (
         <li
           key={event.kind + event.id}
@@ -414,7 +468,8 @@ export function HistoryList({
                 {event.entityName}
               </HistoryRecordLink>
             ) : (
-              <Link
+              <PeekLink
+                peekTarget={{ kind: event.kind, id: event.entityId }}
                 className={`text-cyan-300 underline ${styles.textTarget}`}
                 href={
                   '/inventory/' +
@@ -424,19 +479,14 @@ export function HistoryList({
                 }
               >
                 {event.entityName}
-              </Link>
+              </PeekLink>
             )}{' '}
             · {event.actorName}
           </p>
           {historySummary(event) && (
             <p className="mt-2 text-sm">{historySummary(event)}</p>
           )}
-          <DetailTag>
-            {compact && (
-              <summary className="min-h-11 cursor-pointer py-2 text-sm font-semibold">
-                View event details
-              </summary>
-            )}
+          <HistoryDetails compact={compact}>
             {event.reason && (
               <p className="mt-2 whitespace-pre-wrap break-words text-sm">
                 Reason: {event.reason}
@@ -553,10 +603,11 @@ export function HistoryList({
                 </Link>
               </p>
             )}
-            <details className="mt-3 text-xs text-slate-400">
-              <summary className="min-h-11 cursor-pointer py-2">
-                Technical event details
-              </summary>
+            <SpringDisclosure
+              className="mt-3 text-xs text-slate-400"
+              summaryProps={{ className: 'min-h-11 cursor-pointer py-2' }}
+              summary={<>Technical event details</>}
+            >
               <CopyTechnicalDetails
                 details={`Event: ${event.kind}:${event.id}\nOperation type: ${event.eventType}\nRecord: ${event.entityId}\nCustody event: ${event.assignment?.eventId ?? 'None'}\nRecorded instant: ${event.at}`}
               />
@@ -579,7 +630,7 @@ export function HistoryList({
                   recorded name snapshots.
                 </p>
               )}
-            </details>
+            </SpringDisclosure>
             {linkToEvent && (
               <Link
                 className={`py-3 text-sm text-cyan-300 underline ${styles.textTarget}`}
@@ -588,9 +639,9 @@ export function HistoryList({
                 Open recorded event
               </Link>
             )}
-          </DetailTag>
+          </HistoryDetails>
         </li>
       ))}
-    </ol>
+    </ListEntrance>
   );
 }

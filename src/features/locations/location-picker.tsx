@@ -1,4 +1,7 @@
 'use client';
+
+import { SpringPresence } from '@/components/experience/spring-presence';
+import { ListEntrance } from '@/components/experience/list-feedback';
 import { afterTransitionCapture } from '@/components/forms/transition-capture';
 
 import {
@@ -751,7 +754,7 @@ export function LocationPicker({
           </MapLoadingContext>
         </InventoryCaptureRegionsContext>
       )}
-      {(validationMessage || visibleOpen) && (
+      {(validationMessage || visibleOpen || !disabled) && (
         <InventoryCaptureGroup
           region={
             mode === 'source'
@@ -765,8 +768,11 @@ export function LocationPicker({
               {validationMessage}
             </p>
           )}
-          {visibleOpen && (
-            <div
+          <SpringPresence
+              open={visibleOpen}
+              instanceKey={searchId}
+              kind="popover"
+              retainExit
               style={
                 {
                   '--picker-left': panelPosition.left + 'px',
@@ -825,7 +831,14 @@ export function LocationPicker({
                 onKeyDown={searchKey}
                 className="min-h-11 w-full rounded-md border border-slate-600 bg-slate-900 px-3 text-slate-100 outline-none focus-visible:border-cyan-400"
               />
-              <div
+              <ListEntrance
+                as="div"
+                identities={
+                  searching
+                    ? options.map((location) => location?.id ?? 'all')
+                    : treeItems.map((row) => row?.location.id ?? 'all')
+                }
+                pending={loading || !!loadError}
                 id={listId}
                 role={searching ? 'listbox' : 'tree'}
                 aria-label={label}
@@ -1035,9 +1048,8 @@ export function LocationPicker({
                       </div>
                     );
                   })}
-              </div>
-            </div>
-          )}
+              </ListEntrance>
+          </SpringPresence>
         </InventoryCaptureGroup>
       )}
     </div>

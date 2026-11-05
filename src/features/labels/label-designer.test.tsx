@@ -1,3 +1,29 @@
+import { PeekProvider } from '@/features/peek/peek-provider';
+import {
+  TransientFeedbackProvider,
+  useTransientFeedbackOwner,
+} from '@/components/experience/transient-feedback';
+import { useRef } from 'react';
+const additionSignals = vi.hoisted(() => ({ values: [] as (string | null)[] }));
+vi.mock('@/components/experience/confirmed-success', async (importOriginal) => {
+  const actual =
+    await importOriginal<
+      typeof import('@/components/experience/confirmed-success')
+    >();
+  return {
+    ...actual,
+    AddedBump: (props: React.ComponentProps<typeof actual.AddedBump>) => {
+      additionSignals.values.push(props.additionId);
+      return <actual.AddedBump {...props} />;
+    },
+  };
+});
+import { animate } from 'motion/mini';
+import { PrivacyReadinessContext } from '@/components/auth/privacy-readiness';
+import { MotionPreference } from '@/components/experience/motion-preference';
+import { RouteMotionProvider } from '@/components/experience/route-motion';
+import { readPrivacyRevocationRevision } from '@/features/scan/assign-batch';
+vi.mock('motion/mini', () => ({ animate: vi.fn(() => ({ cancel: vi.fn() })) }));
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import userEvent from '@testing-library/user-event';
 import {
@@ -3183,12 +3209,16 @@ it('defers label restoration and changed-actor bootstrap while privacy verificat
   const { PrivacyReadinessContext } =
     await import('@/components/auth/privacy-readiness');
   const get = vi.spyOn(Storage.prototype, 'getItem');
+  // Presentation may read only the public personal motion preference. All other
+  // storage, including either actor's private queue, stays prohibited while blocked.
+  const privateReads = () =>
+    get.mock.calls.filter(([key]) => key !== 'it-inventory-reduce-motion');
   const view = render(
     <PrivacyReadinessContext value={{ ready: false, generation: 'first' }}>
       <LabelDesigner {...props} />
     </PrivacyReadinessContext>,
   );
-  expect(get).not.toHaveBeenCalled();
+  expect(privateReads()).toEqual([]);
   expect(mocks.getQueueRecords).not.toHaveBeenCalled();
   view.rerender(
     <PrivacyReadinessContext value={{ ready: true, generation: 'first' }}>
@@ -3207,19 +3237,19 @@ it('defers label restoration and changed-actor bootstrap while privacy verificat
       <LabelDesigner {...props} />
     </PrivacyReadinessContext>,
   );
-  expect(get).not.toHaveBeenCalled();
+  expect(privateReads()).toEqual([]);
   view.rerender(
     <PrivacyReadinessContext value={{ ready: true, generation: 'first' }}>
       <LabelDesigner {...props} />
     </PrivacyReadinessContext>,
   );
-  expect(get).not.toHaveBeenCalled();
+  expect(privateReads()).toEqual([]);
   view.rerender(
     <PrivacyReadinessContext value={{ ready: false, generation: 'first' }}>
       <LabelDesigner {...props} memberId="other-actor" />
     </PrivacyReadinessContext>,
   );
-  expect(get).not.toHaveBeenCalled();
+  expect(privateReads()).toEqual([]);
   expect(
     screen.queryByRole('region', { name: 'Label queue' }),
   ).not.toBeInTheDocument();
@@ -3396,4 +3426,487 @@ it('rejects persistence from a late old-instance refresh after cleanup before th
   await waitFor(() =>
     expect(JSON.parse(sessionStorage.getItem(key)!).entries).toEqual([]),
   );
+});
+
+it('bumps only a confirmed explicit addition, checks actual generated media, and never celebrates afterprint', async () => {
+  vi.mocked(animate).mockClear();
+  localStorage.clear();
+  document.documentElement.dataset.motion = 'full';
+  const media = Object.getOwnPropertyDescriptor(window, 'matchMedia');
+  Object.defineProperty(window, 'matchMedia', {
+    configurable: true,
+    value: () => ({
+      matches: false,
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+    }),
+  });
+  Object.defineProperty(Element.prototype, 'animate', {
+    configurable: true,
+    value: vi.fn(),
+  });
+  vi.spyOn(Element.prototype, 'getClientRects').mockReturnValue([
+    new DOMRect(0, 0, 100, 30),
+  ] as unknown as DOMRectList);
+  mocks.searchLabelRecords.mockResolvedValue(labelResults([quantity]));
+  mocks.getQueueRecords.mockResolvedValue([quantity]);
+  const app = () => (
+    <PrivacyReadinessContext
+      value={{
+        ready: true,
+        visible: true,
+        generation: 'success-test',
+        verifiedEpoch: assignmentEpoch(),
+        revocationRevision: readPrivacyRevocationRevision(),
+      }}
+    >
+      <MotionPreference>
+        <RouteMotionProvider actorId="member-a">
+          <TransientFeedbackProvider
+            actorId="member-a"
+            backend="https://inventory.example.test"
+          >
+            <LabelDesigner {...props} initial={[]} />
+          </TransientFeedbackProvider>
+        </RouteMotionProvider>
+      </MotionPreference>
+    </PrivacyReadinessContext>
+  );
+  const bumpCalls = () =>
+    vi
+      .mocked(animate)
+      .mock.calls.filter(([node]) =>
+        (node as Element).hasAttribute('data-added-bump'),
+      );
+  const drawCalls = () =>
+    vi
+      .mocked(animate)
+      .mock.calls.filter(([node]) =>
+        (node as Element).hasAttribute('data-success-stroke'),
+      );
+  const view = render(app());
+  try {
+    const add = await screen.findByRole('button', { name: 'Add to queue' });
+    expect(bumpCalls()).toHaveLength(0);
+    expect(drawCalls()).toHaveLength(0);
+    fireEvent.click(add);
+    await screen.findByRole('button', { name: 'In queue' });
+    fireEvent.click(screen.getByRole('button', { name: 'In queue' }));
+    await waitFor(() => expect(printButton()).toBeEnabled());
+    expect(bumpCalls()).toHaveLength(1);
+    expect(document.querySelectorAll('[data-feedback-card]')).toHaveLength(1);
+    expect(document.querySelector('[data-feedback-card]')).toHaveTextContent(
+      'Added 1 label to the queue.',
+    );
+    expect(drawCalls()).toHaveLength(2);
+    expect(document.querySelector('[data-added-bump]')).toHaveTextContent(
+      '1 distinct record · 1 label',
+    );
+    const drawn = drawCalls().length;
+    fireEvent.click(printButton());
+    await waitFor(() => expect(window.print).toHaveBeenCalledOnce());
+    act(() => window.dispatchEvent(new Event('afterprint')));
+    expect(drawCalls()).toHaveLength(drawn);
+    expect(bumpCalls()).toHaveLength(1);
+    expect(document.querySelectorAll('[data-feedback-card]')).toHaveLength(1);
+    view.unmount();
+    render(app());
+    await screen.findByRole('button', { name: 'In queue' });
+    expect(document.querySelector('[data-feedback-card]')).toBeNull();
+    expect(bumpCalls()).toHaveLength(1);
+    await waitFor(() => expect(printButton()).toBeEnabled());
+    expect(drawCalls()).toHaveLength(drawn);
+    fireEvent.change(screen.getByRole('spinbutton', { name: 'Copies' }), {
+      target: { value: '2' },
+    });
+    await waitFor(() => expect(printButton()).toBeEnabled());
+    expect(drawCalls()).toHaveLength(drawn + 2);
+  } finally {
+    if (media) Object.defineProperty(window, 'matchMedia', media);
+    else Reflect.deleteProperty(window, 'matchMedia');
+    Reflect.deleteProperty(Element.prototype, 'animate');
+  }
+});
+
+it('keeps failed additions and stale or failed sheet generations free of success signals', async () => {
+  vi.mocked(animate).mockClear();
+  mocks.searchLabelRecords.mockResolvedValue(labelResults([quantity]));
+  mocks.getQueueRecords.mockRejectedValue(new Error('lookup failed'));
+  const view = render(toastConsumer(<LabelDesigner {...props} initial={[]} />));
+  fireEvent.click(await screen.findByRole('button', { name: 'Add to queue' }));
+  await waitFor(() =>
+    expect(screen.getByRole('button', { name: 'Add to queue' })).toBeEnabled(),
+  );
+  expect(document.querySelector('[data-confirmed-success]')).toBeNull();
+  expect(document.querySelector('[data-feedback-card]')).toBeNull();
+  expect(additionSignals.values.every((value) => value === null)).toBe(true);
+  expect(
+    vi
+      .mocked(animate)
+      .mock.calls.filter(([node]) =>
+        (node as Element).hasAttribute('data-added-bump'),
+      ),
+  ).toHaveLength(0);
+  view.unmount();
+  const delayed = { ...quantity, name: 'delayed codes' };
+  mocks.getQueueRecords.mockResolvedValue([delayed]);
+  const next = render(
+    toastConsumer(<LabelDesigner {...props} initial={[delayed]} />),
+  );
+  await screen.findByLabelText('Print preview');
+  const card = document.querySelector('.label-card')!;
+  act(() => {
+    card.setAttribute('data-code-ready', 'true');
+    card.setAttribute('data-text-measured', 'true');
+    card.setAttribute('data-sheet-generation', 'stale-generation');
+  });
+  await act(async () => {});
+  expect(printButton()).toBeDisabled();
+  expect(document.querySelector('[data-confirmed-success]')).toBeNull();
+  expect(document.querySelector('[data-feedback-card]')).toBeNull();
+  mocks.getQueueRecords.mockRejectedValue(new Error('refresh failed'));
+  act(() => window.dispatchEvent(new Event('focus')));
+  await screen.findByText(/Refresh failed/);
+  expect(document.querySelector('[data-confirmed-success]')).toBeNull();
+  expect(document.querySelector('[data-feedback-card]')).toBeNull();
+  next.unmount();
+});
+
+function toastConsumer(children: React.ReactNode) {
+  return (
+    <PrivacyReadinessContext
+      value={{
+        ready: true,
+        visible: true,
+        generation: 'toast-negative',
+        verifiedEpoch: assignmentEpoch(),
+        revocationRevision: readPrivacyRevocationRevision(),
+      }}
+    >
+      <TransientFeedbackProvider
+        actorId="member-a"
+        backend="https://inventory.example.test"
+      >
+        {children}
+      </TransientFeedbackProvider>
+    </PrivacyReadinessContext>
+  );
+}
+
+it('confirms a linked multi-add with a bounded operation token independent of requested identity length', async () => {
+  const rows = Array.from({ length: 6 }, (_, index) => ({
+    ...asset,
+    key: `00000000-0000-4000-8000-${String(index + 900).padStart(12, '0')}`,
+    name: `Private device ${index}`,
+    tag: `linked-${index}`,
+  }));
+  const additions = rows.map(({ kind, key }) => ({ kind, key }));
+  expect(
+    additions.map(({ kind, key }) => `${kind}:${key}`).join('|').length,
+  ).toBeGreaterThan(200);
+  mocks.query = rows.map(({ key }) => 'asset=' + key).join('&');
+  mocks.getQueueRecords.mockResolvedValue(rows);
+  render(
+    toastConsumer(
+      <LabelDesigner {...props} initial={[]} addIntent={additions} />,
+    ),
+  );
+  await waitFor(() =>
+    expect(
+      screen.getByRole('region', { name: 'Label queue' }),
+    ).toHaveTextContent('6 distinct records'),
+  );
+  const card = document.querySelector('[data-feedback-card]');
+  expect(card).toHaveTextContent('Added 6 labels to the queue.');
+  expect(card).not.toHaveTextContent('Private device');
+  expect(document.querySelectorAll('[data-feedback-card]')).toHaveLength(1);
+});
+
+it.each([
+  { selection: false, dismissal: 'Escape' },
+  { selection: false, dismissal: 'Dismiss' },
+  { selection: true, dismissal: 'Escape' },
+  { selection: true, dismissal: 'Dismiss' },
+])(
+  'returns Labels keyboard focus to main content when its $selection addition trigger becomes disabled ($dismissal)',
+  async ({ selection, dismissal }) => {
+    const user = userEvent.setup();
+    mocks.searchLabelRecords.mockResolvedValue(labelResults([quantity]));
+    mocks.getQueueRecords.mockResolvedValue([quantity]);
+    const epoch = assignmentEpoch(),
+      revision = readPrivacyRevocationRevision();
+    const view = render(
+      toastConsumer(
+        <main id="main-content" tabIndex={-1}>
+          <LabelDesigner {...props} initial={[]} />
+        </main>,
+      ),
+    );
+    await screen.findByRole('button', { name: 'Add to queue' });
+    if (selection) {
+      const checkbox = screen.getByRole('checkbox', {
+        name: new RegExp('Select ' + quantity.name),
+      });
+      checkbox.focus();
+      await user.keyboard(' ');
+    }
+    const trigger = screen.getByRole('button', {
+      name: selection ? 'Add selected to queue' : 'Add to queue',
+    });
+    expect(trigger).toBeEnabled();
+    trigger.focus();
+    await user.keyboard('{Enter}');
+    await waitFor(() => expect(trigger).toBeDisabled());
+    const card = await waitFor(() => {
+      const node = view.container.querySelector<HTMLElement>(
+        '[data-feedback-card]',
+      );
+      expect(node).not.toBeNull();
+      return node!;
+    });
+    const dismiss = within(card).getByRole('button', { name: 'Dismiss' });
+    dismiss.focus();
+    expect(dismiss).toHaveFocus();
+    await user.keyboard(dismissal === 'Escape' ? '{Escape}' : '{Enter}');
+    expect(document.getElementById('main-content')).toHaveFocus();
+    expect(view.container.querySelector('[data-feedback-card]')).toBeNull();
+    expect(
+      screen.getByRole('region', { name: 'Label queue' }),
+    ).toHaveTextContent('1 distinct record');
+    expect(trigger).toBeDisabled();
+    expect(assignmentEpoch()).toBe(epoch);
+    expect(readPrivacyRevocationRevision()).toBe(revision);
+  },
+);
+
+function OccupiedTransientNotices() {
+  const host = useRef<HTMLDivElement>(null);
+  const feedback = useTransientFeedbackOwner(host);
+  return (
+    <div ref={host}>
+      <button
+        type="button"
+        onClick={() => {
+          for (let index = 0; index < 3; index++) {
+            const retry = 'occupied-notice-' + index;
+            const ticket = feedback.begin(retry);
+            feedback.confirm(ticket, retry, {
+              kind: 'details-saved',
+              eventId: retry,
+            });
+          }
+        }}
+      >
+        Fill transient notices
+      </button>
+    </div>
+  );
+}
+
+it.each(['available', 'full', 'mixed'] as const)(
+  'announces linked-add success once and preserves supplementary feedback when notices are %s',
+  async (mode) => {
+    let finish!: (rows: LiveLabel[]) => void;
+    const linked = new Promise<LiveLabel[]>((resolve) => {
+      finish = resolve;
+    });
+    const additions = [{ kind: 'asset' as const, key: assetId }];
+    if (mode === 'mixed') additions.push({ kind: 'asset', key: quantityId });
+    mocks.query = additions.map(({ key }) => 'asset=' + key).join('&');
+    mocks.getQueueRecords
+      .mockResolvedValue([asset])
+      .mockImplementationOnce(() => linked);
+    render(
+      toastConsumer(
+        <>
+          <OccupiedTransientNotices />
+          <LabelDesigner {...props} initial={[]} addIntent={additions} />
+        </>,
+      ),
+    );
+    await screen.findByText(
+      'Adding linked records after restoring this queue…',
+    );
+    if (mode === 'full') {
+      fireEvent.click(
+        screen.getByRole('button', { name: 'Fill transient notices' }),
+      );
+      expect(document.querySelectorAll('[data-feedback-card]')).toHaveLength(3);
+    }
+    await act(async () => finish([asset]));
+    const inline = await screen.findByText(
+      mode === 'mixed'
+        ? 'Laptop added. Names and context refresh before printing. That record is unavailable to this account.'
+        : 'Laptop added. Names and context refresh before printing.',
+    );
+    expect(
+      screen.getByRole('region', { name: 'Label queue' }),
+    ).toHaveTextContent('1 distinct record');
+    if (mode === 'full') {
+      expect(inline).toHaveAttribute('role', 'status');
+      expect(document.querySelectorAll('[data-feedback-card]')).toHaveLength(3);
+      expect(
+        [...document.querySelectorAll('[data-feedback-card]')].every((card) =>
+          card.textContent?.includes('Details saved.'),
+        ),
+      ).toBe(true);
+    } else {
+      expect(inline).not.toHaveAttribute('role', 'status');
+      const cards = document.querySelectorAll('[data-feedback-card]');
+      expect(cards).toHaveLength(1);
+      expect(cards[0].querySelector('[role="status"]')).toHaveTextContent(
+        'Added 1 label to the queue.',
+      );
+      expect(cards[0].querySelector('[role="status"]')).toHaveAttribute(
+        'aria-live',
+        'polite',
+      );
+      if (mode === 'mixed') {
+        const error = screen.getByText(
+          'That record is unavailable to this account.',
+          { exact: true },
+        );
+        expect(error).toHaveAttribute('role', 'status');
+        expect(error).toHaveAttribute('aria-live', 'polite');
+      }
+    }
+  },
+);
+
+it.each(['available', 'full'] as const)(
+  'separates mixed manual-add announcements with an %s transient presenter',
+  async (mode) => {
+    const missing = {
+      ...quantity,
+      key: '00000000-0000-4000-8000-000000000003',
+      name: 'Missing adapters',
+    };
+    mocks.searchLabelRecords.mockResolvedValue(
+      labelResults([quantity, asset, missing]),
+    );
+    mocks.getQueueRecords.mockImplementation((keys: { key: string }[]) =>
+      Promise.resolve(
+        [quantity, asset].filter((record) =>
+          keys.some((key) => key.key === record.key),
+        ),
+      ),
+    );
+    render(
+      toastConsumer(
+        <>
+          <OccupiedTransientNotices />
+          <LabelDesigner {...props} initial={[quantity]} />
+        </>,
+      ),
+    );
+    await screen.findByRole('button', { name: 'In queue' });
+    if (mode === 'full') {
+      fireEvent.click(
+        screen.getByRole('button', { name: 'Fill transient notices' }),
+      );
+      expect(document.querySelectorAll('[data-feedback-card]')).toHaveLength(3);
+    }
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Select current page' }),
+    );
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Add selected to queue' }),
+    );
+    const inline = await screen.findByText(
+      'Added: Laptop (Individual asset). Already present: Adapters (Quantity item). Unavailable to this account: Missing adapters (Quantity item).',
+    );
+    expect(inline).toBeVisible();
+    expect(
+      screen.getByRole('region', { name: 'Label queue' }),
+    ).toHaveTextContent('2 distinct records');
+    const successStatuses = () =>
+      screen
+        .getAllByRole('status')
+        .filter((node) => node.textContent?.includes('Added: Laptop'));
+    if (mode === 'full') {
+      expect(inline).toHaveAttribute('role', 'status');
+      expect(inline).toHaveAttribute('aria-live', 'polite');
+      expect(successStatuses()).toHaveLength(1);
+      expect(document.querySelectorAll('[data-feedback-card]')).toHaveLength(3);
+    } else {
+      expect(inline).not.toHaveAttribute('role', 'status');
+      expect(successStatuses()).toHaveLength(0);
+      const remaining = screen.getByText(
+        'Already present: Adapters (Quantity item). Unavailable to this account: Missing adapters (Quantity item).',
+        { exact: true },
+      );
+      expect(remaining).toHaveAttribute('role', 'status');
+      expect(remaining).toHaveAttribute('aria-live', 'polite');
+      expect(remaining).not.toHaveTextContent('Added:');
+      const cards = document.querySelectorAll('[data-feedback-card]');
+      expect(cards).toHaveLength(1);
+      expect(cards[0].querySelector('[role="status"]')).toHaveTextContent(
+        'Added 1 label to the queue.',
+      );
+    }
+  },
+);
+
+it('opens lazy record peeks from label search and queue links without changing selection or names', async () => {
+  const actor = '00000000-0000-4000-8000-000000000001',
+    backend = 'https://peek-labels.test';
+  mocks.searchLabelRecords.mockResolvedValue(labelResults([quantity]));
+  mocks.getQueueRecords.mockResolvedValue([quantity]);
+  vi.spyOn(HTMLElement.prototype, 'getClientRects').mockReturnValue([
+    new DOMRect(10, 20, 200, 30),
+  ] as unknown as DOMRectList);
+  const fetcher = vi.spyOn(globalThis, 'fetch').mockImplementation(async () =>
+    Response.json({
+      actor,
+      backend,
+      payload: {
+        target: { kind: 'quantity', id: quantityId },
+        name: 'Current adapters',
+        status: 'active',
+        assetTag: null,
+        stock: { available: '3', assigned: '0', recorded: '3' },
+        locations: [],
+        moreLocations: false,
+        siteName: null,
+        photo: null,
+      },
+    }),
+  );
+  render(
+    <PrivacyReadinessContext
+      value={{
+        ready: true,
+        visible: true,
+        generation: 'label-peek',
+        verifiedEpoch: assignmentEpoch(),
+        revocationRevision: readPrivacyRevocationRevision(),
+      }}
+    >
+      <PeekProvider actor={actor} backend={backend}>
+        <LabelDesigner {...props} initial={[]} />
+      </PeekProvider>
+    </PrivacyReadinessContext>,
+  );
+  const result = await screen.findByRole('link', { name: 'Adapters' });
+  expect(fetcher).not.toHaveBeenCalled();
+  act(() => result.focus());
+  expect(await screen.findByText('Current adapters')).toBeInTheDocument();
+  expect(fetcher).toHaveBeenCalledWith(
+    '/api/peek?kind=quantity&id=' + quantityId,
+    expect.objectContaining({ cache: 'no-store' }),
+  );
+  fireEvent.keyDown(result, { key: 'Escape' });
+  mocks.getQueueRecords.mockResolvedValue([{ ...quantity, state: 'archived' }]);
+  fireEvent.click(screen.getByRole('button', { name: 'Add to queue' }));
+  await screen.findByRole('button', { name: 'In queue' });
+  fireEvent.click(await screen.findByRole('button', { name: 'Review item' }));
+  const queued = within(
+    screen.getByRole('region', { name: 'Label queue' }),
+  ).getByRole('link', { name: 'View item details' });
+  act(() => queued.focus());
+  expect(await screen.findByRole('dialog')).toHaveTextContent(
+    'Current adapters',
+  );
+  expect(queued).toHaveAttribute('href', quantity.path);
+  expect(screen.getByRole('button', { name: 'In queue' })).toBeInTheDocument();
 });

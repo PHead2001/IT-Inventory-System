@@ -1,4 +1,6 @@
 'use client';
+
+import { collectRoomObstructionRects, connectRoomObstructions } from '@/components/experience/room-obstructions';
 import { useFrame, useThree } from '@react-three/fiber';
 import { createContext, useContext, useEffect, type ReactNode } from 'react';
 import {
@@ -269,14 +271,9 @@ export function createRoomLabelRegistry(
       return labels;
     };
     const readReserved = () => {
-      const result: LabelArea[] = [];
-      for (const element of host
-        .closest('[data-room-surface]')
-        ?.querySelectorAll<HTMLElement>('[data-room-obstruction]') ?? []) {
-        if (!charge()) break;
-        if (element.getClientRects().length > 0)
-          result.push(element.getBoundingClientRect());
-      }
+      const result: LabelArea[] = canvas
+        ? collectRoomObstructionRects(canvas, viewport, charge)
+        : [];
       // Physical reservations remain packing masks, never visibility geometry.
       for (const entry of entries.values()) {
         if (!entry.options.pickReservation) continue;
@@ -859,6 +856,7 @@ export function createRoomLabelRegistry(
         if (!connected) return;
         invalidateLayout();
       };
+      const disconnectObstructions = connectRoomObstructions(element, changed);
       observer = new ResizeObserver((records) => {
         const labels = new Set(
           [...entries.values()].map((entry) => entry.element),
@@ -992,6 +990,7 @@ export function createRoomLabelRegistry(
       schedule();
       return () => {
         connected = false;
+        disconnectObstructions();
         identityRevision++;
         continuation = null;
         geometryIdentity = undefined;

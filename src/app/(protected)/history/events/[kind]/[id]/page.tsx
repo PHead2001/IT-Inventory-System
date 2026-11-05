@@ -1,3 +1,4 @@
+import { PeekLink } from '@/features/peek/peek-link';
 import { RouteReady } from '@/components/experience/route-ready';
 import { routeReadyProps } from '@/components/experience/route-ready.server';
 import Link from '@/components/experience/route-link';
@@ -39,12 +40,13 @@ export default async function HistoryEventPage({
             >
               View all record history
             </Link>
-            <Link
+            <PeekLink
+              peekTarget={{ kind: event.kind, id: event.entityId }}
               className="inline-flex min-h-11 items-center text-cyan-300 underline"
               href={`/inventory/${event.kind === 'quantity' ? 'quantity' : 'assets'}/${event.entityId}`}
             >
               Back to record
-            </Link>
+            </PeekLink>
           </nav>
           <HistoryList events={[event]} />
         </>

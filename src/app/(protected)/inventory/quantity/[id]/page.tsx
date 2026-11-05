@@ -1,3 +1,6 @@
+import { SpringDisclosure } from '@/components/experience/spring-disclosure';
+import { CountTicker } from '@/components/experience/count-ticker';
+import { HoldingFeedback } from '@/components/experience/holding-feedback';
 import {
   InventoryCaptureGroup,
   InventoryCaptureRegion,
@@ -127,12 +130,13 @@ export default async function QuantityPage({
                       status={item.archived ? 'archived' : 'active'}
                     />
                   </p>
-                  <details className="mt-2 text-xs text-slate-400">
-                    <summary className="min-h-11 cursor-pointer py-2">
-                      Technical record details
-                    </summary>
+                  <SpringDisclosure
+                    className="mt-2 text-xs text-slate-400"
+                    summaryProps={{ className: 'min-h-11 cursor-pointer py-2' }}
+                    summary={<>Technical record details</>}
+                  >
                     <p>Record version: {item.version}</p>
-                  </details>
+                  </SpringDisclosure>
                 </div>
                 <div className={styles.detailActions}>
                   <Link href={'/labels?quantity=' + item.id}>
@@ -143,15 +147,36 @@ export default async function QuantityPage({
               <dl className={styles.facts}>
                 <div className={styles.fact}>
                   <dt>Available in storage</dt>
-                  <dd>{countLabel(stockSummary.availableQuantity, 'unit')}</dd>
+                  <dd>
+                    {
+                      <CountTicker
+                        value={stockSummary.availableQuantity}
+                        unit="unit"
+                      />
+                    }
+                  </dd>
                 </div>
                 <div className={styles.fact}>
                   <dt>Assigned to sites</dt>
-                  <dd>{countLabel(stockSummary.assignedQuantity, 'unit')}</dd>
+                  <dd>
+                    {
+                      <CountTicker
+                        value={stockSummary.assignedQuantity}
+                        unit="unit"
+                      />
+                    }
+                  </dd>
                 </div>
                 <div className={styles.fact}>
                   <dt>Total recorded</dt>
-                  <dd>{countLabel(stockSummary.ownedQuantity, 'unit')}</dd>
+                  <dd>
+                    {
+                      <CountTicker
+                        value={stockSummary.ownedQuantity}
+                        unit="unit"
+                      />
+                    }
+                  </dd>
                 </div>
                 <div className={styles.fact}>
                   <dt>Reorder threshold</dt>
@@ -258,24 +283,30 @@ export default async function QuantityPage({
                     until moved.
                   </p>
                   {balances.some((b) => b.quantity > 0) ? (
-                    <ul className="space-y-3">
-                      {balances
+                    <HoldingFeedback
+                      rows={balances
                         .filter((b) => b.quantity > 0)
-                        .map((b) => (
-                          <li className={panel} key={b.location.id}>
-                            <LocationLink location={b.location} />
-                            <p className="mt-2">
-                              {countLabel(b.quantity, 'unit')}
-                            </p>
-                            {!b.location.active && (
-                              <p className="mt-1 text-sm text-amber-200">
-                                Inactive location: existing stock remains
-                                recorded and can be evacuated.
+                        .map((b) => ({
+                          id: b.location.id,
+                          value: String(b.quantity),
+                          content: (
+                            <>
+                              <LocationLink location={b.location} />
+                              <p className="mt-2">
+                                <CountTicker value={b.quantity} unit="unit" />
                               </p>
-                            )}
-                          </li>
-                        ))}
-                    </ul>
+                              {!b.location.active && (
+                                <p className="mt-1 text-sm text-amber-200">
+                                  Inactive location: existing stock remains
+                                  recorded and can be evacuated.
+                                </p>
+                              )}
+                            </>
+                          ),
+                        }))}
+                      className="space-y-3"
+                      rowClassName={panel}
+                    />
                   ) : (
                     <p className={panel}>No positive stock at any location.</p>
                   )}
