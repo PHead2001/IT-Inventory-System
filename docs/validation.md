@@ -21,7 +21,7 @@ start is not forced through or hidden; absence of a valid path remains a failure
 ## Iteration and authoritative CI
 
 Batch related findings and fixes before one push. Run focused regressions during
-iteration, then `npm run validate:push` (typecheck, zero-warning lint, formatting,
+iteration, then run `npm run validate:push` once per fix batch (typecheck, zero-warning lint, formatting,
 and the complete Vitest suite) before pushing. It performs no fresh install,
 build, database reset or Playwright execution. Its sequential local wrapper sets
 a 2 GiB Node old-space limit for the canonical typecheck stage and 1 GiB for lint,
@@ -32,7 +32,23 @@ dependency inputs are unchanged. The optional repository-local pre-push hook
 enforces this gate on the exact current clean HEAD; see
 [local setup](development/README.md#automatic-local-push-checks).
 
-Keep work in a draft PR during iteration. Foundation CI handles opened, reopened,
+Keep the PR draft through iteration and Codex review rounds. For each valid
+finding, inspect its root cause and sibling paths, preserve a durable regression,
+and run the focused regression and affected sibling tests. Run the affected local
+database or browser gate when the fix touches persistence, authorization or
+browser behavior; the cheap push gate does not replace those checks. Batch the
+round's fixes, run `npm run validate:push`, and push once. Reply on each original
+thread with the fix SHA, root cause, regression coverage and actual local
+validation evidence before resolving it. State that complete CI runs when the
+PR is marked ready; do not claim an unexecuted gate.
+
+Query live unresolved threads, request fresh `@codex review`, and wait for its
+completion after each batch. Mark ready only when the latest review on the
+current HEAD has no actionable findings and zero unresolved actionable threads.
+That starts authoritative complete CI on that exact HEAD. A draft `required`
+failure is intentional uncertified feedback, not a defect to repair with a push.
+
+Foundation CI handles opened, reopened,
 synchronize, ready_for_review and converted_to_draft events, cancelling superseded
 runs for that PR. A draft uses a light runner and ends the stable `required` check
 with an explicit uncertified failure before dependency installation. Missing or
