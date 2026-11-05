@@ -1,12 +1,7 @@
 // @vitest-environment node
 import { createHash } from 'node:crypto';
-import {
-  mkdtempSync,
-  mkdirSync,
-  readFileSync,
-  rmSync,
-  writeFileSync,
-} from 'node:fs';
+import { mkdtempSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { rm } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -20,8 +15,14 @@ const require = createRequire(import.meta.url);
 const installedNext = dirname(require.resolve('next/package.json'));
 const temporary = [];
 const hash = (bytes) => createHash('sha256').update(bytes).digest('hex');
-afterEach(() => {
-  for (const path of temporary.splice(0)) rmSync(path, { recursive: true });
+afterEach(async () => {
+  for (const path of temporary.splice(0))
+    await rm(path, {
+      recursive: true,
+      force: true,
+      maxRetries: 3,
+      retryDelay: 100,
+    });
 });
 function fixture() {
   const nextRoot = mkdtempSync(join(tmpdir(), 'next-route-cache-'));

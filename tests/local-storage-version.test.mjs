@@ -1,11 +1,6 @@
 import assert from 'node:assert/strict';
-import {
-  mkdtempSync,
-  mkdirSync,
-  readFileSync,
-  rmSync,
-  writeFileSync,
-} from 'node:fs';
+import { mkdtempSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
@@ -19,18 +14,23 @@ import {
   verifyLocalStorageRuntime,
 } from '../scripts/local-storage-version.mjs';
 
-function fixture(callback) {
+async function fixture(callback) {
   const cwd = mkdtempSync(join(tmpdir(), 'inventory-storage-pin-'));
   try {
     mkdirSync(join(cwd, 'supabase'));
-    callback(cwd);
+    await callback(cwd);
   } finally {
-    rmSync(cwd, { recursive: true, force: true });
+    await rm(cwd, {
+      recursive: true,
+      force: true,
+      maxRetries: 3,
+      retryDelay: 100,
+    });
   }
 }
 
-test('fresh checkout gets the pinned local Storage version; repeat start is idempotent', () => {
-  fixture((cwd) => {
+test('fresh checkout gets the pinned local Storage version; repeat start is idempotent', async () => {
+  await fixture((cwd) => {
     assert.equal(installLocalStorageVersion(cwd), 'pinned');
     assert.equal(
       readFileSync(localStorageVersionPath(cwd), 'utf8'),
@@ -41,8 +41,8 @@ test('fresh checkout gets the pinned local Storage version; repeat start is idem
   });
 });
 
-test('a linked project cache is preserved while the local version is restored', () => {
-  fixture((cwd) => {
+test('a linked project cache is preserved while the local version is restored', async () => {
+  await fixture((cwd) => {
     const temp = join(cwd, 'supabase/.temp');
     mkdirSync(temp);
     writeFileSync(join(temp, 'project-ref'), 'fictional-remote-ref\n');
@@ -59,8 +59,8 @@ test('a linked project cache is preserved while the local version is restored', 
   });
 });
 
-test('reset/test verification rejects a missing or changed pin', () => {
-  fixture((cwd) => {
+test('reset/test verification rejects a missing or changed pin', async () => {
+  await fixture((cwd) => {
     assert.throws(
       () => assertLocalStorageVersion(cwd),
       /version pin is missing/,
@@ -74,8 +74,8 @@ test('reset/test verification rejects a missing or changed pin', () => {
   });
 });
 
-test('runtime verification requires the exact local Storage image, not only a pin file', () => {
-  fixture((cwd) => {
+test('runtime verification requires the exact local Storage image, not only a pin file', async () => {
+  await fixture((cwd) => {
     installLocalStorageVersion(cwd);
     let command;
     let args;
