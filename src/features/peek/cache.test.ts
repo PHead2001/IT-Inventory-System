@@ -57,6 +57,75 @@ function isolatedCache(
 }
 afterEach(() => vi.useRealTimers());
 
+it('deduplicates the same entity only within the exact pending presentation owner', async () => {
+  const pending = deferred<Response>();
+  const fetcher = vi.fn<typeof fetch>().mockReturnValue(pending.promise);
+  const cache = isolatedCache(actor, backend, vi.fn(), fetcher);
+  const ownerCurrent = () => true;
+  const deadline = Date.now() + 5000;
+  const first = cache.revalidate(target(1), deadline, ownerCurrent);
+  const duplicate = cache.revalidate(target(1), deadline, ownerCurrent);
+  await Promise.resolve();
+  expect(fetcher).toHaveBeenCalledOnce();
+  pending.resolve(response(target(1)));
+  await expect(Promise.all([first, duplicate])).resolves.toHaveLength(2);
+});
+
+it.each(['success', 'forbidden'] as const)(
+  'starts a successor same-entity read under its own owner and ignores retired %s',
+  async (late) => {
+    const previous = deferred<Response>();
+    const successor = deferred<Response>();
+    const lost = vi.fn();
+    const fetcher = vi
+      .fn<typeof fetch>()
+      .mockReturnValueOnce(previous.promise)
+      .mockReturnValueOnce(successor.promise);
+    const cache = isolatedCache(actor, backend, lost, fetcher);
+    let firstCurrent = true;
+    const oldRead = cache
+      .revalidate(target(1), Date.now() + 5000, () => firstCurrent)
+      .catch((error) => error);
+    await Promise.resolve();
+    const nextRead = cache.revalidate(target(1), Date.now() + 5000, () => true);
+    try {
+      firstCurrent = false;
+      await Promise.resolve();
+      expect(fetcher).toHaveBeenCalledTimes(2);
+      expect(fetcher.mock.calls[0][1]?.signal?.aborted).toBe(true);
+      expect(fetcher.mock.calls[1][1]?.signal?.aborted).toBe(false);
+      successor.resolve(
+        Response.json({
+          actor,
+          backend,
+          payload: { ...payload(target(1)), name: 'Successor record' },
+        }),
+      );
+      await expect(nextRead).resolves.toMatchObject({
+        name: 'Successor record',
+      });
+      previous.resolve(
+        late === 'forbidden'
+          ? new Response('', { status: 403 })
+          : Response.json({
+              actor,
+              backend,
+              payload: { ...payload(target(1)), name: 'Retired record' },
+            }),
+      );
+      await oldRead;
+      await new Promise<void>((resolve) => setTimeout(resolve, 0));
+      expect(cache.get(target(1))?.name).toBe('Successor record');
+      expect(lost).not.toHaveBeenCalled();
+    } finally {
+      previous.resolve(response(target(1)));
+      successor.resolve(response(target(1)));
+      await Promise.allSettled([oldRead, nextRead]);
+      cache.dispose();
+    }
+  },
+);
+
 it('deduplicates pending reads, revalidates every open and expires successes without extending on failure', async () => {
   let now = 0;
   const pending = deferred<Response>();

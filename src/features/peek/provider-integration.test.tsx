@@ -1,4 +1,4 @@
-import { useLayoutEffect, useState } from 'react';
+import { useLayoutEffect, useState, type ReactNode } from 'react';
 import {
   act,
   cleanup,
@@ -82,7 +82,7 @@ function Business() {
     </>
   );
 }
-function tree() {
+function tree(children: ReactNode = <Business />) {
   return (
     <ThemePreferenceProvider scope="joined:anonymous">
       <ProtectedPrivacyBoundary
@@ -107,7 +107,7 @@ function tree() {
                       contentIdentity={runtime.path + runtime.query}
                       conventionalPrimary
                     >
-                      <Business />
+                      {children}
                     </RouteReady>
                   </ProtectedPrivacyContent>
                 </TransientFeedbackProvider>
@@ -179,6 +179,103 @@ afterEach(() => {
   delete window.inventoryTheme;
   history.replaceState({}, '', '/');
 });
+
+it.each(['hidden', 'unmounted'] as const)(
+  'keeps the successor same-entity preview current when its predecessor is %s',
+  async (retirement) => {
+    let finishFirst!: (value: Response) => void;
+    let finishSecond!: (value: Response) => void;
+    const first = new Promise<Response>((resolve) => {
+      finishFirst = resolve;
+    });
+    const second = new Promise<Response>((resolve) => {
+      finishSecond = resolve;
+    });
+    const fetched = vi.mocked(fetch).mockReset();
+    fetched.mockReturnValueOnce(first).mockReturnValueOnce(second);
+    vi.mocked(HTMLElement.prototype.getClientRects).mockImplementation(
+      function (this: HTMLElement) {
+        return (this.closest('[hidden], [inert]')
+          ? []
+          : [new DOMRect(10, 20, 120, 30)]) as unknown as DOMRectList;
+      },
+    );
+    function Links({ retired = false }: { retired?: boolean }) {
+      return (
+        <>
+          {(!retired || retirement === 'hidden') && (
+            <div key="first" hidden={retired}>
+              <PeekLink
+                peekTarget={{ kind: 'asset', id: actor }}
+                href={'/inventory/assets/' + actor}
+              >
+                First record link
+              </PeekLink>
+            </div>
+          )}
+          <PeekLink
+            key="second"
+            peekTarget={{ kind: 'asset', id: actor }}
+            href={'/inventory/assets/' + actor}
+          >
+            Second record link
+          </PeekLink>
+        </>
+      );
+    }
+    const reply = (name: string) =>
+      Response.json({
+        actor,
+        backend,
+        payload: {
+          target: { kind: 'asset', id: actor },
+          name,
+          status: 'active',
+          assetTag: 'TAG',
+          stock: null,
+          locations: [],
+          moreLocations: false,
+          siteName: null,
+          photo: null,
+        },
+      });
+    const view = render(tree(<Links />));
+    try {
+      const firstLink = await screen.findByRole('link', {
+        name: 'First record link',
+      });
+      act(() => firstLink.focus());
+      await waitFor(() => expect(fetched).toHaveBeenCalledOnce());
+      act(() =>
+        screen.getByRole('link', { name: 'Second record link' }).focus(),
+      );
+      view.rerender(tree(<Links retired />));
+      await waitFor(() => expect(fetched).toHaveBeenCalledTimes(2));
+      expect(fetched.mock.calls[1][1]?.signal?.aborted).toBe(false);
+      await act(async () => finishSecond(reply('Successor private record')));
+      expect(await screen.findByRole('dialog')).toHaveTextContent(
+        'Successor private record',
+      );
+      await act(async () => finishFirst(reply('Retired private record')));
+      expect(screen.getByRole('dialog')).toHaveTextContent(
+        'Successor private record',
+      );
+      expect(
+        screen.queryByText('Retired private record'),
+      ).not.toBeInTheDocument();
+      expect(fetched.mock.calls[1][1]?.signal?.aborted).toBe(false);
+    } finally {
+      finishFirst(reply('Retired private record'));
+      finishSecond(reply('Successor private record'));
+      view.unmount();
+      await act(async () => {
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+    }
+  },
+);
+
 it('admits initial, navigated, query and Back scopes through the current protected/theme/route/command stack without losing drafts', async () => {
   const view = render(tree());
   await screen.findByRole('textbox');

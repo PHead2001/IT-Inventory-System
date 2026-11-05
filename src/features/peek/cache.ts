@@ -8,12 +8,14 @@ import { PeekNetwork, PeekUnavailable, sharedPeekNetwork } from './network';
 export { PeekUnavailable } from './network';
 export class PeekAccessLost extends Error {}
 type Entry = { payload: PeekPayload; expires: number };
+const alwaysCurrent = () => true;
 /** Per-provider memory only. One active card, 50 successes, 30 seconds. */
 export class PeekCache {
   readonly network;
   private entries = new Map<string, Entry>();
   private pending: {
     key: string;
+    ownerCurrent: () => boolean;
     controller: AbortController;
     promise: Promise<PeekPayload>;
   } | null = null;
@@ -79,12 +81,13 @@ export class PeekCache {
   async revalidate(
     target: PeekTarget,
     deadline = Date.now() + 5000,
-    ownerCurrent: () => boolean = () => true,
+    ownerCurrent: () => boolean = alwaysCurrent,
   ): Promise<PeekPayload> {
     if (this.disposed || !this.allowed() || !ownerCurrent())
       throw new PeekUnavailable();
     const key = peekKey(target);
-    if (this.pending?.key === key) return this.pending.promise;
+    if (this.pending?.key === key && this.pending.ownerCurrent === ownerCurrent)
+      return this.pending.promise;
     this.cancel();
     const generation = this.generation;
     const controller = new AbortController();
@@ -153,7 +156,7 @@ export class PeekCache {
         if (this.pending?.controller === controller) this.pending = null;
       }
     })();
-    this.pending = { key, controller, promise };
+    this.pending = { key, ownerCurrent, controller, promise };
     return promise;
   }
 }
