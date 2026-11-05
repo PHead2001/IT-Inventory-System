@@ -324,7 +324,8 @@ test('a saved event link survives more than one page of newer history and later 
 }) => {
   test.setTimeout(120_000);
   await login(page);
-  await createQuantity(page, 'Stable history link ' + crypto.randomUUID());
+  const itemName = 'Stable history link ' + crypto.randomUUID();
+  await createQuantity(page, itemName);
   const detailUrl = page.url();
   const itemId = detailUrl.split('/').at(-1)!;
   const api = new URL(process.env.LOCAL_API_URL!);
@@ -376,7 +377,37 @@ test('a saved event link survives more than one page of newer history and later 
     expect(href).toBe('/history/events/quantity/' + eventId);
     for (let index = 0; index < 30; index++)
       await receive('Newer receipt ' + index);
-    await page.goto('/history?type=quantity&entityId=' + itemId);
+    await page.goto(
+      '/history?type=quantity&entityId=' + itemId + '&location=ITC-S1A',
+    );
+    const filterForm = page.getByRole('form', { name: 'Filter history' });
+    await expect(filterForm).toBeVisible();
+    for (const width of [1280, 390]) {
+      for (const reducedMotion of ['no-preference', 'reduce'] as const) {
+        await page.setViewportSize({ width, height: 844 });
+        await page.emulateMedia({ reducedMotion });
+        await expectTouchTarget(
+          filterForm.getByRole('link', { name: itemName, exact: true }),
+        );
+        await expectTouchTarget(
+          filterForm.getByRole('link', {
+            name: 'Clear record filter',
+            exact: true,
+          }),
+        );
+        await expectTouchTarget(
+          page.getByRole('link', {
+            name: 'Clear location filter',
+            exact: true,
+          }),
+        );
+        expect(
+          await page
+            .locator('main')
+            .evaluate((main) => main.scrollWidth <= main.clientWidth),
+        ).toBe(true);
+      }
+    }
     await expect(
       page.locator('#history-event-quantity-' + eventId),
     ).toHaveCount(0);

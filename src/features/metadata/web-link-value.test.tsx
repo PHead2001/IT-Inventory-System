@@ -25,6 +25,11 @@ describe('saved web links', () => {
     render(<WebLinkValue value={href} />);
     const link = screen.getByRole('link');
     expect(link).toHaveAttribute('href', href);
+    expect(link).toHaveClass('min-h-11', 'min-w-11', 'max-w-full');
+    expect(screen.getByRole('button', { name: `Copy ${href}` })).toHaveClass(
+      'min-h-11',
+      'min-w-11',
+    );
     expect(link).toHaveAttribute('target', '_blank');
     expect(link).toHaveAttribute('rel', 'noopener noreferrer');
     fireEvent.click(screen.getByRole('button', { name: `Copy ${href}` }));
@@ -41,7 +46,9 @@ describe('saved web links', () => {
     fireEvent.click(screen.getByRole('button', { name: `Copy ${href}` }));
     const text = await screen.findByLabelText('Full link for manual copying');
     expect(text).toHaveValue(href);
-    fireEvent.click(screen.getByRole('button', { name: 'Select full link' }));
+    const select = screen.getByRole('button', { name: 'Select full link' });
+    expect(select).toHaveClass('min-h-11', 'min-w-11');
+    fireEvent.click(select);
     expect(text).toHaveFocus();
     expect((text as HTMLTextAreaElement).selectionEnd).toBe(href.length);
   });
