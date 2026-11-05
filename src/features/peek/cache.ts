@@ -30,7 +30,7 @@ export class PeekCache {
     readonly actor: string,
     readonly backend: string,
     private lost: () => void,
-    private request: typeof fetch = fetch,
+    private request: typeof fetch = (...args) => globalThis.fetch(...args),
     private now: () => number = Date.now,
     scheduler: PeekNetwork = sharedPeekNetwork,
   ) {

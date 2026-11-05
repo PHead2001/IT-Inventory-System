@@ -57,6 +57,37 @@ function isolatedCache(
 }
 afterEach(() => vi.useRealTimers());
 
+it('uses the global receiver for its default fetch transport', async () => {
+  const lost = vi.fn();
+  const fetcher = vi.spyOn(globalThis, 'fetch').mockImplementation(function (
+    this: unknown,
+  ) {
+    if (this !== globalThis) throw new TypeError('Illegal invocation');
+    return Promise.resolve(response(target(1)));
+  });
+  const cache = isolatedCache(actor, backend, lost);
+  try {
+    await expect(cache.revalidate(target(1))).resolves.toEqual(
+      payload(target(1)),
+    );
+    expect(fetcher).toHaveBeenCalledOnce();
+    expect(fetcher.mock.contexts).toEqual([globalThis]);
+    expect(fetcher).toHaveBeenCalledWith(
+      '/api/peek?' + new URLSearchParams(target(1)).toString(),
+      {
+        signal: expect.any(AbortSignal),
+        cache: 'no-store',
+        credentials: 'same-origin',
+      },
+    );
+    expect(cache.get(target(1))).toEqual(payload(target(1)));
+    expect(lost).not.toHaveBeenCalled();
+  } finally {
+    cache.dispose();
+    fetcher.mockRestore();
+  }
+});
+
 it('deduplicates the same entity only within the exact pending presentation owner', async () => {
   const pending = deferred<Response>();
   const fetcher = vi.fn<typeof fetch>().mockReturnValue(pending.promise);
