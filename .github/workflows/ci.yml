@@ -162,6 +162,7 @@ jobs:
         id: failure_artifact
         if: failure() || cancelled()
         continue-on-error: true
+        timeout-minutes: 2
         with:
           name: foundation-failures-${{ env.TESTED_SHA }}
           path: |

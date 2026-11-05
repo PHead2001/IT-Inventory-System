@@ -9,7 +9,7 @@ import {
   type LabelArea,
   type LabelPlacement,
   type LabelRect,
-} from './label-layout';
+} from './label-layout-test-harness';
 
 // Sanitized CI 38023742642 / job 114130066900, exact settled transaction 221
 // at cf3caf4551b3aa44dab4e33b3f614c8574049e0b; geometry/flags/output retained.
@@ -107,11 +107,13 @@ describe('captured CI phone selected-label capacity', () => {
         .filter((entry) => !entry.visible)
         .map((entry) => entry.id),
     ).toEqual(['shelf-3c', 'shelf-4b', 'shelf-4c']);
+    const startedAt = performance.now();
     const result = layoutLabelsDetailed(
       labels,
       baseline.viewport,
       baseline.reserved,
     );
+    const elapsedMs = performance.now() - startedAt;
     expect(result.status === 'complete').toBe(
       result.placements.every((entry) => entry.visible),
     );
@@ -124,7 +126,7 @@ describe('captured CI phone selected-label capacity', () => {
     expect(result.stats.operations).toBeLessThanOrEqual(
       LABEL_PACKING_BUDGET.maxOperations,
     );
-    expect(result.stats.elapsedMs).toBeLessThan(2000);
+    expect(elapsedMs).toBeLessThan(2000);
   });
 
   it('packs a constructive 27-action supplementary long-text stress case once More is outside the canvas', () => {
@@ -170,19 +172,23 @@ describe('captured CI phone selected-label capacity', () => {
       }),
     ];
     assertPhysicalPlacement(certificate, [], input);
+    const startedAt = performance.now();
     const result = layoutLabelsDetailed(input, baseline.viewport);
+    const elapsedMs = performance.now() - startedAt;
     expect(result.status).toBe('complete');
     assertPhysicalPlacement(result.placements, [], input);
     expect(
       layoutLabelsDetailed([...input].reverse(), baseline.viewport).placements,
     ).toEqual(result.placements);
-    expect(result.stats.elapsedMs).toBeLessThan(2000);
+    expect(elapsedMs).toBeLessThan(2000);
 
+    const obstructedStartedAt = performance.now();
     const obstructed = layoutLabelsDetailed(
       input,
       baseline.viewport,
       modeledPhonePanel(),
     );
+    const obstructedElapsedMs = performance.now() - obstructedStartedAt;
     expect(obstructed.status).not.toBe('complete');
     assertPhysicalPlacement(
       obstructed.placements,
@@ -196,7 +202,7 @@ describe('captured CI phone selected-label capacity', () => {
     expect(obstructed.stats.nodes).toBeLessThanOrEqual(
       LABEL_PACKING_BUDGET.maxNodes,
     );
-    expect(obstructed.stats.elapsedMs).toBeLessThan(2000);
+    expect(obstructedElapsedMs).toBeLessThan(2000);
     // Independent upper bound: inflate targets by the required 3px gap.
     // A 94px strip for 194px + one-marker remainder beside 241x119 selected
     // text + six-marker width over remaining 94px cannot hold 26x47px.

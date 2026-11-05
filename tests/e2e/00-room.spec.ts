@@ -183,6 +183,7 @@ test('scene effects retain actual surface ownership and stop drawing after settl
   test.setTimeout(120_000);
   trackRoomPage(testInfo, page);
   markRoomProgress(testInfo, { journey: 'effects', stage: 'room setup' });
+  await enableRoomLayoutDiagnostics(page);
   await observeRoomScene(page);
   await page.setViewportSize({ width: 1280, height: 1100 });
   await page.emulateMedia({ reducedMotion: 'no-preference' });
@@ -1666,6 +1667,7 @@ for (const { name, viewport } of [
 test('panned camera keeps visible drawer labels clickable', async ({
   page,
 }) => {
+  await enableRoomLayoutDiagnostics(page);
   await page.setViewportSize({ width: 1280, height: 1100 });
   await login(page);
   await page.goto('/room');

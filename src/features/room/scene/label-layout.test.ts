@@ -12,7 +12,7 @@ import {
   type LabelRect,
   type LabelArea,
   type LabelPlacement,
-} from './label-layout';
+} from './label-layout-test-harness';
 
 const viewport = { left: 0, top: 0, right: 160, bottom: 100 };
 const label = (
