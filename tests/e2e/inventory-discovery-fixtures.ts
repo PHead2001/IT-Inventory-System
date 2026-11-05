@@ -3,6 +3,7 @@ import { expect, type Page, type Route } from '@playwright/test';
 import { createClient } from '@supabase/supabase-js';
 import { z } from 'zod';
 import fixture from '../fixtures/auth.json' with { type: 'json' };
+import { countFeedback } from './count-feedback-support';
 
 /** Caller-scoped RPCs prepare fictional rows; discovery assertions use the UI. */
 export async function discoveryFixture() {
@@ -126,9 +127,7 @@ export async function appliedSearch(page: Page, query: string, count: number) {
   await expect(
     page.getByRole('textbox', { name: 'Search inventory', exact: true }),
   ).toHaveValue(query);
-  await expect(
-    page.getByText(`${count} matching rows`, { exact: true }),
-  ).toBeVisible();
+  await expect(countFeedback(page, `${count} matching rows`)).toBeVisible();
   await expect(
     page.getByText('Results and CSV use the applied search.', { exact: true }),
   ).toBeVisible();

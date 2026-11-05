@@ -1,5 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { expect, test, type Page } from '@playwright/test';
+import { countFeedback } from './count-feedback-support';
 import { Box3, Matrix4, Ray, Vector3 } from 'three';
 import { measureRoomLabelName } from './room-label-name';
 import { enableRoomLayoutDiagnostics } from './room-layout-diagnostics';
@@ -1465,7 +1466,7 @@ test('real WebGL room raycasting selects shelf and drawer inventory', async ({
   const fixtureRow = inventory.getByRole('listitem').filter({
     has: page.getByRole('link', { name: inventoryName, exact: true }),
   });
-  await expect(fixtureRow.getByText('7 units', { exact: true })).toBeVisible();
+  await expect(countFeedback(fixtureRow, '7 units')).toBeVisible();
   const toolbar = page.locator('[data-room-surface]');
   await setRoomLabels(page, true);
   await toolbar
@@ -1526,7 +1527,7 @@ test('real WebGL room raycasting selects shelf and drawer inventory', async ({
   await expect(
     inventory.getByRole('link', { name: inventoryName, exact: true }),
   ).toHaveCount(1);
-  await expect(fixtureRow.getByText('4 units', { exact: true })).toBeVisible();
+  await expect(countFeedback(fixtureRow, '4 units')).toBeVisible();
 });
 
 for (const { name, viewport } of [

@@ -339,6 +339,30 @@ it.each(['forbidden', 'actor_changed'])(
 it.each(['forbidden', 'actor_changed'])(
   'ignores a retired observer %s after successor route admission',
   async (code) => {
+    const previewEnvelope = {
+      actor,
+      backend,
+      payload: {
+        target: { kind: 'asset', id: actor },
+        name: 'Joined private record',
+        status: 'active',
+        assetTag: 'TAG',
+        stock: null,
+        locations: [],
+        moreLocations: false,
+        siteName: null,
+        photo: null,
+      },
+    };
+    let finishPreview!: (value: typeof previewEnvelope) => void;
+    const previewBody = new Promise<typeof previewEnvelope>((resolve) => {
+      finishPreview = resolve;
+    });
+    // This test controls body completion; native Response stream scheduling is
+    // unrelated to whether an obsolete action may withdraw the successor card.
+    const response = new Response(null, { status: 200 });
+    const decode = vi.spyOn(response, 'json').mockReturnValue(previewBody);
+    vi.mocked(fetch).mockResolvedValueOnce(response);
     const view = render(tree());
     await screen.findByRole('textbox');
     await waitFor(() => expect(command.authorized()).toBe(true));
@@ -363,7 +387,16 @@ it.each(['forbidden', 'actor_changed'])(
       await waitFor(() => expect(command.authorized()).toBe(true));
       expect(originalCurrent()).toBe(false);
       act(() => screen.getByRole('link', { name: 'Joined record' }).focus());
-      await screen.findByText('Joined private record');
+      await waitFor(() => expect(decode).toHaveBeenCalledOnce());
+      expect(
+        screen.getByRole('dialog').querySelector('[aria-busy="true"]'),
+      ).toBeInTheDocument();
+      expect(vi.mocked(fetch).mock.calls[0][1]?.signal?.aborted).toBe(false);
+      await act(async () => {
+        finishPreview(previewEnvelope);
+        await previewBody;
+      });
+      expect(screen.getByText('Joined private record')).toBeVisible();
       const receipt = { ok: false, code };
       await act(async () => {
         finish(receipt);
@@ -373,9 +406,14 @@ it.each(['forbidden', 'actor_changed'])(
         'Joined private record',
       );
       expect(command.authorized()).toBe(true);
+      expect(vi.mocked(fetch).mock.calls[0][1]?.signal?.aborted).toBe(false);
       expect(screen.getByRole('textbox')).toBe(draft);
       expect(draft).toHaveValue('retained');
     } finally {
+      await act(async () => {
+        finishPreview(previewEnvelope);
+        await previewBody;
+      });
       finish?.({ ok: false, code });
       await pending;
     }
