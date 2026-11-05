@@ -1,7 +1,13 @@
-import { expect, test, type Page, type Response } from '@playwright/test';
+import { expect, test, type Page, type Locator } from '@playwright/test';
 import type { RoomOccupancy } from '../../src/features/room/occupancy-contract';
 import { occupancyText } from '../../src/features/room/occupancy-contract';
-import { roomSelectionOccupancy } from './room-occupancy-snapshot';
+import {
+  roomSelectionOccupancy,
+  observeRoomOccupancy,
+  readCommittedRoomOccupancy,
+  type RoomOccupancyCapture,
+  type RoomOccupancyCommit,
+} from './room-occupancy-snapshot';
 import { measureRoomTarget, roomTargetMeetsMinimum } from './room-target-size';
 import {
   enableRoomLayoutDiagnostics,
@@ -48,6 +54,41 @@ const {
   near,
 } = registerRoomTestSupport();
 
+async function committedRoomCounts(
+  page: Page,
+  viewer: Locator,
+  capture: RoomOccupancyCapture,
+  previousGeneration: string | null = null,
+  code?: string,
+) {
+  return readCommittedRoomOccupancy({
+    capture,
+    origin: new URL(page.url()).origin,
+    spaceId: 'it-closet',
+    code,
+    previousGeneration,
+    readCommit: async () => {
+      let commit!: RoomOccupancyCommit;
+      await expect
+        .poll(async () => {
+          commit = await viewer.evaluate((host) => ({
+            code: host.dataset.selectedCode ?? '',
+            status: host.dataset.occupancyStatus ?? '',
+            generation: host.dataset.occupancyGeneration ?? '',
+          }));
+          return commit.status === 'ready' &&
+            commit.generation !== previousGeneration &&
+            (code === undefined || commit.code === code)
+            ? commit.generation
+            : '';
+        })
+        .toMatch(/^[0-9a-f-]{36}$/);
+      return commit;
+    },
+    observe: async () => undefined,
+  });
+}
+
 test('spatial reveal endpoints retain actual picking and labels across oblique, overhead, underside and panned views', async ({
   page,
 }, testInfo) => {
@@ -59,43 +100,16 @@ test('spatial reveal endpoints retain actual picking and labels across oblique, 
     journey: 'spatial-reveal',
     stage: 'room setup',
   });
-  const occupancyResponses = new Map<
-    string,
-    Promise<{ requestUrl: string; response: unknown } | null>
-  >();
-  let occupancyCaptureOverflow = false;
-  const captureOccupancy = (response: Response) => {
-    const url = new URL(response.url());
-    if (
-      !response.ok() ||
-      url.origin !== new URL(page.url()).origin ||
-      url.pathname !== '/api/room/occupancy' ||
-      url.searchParams.get('space') !== 'it-closet'
-    )
-      return;
-    const generation = url.searchParams.get('generation');
-    if (!generation) return;
-    if (occupancyResponses.size >= 128) {
-      occupancyCaptureOverflow = true;
-      return;
-    }
-    occupancyResponses.set(
-      generation,
-      response
-        .json()
-        .then((payload: unknown) => ({
-          requestUrl: response.request().url(),
-          response: payload,
-        }))
-        .catch(() => null),
-    );
-  };
-  page.on('response', captureOccupancy);
   await observeRoomScene(page);
   await enableRoomLayoutDiagnostics(page);
   await page.setViewportSize({ width: 1280, height: 1100 });
   await page.emulateMedia({ reducedMotion: 'no-preference' });
   await login(page);
+  const occupancyCapture = observeRoomOccupancy(
+    page,
+    new URL(page.url()).origin,
+    'it-closet',
+  );
   await page.goto('/room?space=it-closet');
   const viewer = await ready(page),
     canvas = viewer.locator('canvas');
@@ -199,19 +213,9 @@ test('spatial reveal endpoints retain actual picking and labels across oblique, 
           return acceptedGeneration;
         })
         .toMatch(/^[0-9a-f-]{36}$/);
-      expect(
-        occupancyCaptureOverflow,
-        'bounded occupancy response capture',
-      ).toBe(false);
-      const adoptedResponse = occupancyResponses.get(acceptedGeneration!);
-      expect(
-        adoptedResponse,
-        'response for the adopted render generation',
-      ).toBeDefined();
-      const adopted = await adoptedResponse!;
-      expect(adopted, 'readable adopted occupancy response').not.toBeNull();
+      const adopted = await occupancyCapture.read(acceptedGeneration!);
       const occupancy = roomSelectionOccupancy({
-        ...adopted!,
+        ...adopted,
         origin: new URL(page.url()).origin,
         spaceId: 'it-closet',
         code,
@@ -345,6 +349,11 @@ test('optional room counts reconcile with active leaf contents and refresh as un
   page,
 }) => {
   await login(page);
+  const capture = observeRoomOccupancy(
+    page,
+    new URL(page.url()).origin,
+    'it-closet',
+  );
   await page.goto('/room?space=it-closet&location=ITC-D01');
   const viewer = page.getByTestId('room-viewer');
   await expect(viewer.locator('canvas')).toBeVisible();
@@ -356,15 +365,15 @@ test('optional room counts reconcile with active leaf contents and refresh as un
     exact: true,
   });
   await expect(toggle).toHaveAttribute('aria-pressed', 'false');
-  const snapshot = page.waitForResponse(
-    (response) =>
-      response.url().includes('/api/room/occupancy?') &&
-      response.status() === 200,
-  );
   await toggle.click();
-  const countsResponse = await snapshot;
-  expect(countsResponse.headers()['cache-control']).toBe('private, no-store');
-  const counts = await countsResponse.json();
+  const counts = await committedRoomCounts(
+    page,
+    viewer,
+    capture,
+    null,
+    'ITC-D01',
+  );
+  expect(counts.cacheControl).toBe('private, no-store');
   expect(counts.counts['ITC-D01'].quantity_product_count).toMatch(
     /^[1-9][0-9]*$/,
   );
@@ -396,11 +405,7 @@ test('optional room counts reconcile with active leaf contents and refresh as un
   });
   await expect(countsExplanation).toBeVisible();
   await expect(countsExplanation).toContainText(/counts are a snapshot/);
-  const refreshed = page.waitForResponse(
-    (response) =>
-      response.url().includes('/api/room/occupancy?') &&
-      response.status() === 200,
-  );
+
   const refreshedContents = page.waitForResponse(
     (response) =>
       response.url().includes('/api/room/contents?') &&
@@ -409,7 +414,13 @@ test('optional room counts reconcile with active leaf contents and refresh as un
   await page
     .getByRole('button', { name: 'Refresh inventory', exact: true })
     .click();
-  await refreshed;
+  await committedRoomCounts(
+    page,
+    viewer,
+    capture,
+    counts.generation,
+    'ITC-D01',
+  );
   await refreshedContents;
   await page
     .getByRole('button', { name: 'More map controls', exact: true })
@@ -420,7 +431,7 @@ test('optional room counts reconcile with active leaf contents and refresh as un
   await expect(page.getByText(/counts are a snapshot/)).toHaveCount(0);
 });
 
-async function assertOccupiedWitnessActions(
+async function assertOccupiedWitnessRepresentations(
   page: Page,
   scene: WitnessSnapshot,
   counts: RoomOccupancy,
@@ -444,13 +455,15 @@ async function assertOccupiedWitnessActions(
       'authorized occupied leaf snapshot for ' + code,
     ).toBeDefined();
     expect(BigInt(counts[code].quantity_unit_count)).toBeGreaterThan(0n);
-    const action = viewer.locator('[data-room-label-code="' + code + '"]');
+    const action = viewer.locator(
+      '[data-room-representation-code="' + code + '"]:visible',
+    );
     await expect(
       action,
-      'every independently witnessed target has one action: ' + code,
+      'every independently witnessed occupied target has its own representation: ' +
+        code,
     ).toHaveCount(1);
     await expect(action).toBeVisible();
-    await expect(action).toHaveAttribute('tabindex', '0');
     await expect(action).not.toHaveAttribute('aria-hidden', 'true');
     await expect(action).toHaveAccessibleName(
       new RegExp(
@@ -468,10 +481,59 @@ async function assertOccupiedWitnessActions(
       );
     const box = await action.boundingBox();
     expect(box).toBeTruthy();
-    const targetSize = await action.evaluate(measureRoomTarget);
-    expect(roomTargetMeetsMinimum(targetSize), JSON.stringify(targetSize)).toBe(
-      true,
-    );
+    if ((await action.getAttribute('data-room-occupied-marker')) === 'true') {
+      await expect(action).toHaveAttribute('role', 'img');
+      await expect(action).not.toHaveAttribute('tabindex');
+      expect(await action.evaluate((element) => element.tagName)).toBe('SPAN');
+      // Transformed DOMRect edges can differ by a few millionths of a CSS px.
+      // The authored badge remains exactly 24px; collision checks stay strict.
+      expect(box!.width).toBeCloseTo(24, 3);
+      expect(box!.height).toBeCloseTo(24, 3);
+      expect(
+        await action.evaluate((element) => {
+          const style = getComputedStyle(element);
+          return { width: style.width, height: style.height };
+        }),
+      ).toEqual({ width: '24px', height: '24px' });
+      expect(
+        await action.evaluate((element) => {
+          const wrapper = element.closest('[data-room-passive-wrapper]');
+          const rect = element.getBoundingClientRect();
+          const top = document.elementFromPoint(
+            rect.left + rect.width / 2,
+            rect.top + rect.height / 2,
+          );
+          const canvas = element
+            .closest('[data-room-surface]')
+            ?.querySelector('canvas');
+          return (
+            getComputedStyle(element).pointerEvents === 'none' &&
+            !!wrapper &&
+            getComputedStyle(wrapper).pointerEvents === 'none' &&
+            top === canvas
+          );
+        }),
+        'passive badge and wrapper leave actual canvas hit-testing available: ' +
+          code,
+      ).toBe(true);
+    } else {
+      await expect(action).toHaveAttribute('tabindex', '0');
+      expect(await action.evaluate((element) => element.tagName)).toBe(
+        'BUTTON',
+      );
+      const targetSize = await action.evaluate(measureRoomTarget);
+      expect(
+        roomTargetMeetsMinimum(targetSize),
+        JSON.stringify(targetSize),
+      ).toBe(true);
+      if ((await action.getAttribute('aria-pressed')) === 'true') {
+        await expect(action).toHaveAttribute('data-label-compact', 'false');
+        if (await action.locator('[data-room-label-full]').count())
+          await expect(action.locator('[data-room-label-full]')).toBeVisible();
+        else
+          expect((await action.innerText()).trim().length).toBeGreaterThan(0);
+      }
+    }
     expect(box!.x).toBeGreaterThanOrEqual(scene.frame.x);
     expect(box!.y).toBeGreaterThanOrEqual(scene.frame.y);
     expect(box!.x + box!.width).toBeLessThanOrEqual(
@@ -487,6 +549,35 @@ async function assertOccupiedWitnessActions(
           box!.y >= mask.bottom ||
           box!.y + box!.height <= mask.top,
       ).toBe(true);
+    expect(
+      await action.evaluate((element) => {
+        const own = element.getBoundingClientRect();
+        return [
+          ...element
+            .closest('[data-room-surface]')!
+            .querySelectorAll<HTMLElement>('[data-label-layout-id]'),
+        ].every((other) => {
+          if (
+            other === element ||
+            other.dataset.labelSuppressed === 'true' ||
+            other.getClientRects().length === 0 ||
+            getComputedStyle(other).visibility !== 'visible'
+          )
+            return true;
+          const area = other.getBoundingClientRect();
+          return (
+            !area.width ||
+            !area.height ||
+            own.left >= area.right ||
+            own.right <= area.left ||
+            own.top >= area.bottom ||
+            own.bottom <= area.top
+          );
+        });
+      }),
+      'occupied representation does not overlap any registered optional label: ' +
+        code,
+    ).toBe(true);
     boxes.push(box!);
   }
   for (const [index, box] of boxes.entries())
@@ -503,7 +594,7 @@ async function assertOccupiedWitnessActions(
   return witnesses;
 }
 
-async function assertOccupiedWitnessActionsWithDiagnostics(
+async function assertOccupiedWitnessRepresentationsWithDiagnostics(
   page: Page,
   scene: WitnessSnapshot,
   counts: RoomOccupancy,
@@ -512,7 +603,7 @@ async function assertOccupiedWitnessActionsWithDiagnostics(
 ) {
   let target: RoomPointerAttempt | undefined;
   try {
-    const result = await assertOccupiedWitnessActions(
+    const result = await assertOccupiedWitnessRepresentations(
       page,
       scene,
       counts,
@@ -570,7 +661,7 @@ async function currentUncoveredRoomPoint(
   );
 }
 
-test('375px populated room gives every independently witnessed opaque target an action with More and selected long text', async ({
+test('375px populated room shows every occupied target with passive badges and selected readable text', async ({
   page,
 }, testInfo) => {
   test.setTimeout(180_000);
@@ -581,6 +672,11 @@ test('375px populated room gives every independently witnessed opaque target an 
   await page.setViewportSize({ width: 375, height: 812 });
   await page.emulateMedia({ reducedMotion: 'reduce' });
   await login(page);
+  const occupancyCapture = observeRoomOccupancy(
+    page,
+    new URL(page.url()).origin,
+    'it-closet',
+  );
   await page.goto('/room?space=it-closet');
   const viewer = await ready(page),
     canvas = viewer.locator('canvas');
@@ -588,14 +684,13 @@ test('375px populated room gives every independently witnessed opaque target an 
     name: 'More map controls',
     exact: true,
   });
-  const assertMoreOutsideCanvasWhenAboveFits = async () => {
+  const assertMoreOutsideCanvas = async () => {
     const panel = page.getByRole('region', {
       name: 'More map controls',
       exact: true,
     });
-    // Scroll/resize schedules popup placement on rAF. Read every rectangle and
-    // the resulting placement together on each retry, never reuse a below-menu
-    // rectangle captured before awaiting the later "above" attribute.
+    // Read placement and geometry together after each scheduled layout. Inline
+    // stays latched across page scrolling and must occupy its own scrollable row.
     await expect
       .poll(() =>
         panel.evaluate((element) => {
@@ -608,35 +703,62 @@ test('375px populated room gives every independently witnessed opaque target an 
             ?.getBoundingClientRect();
           if (!bar || !frame) return false;
           const popup = element.getBoundingClientRect();
+          const css = getComputedStyle(element);
+          const outsideCanvas = popup.bottom <= frame.top;
+          const scrollable =
+            ['auto', 'scroll'].includes(css.overflowY) &&
+            element.clientHeight > 0 &&
+            element.scrollHeight > element.clientHeight;
+          if (
+            !outsideCanvas ||
+            !scrollable ||
+            popup.left < bar.left ||
+            popup.right > bar.right
+          )
+            return false;
+          if (element.getAttribute('data-placement') === 'inline')
+            return css.position === 'relative' && popup.top >= bar.bottom;
           const top = window.visualViewport?.offsetTop ?? 0;
-          const fullHeight = Math.min(
-            parseFloat(
-              getComputedStyle(element).getPropertyValue('--room-menu-height'),
-            ) || 200,
-            (window.visualViewport?.height ?? window.innerHeight) * 0.35,
-            element.scrollHeight + 2,
-          );
           return (
-            bar.top - top - 9 < fullHeight ||
-            (element.getAttribute('data-placement') === 'above' &&
-              popup.top >= top + 4 &&
-              popup.bottom <= bar.top - 5 &&
-              popup.bottom <= frame.top)
+            element.getAttribute('data-placement') === 'above' &&
+            popup.top >= top + 4 &&
+            popup.bottom <= bar.top - 5
           );
         }),
       )
       .toBe(true);
   };
   await more.click();
-  await assertMoreOutsideCanvasWhenAboveFits();
-  const initialSnapshot = page.waitForResponse(
-    (response) =>
-      response.url().includes('/api/room/occupancy?') && response.ok(),
-  );
+  await assertMoreOutsideCanvas();
+
   await page
     .getByRole('button', { name: 'Show item counts', exact: true })
     .click();
-  let counts: RoomOccupancy = (await (await initialSnapshot).json()).counts;
+  let snapshot = await committedRoomCounts(page, viewer, occupancyCapture);
+  let counts: RoomOccupancy = snapshot.counts;
+  const assertCurrentGeneration = async () => {
+    await expect(viewer).toHaveAttribute('data-occupancy-status', 'ready');
+    await expect(viewer).toHaveAttribute(
+      'data-occupancy-generation',
+      snapshot.generation,
+    );
+  };
+  const assertCurrentRepresentations = async (
+    scene: WitnessSnapshot,
+    stage: RoomLayoutWitnessStage,
+    witnesses = roomVisibilityWitnesses(scene),
+  ) => {
+    await assertCurrentGeneration();
+    const result = await assertOccupiedWitnessRepresentationsWithDiagnostics(
+      page,
+      scene,
+      counts,
+      stage,
+      witnesses,
+    );
+    await assertCurrentGeneration();
+    return result;
+  };
   expect(Object.keys(counts)).toHaveLength(28);
   for (const value of Object.values(counts))
     expect(BigInt(value.quantity_unit_count)).toBeGreaterThan(0n);
@@ -644,8 +766,8 @@ test('375px populated room gives every independently witnessed opaque target an 
   await page.getByRole('button', { name: 'Fit room', exact: true }).click();
   await canvas.scrollIntoViewIfNeeded();
   await settledLabels(page);
-  // Page scrolling flips More across the canvas without moving the camera.
-  // Its old opaque mask must not keep independently visible actions hidden.
+  // The narrow More panel moves into page flow when above cannot fit. Native
+  // page scrolling must preserve its latch, the camera and every required label.
   await page.setViewportSize({ width: 390, height: 844 });
   await page.getByRole('button', { name: 'Fit room', exact: true }).click();
   await more.click();
@@ -654,43 +776,140 @@ test('375px populated room gives every independently witnessed opaque target an 
     name: 'More map controls',
     exact: true,
   });
+  await menu.hover();
+  const controlsScroll = await menu.evaluate((element) => element.scrollTop);
+  const controlsCamera = await camera(page);
+  await page.mouse.wheel(0, 160);
+  await expect
+    .poll(() => menu.evaluate((element) => element.scrollTop))
+    .toBeGreaterThan(controlsScroll);
+  await page.mouse.wheel(0, -160);
+  await expect
+    .poll(() => menu.evaluate((element) => element.scrollTop))
+    .toBe(controlsScroll);
+  const controlsCameraAfter = await camera(page);
+  near(controlsCameraAfter.position, controlsCamera.position);
+  near(controlsCameraAfter.target, controlsCamera.target);
+  expect(controlsCameraAfter.zoom).toBeCloseTo(controlsCamera.zoom, 6);
+  await canvas.scrollIntoViewIfNeeded();
+  await settledLabels(page);
+  await assertMoreOutsideCanvas();
   const scrollFrame = await canvas.boundingBox();
   expect(scrollFrame).not.toBeNull();
-  await page.mouse.move(5, 800);
-  await page.mouse.wheel(0, scrollFrame!.y - 149);
+  const scrollBadge = viewer
+    .locator('[data-room-occupied-marker]:visible')
+    .first();
+  const scrollBadgeBox = await scrollBadge.boundingBox();
+  expect(scrollBadgeBox).not.toBeNull();
+  const beforePassiveWheel = await camera(page);
+  const selectionBeforeScroll = await viewer.getAttribute('data-selected-code');
+  const pageScrollBefore = await page.evaluate(() => scrollY);
+  const scrollPoint = { x: scrollBadgeBox!.x + 12, y: scrollBadgeBox!.y + 12 };
+  await page.mouse.move(scrollPoint.x, scrollPoint.y);
+  // Await installation before input. Passive map policy stops wheel listeners
+  // on the canvas itself; document capture observes its actual native target.
+  const trustedPassiveWheel = await scrollBadge.evaluateHandle(
+    (badge, point) => {
+      const canvas = badge
+        .closest('[data-room-surface]')
+        ?.querySelector('canvas');
+      const wrapper = badge.closest('[data-room-passive-wrapper]');
+      const rect = badge.getBoundingClientRect();
+      const document = badge.ownerDocument;
+      if (
+        !canvas ||
+        !wrapper ||
+        point.x < rect.left ||
+        point.x >= rect.right ||
+        point.y < rect.top ||
+        point.y >= rect.bottom ||
+        getComputedStyle(badge).pointerEvents !== 'none' ||
+        getComputedStyle(wrapper).pointerEvents !== 'none' ||
+        document.elementFromPoint(point.x, point.y) !== canvas
+      )
+        throw new Error(
+          'Passive wheel point must be inside the live badge and hit its canvas',
+        );
+      let cancel: () => void = () => undefined;
+      const result = new Promise<boolean>((resolve) => {
+        const receive = (event: WheelEvent) =>
+          finish(event.isTrusted && event.target === canvas);
+        const stop = window.setTimeout(() => finish(false), 3000);
+        function finish(value: boolean) {
+          clearTimeout(stop);
+          document.removeEventListener('wheel', receive, true);
+          resolve(value);
+        }
+        cancel = () => finish(false);
+        document.addEventListener('wheel', receive, {
+          capture: true,
+          passive: true,
+        });
+      });
+      return { result, cancel };
+    },
+    scrollPoint,
+  );
+  try {
+    await page.mouse.wheel(0, Math.max(200, scrollFrame!.y));
+    expect(
+      await trustedPassiveWheel.evaluate((observation) => observation.result),
+      'a trusted wheel over the passive badge reaches the canvas',
+    ).toBe(true);
+  } finally {
+    try {
+      await trustedPassiveWheel.evaluate((observation) => observation.cancel());
+    } finally {
+      await trustedPassiveWheel.dispose();
+    }
+  }
+  const afterPassiveWheel = await camera(page);
+  near(afterPassiveWheel.position, beforePassiveWheel.position);
+  near(afterPassiveWheel.target, beforePassiveWheel.target);
+  expect(afterPassiveWheel.zoom).toBeCloseTo(beforePassiveWheel.zoom, 6);
   await expect
-    .poll(async () => Math.abs((await canvas.boundingBox())!.y - 149))
-    .toBeLessThan(5);
-  await expect(menu).toHaveAttribute('data-placement', 'below');
+    .poll(() => page.evaluate(() => scrollY))
+    .toBeGreaterThan(pageScrollBefore);
+  await expect(menu).toHaveAttribute('data-placement', 'inline');
+  await assertMoreOutsideCanvas();
   await settledLabels(page);
-  const coveredScene = await captureRoomWitness(page);
-  const coveredWitnesses = await assertOccupiedWitnessActionsWithDiagnostics(
-    page,
-    coveredScene,
-    counts,
-    'scroll-more-overlapping-canvas',
+  const scrolledFrame = await canvas.boundingBox();
+  expect(scrolledFrame!.width).toBe(scrollFrame!.width);
+  expect(scrolledFrame!.height).toBe(scrollFrame!.height);
+  await expect(viewer).toHaveAttribute(
+    'data-selected-code',
+    selectionBeforeScroll!,
   );
-  const unchangedCamera = await camera(page);
-  const scrollRevision = Number(
-    await canvas.getAttribute('data-label-layout-revision'),
-  );
-  await page.mouse.wheel(0, -250);
-  await expect(menu).toHaveAttribute('data-placement', 'above');
-  await assertMoreOutsideCanvasWhenAboveFits();
-  await settledLabels(page, scrollRevision);
-  await expect(more).toHaveAttribute('aria-expanded', 'true');
-  const restoredCamera = await camera(page);
-  near(restoredCamera.position, unchangedCamera.position);
-  near(restoredCamera.target, unchangedCamera.target);
-  expect(restoredCamera.zoom).toBeCloseTo(unchangedCamera.zoom, 5);
-  const uncoveredScene = await captureRoomWitness(page);
-  const restoredWitnesses = await assertOccupiedWitnessActionsWithDiagnostics(
-    page,
-    uncoveredScene,
-    counts,
+  await assertCurrentRepresentations(
+    await captureRoomWitness(page),
     'scroll-more-outside-canvas-without-reopening',
   );
-  expect(restoredWitnesses.size).toBeGreaterThan(coveredWitnesses.size);
+  const pageScrollAfter = await page.evaluate(() => scrollY);
+  const returnPoint = await uncoveredCanvasGesture(page, 0, 0);
+  await page.mouse.move(returnPoint.x, returnPoint.y);
+  await page.mouse.wheel(0, -250);
+  await expect
+    .poll(() => page.evaluate(() => scrollY))
+    .toBeLessThan(pageScrollAfter);
+  await expect(menu).toHaveAttribute('data-placement', 'inline');
+  await assertMoreOutsideCanvas();
+  await settledLabels(page);
+  await expect(more).toHaveAttribute('aria-expanded', 'true');
+  const restoredCamera = await camera(page);
+  near(restoredCamera.position, beforePassiveWheel.position);
+  near(restoredCamera.target, beforePassiveWheel.target);
+  expect(restoredCamera.zoom).toBeCloseTo(beforePassiveWheel.zoom, 6);
+  const restoredFrame = await canvas.boundingBox();
+  expect(restoredFrame!.width).toBe(scrollFrame!.width);
+  expect(restoredFrame!.height).toBe(scrollFrame!.height);
+  await expect(viewer).toHaveAttribute(
+    'data-selected-code',
+    selectionBeforeScroll!,
+  );
+  await assertCurrentRepresentations(
+    await captureRoomWitness(page),
+    'scroll-more-outside-canvas-without-reopening',
+  );
   await more.click();
   await page.setViewportSize({ width: 375, height: 812 });
   await canvas.scrollIntoViewIfNeeded();
@@ -743,27 +962,29 @@ test('375px populated room gives every independently witnessed opaque target an 
       page,
       scenario === 'fit-closed' ? undefined : requestedAfter,
     );
-    const response = page.waitForResponse(
-      (result) => result.url().includes('/api/room/occupancy?') && result.ok(),
-    );
+
     await page
       .getByRole('button', { name: 'Refresh inventory', exact: true })
       .click();
-    counts = (await (await response).json()).counts;
+    snapshot = await committedRoomCounts(
+      page,
+      viewer,
+      occupancyCapture,
+      snapshot.generation,
+    );
+    counts = snapshot.counts;
     if (open && (await more.getAttribute('aria-expanded')) !== 'true')
       await more.click();
     await canvas.scrollIntoViewIfNeeded();
     await settledLabels(page);
-    if (open) await assertMoreOutsideCanvasWhenAboveFits();
+    if (open) await assertMoreOutsideCanvas();
     const scene = await captureRoomWitness(page);
     expect(scene.frame.width).toBe(initialSize!.width);
     expect(scene.frame.height).toBe(initialSize!.height);
     const report = roomVisibilityWitnessReport(scene);
     report.partiallyExposedCodes.forEach((code) => partialCodes.add(code));
-    const witnesses = await assertOccupiedWitnessActionsWithDiagnostics(
-      page,
+    const witnesses = await assertCurrentRepresentations(
       scene,
-      counts,
       scenario,
       report.witnesses,
     );
@@ -798,7 +1019,9 @@ test('375px populated room gives every independently witnessed opaque target an 
         await expect(canvas).toHaveAttribute('data-hover-visible-code', code);
         // The expected code came from independent triangles, never this telemetry.
         await expect(
-          viewer.locator('[data-room-label-code="' + code + '"]'),
+          viewer.locator(
+            '[data-room-representation-code="' + code + '"]:visible',
+          ),
         ).toBeVisible();
       } catch (error) {
         await reportRoomLayoutFailure(
@@ -840,15 +1063,24 @@ test('375px populated room gives every independently witnessed opaque target an 
         await more.click();
       await canvas.scrollIntoViewIfNeeded();
       await settledLabels(page);
-      await assertMoreOutsideCanvasWhenAboveFits();
+      await assertMoreOutsideCanvas();
+      // Navigation may finish its privacy verification during the map actions.
+      // Bind the adopted body only after those actions, then freeze this judgment.
+      snapshot = await committedRoomCounts(
+        page,
+        viewer,
+        occupancyCapture,
+        null,
+        code,
+      );
+      counts = snapshot.counts;
+      await settledLabels(page);
+      await assertCurrentGeneration();
       const selectedScene = await captureRoomWitness(page);
-      const selectedWitnesses =
-        await assertOccupiedWitnessActionsWithDiagnostics(
-          page,
-          selectedScene,
-          counts,
-          'fit-open-selected-before-long-text',
-        );
+      const selectedWitnesses = await assertCurrentRepresentations(
+        selectedScene,
+        'fit-open-selected-before-long-text',
+      );
       expect(
         selectedWitnesses.has(code),
         'selected target is independently witnessed after reopening More',
@@ -869,10 +1101,8 @@ test('375px populated room gives every independently witnessed opaque target an 
       await settledLabels(page);
       // Same captured physical scene and overlay: text-only stress cannot remove
       // neighbors from the independently required visible set.
-      await assertOccupiedWitnessActionsWithDiagnostics(
-        page,
+      await assertCurrentRepresentations(
         selectedScene,
-        counts,
         'fit-open-selected-long-text',
       );
       await expect(label).toBeVisible();
@@ -992,7 +1222,16 @@ test('375px populated room gives every independently witnessed opaque target an 
   expect(
     roomVisibilityWitnesses(await captureRoomWitness(page)).has('ITC-RED'),
   ).toBe(true);
-  await red.click();
+  const browser = page.getByRole('navigation', { name: 'Location browser' });
+  await browser
+    .getByRole('searchbox', { name: 'Browse locations' })
+    .fill('ITC-RED');
+  const redControl = browser.getByRole('button', { name: /ITC-RED$/ });
+  expect(
+    roomTargetMeetsMinimum(await redControl.evaluate(measureRoomTarget)),
+  ).toBe(true);
+  await redControl.focus();
+  await redControl.press('Enter');
   await expect(viewer).toHaveAttribute('data-selected-code', 'ITC-RED');
   await expect(page).toHaveURL(/location=ITC-RED(?:&|$)/);
   await page.getByRole('button', { name: 'Fit room', exact: true }).click();
@@ -1000,11 +1239,26 @@ test('375px populated room gives every independently witnessed opaque target an 
   await canvas.scrollIntoViewIfNeeded();
   await page.mouse.move(15, 15);
   await settledLabels(page);
-  await assertMoreOutsideCanvasWhenAboveFits();
-  await assertOccupiedWitnessActions(
+  await assertMoreOutsideCanvas();
+  await expect(
+    menu.getByRole('button', { name: 'Show labels', exact: true }),
+  ).toHaveAttribute('aria-pressed', 'true');
+  await expect(
+    menu.getByRole('button', { name: 'Show item counts', exact: true }),
+  ).toHaveAttribute('aria-pressed', 'true');
+  snapshot = await committedRoomCounts(
     page,
+    viewer,
+    occupancyCapture,
+    null,
+    'ITC-RED',
+  );
+  counts = snapshot.counts;
+  await settledLabels(page);
+  await assertCurrentGeneration();
+  await assertCurrentRepresentations(
     await captureRoomWitness(page),
-    counts,
+    'selected-red-before-resize',
   );
 
   const beforeResize = Number(
@@ -1018,7 +1272,7 @@ test('375px populated room gives every independently witnessed opaque target an 
   await canvas.scrollIntoViewIfNeeded();
   await page.mouse.move(15, 15);
   await settledLabels(page);
-  await assertMoreOutsideCanvasWhenAboveFits();
+  await assertMoreOutsideCanvas();
   await expect(viewer).toHaveAttribute('data-selected-code', 'ITC-RED');
   await expect(red).toHaveAttribute('aria-pressed', 'true');
   await expect(red).toHaveAttribute('data-label-compact', 'false');
@@ -1029,12 +1283,14 @@ test('375px populated room gives every independently witnessed opaque target an 
     resizedRequiredWitnesses.has('ITC-S4C'),
     'the previously missing action is independently exposed after mounted resize',
   ).toBe(true);
-  const resizedWitnesses = await assertOccupiedWitnessActions(
+  await assertCurrentGeneration();
+  const resizedWitnesses = await assertOccupiedWitnessRepresentations(
     page,
     resizedScene,
     counts,
     resizedRequiredWitnesses,
   );
+  await assertCurrentGeneration();
   await testInfo.attach('390-after-mounted-resize-opaque-witnesses', {
     body: JSON.stringify({
       viewport: page.viewportSize(),
@@ -1075,6 +1331,194 @@ test('375px populated room gives every independently witnessed opaque target an 
   ).toBeVisible();
   await page.mouse.move(15, 15);
   await settledLabels(page);
+  // A passive badge is also a valid start for a native canvas pan; it cannot
+  // intercept the down event or activate a location of its own.
+  await activateMap(page);
+  await canvas.scrollIntoViewIfNeeded();
+  await settledLabels(page);
+  const panBadge = viewer
+    .locator('[data-room-occupied-marker]:visible')
+    .first();
+  const panBox = await panBadge.boundingBox();
+  expect(panBox).not.toBeNull();
+  const panStart = { x: panBox!.x + 12, y: panBox!.y + 12 };
+  expect(
+    await canvas.evaluate(
+      (element, point) =>
+        document.elementFromPoint(point.x, point.y) === element,
+      panStart,
+    ),
+  ).toBe(true);
+  const beforeBadgePan = await camera(page);
+  const selectedBeforeBadgePan =
+    await viewer.getAttribute('data-selected-code');
+  const focusBeforeBadgePan = await viewer.getAttribute('data-focus-count');
+  await page.mouse.move(panStart.x, panStart.y);
+  const trustedBadgeDown = await panBadge.evaluateHandle((badge, point) => {
+    const canvas = badge
+      .closest('[data-room-surface]')
+      ?.querySelector('canvas');
+    const rect = badge.getBoundingClientRect();
+    const document = badge.ownerDocument;
+    if (
+      !canvas ||
+      point.x < rect.left ||
+      point.x >= rect.right ||
+      point.y < rect.top ||
+      point.y >= rect.bottom ||
+      document.elementFromPoint(point.x, point.y) !== canvas
+    )
+      throw new Error(
+        'Passive pan point must be inside the live badge and hit its canvas',
+      );
+    let cancel: () => void = () => undefined;
+    const result = new Promise<boolean>((resolve) => {
+      const receive = (event: PointerEvent) =>
+        finish(event.isTrusted && event.target === canvas);
+      const stop = window.setTimeout(() => finish(false), 3000);
+      function finish(value: boolean) {
+        clearTimeout(stop);
+        document.removeEventListener('pointerdown', receive, true);
+        resolve(value);
+      }
+      cancel = () => finish(false);
+      document.addEventListener('pointerdown', receive, {
+        capture: true,
+        passive: true,
+      });
+    });
+    return { result, cancel };
+  }, panStart);
+  try {
+    await page.mouse.down({ button: 'right' });
+    try {
+      await page.mouse.move(
+        panStart.x +
+          (panStart.x < resizedScene.frame.x + resizedScene.frame.width / 2
+            ? 24
+            : -24),
+        panStart.y,
+        { steps: 8 },
+      );
+    } finally {
+      await page.mouse.up({ button: 'right' });
+    }
+    expect(
+      await trustedBadgeDown.evaluate((observation) => observation.result),
+    ).toBe(true);
+  } finally {
+    try {
+      await trustedBadgeDown.evaluate((observation) => observation.cancel());
+    } finally {
+      await trustedBadgeDown.dispose();
+    }
+  }
+  await expect
+    .poll(async () => {
+      const moved = await camera(page);
+      return moved.target.some(
+        (value, index) => value !== beforeBadgePan.target[index],
+      );
+    })
+    .toBe(true);
+  await expect(viewer).toHaveAttribute(
+    'data-selected-code',
+    selectedBeforeBadgePan!,
+  );
+  await expect(viewer).toHaveAttribute(
+    'data-focus-count',
+    focusBeforeBadgePan!,
+  );
+  await page.keyboard.press('Escape');
+
+  // Conventional native 44px controls remain the dependable touch path.
+  // Pan changed the camera; choose from fresh independent physical witnesses.
+  await canvas.scrollIntoViewIfNeeded();
+  await settledLabels(page);
+  const touchWitnesses = roomVisibilityWitnesses(
+    await captureRoomWitness(page),
+  );
+  const touchCode = [...touchWitnesses.keys()].find(
+    (code) => code !== resizedCode,
+  )!;
+  expect(touchCode).toBeDefined();
+  await browser
+    .getByRole('searchbox', { name: 'Browse locations' })
+    .fill(touchCode);
+  const touchControl = browser.getByRole('button', {
+    name: new RegExp(touchCode + '$'),
+  });
+  await touchControl.scrollIntoViewIfNeeded();
+  expect(
+    roomTargetMeetsMinimum(await touchControl.evaluate(measureRoomTarget)),
+  ).toBe(true);
+  const touchBox = await touchControl.boundingBox();
+  expect(touchBox).not.toBeNull();
+  const cdp = await page.context().newCDPSession(page);
+  try {
+    await cdp.send('Emulation.setTouchEmulationEnabled', {
+      enabled: true,
+      maxTouchPoints: 2,
+    });
+    await cdp.send('Input.dispatchTouchEvent', {
+      type: 'touchStart',
+      touchPoints: [
+        {
+          x: touchBox!.x + touchBox!.width / 2,
+          y: touchBox!.y + touchBox!.height / 2,
+          id: 0,
+        },
+      ],
+    });
+    await cdp.send('Input.dispatchTouchEvent', {
+      type: 'touchEnd',
+      touchPoints: [],
+    });
+    await selected(page, touchCode);
+  } finally {
+    await cdp.send('Emulation.setTouchEmulationEnabled', { enabled: false });
+    await cdp.detach();
+  }
+  await canvas.scrollIntoViewIfNeeded();
+  await settledLabels(page);
+  snapshot = await committedRoomCounts(
+    page,
+    viewer,
+    occupancyCapture,
+    null,
+    touchCode,
+  );
+  counts = snapshot.counts;
+  await settledLabels(page);
+  await assertCurrentGeneration();
+  expect(
+    roomVisibilityWitnesses(await captureRoomWitness(page)).has(touchCode),
+    'conventionally selected target remains independently exposed',
+  ).toBe(true);
+  const touchLabel = viewer.locator(
+    '[data-room-label-code="' + touchCode + '"]',
+  );
+  await expect(touchLabel).toBeVisible();
+  await expect(touchLabel).toHaveAttribute('aria-pressed', 'true');
+  await expect(touchLabel).toHaveAttribute('data-label-compact', 'false');
+  await assertCurrentGeneration();
+  const selectedCounts = counts[touchCode];
+  const formatCount = (value: string, word: string) =>
+    BigInt(value).toLocaleString('en-US') +
+    ' ' +
+    word +
+    (value === '1' ? '' : 's');
+  await expect(touchLabel).toHaveAccessibleName(
+    new RegExp(
+      [
+        formatCount(selectedCounts.quantity_product_count, 'product'),
+        formatCount(selectedCounts.quantity_unit_count, 'unit'),
+        formatCount(selectedCounts.asset_count, 'asset'),
+      ].join(' / '),
+    ),
+  );
+
+  await assertCurrentGeneration();
   expect(await canvas.getAttribute('data-label-layout-error')).toBeNull();
   expect(pageErrors).toEqual([]);
 });

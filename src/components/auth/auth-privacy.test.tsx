@@ -6,6 +6,7 @@ import {
   waitFor,
 } from '@testing-library/react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
+import { flushSync } from 'react-dom';
 import {
   AuthPrivacyBoundary,
   PasswordLogoutCompletion,
@@ -1880,4 +1881,144 @@ it('target readiness supplies its captured epoch to transition admission and nes
   expect(ticketPrivacy.ready).toBe(false);
   expect(nested.ready).toBe(true);
   expect(nested.verifiedEpoch).toBe(assignmentEpoch());
+});
+
+it.each(['retire', 'replace'] as const)(
+  'target admission withdraws a verified precommit target synchronously on %s',
+  async (change) => {
+    const operation = await startTicket();
+    await operation.settle();
+    await operation.wait;
+    const target = '/inventory?search=raw&search=duplicate';
+    expect(ticketPrivacy.navigation!.admission(target).ready).toBe(true);
+    let observed!: { ready: boolean; wait?: Promise<void> };
+    act(() => {
+      if (change === 'retire')
+        ticketPrivacy.navigation!.retire(operation.provider);
+      else ticketPrivacy.navigation!.bind(Symbol());
+      // Capture before the queued negative React publication can run.
+      observed = ticketPrivacy.navigation!.admission(target);
+    });
+    expect(observed.ready).toBe(false);
+    expect(observed.wait).toBeUndefined();
+  },
+);
+
+it.each(['retire', 'replace'] as const)(
+  'target admission cannot borrow committed-primary readiness after verified %s',
+  async (change) => {
+    const operation = await startTicket();
+    await operation.settle();
+    await operation.wait;
+    const target = '/inventory?search=raw&search=duplicate';
+    routing.query = 'search=raw&search=duplicate';
+    operation.view.rerender(ticketTree());
+    await waitFor(() => expect(ticketPrivacy.ready).toBe(true));
+    expect(ticketPrivacy.navigation!.admission(target).ready).toBe(true);
+    let finish!: (value: LogoutPrivacyGeneration) => void;
+    const recheck = new Promise<LogoutPrivacyGeneration>((resolve) => {
+      finish = resolve;
+    });
+    actions.readLogoutPrivacyGeneration.mockReturnValueOnce(recheck);
+    const priorReads = actions.readLogoutPrivacyGeneration.mock.calls.length;
+    let observed!: { ready: boolean; wait?: Promise<void> };
+    act(() => {
+      if (change === 'retire')
+        ticketPrivacy.navigation!.retire(operation.provider);
+      else ticketPrivacy.navigation!.bind(Symbol());
+      observed = ticketPrivacy.navigation!.admission(target);
+    });
+    expect(observed.ready).toBe(false);
+    expect(observed.wait).toBeUndefined();
+    await waitFor(() =>
+      expect(
+        actions.readLogoutPrivacyGeneration.mock.calls.length,
+      ).toBeGreaterThan(priorReads),
+    );
+    expect(ticketPrivacy.navigation!.admission(target).ready).toBe(false);
+    await act(async () => {
+      finish({ status: 'absent' });
+      await recheck;
+    });
+    await waitFor(() => expect(ticketPrivacy.ready).toBe(true));
+    // A separately completed current-key verification may admit this primary.
+    expect(ticketPrivacy.navigation!.admission(target).ready).toBe(true);
+  },
+);
+
+it.each(['retire', 'replace'] as const)(
+  'target admission prevents streamed restoration bootstrap in the synchronous %s gap',
+  async (change) => {
+    const operation = await startTicket();
+    await operation.settle();
+    await operation.wait;
+    const bootstrap = vi.fn();
+    function StreamedTarget() {
+      const privacy = useContext(PrivacyReadinessContext);
+      useLayoutEffect(() => {
+        if (privacy.ready) bootstrap();
+      }, [privacy]);
+      return <input aria-label="Streamed target bootstrap" />;
+    }
+    let bootstrapsDuringRetirement = -1;
+    let mountedDuringRetirement = false;
+    act(() => {
+      if (change === 'retire')
+        ticketPrivacy.navigation!.retire(operation.provider);
+      else ticketPrivacy.navigation!.bind(Symbol());
+      flushSync(() =>
+        operation.view.rerender(
+          <ProtectedPrivacyBoundary
+            binding={protectedBinding}
+            serverGeneration={{ status: 'absent' }}
+          >
+            <TicketProbe />
+            <ProtectedPrivacyContent
+              transitionAdmission
+              routeKey="/inventory?search=raw&search=duplicate"
+            >
+              <StreamedTarget />
+            </ProtectedPrivacyContent>
+          </ProtectedPrivacyBoundary>,
+        ),
+      );
+      bootstrapsDuringRetirement = bootstrap.mock.calls.length;
+      mountedDuringRetirement =
+        screen.queryByLabelText('Streamed target bootstrap') !== null;
+    });
+    expect(bootstrapsDuringRetirement).toBe(0);
+    expect(mountedDuringRetirement).toBe(false);
+    expect(bootstrap).not.toHaveBeenCalled();
+  },
+);
+
+it('target admission preserves an existing primary when an unrelated pending target is cancelled', async () => {
+  const operation = await startTicket();
+  const draft = screen.getByLabelText('Original ticket draft');
+  fireEvent.change(draft, { target: { value: 'retained primary draft' } });
+  let observed!: { ready: boolean; wait?: Promise<void> };
+  act(() => {
+    ticketPrivacy.navigation!.retire(operation.provider);
+    observed = ticketPrivacy.navigation!.admission(
+      '/inventory?search=raw&search=duplicate',
+    );
+  });
+  expect(observed.ready).toBe(false);
+  expect(observed.wait).toBeUndefined();
+  expect(screen.getByLabelText('Original ticket draft')).toBe(draft);
+  expect(draft).toBeVisible();
+  expect(draft).toHaveValue('retained primary draft');
+  fireEvent.change(draft, {
+    target: { value: 'still editable after cancellation' },
+  });
+  expect(draft).toHaveValue('still editable after cancellation');
+  await waitFor(() => expect(ticketPrivacy.ready).toBe(true));
+  expect(ticketPrivacy.navigation!.admission('/inventory').ready).toBe(true);
+  expect(
+    ticketPrivacy.navigation!.admission(
+      '/inventory?search=raw&search=duplicate',
+    ).ready,
+  ).toBe(false);
+  await operation.settle();
+  expect(screen.getByLabelText('Original ticket draft')).toBe(draft);
 });

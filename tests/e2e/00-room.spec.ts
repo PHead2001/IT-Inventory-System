@@ -1,3 +1,4 @@
+import { canvasGestureCandidates } from './canvas-gesture';
 import { readFileSync } from 'node:fs';
 import { expect, test, type Page } from '@playwright/test';
 import { Box3, Matrix4, Ray, Vector3 } from 'three';
@@ -200,27 +201,35 @@ async function chooseRoomLocation(page: Page, code: string) {
 }
 
 async function uncoveredCanvasGesture(page: Page, dx: number, dy: number) {
-  return page.locator('[aria-label="Interactive room canvas"] canvas').evaluate(
-    (canvas, delta) => {
-      const rect = canvas.getBoundingClientRect();
-      // Labels are genuine DOM controls above the canvas. A canvas gesture must
-      // start on the canvas, with its whole initial path inside the viewport.
-      for (const yPart of [0.5, 0.3, 0.7, 0.15, 0.85])
-        for (const xPart of [0.5, 0.3, 0.7, 0.15, 0.85]) {
-          const x = rect.x + rect.width * xPart;
-          const y = rect.y + rect.height * yPart;
-          const uncovered = Array.from({ length: 9 }, (_, step) => {
-            const px = x + (delta.dx * step) / 8;
-            const py = y + (delta.dy * step) / 8;
-            return document.elementFromPoint(px, py) === canvas;
-          }).every(Boolean);
-          if (uncovered) return { x, y };
-        }
-      throw new Error('No uncovered native canvas gesture path');
-    },
+  const canvas = page.locator('[aria-label="Interactive room canvas"] canvas');
+  const geometry = await canvas.evaluate((element) => ({
+    canvas: element.getBoundingClientRect().toJSON(),
+    viewport: { width: innerWidth, height: innerHeight },
+  }));
+  const candidates = canvasGestureCandidates(
+    geometry.canvas,
+    geometry.viewport,
     { dx, dy },
   );
+  return canvas.evaluate(
+    (element, gesture) => {
+      // Preserve the full gesture extent and prove every sampled physical hit.
+      // DOM labels remain genuine controls; no pointer event is forced through.
+      for (const point of gesture.candidates) {
+        const uncovered = Array.from({ length: 9 }, (_, step) => {
+          const px = point.x + (gesture.dx * step) / 8;
+          const py = point.y + (gesture.dy * step) / 8;
+          return document.elementFromPoint(px, py) === element;
+        }).every(Boolean);
+        if (uncovered) return point;
+      }
+      throw new Error('No uncovered native canvas gesture path');
+    },
+    { candidates, dx, dy },
+  );
 }
+
+/** Read the body for the actual committed generation, reacquiring only a changed render. */
 
 test('scene effects retain actual surface ownership and stop drawing after settled selection and palette changes', async ({
   page,
@@ -1812,9 +1821,10 @@ test('real controls orbit through both complete turns and preserve selection acr
     await viewer.locator('canvas').scrollIntoViewIfNeeded();
     const bounds = await viewer.locator('canvas').boundingBox();
     expect(bounds).toBeTruthy();
-    const y = bounds!.y + bounds!.height * 0.48;
-    await page.mouse.move(bounds!.x + bounds!.width * 0.72, y);
-    await snapshot(bounds!.x + bounds!.width * 0.72, y);
+    const dx = -bounds!.width * 0.44;
+    const drag = await uncoveredCanvasGesture(page, dx, 0);
+    await page.mouse.move(drag.x, drag.y);
+    await snapshot(drag.x, drag.y);
     expect(
       await viewer
         .locator('canvas')
@@ -1827,7 +1837,7 @@ test('real controls orbit through both complete turns and preserve selection acr
       'true',
     );
     await expect(viewer.locator('canvas')).toBeFocused();
-    await page.mouse.move(bounds!.x + bounds!.width * 0.28, y, { steps: 12 });
+    await page.mouse.move(drag.x + dx, drag.y, { steps: 12 });
     await page.mouse.up();
     expect(
       Math.abs((await camera(page)).unwrapped - counterclockwise.unwrapped),
@@ -1978,9 +1988,9 @@ test('Free Orbit tilts to both poles and below the horizon while Guided clamps b
     expect(frame).toBeTruthy();
     const beforeDrag = await camera(page);
     const dy = frame!.height * 0.35;
-    const start = await uncoveredCanvasGesture(page, 0, dy);
-    await page.mouse.move(start.x, start.y);
-    await snapshot(start.x, start.y);
+    const drag = await uncoveredCanvasGesture(page, 0, dy);
+    await page.mouse.move(drag.x, drag.y);
+    await snapshot(drag.x, drag.y);
     expect(
       await canvas.evaluate((element) => element.matches(':hover')),
       'The final drag pointer must hit the canvas at the intended drag start',
@@ -1991,7 +2001,7 @@ test('Free Orbit tilts to both poles and below the horizon while Guided clamps b
       'true',
     );
     await expect(viewer.locator('canvas')).toBeFocused();
-    await page.mouse.move(start.x, start.y + dy, { steps: 12 });
+    await page.mouse.move(drag.x, drag.y + dy, { steps: 12 });
     await page.mouse.up();
     expect(
       Math.abs((await camera(page)).elevation - beforeDrag.elevation),

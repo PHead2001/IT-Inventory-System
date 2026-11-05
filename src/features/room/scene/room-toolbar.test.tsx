@@ -2,7 +2,11 @@ import { useState } from 'react';
 import { act, fireEvent, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { RoomToolbar, placeRoomControls } from './room-toolbar';
+import {
+  RoomToolbar,
+  placeRoomControls,
+  roomControlsNeedInline,
+} from './room-toolbar';
 
 function setupToolbar({
   initialActive = true,
@@ -275,7 +279,7 @@ describe('measured controls placement', () => {
       frameCallbacks.clear();
       callbacks.forEach((callback) => callback(2));
     });
-    expect(panel.dataset.placement).toBe('below');
+    expect(panel.dataset.placement).toBe('inline');
     expect(recenter).toHaveFocus();
     expect(within(panel).getByRole('button', { name: 'Recenter' })).toBe(
       recenter,
@@ -288,12 +292,9 @@ describe('measured controls placement', () => {
       frameCallbacks.clear();
       callbacks.forEach((callback) => callback(3));
     });
-    const top = parseFloat(panel.style.top) + bounds.top,
-      left = parseFloat(panel.style.left) + bounds.left;
-    expect(top).toBeGreaterThanOrEqual(24);
-    expect(left).toBeGreaterThanOrEqual(4);
-    expect(top + parseFloat(panel.style.maxHeight)).toBeLessThanOrEqual(266);
-    expect(left + parseFloat(panel.style.width)).toBeLessThanOrEqual(296);
+    expect(panel.dataset.placement).toBe('inline');
+    expect(parseFloat(panel.style.maxHeight)).toBeLessThanOrEqual(87.5);
+    expect(parseFloat(panel.style.width)).toBeLessThanOrEqual(292);
     expect(recenter).toHaveFocus();
     window.dispatchEvent(new Event('resize'));
     await user.keyboard('{Escape}');
@@ -431,5 +432,168 @@ describe('room toolbar Escape', () => {
       'aria-expanded',
       'false',
     );
+  });
+});
+
+describe('narrow controls leave the canvas clear', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+    vi.unstubAllGlobals();
+  });
+  const viewport = { left: 0, top: 0, right: 375, bottom: 812 };
+  it('uses flow at 375px when the complete panel cannot fit above', () => {
+    const row = { left: 30, top: 103, right: 345, bottom: 147 };
+    expect(roomControlsNeedInline(row, viewport, 200, true)).toBe(true);
+    expect(
+      roomControlsNeedInline({ ...row, top: 209 }, viewport, 200, true),
+    ).toBe(false);
+    expect(roomControlsNeedInline(row, viewport, 200, false)).toBe(false);
+    expect(
+      roomControlsNeedInline(
+        { ...row, top: 209 },
+        { ...viewport, top: 1 },
+        200,
+        true,
+      ),
+    ).toBe(true);
+  });
+  it('latches flow across scroll and row resize, resets on width class and close, and retains controls and focus', async () => {
+    let row = { left: 30, top: 103, right: 345, bottom: 147 };
+    let hostReads = 0;
+    const observed: Element[] = [];
+    let onResize: ResizeObserverCallback = () => {};
+    const frames = new Map<number, FrameRequestCallback>();
+    let id = 0;
+    vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => {
+      frames.set(++id, callback);
+      return id;
+    });
+    vi.stubGlobal('cancelAnimationFrame', (key: number) => frames.delete(key));
+    vi.stubGlobal(
+      'ResizeObserver',
+      class {
+        constructor(callback: ResizeObserverCallback) {
+          onResize = callback;
+        }
+        observe(element: Element) {
+          observed.push(element);
+        }
+        disconnect() {}
+      },
+    );
+    vi.stubGlobal(
+      'visualViewport',
+      Object.assign(new EventTarget(), {
+        offsetLeft: 0,
+        offsetTop: 0,
+        width: 1200,
+        height: 812,
+      }),
+    );
+    vi.spyOn(HTMLElement.prototype, 'scrollHeight', 'get').mockReturnValue(600);
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(
+      function (this: HTMLElement) {
+        if (this.querySelector('[role="toolbar"]')) hostReads++;
+        return {
+          ...row,
+          width: row.right - row.left,
+          height: row.bottom - row.top,
+          x: row.left,
+          y: row.top,
+          toJSON() {},
+        };
+      },
+    );
+    const flush = () =>
+      act(() => {
+        const callbacks = [...frames.values()];
+        frames.clear();
+        callbacks.forEach((callback) => callback(1));
+      });
+    const onOverlayChange = vi.fn();
+    const { user, onCommand, onActiveChange } = setupToolbar({
+      onOverlayChange,
+    });
+    const more = screen.getByRole('button', { name: 'More map controls' });
+    await user.click(more);
+    const panel = screen.getByRole('region', { name: 'More map controls' });
+    const recenter = within(panel).getByRole('button', { name: 'Recenter' });
+    expect(panel.dataset.placement).toBe('inline');
+    expect(panel).toHaveAttribute('data-room-obstruction', 'true');
+    expect(recenter).toHaveFocus();
+    expect(observed).toContain(screen.getByRole('toolbar'));
+    expect(hostReads).toBe(0);
+    for (const name of [
+      'Guided',
+      'Free Orbit',
+      'Pan up',
+      'Pan left',
+      'Pan right',
+      'Pan down',
+      'Rotate left',
+      'Rotate right',
+      'Tilt up',
+      'Tilt down',
+      'Show labels',
+      'Show item counts',
+      'Controls',
+      'Close controls',
+    ]) {
+      expect(within(panel).getByRole('button', { name })).toBeEnabled();
+    }
+    const notifications = onOverlayChange.mock.calls.length;
+    row = { ...row, top: 500, bottom: 544 };
+    window.dispatchEvent(new Event('scroll'));
+    act(() => onResize([], {} as ResizeObserver));
+    expect(frames.size).toBe(1);
+    flush();
+    expect(panel.dataset.placement).toBe('inline');
+    expect(recenter).toHaveFocus();
+    expect(onOverlayChange).toHaveBeenCalledTimes(notifications);
+    expect(frames.size).toBe(0);
+    row = { ...row, right: 900 };
+    window.dispatchEvent(new Event('resize'));
+    flush();
+    expect(panel.dataset.placement).toBe('below');
+    expect(onOverlayChange.mock.calls.length).toBeGreaterThan(notifications);
+    expect(within(panel).getByRole('button', { name: 'Recenter' })).toBe(
+      recenter,
+    );
+    row = { ...row, right: 345 };
+    window.dispatchEvent(new Event('resize'));
+    flush();
+    expect(panel.dataset.placement).toBe('above');
+    row = { ...row, top: 103, bottom: 147 };
+    window.dispatchEvent(new Event('scroll'));
+    flush();
+    expect(panel.dataset.placement).toBe('inline');
+    await user.click(within(panel).getByRole('button', { name: 'Pan right' }));
+    expect(onCommand).toHaveBeenCalledExactlyOnceWith('right');
+    expect(panel).toBeVisible();
+    await user.click(
+      within(panel).getByRole('button', { name: 'Close controls' }),
+    );
+    expect(more).toHaveFocus();
+    row = { ...row, top: 500, bottom: 544 };
+    await user.click(more);
+    expect(
+      screen.getByRole('region', { name: 'More map controls' }).dataset
+        .placement,
+    ).toBe('above');
+    await user.keyboard('{Escape}');
+    expect(onActiveChange).toHaveBeenCalledExactlyOnceWith(false);
+    expect(
+      screen.queryByRole('region', { name: 'More map controls' }),
+    ).not.toBeInTheDocument();
+    row = { ...row, top: 103, bottom: 147 };
+    await user.click(more);
+    expect(
+      screen.getByRole('region', { name: 'More map controls' }).dataset
+        .placement,
+    ).toBe('inline');
+    fireEvent.pointerDown(document.body);
+    expect(
+      screen.queryByRole('region', { name: 'More map controls' }),
+    ).not.toBeInTheDocument();
   });
 });

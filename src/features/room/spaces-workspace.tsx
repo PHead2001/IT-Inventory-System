@@ -648,7 +648,7 @@ export function SpacesWorkspace({
               ? 'Refreshing location counts…'
               : occupancy.status === 'error'
                 ? 'Item counts unavailable. Refresh to try again.'
-                : 'Counts show quantity items with stock and active individual assets at each storage location. Focus or select a marker for quantity items, units and individual assets. Hidden locations remain in the browser; counts are a snapshot.'}
+                : 'Counts show quantity items with stock and active individual assets at each storage location. Badges mark occupied locations. Select a location on the map or in the location browser to see its distinct products, units and individual assets. Hidden locations remain in the browser; counts are a snapshot.'}
           </p>
           <button
             className={styles.commandButton}

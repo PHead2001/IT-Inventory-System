@@ -188,7 +188,7 @@ describe('browser scheduling', () => {
     const titles = [
       'spatial reveal endpoints retain actual picking and labels across oblique, overhead, underside and panned views',
       'optional room counts reconcile with active leaf contents and refresh as uncached snapshots',
-      '375px populated room gives every independently witnessed opaque target an action with More and selected long text',
+      '375px populated room shows every occupied target with passive badges and selected readable text',
     ];
     const files = [
       'tests/e2e/00-room.spec.ts',

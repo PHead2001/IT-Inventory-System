@@ -285,6 +285,12 @@
   background: var(--room-menu-background);
   scrollbar-color: var(--room-border) var(--room-menu-background);
 }
+/* Preserve the scrollable panel and canvas dimensions when above cannot fit. */
+.moreMenu[data-placement='inline'] {
+  position: relative;
+  margin-top: 5px;
+  margin-left: auto;
+}
 .toolbarHost {
   position: relative;
   min-width: 0;
@@ -366,6 +372,21 @@
   height: 1px;
   background: color-mix(in srgb, var(--accent) 65%, transparent);
   transform-origin: left center;
+  pointer-events: none;
+}
+.occupiedMarker {
+  visibility: hidden;
+  position: relative;
+  display: grid;
+  place-items: center;
+  box-sizing: border-box;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 1px solid var(--room-label-border);
+  border-radius: 6px;
+  background: var(--room-label-background);
+  color: var(--foreground);
   pointer-events: none;
 }
 .locationLabel,
