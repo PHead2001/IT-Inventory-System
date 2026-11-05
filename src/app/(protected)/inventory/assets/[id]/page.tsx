@@ -93,7 +93,7 @@ export default async function AssetPage({
               <InventoryBackLink
                 record={{ kind: 'asset', id: asset.id }}
                 href={returnTo}
-                className="text-sm text-cyan-200 underline"
+                className={`text-sm text-cyan-200 underline ${styles.textTarget}`}
               >
                 ←{' '}
                 {returnTo === '/inventory'
@@ -147,7 +147,7 @@ export default async function AssetPage({
                   <dd>
                     {site ? (
                       <Link
-                        className="text-cyan-300 underline"
+                        className={`text-cyan-300 underline ${styles.textTarget}`}
                         href={'/sites/' + encodeURIComponent(site.code)}
                       >
                         {site.name} ({site.code})
@@ -237,7 +237,7 @@ export default async function AssetPage({
                       {duplicateSerialMatches.map((match) => (
                         <li key={match.id}>
                           <Link
-                            className="underline"
+                            className={`underline ${styles.textTarget}`}
                             href={'/inventory/assets/' + match.id}
                           >
                             {match.name} (

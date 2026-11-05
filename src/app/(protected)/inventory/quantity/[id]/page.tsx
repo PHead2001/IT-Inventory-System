@@ -106,7 +106,7 @@ export default async function QuantityPage({
               <InventoryBackLink
                 record={{ kind: 'quantity', id: item.id }}
                 href={returnTo}
-                className="text-sm text-cyan-200 underline"
+                className={`text-sm text-cyan-200 underline ${styles.textTarget}`}
               >
                 ←{' '}
                 {returnTo === '/inventory'
@@ -292,7 +292,7 @@ export default async function QuantityPage({
                       {siteHoldings.map((holding) => (
                         <li className={panel} key={holding.site_id}>
                           <Link
-                            className="text-cyan-300 underline"
+                            className={`text-cyan-300 underline ${styles.textTarget}`}
                             href={`/sites/${encodeURIComponent(holding.site_code)}`}
                           >
                             {holding.site_name} ({holding.site_code})

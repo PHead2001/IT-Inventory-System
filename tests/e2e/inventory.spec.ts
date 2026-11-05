@@ -178,6 +178,13 @@ test('empty normalized edits leave history unchanged, Receive defaults once, and
   if (viewport) await page.setViewportSize(viewport);
   await page.goto(detailUrl);
   await version(page, 1);
+  for (const width of [1280, 390]) {
+    await page.setViewportSize({ width, height: 844 });
+    await expectTouchTarget(
+      page.getByRole('link', { name: /Back to inventory/ }),
+    );
+  }
+  if (viewport) await page.setViewportSize(viewport);
   const itemId = detailUrl.split('/').at(-1)!;
   const api = new URL(process.env.LOCAL_API_URL!);
   expect(['127.0.0.1', 'localhost']).toContain(api.hostname);
