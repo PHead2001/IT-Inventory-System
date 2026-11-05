@@ -12,6 +12,7 @@ import {
   symlinkSync,
   writeFileSync,
 } from 'node:fs';
+import { rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { execFileSync } from 'node:child_process';
@@ -63,7 +64,14 @@ const snapshot = () => ({
 
 function templateFixture(t) {
   const cwd = mkdtempSync(join(tmpdir(), 'local-auth-templates-'));
-  t.after(() => rmSync(cwd, { recursive: true, force: true }));
+  t.after(async () => {
+    await rm(cwd, {
+      recursive: true,
+      force: true,
+      maxRetries: 3,
+      retryDelay: 100,
+    });
+  });
   mkdirSync(join(cwd, 'supabase/templates'), { recursive: true });
   writeFileSync(
     join(cwd, 'supabase/config.toml'),
@@ -266,7 +274,14 @@ test('a template that grows after path stat is read within a fixed budget and re
 
 test('database start/reset isolate port checks and block mutations or CLI on prerequisite failure', (t) => {
   const cwd = mkdtempSync(join(tmpdir(), 'local-auth-db-order-'));
-  t.after(() => rmSync(cwd, { recursive: true, force: true }));
+  t.after(async () => {
+    await rm(cwd, {
+      recursive: true,
+      force: true,
+      maxRetries: 3,
+      retryDelay: 100,
+    });
+  });
   const scripts = join(cwd, 'scripts');
   mkdirSync(scripts);
   writeFileSync(

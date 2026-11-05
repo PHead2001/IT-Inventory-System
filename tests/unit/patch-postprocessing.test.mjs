@@ -4,9 +4,9 @@ import {
   mkdirSync,
   mkdtempSync,
   readFileSync,
-  rmSync,
   writeFileSync,
 } from 'node:fs';
+import { rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { expect, it } from 'vitest';
@@ -51,7 +51,7 @@ function fixture() {
   return { root, packageRoot };
 }
 
-it('applies the exact pinned upstream patch and verifies an already-patched installation without rewriting', () => {
+it('applies the exact pinned upstream patch and verifies an already-patched installation without rewriting', async () => {
   const { root, packageRoot } = fixture();
   try {
     expect(applyPostprocessingPatch(root).map(({ status }) => status)).toEqual([
@@ -69,13 +69,18 @@ it('applies the exact pinned upstream patch and verifies an already-patched inst
       'verified',
     ]);
   } finally {
-    rmSync(root, { recursive: true, force: true });
+    await rm(root, {
+      recursive: true,
+      force: true,
+      maxRetries: 3,
+      retryDelay: 100,
+    });
   }
 });
 
 it.each(['bytes', 'version', 'payload'])(
   'refuses unknown %s before changing any other target',
-  (kind) => {
+  async (kind) => {
     const { root, packageRoot } = fixture();
     try {
       if (kind === 'bytes') {
@@ -105,7 +110,12 @@ it.each(['bytes', 'version', 'payload'])(
           readFileSync(join(packageRoot, manifest.files[index].path)),
         ).toEqual(before[index]);
     } finally {
-      rmSync(root, { recursive: true, force: true });
+      await rm(root, {
+        recursive: true,
+        force: true,
+        maxRetries: 3,
+        retryDelay: 100,
+      });
     }
   },
 );
