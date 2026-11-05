@@ -26,6 +26,18 @@ it.each(['primary', 'paired', 'history', 'location'] as const)(
         input.endsWith('loading-skeleton.module.css'),
       ),
     ).toBe(true);
+    expect(
+      fixture.inputs.some((input) =>
+        input.endsWith(
+          'next/dist/client/components/navigation-dynamic-rendering.browser.js',
+        ),
+      ),
+    ).toBe(true);
+    expect(
+      fixture.inputs.some((input) =>
+        input.endsWith('next/dist/server/dynamic-rendering-utils.js'),
+      ),
+    ).toBe(false);
     expect(fixture.styles.length).toBeGreaterThan(0);
     expect(fixture.script).toContain('startTransition');
     expect(fixture.script).not.toContain('geometry-body');
@@ -41,7 +53,14 @@ it.each(['primary', 'paired', 'history', 'location'] as const)(
       virtualConsole,
     });
     try {
-      expect(() => dom.window.eval(fixture.script)).not.toThrow();
+      expect(() => {
+        try {
+          dom.window.eval(fixture.script);
+        } catch (error) {
+          // Preserve browser-realm failure details in Vitest's Node reporter.
+          throw new Error(String(error), { cause: error });
+        }
+      }).not.toThrow();
       await vi.waitFor(() => {
         expect(dom.window.document.querySelector('h1')?.textContent).toBe(
           fixture.sourceRoute,

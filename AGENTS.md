@@ -435,7 +435,7 @@ Use **iterate cheaply, certify expensively**.
 - do not reset local Supabase for isolated UI-only changes
 - batch all related findings and fixes before one push
 - run `npm run validate:push` before pushing (typecheck, zero-warning lint, formatting and Vitest; no build/database/browser gate)
-- keep PRs draft during iteration; mark ready for review for authoritative complete CI
+- keep PRs draft during iteration and Codex review rounds; mark ready for review only after the latest Codex review has no actionable findings and zero unresolved actionable threads, so authoritative complete CI normally runs once
 - adversarially inspect sibling paths before pushing
 
 ## Fresh dependency install
@@ -511,21 +511,26 @@ Never claim validation that was not actually run.
 
 Every PR receives Codex review unless explicitly waived.
 
+## Draft review rounds
+
+Run Codex review rounds while the PR is draft. Draft CI is intentionally uncertified and does not run the full gate.
+
+The draft `required` check fails by design; do not treat that failure as a defect or push to fix it.
+
 For each valid finding:
 
 1. inspect root cause and sibling paths
 2. implement the invariant-level fix
 3. add durable regression coverage
-4. run focused tests
-5. run affected local regressions and the cheap pre-push gate; use canonical exact-SHA CI for complete certification
-6. push the exact fix SHA
-7. wait for required exact-SHA checks
-8. reply on the original thread with:
+4. run the focused regression and affected sibling tests
+5. run the local database or browser gate for the affected specs when the fix touches persistence, authorization or browser behavior
+6. batch every fix in the round, run `npm run validate:push`, and push once
+7. reply on the original thread with:
    - fix SHA
    - root-cause explanation
    - regression coverage
-   - validation evidence
-9. resolve only after the evidence reply
+   - local validation evidence, stating that complete CI runs when the PR is marked ready
+8. resolve only after the evidence reply
 
 Never resolve first and explain later.
 
@@ -534,7 +539,17 @@ After each batch:
 - query live unresolved threads
 - request fresh `@codex review`
 - wait for completion
-- repeat until the latest review has no actionable findings and unresolved count is zero on the same green HEAD
+- repeat until the latest review has no actionable findings and the unresolved count is zero
+
+## Ready for review
+
+Mark the PR ready only after the draft rounds are clean. That runs the authoritative complete CI gate on the exact HEAD.
+
+- if CI passes and the latest review is clean on that same HEAD, the PR meets the review part of final certification
+- if CI fails on a real defect, fix it in the same evidence-reply style, push once, and obtain a fresh review of the new HEAD
+- if more than one further fix push is likely, convert back to draft first, then mark ready again when done
+- if CI fails only on a known flaky test unrelated to the change, rerun the failed job once before pushing anything; a second failure is treated as real
+- if CI fails only on a test already recorded as flaky (same test and assertion failed on `main` or another unrelated PR), rerun the failed job once before pushing anything; a second failure is treated as real
 
 ---
 
