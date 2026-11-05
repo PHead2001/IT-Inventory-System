@@ -884,13 +884,15 @@ export function createRoomLabelRegistry(
                 : 'obstruction',
           );
         if (
-          continuation &&
           records.length > 0 &&
           records.every((record) => labels.has(record.target as HTMLElement))
         ) {
-          // Placement writes can resize Html labels. Request the retained whole
-          // validation; that pass detects external dimension/anchor changes.
-          recordRoomDemand(element, 'resize-continuation');
+          // Label dimensions affect DOM placement, not world geometry. In
+          // particular, re-observing an existing label after an option change
+          // delivers a first resize notification. Turning that notification
+          // into a scene frame feeds hover/registration work back into itself.
+          // Both fresh placement and retained validation measure the new size.
+          if (continuation) recordRoomDemand(element, 'resize-continuation');
           schedule();
         } else changed('resize-scene');
       });

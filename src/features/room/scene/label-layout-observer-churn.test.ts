@@ -130,7 +130,7 @@ async function fixture() {
       world: [...world],
     })),
   );
-  registry.register('D07', element, leader, {
+  let unregister = registry.register('D07', element, leader, {
     priority: 4,
     locationCode: 'ITC-D07',
   });
@@ -150,6 +150,13 @@ async function fixture() {
     demand,
     projection,
     world,
+    reregister: () => {
+      unregister();
+      unregister = registry.register('D07', element, leader, {
+        priority: 4,
+        locationCode: 'ITC-D07',
+      });
+    },
     move: () => {
       anchorX += 20;
     },
@@ -159,6 +166,56 @@ async function fixture() {
     },
   };
 }
+it('settles label-only first observations and real text resizes without feeding scene demand back into registration', async () => {
+  const f = await fixture();
+  for (let index = 0; index < 6; index++) {
+    const revision = Number(f.canvas.dataset.labelLayoutRevision);
+    f.reregister(); // React option cleanup/re-registration observes the same DOM again.
+    resize([resizeEntry(f.element)], {} as ResizeObserver);
+    expect(f.canvas.dataset.labelLayoutPending).toBe('true');
+    flush();
+    expect(Number(f.canvas.dataset.labelLayoutRevision)).toBeGreaterThan(
+      revision,
+    );
+    expect(f.canvas.dataset.labelLayoutPending).toBe('false');
+    expect(f.canvas.dataset.labelLayoutStatus).toBe('complete');
+    expect(frames.size).toBe(0);
+  }
+  const revision = Number(f.canvas.dataset.labelLayoutRevision);
+  f.text();
+  resize([resizeEntry(f.element)], {} as ResizeObserver);
+  flush();
+  expect(Number(f.canvas.dataset.labelLayoutRevision)).toBeGreaterThan(
+    revision,
+  );
+  expect(f.element).toHaveTextContent('Drawer 7 · 4 units');
+  expect(f.element.dataset.labelSuppressed).toBe('false');
+  expect(f.demand).not.toHaveBeenCalled();
+});
+it('keeps canvas, obstruction and mixed resize deliveries authoritative for scene geometry', async () => {
+  const f = await fixture();
+  const panel = document.createElement('div');
+  panel.dataset.roomObstruction = 'true';
+  f.surface.append(panel);
+  mutation(f.surface, [panel]);
+  flush();
+  for (const targets of [
+    [f.canvas],
+    [panel],
+    [f.element, f.canvas],
+    [f.element, panel],
+  ]) {
+    const revision = Number(f.canvas.dataset.labelLayoutRevision);
+    f.demand.mockClear();
+    resize(targets.map(resizeEntry), {} as ResizeObserver);
+    expect(f.demand).toHaveBeenCalledOnce();
+    flush();
+    expect(Number(f.canvas.dataset.labelLayoutRevision)).toBeGreaterThan(
+      revision,
+    );
+    expect(f.canvas.dataset.labelLayoutPending).toBe('false');
+  }
+});
 it('does not turn unrelated descendant child-list churn into scene demand or new settled revisions at fixed camera/anchors', async () => {
   const f = await fixture(),
     revision = f.canvas.dataset.labelLayoutRevision;
@@ -317,7 +374,7 @@ it('never accepts repeated unmeasurable canvas geometry as an unchanged signatur
   expect(f.demand).toHaveBeenCalledTimes(2);
 });
 
-it('attributes existing RO, MO and viewport demand without changing callback invalidation counts', async () => {
+it('attributes label resize work separately from scene, mutation and viewport demand', async () => {
   const f = await fixture();
   const before = window.__readRoomDemandSnapshot!(f.canvas)!;
   const callback = () => resize([resizeEntry(f.element)], {} as ResizeObserver);
@@ -325,11 +382,11 @@ it('attributes existing RO, MO and viewport demand without changing callback inv
   callback();
   f.text();
   callback();
-  expect(f.demand).toHaveBeenCalledTimes(3);
+  expect(f.demand).not.toHaveBeenCalled();
   const resized = window.__readRoomDemandSnapshot!(f.canvas)!;
   expect(
     resized.counters['resize-scene'] - before.counters['resize-scene'],
-  ).toBe(3);
+  ).toBe(0);
   expect(
     resized.counters['resize-label'] - before.counters['resize-label'],
   ).toBe(3);
