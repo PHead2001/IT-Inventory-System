@@ -34,7 +34,11 @@ import {
   uncoveredRoomWitnesses,
   type WitnessSnapshot,
 } from './room-visibility-witness';
-import { registerRoomTestSupport } from './room-test-support';
+import {
+  registerRoomTestSupport,
+  activateMap,
+  uncoveredCanvasGesture,
+} from './room-test-support';
 
 const {
   bindingBounds,

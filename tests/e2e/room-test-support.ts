@@ -1,3 +1,4 @@
+import { canvasGestureCandidates } from './canvas-gesture';
 import { writeFileSync } from 'node:fs';
 import { expect, test, type Page, type TestInfo } from '@playwright/test';
 import { createClient } from '@supabase/supabase-js';
@@ -1067,4 +1068,63 @@ export function registerRoomTestSupport() {
     camera,
     near,
   };
+}
+
+export async function activateMap(page: Page) {
+  if (await page.locator('canvas[data-map-active="true"]').count()) return;
+  const more = page.getByRole('button', {
+    name: 'More map controls',
+    exact: true,
+  });
+  let activation = page
+    .getByRole('button', { name: 'Interact with map', exact: true })
+    .filter({ visible: true });
+  const needsOverflow = (await activation.count()) === 0;
+  const wasOpen = (await more.getAttribute('aria-expanded')) === 'true';
+  if (needsOverflow && !wasOpen) await more.click();
+  activation = page
+    .getByRole('button', { name: 'Interact with map', exact: true })
+    .filter({ visible: true });
+  await activation.evaluate((element) =>
+    element.focus({ preventScroll: true }),
+  );
+  await page.keyboard.press('Enter');
+  if (needsOverflow && !wasOpen) await more.click();
+  await expect(page.locator('canvas')).toHaveAttribute(
+    'data-map-active',
+    'true',
+  );
+}
+
+export async function uncoveredCanvasGesture(
+  page: Page,
+  dx: number,
+  dy: number,
+) {
+  const canvas = page.locator('[aria-label="Interactive room canvas"] canvas');
+  const geometry = await canvas.evaluate((element) => ({
+    canvas: element.getBoundingClientRect().toJSON(),
+    viewport: { width: innerWidth, height: innerHeight },
+  }));
+  const candidates = canvasGestureCandidates(
+    geometry.canvas,
+    geometry.viewport,
+    { dx, dy },
+  );
+  return canvas.evaluate(
+    (element, gesture) => {
+      // Preserve the full gesture extent and prove every sampled physical hit.
+      // DOM labels remain genuine controls; no pointer event is forced through.
+      for (const point of gesture.candidates) {
+        const uncovered = Array.from({ length: 9 }, (_, step) => {
+          const px = point.x + (gesture.dx * step) / 8;
+          const py = point.y + (gesture.dy * step) / 8;
+          return document.elementFromPoint(px, py) === element;
+        }).every(Boolean);
+        if (uncovered) return point;
+      }
+      throw new Error('No uncovered native canvas gesture path');
+    },
+    { candidates, dx, dy },
+  );
 }
