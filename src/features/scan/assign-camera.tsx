@@ -105,7 +105,11 @@ function CameraReader({
     }
   };
   return (
-    <section aria-label="Assignment camera" className={panel + ' space-y-3'}>
+    <section
+      aria-label="Assignment camera"
+      className={panel + ' space-y-3'}
+      data-scanner-active={status !== 'idle' ? 'true' : undefined}
+    >
       <h2 className="font-semibold">Scan an inventory label</h2>
       <p className="text-sm text-slate-300">
         The camera inspects equipment. Each assignment requires Confirm assign.

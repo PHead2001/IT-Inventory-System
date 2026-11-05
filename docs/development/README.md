@@ -69,6 +69,22 @@ Private inventory files additionally need local Supabase Storage and a server-on
 
 Vercel previews derive their HTTPS origin from VERCEL_BRANCH_URL when APP_ORIGIN is unset. Do not copy the local APP_ORIGIN into Vercel Preview settings. See [deployment](../deployment.md) for the one-time Supabase preview wildcard and exact production redirects.
 
+## Draft review workflow
+
+Keep the PR draft while fixing and reviewing it. Run focused regressions and
+affected sibling tests, plus the affected local database or browser gate when
+persistence, authorization or browser behavior changes. Batch each review round,
+run `npm run validate:push` once for that batch, and push once. Reply on the
+original findings with the fix SHA and actual local evidence before resolving
+them; complete CI is still pending while the PR is draft. Request fresh Codex
+review and mark ready only after the latest exact-HEAD review is clean and no
+actionable threads remain. Final exact-HEAD CI and the other certification
+requirements remain mandatory; see [validation](../validation.md).
+
+When merging or carrying changes between branches, preserve the owner-approved
+`AGENTS.md` policy and reconcile necessary edits with it. Do not replace the
+whole file with an older branch's copy.
+
 ## Automatic local push checks
 
 After setup, run `npm run hooks:install` once to opt this repository into automatic

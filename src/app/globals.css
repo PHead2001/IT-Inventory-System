@@ -1218,6 +1218,15 @@ html[data-motion='full'] .experience-auth-panel {
   .experience-header .experience-brand-mark {
     flex-shrink: 0;
   }
+  .experience-header .experience-brand {
+    min-width: 44px;
+    min-height: 44px;
+    justify-content: center;
+    flex-shrink: 0;
+  }
+  .experience-header .experience-brand > span:last-child {
+    display: none;
+  }
   .experience-account {
     position: relative;
     gap: 7px;

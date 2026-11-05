@@ -10,7 +10,10 @@ import type { MetadataForm } from '@/features/metadata/contracts';
 import { holdTransitionCapture } from '../../../../tests/helpers/transition-capture';
 
 const actions = vi.hoisted(() => ({ submit: vi.fn() }));
-vi.mock('next/navigation', () => ({ useRouter: () => ({ refresh: vi.fn() }) }));
+vi.mock('next/navigation', () => ({
+  useRouter: () => ({ refresh: vi.fn() }),
+  useSearchParams: () => new URLSearchParams(),
+}));
 vi.mock('../actions', () => ({
   submitInventory: actions.submit,
   findDuplicateSerials: vi.fn(),

@@ -12,6 +12,7 @@ import {
   useSyncExternalStore,
 } from 'react';
 
+import { registerNavigationGuard } from '@/lib/navigation/guard';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { field, panel } from '@/features/inventory/components/read-ui';
@@ -476,30 +477,16 @@ export function SiteManagementForm({
       event.returnValue = '';
     };
     window.addEventListener('beforeunload', warn);
-    const guard = (event: MouseEvent) => {
-      if (
-        !recoveryError ||
-        event.button !== 0 ||
-        event.metaKey ||
-        event.ctrlKey ||
-        event.shiftKey ||
-        event.altKey
-      )
-        return;
-      const anchor =
-        event.target instanceof Element
-          ? event.target.closest('a[href]')
-          : null;
-      if (!anchor || anchor.getAttribute('target') === '_blank') return;
-      event.preventDefault();
+    const removeGuard = registerNavigationGuard(() => {
+      if (!recoveryError) return true;
       setRecoveryError(
         limitation + ' Navigation is paused until this draft can be retained.',
       );
-    };
-    document.addEventListener('click', guard, true);
+      return false;
+    });
     return () => {
       window.removeEventListener('beforeunload', warn);
-      document.removeEventListener('click', guard, true);
+      removeGuard();
     };
   }, [
     dirty,

@@ -37,6 +37,27 @@ moves also verify current stock and the caller-authorized historical receipt;
 prior receipts remain collapsed, timestamped and immutable while the new intent
 uses a fresh coherent stock/version snapshot.
 
+Native same-record Move task queries have a consumption-only handoff from a
+previously accepted, visible, idle primary. Its receipt binds the actor, root,
+content, immutable server route anchor, navigation identity and privacy/security
+revision. The committed router key must match the actual URL. Only one supported
+Move task and an optional valid return path may differ; all other query values,
+including repeated values, must remain unchanged. Consumption removes only the
+task, preserving the hash and user history state, and rebases that primary's clean
+key without creating a navigation ticket, acknowledging a new route or settling
+pending work. Navigation, traversal, pending work, semantic query changes and
+security withdrawal retire the receipt; cached rendering or reverification alone
+cannot revive it. Normal accepted navigation and task eligibility/draft guards
+remain authoritative.
+
+An exact fresh visible primary that is still busy records only a nonauthorizing
+candidate. A genuine same-epoch pending-to-idle notification queues a read-only
+observation of that unchanged source; it neither registers a primary nor finishes
+another owner's work. Retirement before issuance tombstones the candidate too.
+Navigation origin travels atomically with its existing identity, so history
+traversal cannot issue a native source even before `popstate` or after a cached
+root remount. A new accepted application navigation can establish fresh authority.
+
 When a refreshed record withdraws the selected task, the workspace retains its
 mounted draft but hides and disables fresh input/submission. Close or switch
 still requires explicit draft discard. Reintroducing a launcher does not silently
@@ -45,6 +66,15 @@ commands retain their exact retry instance, and committed receipts retain Done
 and read recovery. Move more rejects new intent after withdrawal, including
 withdrawal while its fresh snapshot is loading. Actor and record workspace keys
 continue to isolate identities, and server authorization remains authoritative.
+The protected shell's command provider sits inside the existing route-motion
+provider and retains child drafts, camera and assignment scope. The palette and
+keyboard registry reuse existing inventory tasks and label intents. Fresh privacy
+grants authorize command presentation; provider-owned navigation serials and
+canonical primary readiness authorize arrival focus. Same-primary task URL
+consumption publishes an explicit readiness handoff. Caller-authorized fuzzy
+search reads bounded base records without multiplying quantity holdings. See
+[Search and commands](command-palette.md) for ownership, ranking, authorization,
+preference, cancellation and task-intent contracts.
 
 Published inventory form revisions, stable custom field identities and bounded custom CSV exports are specified in [published metadata](published-metadata.md).
 
@@ -315,6 +345,21 @@ password mutation. Auth entry and the protected shell read the current generatio
 before mounting private restoration consumers, and recheck on entry/reactivation.
 Readiness is bound to pathname, full query, known server generation and the
 explicit action revision. Reactivation immediately marks verification pending.
+The controller separately attests a validated same-record Move task/return-scope
+query change for preservation of an already accepted native task receipt. Its
+first changed-key render carries the exact pending operation before descendant
+layout effects. The original protected binding, generation, server/configuration
+revisions, cleanup/revocation/callback epochs and request sequence remain fixed.
+It grants no readiness, restoration or navigation authority; only the exact fresh
+verification may authorize one existing receipt's consumption. A successful
+consumption alone may bind the exact task-removal cleanup leg. Generic rechecks,
+failure, uncertainty, supersession or changed owners/security retire the receipt
+permanently. Repeated observations of the same verified cleanup retain its exact
+live controller proof until the next valid task transition; they recheck the
+original source binding, security revision, pending epoch, visibility and idle
+state each time. Retirement clears that proof and cannot be undone by observing
+the old cleanup again. See [command handoff](command-palette.md) for its receipt
+boundaries.
 The protected controller always renders the opaque server route slot without
 an ancestor Suspense or accepted-content gate. Each async protected server page
 completes its existing authorization, reads, validation, `notFound()` and

@@ -2,7 +2,8 @@ import './preview-file-keys.test.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, writeFileSync, rmSync, readFileSync } from 'node:fs';
+import { mkdtempSync, writeFileSync, readFileSync } from 'node:fs';
+import { rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -654,7 +655,7 @@ test('Auth transport refuses redirects, caps streamed error bytes, and redacts u
   });
 });
 
-test('CLI prints only sanitized failure after bounded delayed-policy retries', () => {
+test('CLI prints only sanitized failure after bounded delayed-policy retries', async () => {
   const directory = mkdtempSync(join(tmpdir(), 'preview-access-http-test-'));
   try {
     const eventPath = join(directory, 'event.json');
@@ -720,7 +721,12 @@ test('CLI prints only sanitized failure after bounded delayed-policy retries', (
       new RegExp(`${sentinel}|${password}|${ref}|u1|weak_password`),
     );
   } finally {
-    rmSync(directory, { recursive: true, force: true });
+    await rm(directory, {
+      recursive: true,
+      force: true,
+      maxRetries: 3,
+      retryDelay: 100,
+    });
   }
 });
 
@@ -1034,7 +1040,7 @@ test('rejects incompatible Auth strength settings without weakening them', () =>
   );
 });
 
-test('malformed event JSON cannot print a secret or parser text', () => {
+test('malformed event JSON cannot print a secret or parser text', async () => {
   const directory = mkdtempSync(join(tmpdir(), 'preview-access-test-'));
   try {
     const path = join(directory, 'event.json');
@@ -1059,7 +1065,12 @@ test('malformed event JSON cannot print a secret or parser text', () => {
     assert.doesNotMatch(result.stderr, new RegExp(sentinel));
     assert.doesNotMatch(result.stderr, /SyntaxError/);
   } finally {
-    rmSync(directory, { recursive: true, force: true });
+    await rm(directory, {
+      recursive: true,
+      force: true,
+      maxRetries: 3,
+      retryDelay: 100,
+    });
   }
 });
 

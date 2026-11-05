@@ -1,13 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
-import {
-  existsSync,
-  mkdtempSync,
-  readFileSync,
-  rmSync,
-  writeFileSync,
-} from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { compareLocalStagingRoutineManifest } from '../scripts/staging-file-routine-check.mjs';
@@ -162,7 +157,12 @@ test('local catalog drift produces a review artifact, fails and leaves expectati
       'comparison does not mutate expectations',
     );
   } finally {
-    rmSync(directory, { recursive: true, force: true });
+    await rm(directory, {
+      recursive: true,
+      force: true,
+      maxRetries: 3,
+      retryDelay: 100,
+    });
   }
 });
 
@@ -197,7 +197,12 @@ test('candidate diagnostics reject hosted targets and unexpected secret or ident
     }
     assert.equal(existsSync(artifact), false);
   } finally {
-    rmSync(directory, { recursive: true, force: true });
+    await rm(directory, {
+      recursive: true,
+      force: true,
+      maxRetries: 3,
+      retryDelay: 100,
+    });
   }
 });
 function fixture() {

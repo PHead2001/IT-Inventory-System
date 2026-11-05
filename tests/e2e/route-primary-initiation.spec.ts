@@ -85,6 +85,7 @@ async function mount(page: Page, kind: RoutePrimaryFixtureKind, width: number) {
     `<style>:root{--motion-route:${token('--motion-route')};--ease-workspace:${token('--ease-workspace')}}html,body{margin:0}${css.slice(start, end)}</style><div id="root"></div>`,
   );
   const fixture = await routePrimaryFixture(kind);
+  if (fixture.styles) await page.addStyleTag({ content: fixture.styles });
   await page.addScriptTag({ content: fixture.script });
   await expect(
     page.getByRole('heading', { name: fixture.sourceRoute }),

@@ -34,8 +34,12 @@ import { createRoutePendingState } from './route-pending-state';
 import { createRoutePendingOwners } from './route-pending-owners';
 import { createRouteReadiness } from './route-readiness';
 import { createNativeScrollRestoration } from './native-scroll-restoration';
+import { createRouteCommandState } from './route-command-state';
 import { createApplicationReturn } from './application-return';
-import { RouteReadyContext } from './route-ready';
+import {
+  RouteReadyContext,
+  RouteNavigationIdentityContext,
+} from './route-ready';
 import { createPairedRouteLoading } from './paired-route-loading-state';
 import {
   PairedRouteLoadingContext,
@@ -71,6 +75,9 @@ const RouteMotionContext = createContext<{
   applicationReturn: ReturnType<typeof createApplicationReturn>;
   lifecycleRef: { current: boolean };
   providerToken: symbol;
+  commands: ReturnType<typeof createRouteCommandState>;
+  actorId: string;
+  latestPrivacy: { current: ReturnType<typeof usePrivacyReadiness> };
   withdrawGrant: () => void;
   captures: ReturnType<typeof createRouteCaptureCompletion>;
   beginLogoutAttempt: () => (confirmed: boolean) => void;
@@ -81,6 +88,17 @@ let currentRouteProvider: symbol | undefined;
 const subscribeSupport = () => () => {};
 const supported = supportsPairedRouteLoading;
 const serverSupported = () => false;
+const commandDestination = (href: string | undefined) => {
+  if (!href) return null;
+  try {
+    const url = new URL(href, location.href);
+    return url.origin === location.origin
+      ? routeKey(url.pathname, url.searchParams)
+      : null;
+  } catch {
+    return null;
+  }
+};
 const emptyIntent = () => null;
 const emptySubscribe = () => () => {};
 const emptyCaptureRevision = () => 0;
@@ -127,7 +145,7 @@ export function RouteMotionProvider({
   const privacy = usePrivacyReadiness();
   const privacyRevision = usePrivacyRevocationRevision();
   const latestPrivacy = useRef(privacy);
-  const mountedActor = useRef(actorId);
+  const [mountedActor] = useState(actorId);
   const liveScrollActor = useRef(actorId);
   const suspended = useRef(true);
   const logoutAttempt = useRef<symbol | null>(null);
@@ -146,6 +164,7 @@ export function RouteMotionProvider({
   });
   const lifecycleRef = useRef(true);
   const [providerToken] = useState(() => Symbol());
+  const [commands] = useState(createRouteCommandState);
   const [loading] = useState(() => createPairedRouteLoading(pending));
   const [auxiliary] = useState(createAuxiliaryRouteCapture);
   const [readiness] = useState(() => {
@@ -254,6 +273,7 @@ export function RouteMotionProvider({
         )
           return;
         auxiliary.withdraw();
+        commands.navigation(commandDestination(href));
         applicationReturn.acceptNavigation(href, pending.snapshot().epoch);
         navigationObservers.forEach((observer) => {
           try {
@@ -403,6 +423,7 @@ export function RouteMotionProvider({
           !state.valid()
         )
           return;
+        commands.retire();
         presentation.invalidate();
         applicationReturn.invalidate();
         latestPrivacy.current.navigation?.retire(providerToken);
@@ -426,6 +447,7 @@ export function RouteMotionProvider({
       providerToken,
       presentation,
       liveRouteKey,
+      commands,
       navigationObservers,
       auxiliary,
       captures,
@@ -440,9 +462,17 @@ export function RouteMotionProvider({
   useInsertionEffect(() => {
     // Child primary layout effects may notify readiness before this provider's
     // layout effect. Publish only committed authority before those callbacks.
+    if (
+      latestPrivacy.current.generation !== privacy.generation ||
+      mountedActor !== actorId
+    )
+      commands.retire(false);
     latestPrivacy.current = privacy;
     liveScrollActor.current = actorId;
-  }, [privacy, actorId]);
+  }, [privacy, actorId, commands]);
+  useLayoutEffect(() => {
+    commands.publish();
+  }, [privacy, actorId, commands]);
   useInsertionEffect(() => {
     lifecycleRef.current = true;
     currentRouteProvider = providerToken;
@@ -458,14 +488,14 @@ export function RouteMotionProvider({
       if (
         !lifecycleRef.current ||
         currentRouteProvider !== providerToken ||
-        mountedActor.current !== liveScrollActor.current ||
+        mountedActor !== liveScrollActor.current ||
         value.revocationRevision !== readPrivacyRevocationRevision() ||
         (value.ready && !(value.visible ?? value.ready))
       )
         return null;
       return {
         key: JSON.stringify([
-          mountedActor.current,
+          mountedActor,
           value.generation,
           value.revocationRevision,
           assignmentEpoch(),
@@ -480,6 +510,7 @@ export function RouteMotionProvider({
     const suspendPresentation = () => {
       if (!lifecycleRef.current || currentRouteProvider !== providerToken)
         return;
+      commands.retire();
       nativeScroll.invalidate();
       applicationReturn.invalidate();
       document.documentElement.dataset.routeMotionPrivate = 'false';
@@ -504,6 +535,7 @@ export function RouteMotionProvider({
           !state.valid()
         )
           return;
+        commands.retire();
         nativeScroll.invalidate();
         applicationReturn.invalidate();
         document.documentElement.dataset.routeMotionPrivate = 'false';
@@ -541,6 +573,7 @@ export function RouteMotionProvider({
       },
     );
     return () => {
+      commands.retire(false);
       auxiliary.withdraw();
       unobserveAuxiliary();
       unbindAuxiliaryWithdrawal();
@@ -562,7 +595,7 @@ export function RouteMotionProvider({
       pending.cancel(true, false);
       loading.cancel(false);
       owners.dispose();
-      readiness.close();
+      readiness.close(false);
       if (ownsDocument) {
         currentRouteProvider = undefined;
         invalidateRouteMotion(state, false);
@@ -579,6 +612,7 @@ export function RouteMotionProvider({
     providerToken,
     presentation,
     nativeScroll,
+    commands,
     applicationReturn,
     navigationObservers,
     auxiliary,
@@ -586,7 +620,7 @@ export function RouteMotionProvider({
   useLayoutEffect(() => {
     if (!lifecycleRef.current || currentRouteProvider !== providerToken) return;
     if (
-      mountedActor.current === actorId &&
+      mountedActor === actorId &&
       freshPresentationGrant(privacy) &&
       logoutAttempt.current === null
     ) {
@@ -603,13 +637,14 @@ export function RouteMotionProvider({
         document.documentElement.dataset.routeMotionPrivate = 'true';
       }
     } else if (!(
-      mountedActor.current === actorId &&
+      mountedActor === actorId &&
       !privacy.ready &&
       privacy.visible === true &&
       !suspended.current &&
       state.valid() &&
       retainedPresentationGrantCurrent(privacy, acceptedGrant.current)
     )) {
+      commands.retire();
       document.documentElement.dataset.routeMotionPrivate = 'false';
       suspended.current = true;
       acceptedGrant.current = null;
@@ -636,6 +671,8 @@ export function RouteMotionProvider({
     providerToken,
     presentation,
     nativeScroll,
+    commands,
+    mountedActor,
     applicationReturn,
   ]);
   useEffect(() => {
@@ -654,8 +691,7 @@ export function RouteMotionProvider({
         (event as NavigateEvent).navigationType !== 'traverse' ||
         !observing ||
         !lifecycleRef.current ||
-        currentRouteProvider !== providerToken ||
-        (!state.arrivalSnapshot() && !state.snapshot())
+        currentRouteProvider !== providerToken
       )
         return;
       // Passive observation runs before history restore. Commit the withdrawn
@@ -663,6 +699,9 @@ export function RouteMotionProvider({
       // page. Preserve the title origin for a later accepted application Back.
       // Never intercept traversal or alter privacy or readiness owners.
       flushSync(() => {
+        commands.history(
+          commandDestination((event as NavigateEvent).destination?.url),
+        );
         state.finishArrival();
         state.finish();
       });
@@ -696,7 +735,7 @@ export function RouteMotionProvider({
         /* The retired provider callback remains permanently inert. */
       }
     };
-  }, [state, providerToken]);
+  }, [state, providerToken, commands]);
   useEffect(() => {
     let listening = true;
     const invalidate = () => {
@@ -706,6 +745,7 @@ export function RouteMotionProvider({
         currentRouteProvider !== providerToken
       )
         return;
+      commands.retire();
       nativeScroll.invalidate();
       applicationReturn.invalidate();
       document.documentElement.dataset.routeMotionPrivate = 'false';
@@ -736,6 +776,9 @@ export function RouteMotionProvider({
       // and wait for ordinary authorized readiness without preparing a pair or
       // delaying/intercepting the browser's restore. Keep the approved origin
       // so app Back after native Forward can still use its accepted Link event.
+      commands.history(
+        routeKey(location.pathname, new URLSearchParams(location.search)),
+      );
       presentation.navigation();
       latestPrivacy.current.navigation?.retire(providerToken);
       loading.cancel();
@@ -763,6 +806,7 @@ export function RouteMotionProvider({
     lifecycleRef,
     providerToken,
     presentation,
+    commands,
     nativeScroll,
     applicationReturn,
   ]);
@@ -805,8 +849,12 @@ export function RouteMotionProvider({
         applicationReturn,
         lifecycleRef,
         providerToken,
+        commands,
+        actorId: mountedActor,
+        latestPrivacy,
         captures,
         withdrawGrant: () => {
+          commands.retire();
           nativeScroll.invalidate();
           applicationReturn.invalidate();
           latestPrivacy.current.navigation?.retire(providerToken);
@@ -858,33 +906,37 @@ export function RouteMotionProvider({
               />
             ))}
             <RouteProgress />
-            <RouteReadyContext.Provider value={readiness}>
-              <PairedRouteLoadingContext.Provider
-                value={{
-                  store: loading,
-                  valid: (owner) =>
-                    lifecycleRef.current &&
-                    currentRouteProvider === providerToken &&
-                    loading.snapshot() === owner &&
-                    pending.current(owner.epoch) &&
-                    state.valid() &&
-                    mountedActor.current === actorId &&
-                    !suspended.current &&
-                    retainedPresentationGrantCurrent(
-                      privacy,
-                      acceptedGrant.current,
-                    ) &&
-                    (owner.kind === 'primary'
-                      ? state.arrivalSnapshot() === owner.arrival &&
-                        owner.arrival.presentation === 'primary'
-                      : state.snapshot()?.name === owner.name) &&
-                    document.documentElement.dataset.routeMotionPrivate ===
-                      'true',
-                }}
-              >
-                {children}
-              </PairedRouteLoadingContext.Provider>
-            </RouteReadyContext.Provider>
+            <RouteNavigationIdentityContext
+              value={{ state: commands, committedRouteKey }}
+            >
+              <RouteReadyContext.Provider value={readiness}>
+                <PairedRouteLoadingContext.Provider
+                  value={{
+                    store: loading,
+                    valid: (owner) =>
+                      lifecycleRef.current &&
+                      currentRouteProvider === providerToken &&
+                      loading.snapshot() === owner &&
+                      pending.current(owner.epoch) &&
+                      state.valid() &&
+                      mountedActor === actorId &&
+                      !suspended.current &&
+                      retainedPresentationGrantCurrent(
+                        privacy,
+                        acceptedGrant.current,
+                      ) &&
+                      (owner.kind === 'primary'
+                        ? state.arrivalSnapshot() === owner.arrival &&
+                          owner.arrival.presentation === 'primary'
+                        : state.snapshot()?.name === owner.name) &&
+                      document.documentElement.dataset.routeMotionPrivate ===
+                        'true',
+                  }}
+                >
+                  {children}
+                </PairedRouteLoadingContext.Provider>
+              </RouteReadyContext.Provider>
+            </RouteNavigationIdentityContext>
           </AuxiliaryRouteCaptureContext>
         </RoutePresentationLifetimeContext>
       </RoutePendingContext.Provider>
@@ -1106,4 +1158,136 @@ export function useRouteMotion() {
       document.documentElement.dataset.motion === 'full' &&
       document.documentElement.dataset.routeMotionPrivate === 'true',
   };
+}
+
+export type RouteCommandTicket = {
+  destination: string;
+  current: () => boolean;
+  retained: () => boolean;
+  used: boolean;
+};
+const visibleCommandTarget = (target: HTMLElement | null) =>
+  !!target?.isConnected &&
+  !target.closest('[hidden], [inert]') &&
+  !target.matches(':disabled') &&
+  target.getClientRects().length > 0 &&
+  getComputedStyle(target).visibility !== 'hidden';
+
+/** Commands observe existing route ownership/readiness; they never grant it. */
+export function useRouteCommandBoundary(actorId: string, backend: string) {
+  const context = useContext(RouteMotionContext);
+  const caller = useRef({ actorId, backend });
+  const liveCaller = useRef({ actorId, backend });
+  const drifted = useRef(false);
+  useInsertionEffect(() => {
+    if (
+      caller.current.actorId !== actorId ||
+      caller.current.backend !== backend
+    )
+      drifted.current = true;
+    liveCaller.current = { actorId, backend };
+  }, [actorId, backend]);
+  return useMemo(() => {
+    const owned = () =>
+      !!context?.lifecycleRef.current &&
+      currentRouteProvider === context.providerToken &&
+      context.actorId === actorId &&
+      !drifted.current &&
+      caller.current.actorId === liveCaller.current.actorId &&
+      caller.current.backend === backend &&
+      liveCaller.current.backend === backend &&
+      context.state.valid();
+    const authorized = () =>
+      owned() && freshPresentationGrant(context!.latestPrivacy.current);
+    const capture = (nextNavigation = false) => {
+      const identity = context?.commands.snapshot();
+      const epoch = context?.pending.snapshot().epoch;
+      const grant = context?.latestPrivacy.current;
+      const accepted = authorized();
+      return (fresh = true) => {
+        const live = context?.latestPrivacy.current;
+        const navigation = context?.commands.snapshot();
+        return (
+          accepted &&
+          owned() &&
+          context?.pending.current(epoch!) === true &&
+          navigation?.generation === identity?.generation &&
+          navigation?.serial ===
+            (identity?.serial ?? 0) + (nextNavigation ? 1 : 0) &&
+          live?.generation === grant?.generation &&
+          retainedPresentationGrantCurrent(live!, {
+            revision: grant!.revocationRevision!,
+            epoch: grant!.verifiedEpoch!,
+          }) &&
+          (!fresh || freshPresentationGrant(live!))
+        );
+      };
+    };
+    return {
+      authorized,
+      capture: () => capture(),
+      issue(href: string): RouteCommandTicket | null {
+        if (!authorized()) return null;
+        const url = new URL(href, location.href);
+        if (url.origin !== location.origin) return null;
+        const current = capture(true);
+        return {
+          destination: routeKey(url.pathname, url.searchParams),
+          current,
+          retained: () => current(false),
+          used: false,
+        };
+      },
+      cancel(ticket: RouteCommandTicket | null) {
+        if (ticket) ticket.used = true;
+      },
+      focus(ticket: RouteCommandTicket, kind: 'heading' | 'search') {
+        if (ticket.used || !ticket.current()) return false;
+        const primary = context?.readiness.currentPrimary();
+        if (!primary) return false;
+        const actualKey = routeKey(
+          location.pathname,
+          new URLSearchParams(location.search),
+        );
+        const committed = new URL(context!.listHref, location.origin);
+        if (routeKey(committed.pathname, committed.searchParams) !== actualKey)
+          return false;
+        const destination =
+          primary.consumedTask?.sourceKey === ticket.destination
+            ? primary.consumedTask.destinationKey
+            : ticket.destination;
+        if (primary.routeKey !== destination || actualKey !== destination)
+          return false;
+        const target = primary.root.querySelector<HTMLElement>(
+          kind === 'search' ? '[data-inventory-search]' : 'h1',
+        );
+        if (!visibleCommandTarget(target) || !ticket.current()) return false;
+        ticket.used = true;
+        if (kind === 'heading') target!.tabIndex = -1;
+        target!.focus();
+        return true;
+      },
+      focusInvoker(current: () => boolean, target: HTMLElement | null) {
+        if (
+          !current() ||
+          !visibleCommandTarget(target) ||
+          Array.from(
+            document.querySelectorAll<HTMLElement>(
+              '[role="dialog"], [role="alertdialog"], dialog[open]',
+            ),
+          ).some(visibleCommandTarget)
+        )
+          return;
+        target!.focus();
+      },
+      subscribe(listener: () => void) {
+        const navigation = context?.commands.subscribe(listener);
+        const ready = context?.readiness.subscribePrimary(listener);
+        return () => {
+          navigation?.();
+          ready?.();
+        };
+      },
+    };
+  }, [context, actorId, backend]);
 }

@@ -12,6 +12,7 @@ import {
   nativeReadyDiagnostic,
   type NativeReadyEvidence,
 } from './native-ready';
+import { withFailureGeometry } from './failure-geometry';
 import {
   routePresentationTiming,
   pairedBodyCrossfade,
@@ -68,7 +69,16 @@ type ColdTitleGeometry = {
 type ColdTitleProbe = {
   samples: ColdTitleGeometry[];
   firstAdmittedAt: number | null;
-  shifts: Array<{ at: number; value: number }>;
+  shifts: Array<{
+    at: number;
+    value: number;
+    sources: Array<{
+      owner: string;
+      tag: string | null;
+      previous: (number | null)[];
+      current: (number | null)[];
+    }>;
+  }>;
   stop: () => void;
 };
 type DocumentDepartureProbe = {
@@ -1590,15 +1600,62 @@ for (const width of [1280, 390]) {
           stop: () => {},
         };
         Object.assign(window, { coldTitleProbe: probe });
+        const recordShift = (entry: PerformanceEntry) => {
+          const shift = entry as PerformanceEntry & {
+            hadRecentInput: boolean;
+            value: number;
+            sources?: Array<{
+              node?: Node;
+              previousRect: DOMRectReadOnly;
+              currentRect: DOMRectReadOnly;
+            }>;
+          };
+          if (shift.hadRecentInput) return;
+          const rect = (r: DOMRectReadOnly) =>
+            [r.x, r.y, r.width, r.height].map((v) =>
+              Number.isFinite(v)
+                ? Math.round(Math.max(-100000, Math.min(100000, v)) * 100) / 100
+                : null,
+            );
+          // All values still contribute to CLS. Only diagnostic source detail
+          // is capped, and it contains no text, IDs, URLs or attribute values.
+          probe.shifts.push({
+            at: shift.startTime,
+            value: shift.value,
+            sources:
+              probe.shifts.length >= 8
+                ? []
+                : (shift.sources ?? []).slice(0, 4).map((source) => {
+                    const node =
+                      source.node instanceof Element ? source.node : null;
+                    const owners = [
+                      ['account', '.experience-account'],
+                      ['header', '.experience-header'],
+                      ['record-name', '[data-record-name-row]'],
+                      ['main', '#main-content'],
+                    ] as const;
+                    return {
+                      owner:
+                        owners.find(([, selector]) =>
+                          node?.closest(selector),
+                        )?.[0] ?? 'other',
+                      tag:
+                        node &&
+                        /^(DIV|MAIN|SECTION|HEADER|H1|H2|A|BUTTON|INPUT|UL|LI|SPAN|SUMMARY|DETAILS)$/.test(
+                          node.tagName,
+                        )
+                          ? node.tagName
+                          : node
+                            ? 'OTHER'
+                            : null,
+                      previous: rect(source.previousRect),
+                      current: rect(source.currentRect),
+                    };
+                  }),
+          });
+        };
         const shifts = new PerformanceObserver((list) => {
-          for (const entry of list.getEntries()) {
-            const shift = entry as PerformanceEntry & {
-              hadRecentInput: boolean;
-              value: number;
-            };
-            if (!shift.hadRecentInput)
-              probe.shifts.push({ at: shift.startTime, value: shift.value });
-          }
+          for (const entry of list.getEntries()) recordShift(entry);
         });
         shifts.observe({ type: 'layout-shift', buffered: true });
         let frame = 0;
@@ -1646,14 +1703,7 @@ for (const width of [1280, 390]) {
           mutations.disconnect();
           // Preserve queued entries before disconnect, including shell shifts
           // before admission. Report them separately from title geometry.
-          for (const entry of shifts.takeRecords()) {
-            const shift = entry as PerformanceEntry & {
-              hadRecentInput: boolean;
-              value: number;
-            };
-            if (!shift.hadRecentInput)
-              probe.shifts.push({ at: shift.startTime, value: shift.value });
-          }
+          for (const entry of shifts.takeRecords()) recordShift(entry);
           shifts.disconnect();
         };
       }, name);
@@ -1692,12 +1742,28 @@ for (const width of [1280, 390]) {
           postAdmissionCLS: probe.shifts
             .filter((entry) => entry.at >= probe.firstAdmittedAt!)
             .reduce((total, entry) => total + entry.value, 0),
+          shiftDetails: probe.shifts.slice(0, 8),
         };
       });
       const totalCLS = (await proof(page)).cls;
-      expect(admitted.preAdmissionCLS).toBe(0);
-      expect(admitted.postAdmissionCLS).toBe(0);
-      expect(totalCLS).toBe(0);
+      await withFailureGeometry(page, 'cold-title-admission', async () => {
+        try {
+          expect(admitted.preAdmissionCLS).toBe(0);
+          expect(admitted.postAdmissionCLS).toBe(0);
+          expect(totalCLS).toBe(0);
+        } catch (error) {
+          console.error(
+            'bounded-cold-title-shifts',
+            JSON.stringify({
+              preAdmissionCLS: admitted.preAdmissionCLS,
+              postAdmissionCLS: admitted.postAdmissionCLS,
+              totalCLS,
+              shifts: admitted.shiftDetails,
+            }),
+          );
+          throw error;
+        }
+      });
       await info.attach('privacy-gated-cold-title-admission', {
         body: JSON.stringify({
           ...admitted,

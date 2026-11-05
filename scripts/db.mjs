@@ -67,6 +67,10 @@ const test = () => {
     localTestEnv(status),
   );
   node(
+    ['--import', 'tsx', 'tests/integration/command-palette-timeout.ts'],
+    localTestEnv(status),
+  );
+  node(
     ['--import', 'tsx', 'tests/integration/configuration.ts'],
     localTestEnv(status),
   );

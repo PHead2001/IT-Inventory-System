@@ -254,7 +254,10 @@ export function ScanPanel() {
     }
   };
   return (
-    <div className={styles.workspace}>
+    <div
+      className={styles.workspace}
+      data-scanner-active={camera !== 'idle' || busy ? 'true' : undefined}
+    >
       <section
         className={styles.columns}
         aria-label="Equipment inspection"

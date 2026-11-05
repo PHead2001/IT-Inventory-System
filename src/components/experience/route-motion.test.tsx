@@ -19,6 +19,7 @@ import {
   useRouteMotion,
   useInvalidateRouteMotion,
   useRouteMotionLogoutAttempt,
+  useRouteCommandBoundary,
 } from './route-motion';
 import { observeRouteActionResult } from './route-action-result';
 import {
@@ -1085,6 +1086,138 @@ afterEach(() => {
   delete (document as Partial<Document>).startViewTransition;
   Reflect.deleteProperty(document, 'activeViewTransition');
   localStorage.removeItem('it-inventory-reduce-motion');
+});
+
+it('Reduced application Back preserves command tickets and observer isolation while replaying its consumed fallback anchor', async () => {
+  const scope = '/inventory?q=cable&type=quantity';
+  const returned = scope + '#inventory-row-2';
+  const destination =
+    detailPath + '?' + new URLSearchParams({ returnTo: returned });
+  const previous = location.href;
+  const originalScroll = HTMLElement.prototype.scrollIntoView;
+  const scroll = vi.fn();
+  HTMLElement.prototype.scrollIntoView = scroll;
+  const geometry = vi
+    .spyOn(HTMLElement.prototype, 'getClientRects')
+    .mockReturnValue([{ width: 300, height: 200 }] as unknown as DOMRectList);
+  localStorage.setItem('it-inventory-reduce-motion', 'true');
+  let phase: 'list' | 'detail' | 'fallback' = 'list';
+  let command!: ReturnType<typeof useRouteCommandBoundary>;
+  const navigationObserved = vi.fn();
+  const brokenObserver = vi.fn(() => {
+    throw new Error('Presentation observer failure');
+  });
+  function ObserveAcceptedNavigation() {
+    const currentCommand = useRouteCommandBoundary('staff', 'backend');
+    const pendingScope = useContext(RoutePendingContext)!;
+    useLayoutEffect(() => {
+      command = currentCommand;
+      const stopBroken = pendingScope.observeNavigation!(brokenObserver);
+      const stopObserved = pendingScope.observeNavigation!(navigationObserved);
+      return () => {
+        stopBroken();
+        stopObserved();
+      };
+    }, [currentCommand, pendingScope]);
+    return null;
+  }
+  const fixture = () =>
+    view(
+      <>
+        <ObserveAcceptedNavigation />
+        {phase === 'fallback' ? (
+          <p role="status">Loading results</p>
+        ) : (
+          <RouteReady
+            actorId="staff"
+            routeKey={
+              phase === 'list'
+                ? scope
+                : routeKey(
+                    detailPath,
+                    new URL(destination, location.origin).searchParams,
+                  )
+            }
+            contentIdentity={phase}
+          >
+            {phase === 'list' ? (
+              <ul>
+                <li id="inventory-row-2">
+                  <InventoryRecordLink
+                    record={record}
+                    holding={initiatingHolding}
+                    returnTo={returned}
+                    href={destination}
+                  >
+                    Original result
+                  </InventoryRecordLink>
+                </li>
+              </ul>
+            ) : (
+              <InventoryBackLink record={record} href={returned}>
+                Back to results
+              </InventoryBackLink>
+            )}
+          </RouteReady>
+        )}
+      </>,
+    );
+  try {
+    history.replaceState(null, '', scope);
+    runtime.query = 'q=cable&type=quantity';
+    const page = render(fixture());
+    expect(screen.getByText('instant')).toBeVisible();
+    const beforeForward = command.capture();
+    const forwardTicket = command.issue(destination)!;
+    expect(beforeForward()).toBe(true);
+    fireEvent.click(screen.getByRole('link', { name: 'Original result' }));
+    expect(forwardTicket.current()).toBe(true);
+    expect(beforeForward()).toBe(false);
+    expect(navigationObserved).toHaveBeenLastCalledWith(destination);
+    history.replaceState(null, '', destination);
+    runtime.pathname = detailPath;
+    runtime.query = new URL(
+      destination,
+      location.origin,
+    ).searchParams.toString();
+    phase = 'detail';
+    page.rerender(fixture());
+    const backTicket = command.issue(returned)!;
+    fireEvent.click(screen.getByRole('link', { name: 'Back to results' }));
+    expect(forwardTicket.current()).toBe(false);
+    expect(backTicket.current()).toBe(true);
+    expect(navigationObserved).toHaveBeenLastCalledWith(returned);
+    expect(brokenObserver).toHaveBeenCalledTimes(2);
+    expect(navigationObserved).toHaveBeenCalledTimes(2);
+    history.replaceState(null, '', returned);
+    runtime.pathname = '/inventory';
+    runtime.query = 'q=cable&type=quantity';
+    phase = 'fallback';
+    page.rerender(fixture());
+    expect(scroll).not.toHaveBeenCalled();
+    expect(document.activeElement).toBe(document.body);
+    phase = 'list';
+    page.rerender(fixture());
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(scroll).toHaveBeenCalledExactlyOnceWith({
+      behavior: 'instant',
+      block: 'start',
+      inline: 'nearest',
+    });
+    expect(scroll.mock.instances[0]).toBe(
+      document.getElementById('inventory-row-2'),
+    );
+    expect(document.activeElement).toBe(document.body);
+    page.rerender(fixture());
+    expect(scroll).toHaveBeenCalledTimes(1);
+  } finally {
+    geometry.mockRestore();
+    if (originalScroll) HTMLElement.prototype.scrollIntoView = originalScroll;
+    else Reflect.deleteProperty(HTMLElement.prototype, 'scrollIntoView');
+    history.replaceState(null, '', previous);
+  }
 });
 
 it.each(['reduced', 'unsupported', 'full'] as const)(
@@ -3144,6 +3277,45 @@ it.each(['confirmed', 'auth revocation'] as const)(
       screen.getByRole('link', { name: 'Cable row 2' }),
     ).not.toHaveAttribute('data-test-transition-name');
     vi.restoreAllMocks();
+  },
+);
+
+it.each(['failed', 'confirmed'] as const)(
+  'retires command owners across a %s logout attempt without borrowing a fresh grant',
+  (outcome) => {
+    let boundary!: ReturnType<typeof useRouteCommandBoundary>;
+    let begin!: ReturnType<typeof useRouteMotionLogoutAttempt>;
+    function Capture() {
+      const currentBoundary = useRouteCommandBoundary('staff', 'local');
+      const currentBegin = useRouteMotionLogoutAttempt();
+      useLayoutEffect(() => {
+        boundary = currentBoundary;
+        begin = currentBegin;
+      });
+      return null;
+    }
+    const fixture = () => view(<Capture />);
+    const page = render(fixture());
+    const oldOwner = boundary.capture();
+    expect(oldOwner()).toBe(true);
+    expect(boundary.issue('/locations')).not.toBeNull();
+    let settle!: (confirmed: boolean) => void;
+    act(() => {
+      settle = begin();
+    });
+    expect(oldOwner()).toBe(false);
+    page.rerender(fixture());
+    expect(boundary.authorized()).toBe(false);
+    expect(boundary.issue('/locations')).toBeNull();
+    act(() => settle(outcome === 'confirmed'));
+    expect(boundary.authorized()).toBe(false);
+    page.rerender(fixture());
+    expect(oldOwner()).toBe(false);
+    expect(boundary.authorized()).toBe(outcome === 'failed');
+    if (outcome === 'failed') {
+      expect(boundary.capture()()).toBe(true);
+      expect(boundary.issue('/locations')).not.toBeNull();
+    } else expect(boundary.issue('/locations')).toBeNull();
   },
 );
 

@@ -91,6 +91,7 @@ vi.mock('@/components/experience/route-motion', () => ({
 }));
 vi.mock('next/navigation', () => ({
   useRouter: () => ({ refresh: () => {} }),
+  useSearchParams: () => new URLSearchParams(),
   notFound: () => {
     throw new Error('Unexpected missing fixture');
   },

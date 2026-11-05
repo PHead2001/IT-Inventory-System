@@ -1,3 +1,4 @@
+import { installRoomLabelDomObservation } from './room-label-dom-observation';
 import type { Page } from '@playwright/test';
 import { gzipSync } from 'node:zlib';
 import { createHash } from 'node:crypto';
@@ -140,6 +141,7 @@ export type RoomLayoutWitnessStage =
   | 'selected-red-before-resize'
   | 'fit-open-selected-long-text';
 export async function enableRoomLayoutDiagnostics(page: Page) {
+  await page.addInitScript(installRoomLabelDomObservation);
   await page.addInitScript(() => {
     Object.defineProperty(window, '__roomLayoutDiagnosticsEnabled', {
       value: true,

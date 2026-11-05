@@ -2,6 +2,7 @@
 import { signOutSession } from '@/lib/auth/logout-transport';
 import { useEffect, useRef, useState } from 'react';
 import { Button } from '@/components/ui/button';
+import { LogOut } from 'lucide-react';
 import { useRouteMotionLogoutAttempt } from '@/components/experience/route-motion';
 import { clearLabelQueueSession } from './queue-model';
 import { invalidateAssignmentCallbacks } from '@/features/scan/assign-batch';
@@ -79,8 +80,16 @@ export function QueueLogoutForm() {
           clearLabelQueueSession();
         }}
       >
-        <Button variant="outline" disabled={busy}>
-          {busy ? 'Signing out…' : 'Sign out'}
+        <Button
+          variant="outline"
+          className="max-sm:w-11 max-sm:px-0"
+          disabled={busy}
+          aria-label={busy ? 'Signing out…' : 'Sign out'}
+        >
+          <LogOut size={18} aria-hidden="true" className="sm:hidden" />
+          <span className="hidden sm:inline">
+            {busy ? 'Signing out…' : 'Sign out'}
+          </span>
         </Button>
         {issue && <p role="alert">{issue}</p>}
       </form>

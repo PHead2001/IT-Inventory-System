@@ -24,6 +24,7 @@ Invite a local user through Supabase Studio and provision membership as describe
 - [Room navigation](docs/room-navigation.md)
 - [Local development](docs/development/README.md)
 - [Validation](docs/validation.md)
+- [Search and keyboard shortcuts](docs/command-palette.md)
 - [Deployment](docs/deployment.md)
 - [Repository rules](AGENTS.md)
 

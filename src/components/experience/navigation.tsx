@@ -6,6 +6,10 @@ import { usePathname } from 'next/navigation';
 import { useState } from 'react';
 import { LayoutGroup, motion } from 'motion/react';
 import {
+  ShortcutBadge,
+  useShortcutHint,
+} from '@/features/commands/command-provider';
+import {
   Boxes,
   Map,
   MapPin,
@@ -76,6 +80,7 @@ function NavigationItem({
   closeMenu: () => void;
 }) {
   const [intent, setIntent] = useState(false);
+  const shortcutHint = useShortcutHint(href);
   return (
     <Link
       href={href}
@@ -87,6 +92,7 @@ function NavigationItem({
       onClick={closeMenu}
       className="experience-nav-link"
       aria-label={label}
+      title={shortcutHint ? label + ' (' + shortcutHint + ')' : label}
       aria-current={active ? 'page' : undefined}
     >
       {active && (
@@ -98,6 +104,7 @@ function NavigationItem({
       )}
       <Icon size={17} strokeWidth={1.8} aria-hidden="true" />
       <span>{label}</span>
+      <ShortcutBadge href={href} />
       <NavigationFeedback />
     </Link>
   );

@@ -3,7 +3,7 @@
 ## Iteration and authoritative CI
 
 Batch related findings and fixes before one push. Run focused regressions during
-iteration, then `npm run validate:push` (typecheck, zero-warning lint, formatting,
+iteration, then run `npm run validate:push` once per fix batch (typecheck, zero-warning lint, formatting,
 and the complete Vitest suite) before pushing. It performs no fresh install,
 build, database reset or Playwright execution. Its sequential local wrapper sets
 a 2 GiB Node old-space limit for the canonical typecheck stage and 1 GiB for lint,
@@ -14,7 +14,23 @@ dependency inputs are unchanged. The optional repository-local pre-push hook
 enforces this gate on the exact current clean HEAD; see
 [local setup](development/README.md#automatic-local-push-checks).
 
-Keep work in a draft PR during iteration. Foundation CI handles opened, reopened,
+Keep the PR draft through iteration and Codex review rounds. For each valid
+finding, inspect its root cause and sibling paths, preserve a durable regression,
+and run the focused regression and affected sibling tests. Run the affected local
+database or browser gate when the fix touches persistence, authorization or
+browser behavior; the cheap push gate does not replace those checks. Batch the
+round's fixes, run `npm run validate:push`, and push once. Reply on each original
+thread with the fix SHA, root cause, regression coverage and actual local
+validation evidence before resolving it. State that complete CI runs when the
+PR is marked ready; do not claim an unexecuted gate.
+
+Query live unresolved threads, request fresh `@codex review`, and wait for its
+completion after each batch. Mark ready only when the latest review on the
+current HEAD has no actionable findings and zero unresolved actionable threads.
+That starts authoritative complete CI on that exact HEAD. A draft `required`
+failure is intentional uncertified feedback, not a defect to repair with a push.
+
+Foundation CI handles opened, reopened,
 synchronize, ready_for_review and converted_to_draft events, cancelling superseded
 runs for that PR. A draft uses a light runner and ends the stable `required` check
 with an explicit uncertified failure before dependency installation. Missing or
@@ -63,6 +79,43 @@ endpoint, cancellation, hover, selection and no-stale-target assertions. The sou
 repair removes a timing vulnerability; unavailable historical assertion details do
 not establish it as the cause of the prior failure. Exact-candidate canonical
 browser execution and full certification are required separately.
+
+### Opt-in room demand attribution
+
+The existing `__roomLayoutDiagnosticsEnabled` test gate also enables read-only
+`window.__readRoomDemandSnapshot(canvas)` counters. The existing label-driver connection
+binds its raw Fiber invalidate function to that canvas; calls before connection
+are unobserved (`preconnectObserved: false` in every snapshot). This measures the connected settle window, not all renderer
+activity. No Fiber/global invalidation wrapper, extra frame driver, observer,
+React state or DOM attribute write is installed. Recorded calls retain their
+existing guards, arguments, ordering and hook dependencies.
+Fiber's internal property/commit invalidations and Drei's own control requests
+are outside these application callsite counters.
+
+The fixed schema contains 47 source/classification counters plus a binding count,
+each capped at 1,000,000 with an overflow flag, in at most 4 KiB. Snapshots are
+immutable copies; reads do not increment counters. Same-canvas reconnects retain
+counters and increment the binding count; stale cleanup cannot remove a newer
+binding. Teardown retires only its own binding and invalidate mapping. The read-only
+window function returns null for unbound/disabled canvases and malformed input;
+a blocked or foreign reader property disables observation without affecting the scene.
+Eight CameraRig input/effect calls share `camera-update`; contact allocation and
+refresh share `contact-update`; bloom overlay success/failure share `bloom-overlay`.
+Frame continuations retain separate counters. Resize deliveries record target
+class and first/changed/identical content width/height via weak references only;
+raw dimensions, identifiers, labels, HTML, errors, URLs, stacks and timestamps are
+not retained. Mutation callbacks classify geometry change, unmeasurable inputs,
+obstruction touches and ignored churn. Font, window and visual viewport event
+origins remain separate. These counters attribute requests; a request count does
+not establish that Fiber submitted a draw or caused the failure.
+
+The existing `settledLabels` canvas evaluation reads the snapshot without adding
+an evaluation, animation frame or poll. Only failures report up to eight samples
+within the existing 16 KiB `ROOM_LABEL_SETTLE_FAILURE` bound. Diagnostic fields
+do not participate in readiness, cadence, timeout or assertion decisions. This
+instrumentation does not establish the cause of the Linux CI settle failure;
+actual failing-environment evidence and final exact-SHA certification remain
+required.
 
 ## Spatial composition source slice
 
@@ -380,6 +433,100 @@ passes do not certify SQL execution, hosted summaries or actual populated UI.
 Full database/type generation, browser captures, exact-SHA remote checks and
 fresh independent review remain acceptance gates. Generated database types need
 no API signature update for this private-function replacement.
+Command palette regressions live beside the registry/provider, authenticated
+POST route and TaskWorkspace. Real-provider tests distinguish same-binding
+privacy pause/resume from revocation or binding drift, accepted-navigation serial
+supersession, native history/terminal/unmount retirement, authoritative primary
+focus and the explicit consumed-task handoff. Focus/readiness observers must not
+settle another owner's pending work. The launcher keeps an authored 18 px glyph
+slot while access is checking; its polite checking status stays outside header
+flow. Component coverage verifies that slot and the asset/quantity sequence of
+two accepted task consumptions followed by native same-record task re-entry.
+This does not certify real Next/browser ordering or zero layout shift.
+Real PrivacyController integration now exercises the first changed-key pending
+attestation, held success with no early task, exact consumption cleanup and later
+deliberate reentry. Negative cases retain initial raw-URL denial, generic refresh,
+failure/recovery, binding/server/configuration changes, root/content/anchor changes,
+hidden roots, business work, navigation, cleanup/revocation/assignment retirement,
+A/B/A supersession with late success and malformed or semantic query changes.
+These focused controller tests do not replace native Next ordering, browser
+geometry or independent review of the changed preservation boundary.
+The explicit server-route gate regressions cover asset and quantity tasks with
+mounted query consumers. They hold first-render verification, require committed
+consumption authority, exercise consumption/cleanup/reentry, and keep ordinary
+content admission and new restoration bootstrap blocked. Revocation, replacement
+owners, generic rechecks and superseded late replies cannot consume the held
+receipt. Separate receipt tests reject minting from consumption-only authority.
+The exact retained task-bearing server gate also covers two ordinary application
+consumptions followed by native entry for both record types. Ordinary transfer
+tests cover live callback revocation during readiness notification, busy work,
+changed pending epochs, unsuccessful consumption, forged/mismatched controller
+tokens and retired binding refusal, including admission of a genuinely new
+navigation binding. The pre-consumption controller capture remains inert until
+the successful handoff and its live post-call checks complete.
+A held-cleanup regression proves that premature native query supersession stays
+rejected even after the old verification succeeds. The browser's deliberate native
+entry observes exact task-to-clean browser navigation and holds a subsequently
+observed genuine privacy-generation response before requiring the visible Search
+and commands launcher to be disabled. Only delivery of that unchanged response
+and the launcher's subsequent enabled state permit native entry. URL removal or
+an already-enabled stale DOM alone cannot establish fresh authority. Because the
+app sends no-referrer, the helper uses observed navigation/request order and
+fails closed if that order is unavailable; it never selects by Referer. Existing
+failure geometry retains the launcher's disabled state without exposing
+controller internals.
+These working-tree checks still require native browser rerun and independent
+review before exact-SHA acceptance.
+The native re-entry, first inventory-row viewport and cold-title browser checks
+emit bounded failure-only geometry; cold-title failures also report at most
+eight layout-shift entries with four fixed-identity sources each. All shifts
+still contribute to the unchanged zero-CLS assertions. Diagnostics omit DOM
+text, raw URLs, arbitrary attributes and history/auth state, and rethrow the
+original assertion. CI run `39328708840` at `608c0e4b` failed seven browser cases;
+artifact upload hit the storage quota. The header status is a source-confirmed
+layout contributor, not a proven explanation of those CLS failures. Native
+timing, access-denial snapshot readiness, actual Next task re-entry and viewport
+placement remain browser acceptance gaps until rerun on the integrated candidate.
+The PR56 dependency integration retains its authored auxiliary registry, capture
+completion collector and shared document clock. After an explicitly consumed
+task, auxiliary source metadata uses the same effective full key as the accepted
+primary and content identity; the immutable server anchor remains in the native
+task guard. Rebinding cleans the old metadata registration. Asset and quantity
+regressions cover repeated task consumption, exact clean-key lookup, stale
+task-key rejection, live revocation and unmount cleanup. Registry metadata grants
+no route or privacy authority. The joined shell retains both the room scene
+budget and command providers under the existing protected scope, with both room
+effects and shortcut preferences available in Settings.
+The additive database search requires the
+full canonical database gate, including pgTAP authorization/lifecycle/ranking
+fixtures and canonical type regeneration. Under the default planner and caller
+RLS, all nine exact deployed full-projection fuzzy arms cover selective, absent,
+sparse 1/20/21-result and common 6,000-row workloads. Each of these 54 cases must
+finish in <=500 ms, use <=16,384 root shared hit+read buffers, avoid temporary
+spill, emit at most 21 IDs and preserve the independent reference's distance/UUID
+order. A PL/pgSQL portal observer records actual emitted order without sorting;
+a deliberately reversed-order regression guards that observer. Separate
+index-eligibility plans change only the inner FETCH FIRST 21 ROWS WITH TIES count
+to 1 and require the expected GiST index with Order By for all nine fields. These
+eligibility probes do not establish deployed-query performance. Six whole
+RPC workloads must finish in <5 seconds. Compact diagnostics retain plan costs,
+estimates, actuals, buffers, field/relation statistics and planner settings;
+planner flags, cost constants and operator leakproof flags remain unchanged.
+These assertions define the required oracle; integrating them is not runtime
+proof. Certification requires their execution through the canonical database
+gate on the exact candidate revision.
+The local palette integration gate also starts fresh PostgreSQL connections as
+the nonsuperuser authenticated role. It reproduces the unregistered trigram
+parameter failure, executes the actual breadcrumb migration prefix and function
+header in a temporary schema with rollback, and checks threshold restoration.
+A separate fresh caller proves nonmember denial and authorized search before
+the extension library has been loaded in that backend.
+The mandatory real Data API deadline integration must witness database
+cancellation code 57014 before the client deadline and forced lock release.
+Desktop/390px Full/Reduced staff/viewer browser/preview checks remain separate
+acceptance requirements; a declared SQL timeout or component mock is not deadline
+proof. See
+[Search and commands](command-palette.md).
 
 Checkpoint scope/accessibility regression coverage includes normalized location status/export links, caller-scoped record identity and unavailable history recovery, page-local versus full-row counts, empty inventory/destination states, page recovery, monitoring coverage, intact location codes and hidden/unmodeled/failed map guidance. Focused Vitest tests prove these contracts and stale-response handling; `scope-accessibility.spec.ts` exercises ordinary controls, real authorized reads and downloaded CSV across page boundaries. Required-input and category-focus interaction coverage lives in `scope-accessibility-forms.spec.ts`. Mocked reads are not integrated runtime or complete assistive-technology proof; use the existing disposable-local and isolated-preview gates for final acceptance.
 
@@ -908,7 +1055,7 @@ The heavy profile is a fixed 6 GiB/static-memory candidate with 1 GiB unallocate
 
 The diagnostic `Local runner pilot` uses its exact workflow/head SHA and must record Linux and Docker versions plus a real disposable container execution and verified removal. Static YAML/shell checks do not prove the VM, runner registration, Docker lifecycle, app/database/E2E gates or trusted secret-bearing jobs. Before enabling active pickup on the live host, complete host security checks and independent review. After normal routing is enabled on the live host, certify the full workload in the first normal PR CI run and certify the four validation/preview jobs through their appropriate PR/main/preview contexts; preserve the `required` check, trusted-main preview execution and protected environment restrictions. Record activation and runtime certification as installation-specific PR evidence, including installed bundle identity, pilot/recovery receipts, owner acceptance of the residual detection window, and exact-SHA normal job results. Activation and a passing diagnostic pilot do not establish normal-workload or production certification; keep unexercised contexts and real reboot recovery explicit. No GitHub-hosted runner fallback or npm Actions cache is configured.
 
-Failure reports retain seven-day GitHub artifact storage. Uploads are best-effort and warn when quota or availability prevents them; failed tests still fail the `required` job. An absent upload is a diagnostics limitation, never evidence that tests passed. Disposal must also occur after failed or cancelled jobs.
+Failure reports retain seven-day GitHub artifact storage. The optional failure upload has a two-minute step timeout and remains best-effort, with a warning when upload fails, including a timeout. It runs after the required validation decision, so artifact delivery cannot change test outcomes; failed tests still fail the `required` job. An absent upload is a diagnostics limitation, never evidence that tests passed. Disposal must also occur after failed or cancelled jobs.
 
 Before artifact upload, the existing Playwright performance reporter prints and appends bounded Browser failure metadata to the job summary: up to twenty failed/interrupted/timed-out attempts, repository E2E source file/line, status, retry, worker index, error count and whether Playwright attached a trace. It reports omitted attempts explicitly. Titles, assertion messages/stacks, test output, attachment paths/contents, environment values and HTTP bodies are excluded. The existing list reporter remains the source for assertion details in the Validate browser workflows log. If artifact upload fails, the workflow also records the limitation in the summary: there is no downloadable trace from that upload. Cancellation or process termination before reporter completion can leave this metadata absent too. This fallback improves diagnosis and does not repair provider storage quota, preserve host traces or change test outcomes.
 
@@ -1726,3 +1873,6 @@ the retained volume, API/database/mail connectivity and unchanged migration
 history. A clean-source CI database reset proves that source revision separately;
 it must not reset a retained local volume containing an owner-held later migration.
 Historical performance and acceptance captures retain their original ports.
+The command-palette timeout proof admits only the same canonical API 45321 and
+database 45322 targets; its unit regressions reject the retired 54321/54322 ports
+as well as URL host overrides before integration clients are constructed.

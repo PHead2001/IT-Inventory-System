@@ -1,4 +1,14 @@
 export type RouteQuery = Record<string, string | string[] | undefined>;
+/** Only UUID identity segments on known inventory record routes are case-insensitive. */
+export function canonicalRecordPath(pathname: string) {
+  return pathname.replace(
+    /^(\/inventory\/(?:assets|quantity)\/)([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/i,
+    (match, prefix: string, id: string) =>
+      /^\/inventory\/(?:assets|quantity)\/$/.test(prefix)
+        ? prefix + id.toLowerCase()
+        : match,
+  );
+}
 
 /** Canonical key retains each repeated value in order; hashes remain anchors. */
 export function routeKey(
@@ -20,5 +30,7 @@ export function routeKey(
     }
   }
   parameters.sort();
-  return pathname + (parameters.size ? `?${parameters}` : '');
+  return (
+    canonicalRecordPath(pathname) + (parameters.size ? `?${parameters}` : '')
+  );
 }

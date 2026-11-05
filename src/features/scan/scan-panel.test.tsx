@@ -15,6 +15,7 @@ import { AssignmentScopeGuard } from './assignment-scope-guard';
 import { readFileSync } from 'node:fs';
 import { PNG } from 'pngjs';
 import { holdTransitionCapture } from '../../../tests/helpers/transition-capture';
+import { ignoresShortcut } from '@/features/commands/registry';
 const mocks = vi.hoisted(() => ({
   decode: vi.fn(),
   stop: vi.fn(),
@@ -63,6 +64,56 @@ const found = {
   status: 'found',
   matches: [{ path: '/locations/ITC', state: 'active', label: 'IT Closet' }],
 };
+it.each(['finish', 'cancel'] as const)(
+  'keeps shortcut exclusion through async manual inspection until %s',
+  async (outcome) => {
+    const pending = deferred<unknown>();
+    mocks.resolve.mockReturnValue(pending.promise);
+    render(<ScanPanel />);
+    const owner = document.querySelector<HTMLElement>('[data-scanner-active]');
+    expect(owner).toBeNull();
+    fireEvent.change(screen.getByLabelText(/Paste a label URL/), {
+      target: { value: 'UNKNOWN' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Open' }));
+    const active = document.querySelector<HTMLElement>(
+      '[data-scanner-active="true"]',
+    )!;
+    vi.spyOn(active, 'getClientRects').mockReturnValue([
+      {},
+    ] as unknown as DOMRectList);
+    expect(
+      ignoresShortcut(
+        new KeyboardEvent('keydown', { key: 'k', ctrlKey: true }),
+        document,
+      ),
+    ).toBe(true);
+    if (outcome === 'cancel')
+      fireEvent.click(
+        screen.getByRole('button', { name: 'Cancel inspection' }),
+      );
+    else
+      await act(async () =>
+        pending.resolve({ status: 'unknown', matches: [] }),
+      );
+    expect(
+      ignoresShortcut(
+        new KeyboardEvent('keydown', { key: 'k', ctrlKey: true }),
+        document,
+      ),
+    ).toBe(false);
+    if (outcome === 'cancel') {
+      await act(async () => pending.resolve(found));
+      expect(
+        ignoresShortcut(
+          new KeyboardEvent('keydown', { key: 'k', ctrlKey: true }),
+          document,
+        ),
+      ).toBe(false);
+      expect(mocks.push).not.toHaveBeenCalled();
+    }
+  },
+);
 beforeEach(() => {
   sessionStorage.clear();
   vi.resetAllMocks();

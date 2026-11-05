@@ -1,4 +1,4 @@
-import { routeKey } from './route-key';
+import { routeKey, canonicalRecordPath } from './route-key';
 import type { RoutePendingState } from './route-pending';
 
 export type ReadyContent = {
@@ -6,6 +6,7 @@ export type ReadyContent = {
   routeKey: string;
   contentIdentity: string;
   root: HTMLElement;
+  consumedTask?: { sourceKey: string; destinationKey: string };
   conventionalPrimary?: boolean;
 };
 export function createRouteReadiness(
@@ -51,21 +52,97 @@ export function createRouteReadiness(
     if (history && pending.current(history.epoch)) history.finish();
     history = undefined;
   };
+  const primary = () => {
+    for (const content of roots.values()) {
+      if (active(content)) return content;
+    }
+    return null;
+  };
   return {
     // Read-only observation reuses the canonical readiness checks. It never
     // acknowledges a commit or settles another owner's pending registration.
-    currentPrimary: () => {
-      for (const content of roots.values()) {
-        if (active(content)) return content;
-      }
-      return null;
-    },
+    currentPrimary: primary,
     subscribePrimary: (listener: () => void) => {
       if (closed) return () => {};
       listeners.add(listener);
       return () => {
         listeners.delete(listener);
       };
+    },
+    nativeTaskIdle: () =>
+      !closed &&
+      !suspended &&
+      !history &&
+      !pending.snapshot().pending &&
+      pending.current(pending.snapshot().epoch),
+    consumeNativeTask(
+      root: HTMLElement,
+      cleanKey: string,
+      consume: () => { sourceKey: string; destinationKey: string } | null,
+    ) {
+      const content = Array.from(roots.values()).find(
+        (value) => value.root === root && value.routeKey === cleanKey,
+      );
+      if (
+        closed ||
+        suspended ||
+        history ||
+        pending.snapshot().pending ||
+        !pending.current(pending.snapshot().epoch) ||
+        !content ||
+        content.actorId !== actorId ||
+        !content.contentIdentity ||
+        !root.isConnected ||
+        root.closest('[hidden], [inert]') ||
+        !Array.from(root.children).some(
+          (child) =>
+            child.getClientRects().length > 0 &&
+            getComputedStyle(child).visibility !== 'hidden',
+        ) ||
+        (primary() && primary() !== content)
+      )
+        return null;
+      const handoff = consume();
+      if (!handoff) return null;
+      content.routeKey = handoff.destinationKey;
+      content.consumedTask = handoff;
+      // The independently accepted receipt authorizes only task consumption.
+      // No commit observer, pending settlement or navigation identity is issued.
+      notify();
+      return handoff;
+    },
+    consumeTask(
+      root: HTMLElement,
+      sourceKey: string,
+      recordPath: string,
+      task: string,
+      apply: (href: string) => void,
+    ) {
+      const content = Array.from(roots.values()).find(
+        (value) => value.root === root && value.routeKey === sourceKey,
+      );
+      if (!content || primary() !== content) return null;
+      const url = new URL(location.href);
+      if (
+        canonicalRecordPath(url.pathname) !== canonicalRecordPath(recordPath) ||
+        url.searchParams.getAll('task').length !== 1 ||
+        url.searchParams.get('task') !== task
+      )
+        return null;
+      url.searchParams.delete('task');
+      const destinationKey = routeKey(url.pathname, url.searchParams);
+      try {
+        apply(url.pathname + url.search + url.hash);
+      } catch {
+        return null;
+      }
+      if (location.href !== url.href) return null;
+      content.routeKey = destinationKey;
+      content.consumedTask = { sourceKey, destinationKey };
+      // Same mounted primary, explicit query handoff. No new readiness receipt,
+      // history settlement, navigation intent or authorization is fabricated.
+      notify();
+      return content.consumedTask;
     },
     register: (content: ReadyContent) => {
       if (closed) return () => {};
@@ -103,12 +180,12 @@ export function createRouteReadiness(
       if (!closed) suspended = false;
       notify();
     },
-    close: () => {
+    close: (publish = true) => {
       closed = true;
       history?.finish();
       history = undefined;
       roots.clear();
-      notify();
+      if (publish) notify();
       listeners.clear();
     },
   };

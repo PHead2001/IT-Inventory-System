@@ -4,6 +4,7 @@ import { expect, test, type Page, type TestInfo } from '@playwright/test';
 import fixture from '../fixtures/auth.json' with { type: 'json' };
 import { setLocalReducedMotion } from './motion-settings';
 import { writeFileSync } from 'node:fs';
+import { withFailureGeometry } from './failure-geometry';
 
 async function signIn(page: Page) {
   await page.goto('/login');
@@ -21,6 +22,37 @@ async function noHorizontalOverflow(page: Page) {
     content: document.documentElement.scrollWidth,
   }));
   expect(dimensions.content).toBeLessThanOrEqual(dimensions.viewport + 1);
+}
+
+async function headerControlsFit(page: Page) {
+  const header = page.locator('.experience-header');
+  const controls = [
+    header.getByRole('link', { name: 'IT Inventory overview' }),
+    header.getByRole('button', { name: 'Search and commands' }),
+    header.getByRole('button', { name: 'Keyboard shortcuts' }),
+    header.getByLabel('Account: Test staff, staff', { exact: true }),
+    header.getByRole('button', { name: 'Sign out', exact: true }),
+  ];
+  const bounds = await Promise.all(
+    controls.map(async (control) => {
+      await expect(control).toBeVisible();
+      const box = (await control.boundingBox())!;
+      expect(box.width).toBeGreaterThanOrEqual(44);
+      expect(box.height).toBeGreaterThanOrEqual(44);
+      return box;
+    }),
+  );
+  const width = page.viewportSize()!.width;
+  for (let index = 0; index < bounds.length; index++) {
+    const box = bounds[index];
+    expect(box.x).toBeGreaterThanOrEqual(0);
+    expect(box.x + box.width).toBeLessThanOrEqual(width);
+    expect(Math.abs(box.y - bounds[0].y)).toBeLessThan(1);
+    if (index > 0)
+      expect(bounds[index - 1].x + bounds[index - 1].width).toBeLessThanOrEqual(
+        box.x,
+      );
+  }
 }
 
 async function captureInventoryComposition(
@@ -57,7 +89,7 @@ async function captureInventoryComposition(
       header: bounds('.experience-header'),
       brand: bounds('.experience-header .experience-brand'),
       account: bounds('.experience-account summary'),
-      signOut: bounds('.experience-account button'),
+      signOut: bounds('.experience-account form button'),
       menu: bounds('.experience-mobile-menu'),
       chip: bounds('.experience-filter-chip'),
     };
@@ -378,6 +410,7 @@ test('representative shell and auth surfaces render at desktop and phone sizes w
     await page.emulateMedia({ reducedMotion: 'reduce' });
     await page.goto('/dashboard');
     await noHorizontalOverflow(page);
+    await headerControlsFit(page);
     await page.screenshot({
       path: testInfo.outputPath('overview-phone-390.png'),
       fullPage: true,
@@ -419,7 +452,10 @@ test('representative shell and auth surfaces render at desktop and phone sizes w
       .first();
     // Retain the unfiltered acceptance check as well as the deterministic case.
     await page.setViewportSize({ width: 502, height: 757 });
-    await expect(firstName).toBeInViewport();
+    await headerControlsFit(page);
+    await withFailureGeometry(page, 'inventory-first-row', async () => {
+      await expect(firstName).toBeInViewport();
+    });
     await page.screenshot({
       path: testInfo.outputPath('inventory-phone-502-global-viewport.png'),
     });
@@ -467,6 +503,7 @@ test('representative shell and auth surfaces render at desktop and phone sizes w
     ]) {
       await page.setViewportSize(viewport);
       await noHorizontalOverflow(page);
+      if (viewport.width < 640) await headerControlsFit(page);
       await page
         .getByLabel('Account: Test staff, staff', { exact: true })
         .focus();
@@ -508,6 +545,7 @@ test('representative shell and auth surfaces render at desktop and phone sizes w
     });
     await page.setViewportSize({ width: 320, height: 800 });
     await noHorizontalOverflow(page);
+    await headerControlsFit(page);
     await captureAccountDisclosure(page, testInfo, 'account-phone-320');
     await page.setViewportSize({ width: 390, height: 844 });
     // Form GET includes empty/default controls; record return scope is canonical.

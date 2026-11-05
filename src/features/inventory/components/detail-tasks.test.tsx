@@ -2,7 +2,10 @@ import { fireEvent, render, screen } from '@testing-library/react';
 import { beforeEach, expect, it, vi } from 'vitest';
 import { DetailTasks } from './detail-tasks';
 const mocks = vi.hoisted(() => ({ tagCheck: vi.fn(), submit: vi.fn() }));
-vi.mock('next/navigation', () => ({ useRouter: () => ({ refresh: vi.fn() }) }));
+vi.mock('next/navigation', () => ({
+  useRouter: () => ({ refresh: vi.fn() }),
+  useSearchParams: () => null,
+}));
 vi.mock('../actions', () => ({
   submitInventory: mocks.submit,
   findDuplicateSerials: vi.fn(),

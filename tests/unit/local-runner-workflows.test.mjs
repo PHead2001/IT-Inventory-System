@@ -453,6 +453,28 @@ describe('disposable local runner workflow contracts', () => {
     expect(pilot).not.toMatch(/uses:\s*actions\/checkout@|secrets\./);
   });
 
+  it('bounds optional failure uploads without delaying or changing the required validation decision', () => {
+    const steps = foundation.jobs.required.steps;
+    const upload = steps.find((step) => step.id === 'failure_artifact');
+    const decision = steps.find(
+      (step) => step.run === 'node scripts/ci-required.mjs',
+    );
+    expect(upload).toMatchObject({
+      if: 'failure() || cancelled()',
+      'continue-on-error': true,
+      'timeout-minutes': 2,
+      with: { 'retention-days': 7 },
+    });
+    expect(decision).toBeDefined();
+    expect(steps.indexOf(upload)).toBeGreaterThan(steps.indexOf(decision));
+    expect(foundationGates).not.toContain('failure_artifact');
+    const warning = steps[steps.indexOf(upload) + 1];
+    expect(warning.if).toBe(
+      "${{ always() && steps.failure_artifact.outcome == 'failure' }}",
+    );
+    expect(warning.run).toContain('::warning::Failure diagnostics');
+  });
+
   it('makes only diagnostics and future-reuse inspection best-effort and preserves failing test gates', () => {
     const required = ci
       .split('  required:')[1]

@@ -1,5 +1,6 @@
 import { build } from 'esbuild';
 import { resolve } from 'node:path';
+import { browserVariantModules } from 'next/dist/build/browser-variant-modules.js';
 
 /** Renderer initiation only. Approval is supplied by this fictional fixture;
  * provider authorization/lifetime has separate real-provider component tests. */
@@ -19,6 +20,14 @@ export async function routePrimaryFixture(kind: RoutePrimaryFixtureKind) {
         ? '/locations/ITC-S1A'
         : '/history';
   const conventionalSource = kind === 'history' || kind === 'location';
+  // Mirror Next's generated exact resolved-path client aliases. The default
+  // modules contain server implementations and must not enter this browser fixture.
+  const browserVariants = new Map(
+    browserVariantModules.map((id) => [
+      resolve('node_modules/next/dist', id + '.js'),
+      resolve('node_modules/next/dist', id + '.browser.js'),
+    ]),
+  );
   const result = await build({
     stdin: {
       resolveDir: process.cwd(),
@@ -116,6 +125,20 @@ export async function routePrimaryFixture(kind: RoutePrimaryFixtureKind) {
     },
     plugins: [
       {
+        name: 'installed-next-browser-variants',
+        setup(builder) {
+          builder.onResolve({ filter: /^(?:\.|next\/dist\/)/ }, (args) => {
+            const requested = args.path.startsWith('.')
+              ? resolve(args.resolveDir, args.path)
+              : resolve('node_modules', args.path);
+            const browser = browserVariants.get(
+              requested.endsWith('.js') ? requested : requested + '.js',
+            );
+            return browser ? { path: browser } : undefined;
+          });
+        },
+      },
+      {
         name: 'fixture-approval-only',
         setup(builder) {
           builder.onResolve({ filter: /^\.\/route-motion$/ }, () => ({
@@ -132,8 +155,14 @@ export async function routePrimaryFixture(kind: RoutePrimaryFixtureKind) {
     ],
     bundle: true,
     write: false,
+    outfile: 'route-primary-fixture.js',
     metafile: true,
-    define: { 'process.env.NODE_ENV': '"production"' },
+    define: {
+      'process.env.NODE_ENV': '"production"',
+      // Next replaces this at build time; this repository does not enable
+      // cacheComponents. Keep its real navigation dependency browser-safe too.
+      'process.env.__NEXT_CACHE_COMPONENTS': 'false',
+    },
     alias: {
       react: resolve('node_modules/next/dist/compiled/react'),
       'react-dom/client': resolve(
@@ -143,7 +172,9 @@ export async function routePrimaryFixture(kind: RoutePrimaryFixtureKind) {
     },
   });
   return {
-    script: result.outputFiles[0].text,
+    script: result.outputFiles.find((file) => file.path.endsWith('.js'))!.text,
+    styles:
+      result.outputFiles.find((file) => file.path.endsWith('.css'))?.text ?? '',
     inputs: Object.keys(result.metafile.inputs),
     sourceRoute,
     destinationRoute,

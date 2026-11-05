@@ -99,6 +99,12 @@ import ProtectedNotFound, {
 import { DocumentAdmission } from './document-admission';
 import { ProtectedPrivacyBoundary } from '@/components/auth/auth-privacy';
 import { ProtectedPrivacyContent } from '@/components/auth/privacy-content';
+import { RoomCameraSnapshotProvider } from '@/features/room/scene/camera-snapshot-provider';
+import { RoomSceneBudgetProvider } from '@/features/room/scene/scene-budget-provider';
+import { OperationalTimeProvider } from '@/components/operational-time';
+import { MotionPreference } from '@/components/experience/motion-preference';
+import { RouteMotionProvider } from '@/components/experience/route-motion';
+import { CommandProvider } from '@/features/commands/command-provider';
 
 it('does not admit record existence before membership or return the shell before admission', async () => {
   const denied = new Error('LOGIN_REDIRECT');
@@ -223,6 +229,44 @@ it('resolves the shared layout and passes only a generic missing flag to its out
   expect(documentBoundary.member.mock.invocationCallOrder[0]).toBeLessThan(
     documentBoundary.admission.mock.invocationCallOrder[0],
   );
+});
+
+it('keeps command privacy and navigation authority inside the unchanged shell provider lifetime beneath document admission', async () => {
+  documentBoundary.admission.mockResolvedValueOnce(true);
+  const layout = await ApplicationLayout({
+    children: <p>Retained task route</p>,
+  });
+  const privacy = layout.props.children;
+  const camera = privacy.props.children;
+  const budget = camera.props.children;
+  const operational = budget.props.children;
+  const motion = operational.props.children[1];
+  const routes = motion.props.children;
+  const commands = routes.props.children;
+  expect(layout.type).toBe(DocumentAdmission);
+  expect(privacy.type).toBe(ProtectedPrivacyBoundary);
+  expect(camera.type).toBe(RoomCameraSnapshotProvider);
+  expect(budget.type).toBe(RoomSceneBudgetProvider);
+  expect(operational.type).toBe(OperationalTimeProvider);
+  expect(motion.type).toBe(MotionPreference);
+  expect(routes.type).toBe(RouteMotionProvider);
+  expect(commands.type).toBe(CommandProvider);
+  expect(commands.props).toMatchObject({
+    actorId: privacy.props.binding.actorId,
+    backend: privacy.props.binding.backend,
+    staff: false,
+  });
+  for (const provider of [
+    layout,
+    privacy,
+    camera,
+    budget,
+    operational,
+    motion,
+    routes,
+    commands,
+  ])
+    expect(provider.key).toBeNull();
 });
 
 describe('protected Speed Insights placement', () => {

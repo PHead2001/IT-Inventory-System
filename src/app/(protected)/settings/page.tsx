@@ -7,6 +7,7 @@ import { RoomEffectsPreference } from '@/components/experience/room-effects-pref
 import { MotionToggle } from '@/components/experience/motion-preference';
 import { BuildInfo } from '@/features/build-info/build-info';
 import { readBuildProvenance } from '@/features/build-info/read.server';
+import { ShortcutPreference } from '@/features/commands/command-provider';
 
 const sections = [
   {
@@ -75,6 +76,7 @@ export default async function SettingsPage({
               system&apos;s reduced-motion preference always applies.
             </p>
             <MotionToggle />
+            <ShortcutPreference />
             <RoomEffectsPreference />
           </section>
           <ul className="grid gap-3 md:grid-cols-2">

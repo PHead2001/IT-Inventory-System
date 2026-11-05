@@ -1,0 +1,362 @@
+# Search, commands, and keyboard shortcuts
+
+The protected shell owns one command provider. Header Search and Ctrl/Command+K
+open a keyboard-navigable palette; the help button and ? open its shortcut sheet.
+Both share one modal focus owner, background inertness, Tab containment, visible
+Close, and Escape return to its original connected, visible, noninert invoker
+under the same authority, unless a leave-guard dialog owns focus. Accepted
+navigation focuses the authoritative destination primary heading; inventory
+search focuses its ordinary field.
+Full motion uses a 240ms visual spring; effective Reduced motion opens immediately.
+
+The phone header uses an accessible brand icon and 44 px Search, help and sign-out
+buttons alongside the account disclosure in one row. The desktop shortcut hint
+keeps a fixed slot even when shortcuts are disabled, so first-use font loading or
+the saved preference cannot move the account controls after privacy admission.
+
+## Commands and preferences
+
+The typed registry supplies commands, shortcut labels, navigation badges and help.
+It exposes navigation and narrow tasks, never stock-mutation payloads. Shortcuts
+are /, N, S, L, G then I/H/M, ?, and Ctrl/Command+K. G expires after one second and
+cancels on unrelated keys, focus change, blur or route change. Held modifier hints
+reset on blur. Browser/assistive modifier combinations are preserved except the
+documented Ctrl/Command+K binding. Users can disable every application shortcut
+through Settings; ordinary buttons remain usable.
+
+Typing, editable content, IME/keyCode 229, repeats, prevented events, active
+cameras, exclusive scopes, and open dialogs/menus/listboxes exclude shortcuts.
+One window keydown/keyup owner and blur handler own this behavior. A versioned
+preference key is naturally origin-scoped and also includes backend and actor.
+Storage failure reports a session-only fallback. Only a boolean is stored.
+
+Staff N opens the established individual-asset/quantity tracking choice. Move
+searches navigate with task=asset_move or task=quantity_move. DetailTasks derives
+current available choices; TaskWorkspace consumes each intent once before using
+its existing draft-discard, pending and uncertain guards. Unknown/unavailable
+intents explain without erasing a task. Removing the consumed URL parameter
+prevents a remount from reopening a closed task. Retired or site-held assets gain
+no forced storage move. Existing authorization, versions, review and retry
+identity stay authoritative at submission.
+
+Add mode shows the session-check status and retains both tracking descriptions
+as disabled choices without navigation links until the caller is verified.
+Session verification on opening or Retry has an eight-second deadline. Transient
+failure or timeout retains the dialog, query and cursor with explicit Retry;
+retrying starts a fresh check. Late answers cannot authorize an expired check or
+overwrite a newer request/owner. Closing, revocation, unmount and settlement clear
+the owned deadline. These presentation checks do not change server authorization.
+The shared retry control says Try again in both Search and Add. Browser search
+also has an eight-second deadline from dispatch through response-body reading;
+expiry aborts and retires that request, stops pending feedback and retains the
+query/cursor for retry. Ignored aborts and late responses cannot replace newer
+results. Query changes, closing, revocation and unmount clear the owned deadline.
+Current 401/403 responses withdraw the palette as soon as headers arrive, before
+body reading; a stalled or malformed denial body cannot become a retryable error.
+Responses from retired requests cannot revoke a newer verified owner.
+
+Native URL consumption omits only Next's history bypass markers; its supported
+history wrapper retains router state and synchronizes useSearchParams. Application
+history state, unrelated query parameters and hashes remain. Commands and ordinary
+links share the canonical leave guards in metadata forms/designers and custody
+management; declined leaves and recovery/pending/uncertain decisions remain there.
+After a declined leave the palette closes and returns focus to its invoker unless
+an existing guard dialog owns focus. Move mode searches active equipment only and
+omits the historical-scope control; ordinary search and Print retain that control.
+Add mode focuses a connected tracking choice, including transitions from an open
+palette. Arrow selection scrolls only the result viewport, immediately in either
+motion mode, and wraps without scrolling the page.
+
+Print label selects the established typed asset/quantity/location queue intent;
+sites are not targets. Queue/review/print controls remain deliberate; no automatic
+printing occurs. Scan opens its existing workflow. Viewers receive no Add/Move
+commands.
+
+## Route and privacy ownership
+
+The command provider sits inside the existing RouteMotionProvider, beneath the
+protected privacy, camera, operational-time/assignment and motion providers.
+Navigation and privacy checks retain the mounted shell, forms and camera state.
+Opening, searching and executing require the protected boundary's fresh
+presentation grant. Caller getUser is an additional check and cannot authorize
+an unverified or revoked presentation. Synchronous privacy-revocation and
+assignment-invalidation subscribers abort requests, discard private query/results
+and focus tickets, and dismiss the overlay without returning focus.
+
+Commands request the existing shared leave decision before calling the supported
+route router. They recheck the captured lifetime after that decision; declined
+leaves create neither route progress nor focus work. Ordinary commands do not
+invalidate route motion. Native Back/Forward remains instantaneous, and accepted
+application Back retains its approved animation and restoration contracts.
+
+The route provider owns command tickets. Each captures its provider and mount,
+actor/backend binding, privacy generation/revocation and assignment epoch,
+pending epoch, and accepted-navigation serial. Every accepted push advances that
+serial, including a repeated same URL. Native history, terminal failures,
+revocation, assignment invalidation and unmount retire old work. A same-binding
+ordinary recheck pauses the original ticket while fresh authority is absent;
+only that same grant can resume it. Binding drift is permanent for the old
+ticket, including A to B to A changes. No refreshed binding rewrites a ticket.
+
+Arrival focus observes currentPrimary/subscribePrimary from canonical readiness.
+Fallback headings, hidden retained content, pathname-only matches and unrelated
+query destinations do not qualify. The target must be inside the authoritative
+visible, noninert primary. The ticket and grant are rechecked and consumed before
+focus. Observing readiness neither acknowledges a commit nor settles pending work.
+
+A consumed task URL has one explicit same-primary handoff beneath RouteReady.
+It requires the exact originating record/query/task, mounted authoritative
+primary and fresh grant. It removes only task through the supported native
+history wrapper, retaining unrelated query/hash and Next/application state, and
+publishes the same primary's effective readiness key. A command ticket may follow
+only that recorded handoff. There is no router replacement, synthetic history
+event, new navigation intent or general query exclusion. A hidden retained
+workspace cannot consume or open the task; the privacy boundary still verifies
+the changed URL through its ordinary contract.
+
+The handoff is scoped to a separate provider-owned navigation identity. Only
+accepted application navigation and native traversal advance it and capture the
+exact destination. A later matching original task URL rearms the same source
+only after the React router commits that full key, the original primary remains
+connected/visible and fresh privacy returns. Identical cached children require
+no remount or forced refresh. Command authority retirement is synchronous during insertion effects, while subscriber publication is coalesced into the following layout phase. Dying-provider cleanup retires without publication; ordinary navigation/privacy events still notify immediately. A raw URL change or unrelated navigation cannot
+rearm it; outgoing pending work retains its clean alias. Native history can
+restore functional readiness while permanently retiring old command focus.
+
+Native same-record Move intents use a separate privacy-controller attestation
+for the exact task/validated-return-scope query change. It preserves only a
+previously accepted clean receipt, with its original root, actor, content, server
+anchor, navigation identity, pending epoch and security revision. The controller
+publishes the pending attestation on the first changed-key render and binds it
+to one verification sequence and the original protected binding, generation,
+server/configuration revisions and cleanup/revocation/callback epochs. Pending
+verification cannot open a task, admit content or restore storage. Only fresh
+success from that exact operation allows one consumption. Its exact successful
+task removal may preserve that receipt through the cleanup query check; later
+deliberate entry requires another exact operation. Generic checks, failure,
+uncertainty, supersession, changed owners, hidden roots, business work and
+security invalidation permanently retire the receipt. A raw URL cannot issue
+or revive one, and the attestation never grants ordinary navigation authority.
+
+Successful record pages retain an explicit server-route privacy gate. A native
+task query can leave that gate's general readiness false even after its exact
+controller verification succeeds. The existing receipt may consult the live
+`consumptionReady` proof for task consumption and its matching cleanup only.
+That proof requires the successful controller state to commit; an operation's
+verified status alone is insufficient. Receipt creation still requires a fresh
+accepted primary. General content admission, restoration readiness and storage
+bootstrap remain governed by the original explicit route gate. Cleanup is
+reobserved after the controller's layout commit so later deliberate entry can
+reuse only the original, still-valid receipt.
+
+A successful ordinary task consumption may explicitly transfer its existing
+fresh, visible, idle primary authority to that native receipt. The controller
+captures an inert, one-shot lifetime before consumption; only actual success and
+unchanged live ownership, security and pending epoch may complete it at the exact
+clean URL. The resulting consumed controller token links the existing cleanup
+check. Failed consumption, busy work, synchronous notification-time invalidation,
+forged tokens and retired same-binding receipts cannot create that transfer.
+Only a legitimately new accepted navigation binding may replace retirement.
+
+## Caller-authorized bounded search
+
+The additive command_palette_search_v1(text,text,text) RPC is SECURITY INVOKER with
+qualified objects and an empty search path. It checks active membership before
+data and preserves RLS. Only authenticated receives EXECUTE; PUBLIC, anon and
+service_role do not. Ordinary inventory search is unchanged.
+
+The pure immutable `command_palette_normalize(text)` helper separately grants
+EXECUTE to authenticated and service_role so existing authorized writes can
+maintain its expression indexes. It reads no records and remains SECURITY
+INVOKER with an empty search path; PUBLIC and anon have no EXECUTE grant.
+This helper grant does not grant palette RPC access or change table privileges.
+The SQL gate checks these ACLs and service-role normalization/search denial.
+The existing `tests/integration/custody.ts` direct service-role transaction inserts
+a location (both indexed name/code) and updates its indexed name, reads it back
+and rolls back. That retained integration is the actual indexed-write regression
+for the helper grant; execution on the repaired candidate remains required.
+
+The closed purpose selector is all (default), move, or print. It filters every
+field stream before nearest-neighbor limits, deduplication, global ranking and
+the 20-entity cap. Move searches active assets/quantity definitions even under
+historical scope; print searches assets/quantity definitions/locations; ordinary
+search includes all four kinds. hasMore counts eligible entities for that purpose.
+This is preliminary discovery, not availability/authorization for a mutation;
+fresh detail/task guards remain authoritative.
+
+Queries trim outer Unicode whitespace, allow at most 200 codepoints and 800 UTF-8
+bytes, and reject controls. Active is default; an explicit all-records toggle
+includes lifecycle chips. Blank queries return no database entities. One/two
+characters match exact identifiers only; longer queries use true pg_trgm word
+similarity at fixed 0.35 threshold. Static commands support approximate matching.
+
+Nine GiST expression indexes cover asset name/tag/serial, quantity name/item code,
+location name/code and site name/code. Each field contributes at most 21 eligible
+exact candidates and 21 eligible nearest-word-distance candidates. The indexed
+expression is `command_palette_normalize(field)`, an immutable invoker helper
+using the same explicit Unicode whitespace set and lowercase for query, fields
+and indexes. Distance orientation is
+field OPERATOR(extensions.<->>) query, equivalent to 1-word_similarity(query,field);
+its threshold operator is %>. Exact candidates rank first, best field matches
+deduplicate by (kind,id), and kind/id break ties deterministically. At most 20
+entities return with hasMore based on the 21st unique entity. Base records include
+zero-stock definitions and empty locations/sites; holdings never duplicate rows.
+Duplicate serials remain legal and return separate named assets.
+
+The forward threshold repair keeps eligibility and the unchanged nonleakproof
+`%>` threshold inside each fuzzy stream before ordering by word distance alone
+and fetching the first 21 rows with ties. The outer query orders qualifying rows
+by distance/UUID and limits to 21. Rejected distance-1 rows cannot inflate the
+boundary output for absent or sparse searches. Under caller RLS the threshold
+may remain a filter, so this change does not establish bounded scanning or a
+particular index plan. Keeping every qualifying boundary tie before the
+UUID sort preserves deterministic results; a common equal-distance term can
+still visit thousands of rows. No constant-work or universal latency claim is
+implied by the 21-candidate output cap.
+
+The transactional SQL gate extracts all nine deployed full-projection arms and
+their inner boundaries. Against 6,000 unrelated rows per table, absent and
+1/20/21-match cases require exact qualifying boundary counts and no rejected
+output, compare ordered IDs with the independent pre-repair reference, and emit
+buffer, rows-removed and execution-time summaries. The existing 6,000 qualifying
+ties and nonleakproof catalog checks remain required. The deployed cost oracle
+covers all nine exact full-projection arms across selective, absent, sparse
+1/20/21-result and common 6,000-row workloads under authenticated caller RLS and
+the default planner. Each of the 54 cases requires <=500 ms execution, <=16,384
+root shared hit+read buffers, no temporary spill and at most 21 emitted IDs in
+the independent reference's distance/UUID order. A PL/pgSQL portal loop observes
+actual order without sorting; a deliberately reversed-order regression guards
+the observer. Separate eligibility probes change only the inner FETCH FIRST 21
+ROWS WITH TIES count to 1 and require each expected GiST index with Order By.
+Eligibility does not establish deployed-query performance. Six whole RPC cases
+must finish in <5 seconds, and the real Data API deadline gate remains mandatory.
+These are authored regression requirements; final-candidate database execution
+and performance acceptance remain pending until those gates run. See
+[validation](validation.md) for the canonical gate and diagnostic requirements.
+
+Version-one rows expose kind, id, name, code, assetTag, serialNumber, status and
+matchedField. Database JSON is capped at 64 KiB; the endpoint validates its schema
+and 20-row cap. Response text limits count Unicode codepoints, matching PostgreSQL
+`char_length`, including supplementary characters. Internal identities are not
+rendered as normal text.
+
+Inventory rows add optional current context: up to three authorized named storage
+locations or sites, plus `hasMore` from a fourth-place sentinel. Location rows and displayed storage contexts add optional canonical full breadcrumbs from caller-invoker `inventory_locations`; only the deduplicated twenty results and three displayed places are enriched. Missing legacy breadcrumbs remain unknown and are omitted, never reconstructed from leaf names. Assets use their
+current storage/site fields while active. Retired assets label preserved storage
+as Last recorded storage, matching the detail page's historical custody meaning;
+an explicit empty retired context says no recorded storage or site assignment.
+Quantity items use positive storage and site holdings.
+Enrichment follows entity deduplication and the twenty-result cap; it never
+aggregates all holdings or reads event history. An explicit empty context means
+no current storage/site; legacy absent context remains unknown and is omitted.
+The forward normalization/context migration must deploy before context is accepted;
+database execution, generated types, the deployed cost/semantic oracle, separate
+index eligibility and real Data API deadline proof remain required.
+
+The private no-store POST endpoint caps streamed bodies at 4 KiB, requires
+same-origin requests, rechecks Auth/membership with the caller SDK, propagates
+cancellation and supplies one eight-second lifetime covering body reads, caller client setup,
+Auth verification, membership and RPC reads. The caller fetch composes this
+lifetime with existing Request/init signals; bounded waits also retire adapters
+that fail to settle. Cleanup cancels timers/listeners and releases the body reader
+without waiting for a nonsettling stream cancellation. JWT/session and access
+denials remain 401/403; transient Auth/read failures remain retryable 503s. Invalid,
+timeout and read failures offer Retry, never No matches. Session/access denial
+clears private search and dismisses the palette; another explicit opening still
+requires a fresh canonical presentation grant and caller session verification.
+The SQL five-second statement_timeout declaration is defense and convention,
+not proof of actual PostgREST timeout enforcement.
+
+PostgREST must hoist `statement_timeout` from the function settings before its
+main query. PostgREST 14 includes it in the default `db-hoisted-tx-settings`, but
+an environment/database override can remove it. See [hoisted function settings](https://docs.postgrest.org/en/v14/references/transactions.html#hoisted-function-settings)
+and [the configuration allowlist](https://docs.postgrest.org/en/v14/references/configuration.html#db-hoisted-tx-settings).
+No role/global timeout is changed by the command migration.
+
+`tests/integration/command-palette-timeout.ts` is part of the canonical local
+database gate. It signs in an owned viewer, verifies normal RPC access, holds an
+independent local table lock and observes the actual authenticated Data API request
+waiting. It requires database `57014`/statement-timeout failure around five seconds,
+before either client cancellation or forced lock release, and cleans up its lock
+and actor. It refuses nonloopback endpoints. Final-candidate execution remains
+required.
+The deployed cost/semantic cases and separate nine-field index-eligibility plans
+remain in `command_palette.test.sql`.
+A hosted timeout run requires independent approval of its exclusive window,
+verified isolated PR backend and caller/SQL access; this local gate does not
+authorize a hosted lock or establish hosted timeout acceptance.
+
+The browser debounces 150ms and cancels on close/new query/scope/purpose.
+Actor/backend/query/scope/request generations reject stale callbacks. Results
+are not cached across openings or persisted. Each palette open revalidates the
+session with caller getUser before searching. A browser Auth subscription clears
+displayed rows and aborts/increments inflight generations on sign-out or actor
+change, including events from another tab. Its synchronous callback performs no
+Supabase request; explicit open/Retry performs asynchronous verification later.
+
+## Validation
+
+Focused unit/RTL/API coverage must prove query validation, role-aware commands,
+shortcut guards/preferences, modal focus, cancellation, session identity changes,
+purpose forwarding, native history synchronization and existing form leave guards.
+Use the repository test command with the command, navigation, search endpoint and
+affected inventory/metadata/custody component suites. Run canonical typecheck,
+zero-warning lint and formatting checks; follow docs/validation.md for full gates.
+
+Schema changes require the complete local database gate and canonical db:types
+regeneration/check. The pgTAP suite covers grants, membership/RLS, input, lifecycle,
+empty entities, duplicate serials, multiple holdings, typo matching, ties/caps,
+purpose filtering, deployed full-projection cost/semantic cases and separate
+authenticated index-eligibility plans. All fixed per-arm budgets, emitted-order
+comparisons, eligibility and whole-RPC checks must pass alongside the real Data
+API timeout behavior. A SQL timeout declaration or mocked endpoint test alone
+does not establish those contracts. Planner flags, cost constants and operator
+leakproof flags remain unchanged; a failed budget or eligibility check remains
+an unresolved criterion.
+
+The emitted-order observer converts each whole portal record to JSON before
+extracting its ID. PL/pgSQL caches the type of a statically referenced record
+field, so the text anti-sort fixture followed by deployed UUID rows must not use
+`candidate.id`, even with a later cast. Same-backend regressions alternate text,
+UUID with a different row descriptor, text again, numeric and null IDs. They
+retain native JSON values and actual portal order without rewriting or sorting
+the deployed query. This observer repair does not change the 54 full-projection
+cost/semantic cases, nine index-eligibility plans or required Data API proof.
+
+For historical context, diagnostic commit
+`856f828b74c38c433cecbf8d2c90931e432acf4a` is dated 2026-10-15.
+[CI run 38807984527](https://github.com/PHead2001/IT-Inventory-System/actions/runs/38807984527)
+proved all nine proposed GiST plans and 90 original/proposed ordered-ID
+comparisons under PostgreSQL 17.6/pg_trgm 1.6, authenticated RLS, threshold 0.35
+and the default planner. All 152 added diagnostic assertions passed; seven
+original production-plan assertions still failed. Those diagnostics justified
+`20261015212553_command_palette_rls_knn.sql`; the migrated RPC's full behavior,
+clean database gate and type check still require a subsequent exact-SHA run.
+The authoritative post-migration probes extract each full fuzzy arm from the
+deployed function, including its payload columns, so planner row-width costs
+are retained. Each statement is explained separately; this is not a capture
+of the RPC's nested execution plan. Existing RPC assertions remain the behavior
+gate alongside the independent field-stream equivalence comparisons.
+
+Browser acceptance must cover staff/viewer, desktop/phone, Full/Reduced motion,
+ordinary buttons/keyboard, help/preferences, repeated same-record Move under the
+actual Next router, history-state preservation and twenty results with arrow
+wrap/Enter. Include private preview evidence and assistive/screen-reader checks.
+Record run-specific results and revision bindings in verification artifacts/PR
+evidence. The acceptance matrix records remaining A301/W20 and W11 criteria;
+this module supplies palette/help entry, while other overlays/tasks/toasts have
+their own delivery requirements.
+
+Local integration preparation on 2026-10-12 applies held command commit
+cd4a2f8c1b44ce56f484d8b4866a01801d6873e6 onto route/privacy base
+4666d532079609f99cfd36b11f350f440b701e53 in
+assist/audit-four-command-integration. The local integration checkpoint has focused
+component/provider regression and canonical typecheck evidence; it is not full
+acceptance. The lead subsequently checkpointed it and integrated the PR54
+document-admission/feedback repair; cached-primary followup checks are recorded
+separately in the review evidence. The unshipped additive migration was recreated with the pinned CLI as
+20261012102652_command_palette_search.sql, following existing forward-history
+prefix rules; deployed migrations were not renumbered. Database application,
+type regeneration, deployed cost/semantic and separate index-eligibility checks,
+real Data API deadline proof, browser/preview checks,
+independent boundary review and exact-commit full gates remain pending.

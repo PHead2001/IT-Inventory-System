@@ -127,6 +127,7 @@ vi.mock('next/navigation', async () => ({
     await vi.importActual<typeof import('next/navigation')>('next/navigation')
   ).unstable_rethrow,
   useRouter: () => ({ refresh: vi.fn(), push: vi.fn() }),
+  useSearchParams: () => new URLSearchParams(window.location.search),
   notFound: () => {
     throw new Error('not found');
   },
