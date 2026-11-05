@@ -81,78 +81,90 @@ export default async function ApplicationLayout({
                     </ProtectedPrivacyContent>
                     <PeekProvider
                       actor={member.user_id}
-                      backend={new URL(process.env.NEXT_PUBLIC_SUPABASE_URL ?? '').origin}
+                      backend={
+                        new URL(process.env.NEXT_PUBLIC_SUPABASE_URL ?? '')
+                          .origin
+                      }
                     >
-                    <TransientFeedbackProvider
-                      actorId={member.user_id}
-                      backend={new URL(process.env.NEXT_PUBLIC_SUPABASE_URL ?? '').origin}
-                    >
-                    <ShellAtmosphere
-                      actorId={member.user_id}
-                      backend={new URL(process.env.NEXT_PUBLIC_SUPABASE_URL ?? '').origin}
-                    >
-                      <a href="#main-content" className="experience-skip-link">
-                        Skip to content
-                      </a>
-                      <header className="experience-header">
-                        <div className="experience-header-inner">
-                          <ProtectedPrivacyContent>
-                            <Link
-                              href="/dashboard"
-                              className="experience-brand"
-                              aria-label="IT Inventory overview"
-                            >
-                              <span className="experience-brand-mark">
-                                <Boxes
-                                  size={19}
-                                  strokeWidth={1.8}
-                                  aria-hidden="true"
-                                />
-                              </span>
-                              <span>
-                                <strong>IT Inventory</strong>
-                                <small>Spatial workspace</small>
-                              </span>
-                            </Link>
-                          </ProtectedPrivacyContent>
-                          <div className="experience-account">
-                            <ProtectedPrivacyContent>
-                              <QuickThemeToggle />
-                              <CommandButtons />
-                              <AccountIdentity
-                                name={member.display_name}
-                                role={member.role}
-                              />
-                            </ProtectedPrivacyContent>
-                            <QueueLogoutForm />
-                          </div>
-                        </div>
-                      </header>
-                      <div className="experience-workspace">
-                        <aside className="experience-sidebar">
-                          <ProtectedPrivacyContent>
-                            <Navigation />
-                          </ProtectedPrivacyContent>
-                        </aside>
-                        <main
-                          id="main-content"
-                          className="experience-main"
-                          tabIndex={-1}
+                      <TransientFeedbackProvider
+                        actorId={member.user_id}
+                        backend={
+                          new URL(process.env.NEXT_PUBLIC_SUPABASE_URL ?? '')
+                            .origin
+                        }
+                      >
+                        <ShellAtmosphere
+                          actorId={member.user_id}
+                          backend={
+                            new URL(process.env.NEXT_PUBLIC_SUPABASE_URL ?? '')
+                              .origin
+                          }
                         >
-                          <ProtectedRouteArrival>
-                            {children}
-                          </ProtectedRouteArrival>
-                        </main>
-                      </div>
-                      <ProtectedPrivacyContent>
-                        {speedInsightsEnabled({
-                          VERCEL_ENV: process.env.VERCEL_ENV,
-                          SPEED_INSIGHTS_ENABLED:
-                            process.env.SPEED_INSIGHTS_ENABLED,
-                        }) && <PrivateSpeedInsights />}
-                      </ProtectedPrivacyContent>
-                    </ShellAtmosphere>
-                    </TransientFeedbackProvider>
+                          <a
+                            href="#main-content"
+                            className="experience-skip-link"
+                          >
+                            Skip to content
+                          </a>
+                          <header className="experience-header">
+                            <div className="experience-header-inner">
+                              <ProtectedPrivacyContent>
+                                <Link
+                                  href="/dashboard"
+                                  className="experience-brand"
+                                  aria-label="IT Inventory overview"
+                                >
+                                  <span className="experience-brand-mark">
+                                    <Boxes
+                                      size={19}
+                                      strokeWidth={1.8}
+                                      aria-hidden="true"
+                                    />
+                                  </span>
+                                  <span>
+                                    <strong>IT Inventory</strong>
+                                    <small>Spatial workspace</small>
+                                  </span>
+                                </Link>
+                              </ProtectedPrivacyContent>
+                              <div className="experience-account">
+                                <ProtectedPrivacyContent>
+                                  <QuickThemeToggle />
+                                  <CommandButtons />
+                                  <AccountIdentity
+                                    name={member.display_name}
+                                    role={member.role}
+                                  />
+                                </ProtectedPrivacyContent>
+                                <QueueLogoutForm />
+                              </div>
+                            </div>
+                          </header>
+                          <div className="experience-workspace">
+                            <aside className="experience-sidebar">
+                              <ProtectedPrivacyContent>
+                                <Navigation />
+                              </ProtectedPrivacyContent>
+                            </aside>
+                            <main
+                              id="main-content"
+                              className="experience-main"
+                              tabIndex={-1}
+                            >
+                              <ProtectedRouteArrival>
+                                {children}
+                              </ProtectedRouteArrival>
+                            </main>
+                          </div>
+                          <ProtectedPrivacyContent>
+                            {speedInsightsEnabled({
+                              VERCEL_ENV: process.env.VERCEL_ENV,
+                              SPEED_INSIGHTS_ENABLED:
+                                process.env.SPEED_INSIGHTS_ENABLED,
+                            }) && <PrivateSpeedInsights />}
+                          </ProtectedPrivacyContent>
+                        </ShellAtmosphere>
+                      </TransientFeedbackProvider>
                     </PeekProvider>
                   </CommandProvider>
                 </RouteMotionProvider>

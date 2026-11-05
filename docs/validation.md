@@ -1977,5 +1977,6 @@ uses its actual Document while retaining physical picks and packing budgets.
 See [spring feedback](spring-feedback.md). Source integration does not establish
 runtime acceptance or promote any audit disposition. Focused tests, fresh review,
 populated desktop/390px Full/Reduced both-theme proof and canonical exact-SHA
-certification remain pending. W10 Overview hero/stat tilt remains an explicit
-extension gap until its current surface-owner adaptation is integrated and proved.
+certification remain pending. Current Overview hero/stat tilt uses the same stationary owner and decorative
+inner wrapper; native visual acceptance remains pending. Future A403 replacement
+hosts must retain these adapters.

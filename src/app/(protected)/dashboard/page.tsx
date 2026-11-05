@@ -1,3 +1,4 @@
+import { MagneticVisual } from '@/components/experience/magnetic-visual';
 import { RouteReady } from '@/components/experience/route-ready';
 import { routeReadyProps } from '@/components/experience/route-ready.server';
 import Link from '@/components/experience/route-link';
@@ -40,8 +41,13 @@ export default async function DashboardPage({
                 <ArrowRight size={15} aria-hidden="true" />
               </Link>
             </div>
-            <div className="experience-closet-preview">
-              <ClosetPreview />
+            <div className="experience-closet-preview experience-tilt">
+              <MagneticVisual
+                kind="tilt"
+                className="grid w-full place-items-center"
+              >
+                <ClosetPreview />
+              </MagneticVisual>
             </div>
           </section>
           <DashboardSnapshotView

@@ -62,6 +62,7 @@ export function createRoomObstructionOwner(document: Document) {
 export function connectRoomObstructions(
   canvas: HTMLCanvasElement,
   changed: () => void,
+  subscribeViewport = true,
 ) {
   const document = canvas.ownerDocument;
   const registry = registryFor(document);
@@ -71,31 +72,38 @@ export function connectRoomObstructions(
     if (active) changed();
   };
   registry.listeners.add(notify);
-  view?.addEventListener('resize', notify);
-  view?.addEventListener('scroll', notify, true);
-  view?.visualViewport?.addEventListener('resize', notify);
-  view?.visualViewport?.addEventListener('scroll', notify);
+  if (subscribeViewport) {
+    view?.addEventListener('resize', notify);
+    view?.addEventListener('scroll', notify, true);
+    view?.visualViewport?.addEventListener('resize', notify);
+    view?.visualViewport?.addEventListener('scroll', notify);
+  }
   return () => {
     active = false;
     registry.listeners.delete(notify);
-    view?.removeEventListener('resize', notify);
-    view?.removeEventListener('scroll', notify, true);
-    view?.visualViewport?.removeEventListener('resize', notify);
-    view?.visualViewport?.removeEventListener('scroll', notify);
+    if (subscribeViewport) {
+      view?.removeEventListener('resize', notify);
+      view?.removeEventListener('scroll', notify, true);
+      view?.visualViewport?.removeEventListener('resize', notify);
+      view?.visualViewport?.removeEventListener('scroll', notify);
+    }
   };
 }
 
 /** CSS-pixel rectangles of painted cards and this surface's local controls. */
 export function collectRoomObstructionRects(
   canvas: HTMLCanvasElement,
-  viewport = canvas.getBoundingClientRect(),
+  viewport?: DOMRect,
   beforeMeasure?: () => boolean | void,
 ) {
-  if (
-    !canvas.isConnected ||
-    viewport.right <= viewport.left ||
-    viewport.bottom <= viewport.top
-  )
+  if (!canvas.isConnected) return [];
+  // The optional viewport read is budgeted too; runtime callers provide their
+  // already measured snapshot so obstruction collection cannot reread it.
+  if (!viewport) {
+    if (beforeMeasure?.() === false) return [];
+    viewport = canvas.getBoundingClientRect();
+  }
+  if (viewport.right <= viewport.left || viewport.bottom <= viewport.top)
     return [];
   const surface = canvas.closest('[data-room-surface]');
   const elements = new Set<HTMLElement>();
@@ -112,13 +120,16 @@ export function collectRoomObstructionRects(
     }
   const rects: DOMRect[] = [];
   for (const element of elements) {
-    if (!element.isConnected || element.getClientRects().length === 0) continue;
+    if (!element.isConnected) continue;
+    if (beforeMeasure?.() === false) return rects;
+    if (element.getClientRects().length === 0) continue;
     let painted = true;
     for (
       let ancestor: HTMLElement | null = element;
       ancestor;
       ancestor = ancestor.parentElement
     ) {
+      if (beforeMeasure?.() === false) return rects;
       const style =
         element.ownerDocument.defaultView?.getComputedStyle(ancestor);
       if (
@@ -133,7 +144,7 @@ export function collectRoomObstructionRects(
       }
     }
     if (!painted) continue;
-    if (beforeMeasure?.() === false) break;
+    if (beforeMeasure?.() === false) return rects;
     const rect = element.getBoundingClientRect();
     if (
       [rect.left, rect.top, rect.right, rect.bottom].every(Number.isFinite) &&

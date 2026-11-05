@@ -5026,7 +5026,12 @@ describe('existing edit recovery and review', () => {
       await act(async () =>
         settle(
           outcome === 'error'
-            ? { ok: false, code: 'unexpected', message: 'Unknown outcome' }
+            ? {
+                ok: false,
+                kind: 'unexpected',
+                code: 'unexpected',
+                message: 'Unknown outcome',
+              }
             : {
                 ok: true,
                 entityId: item.id,

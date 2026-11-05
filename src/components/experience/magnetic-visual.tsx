@@ -4,10 +4,16 @@ import type { ReactNode } from 'react';
 export function MagneticVisual({
   children,
   className = '',
+  kind = 'magnetic',
 }: {
   children: ReactNode;
   className?: string;
+  kind?: 'magnetic' | 'tilt';
 }) {
+  if (kind === 'tilt')
+    return (
+      <div className={`experience-tilt-visual ${className}`}>{children}</div>
+    );
   return (
     <>
       <span aria-hidden="true" className="experience-magnetic-face" />

@@ -124,7 +124,7 @@ async function mount() {
 beforeEach(() => {
   vi.useFakeTimers();
   vi.spyOn(HTMLElement.prototype, 'getClientRects').mockImplementation(
-    function () {
+    function (this: HTMLElement) {
       return (this.closest('[hidden], [inert]') ||
       getComputedStyle(this).visibility === 'hidden'
         ? []
@@ -806,12 +806,7 @@ it('rejects hidden responsive triggers during an in-flight read', async () => {
   expect(screen.queryByText('Laptop')).toBeNull();
 });
 
-it.each([
-  'history-main',
-  'history-detail',
-  'location-row',
-  'location-link',
-])(
+it.each(['history-main', 'history-detail', 'location-row', 'location-link'])(
   'opens lazy current details from the actual %s consumer without altering its href',
   async (surface) => {
     const location = {
@@ -888,12 +883,12 @@ it.each([
       </PeekProvider>,
     );
     const link = screen.getByRole('link', {
-            name: surface.startsWith('history')
-              ? 'History device'
-              : surface === 'location-row'
-                ? 'Location device'
-                : /IT Closet/,
-          });
+      name: surface.startsWith('history')
+        ? 'History device'
+        : surface === 'location-row'
+          ? 'Location device'
+          : /IT Closet/,
+    });
     const href = link.getAttribute('href');
     expect(fetch).not.toHaveBeenCalled();
     act(() => link.focus());

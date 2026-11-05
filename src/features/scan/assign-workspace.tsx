@@ -1,4 +1,9 @@
 'use client';
+import {
+  ConfirmedSuccess,
+  useFeedbackOwner,
+} from '@/components/experience/confirmed-success';
+import { CountTicker } from '@/components/experience/count-ticker';
 import { PeekLink } from '@/features/peek/peek-link';
 import {
   LoadingAnnouncement,
@@ -106,6 +111,11 @@ function AssignmentFields({
   const feedbackHost = useRef<HTMLDivElement>(null);
   const feedback = useScanFeedback(feedbackHost, actorId + ':' + backend);
   const [scanIssue, setScanIssue] = useState(false);
+  const successOwner = useFeedbackOwner(actorId + ':' + backend);
+  const finishOwner = useFeedbackOwner(actorId + ':' + backend);
+  const [confirmedAssignmentId, setConfirmedAssignmentId] = useState<string>();
+  const [finishedFeedbackId, setFinishedFeedbackId] = useState<string>();
+  const finishSerial = useRef(0);
   const observeRouteActionResult = useRouteActionResult();
   const privacy = usePrivacyReadiness();
   const cleanupRevision = useAuthoritativeCleanupRevision();
@@ -1095,8 +1105,11 @@ function AssignmentFields({
           setReady(false);
         } else recovered.current = null;
         dispatch({ type: 'committed', result });
-        if (result.changed && current.phase === 'review')
+        // Unknown/replayed results remain truthful static receipts, never a new celebration.
+        if (result.changed && current.phase === 'review') {
+          setConfirmedAssignmentId(result.eventId);
           feedback('assignment', `assignment:${result.eventId}`);
+        }
         setInput('');
       } else if (
         custodyOutcomeUnresolved(result, current.phase === 'unknown')
@@ -1388,18 +1401,49 @@ function AssignmentFields({
         tabIndex={-1}
         className={panel + ' space-y-3'}
       >
+        <ConfirmedSuccess
+          owner={finishOwner}
+          eventId={
+            batch?.finished
+              ? (finishedFeedbackId ?? 'finished:restored')
+              : undefined
+          }
+          restored={!finishedFeedbackId}
+        />
         <h2 className="text-lg font-semibold">
           {batch?.finished ? 'Batch finished' : 'Assignment checklist'}
         </h2>
         <p role="status">
-          {countLabel(totals.assetAssignments, 'asset assignment')}
-          {totals.assets !== totals.assetAssignments
-            ? ` (${countLabel(totals.assets, 'individual asset')})`
-            : ''}{' '}
-          · {countLabel(totals.quantityAssignments, 'quantity assignment')} (
-          {countLabel(totals.units, 'unit')}) confirmed · {totals.failed} failed
-          · {totals.skipped} skipped · {totals.pending} pending ·{' '}
-          {totals.uncertain} uncertain
+          <CountTicker
+            announce={false}
+            value={totals.assetAssignments}
+            unit="asset assignment"
+          />
+          {totals.assets !== totals.assetAssignments ? (
+            <>
+              {' '}
+              (
+              <CountTicker
+                announce={false}
+                value={totals.assets}
+                unit="individual asset"
+              />
+              )
+            </>
+          ) : null}{' '}
+          ·{' '}
+          <CountTicker
+            announce={false}
+            value={totals.quantityAssignments}
+            unit="quantity assignment"
+          />{' '}
+          (
+          <CountTicker announce={false} value={totals.units} unit="unit" />)
+          confirmed · <CountTicker announce={false} value={totals.failed} />{' '}
+          failed · <CountTicker announce={false} value={totals.skipped} />{' '}
+          skipped · <CountTicker announce={false} value={totals.pending} />{' '}
+          pending · <CountTicker announce={false} value={totals.uncertain} />{' '}
+          uncertain
         </p>
         <ol className="max-h-64 space-y-3 overflow-y-auto overscroll-contain">
           {batch?.entries.map((row) => (
@@ -1450,7 +1494,13 @@ function AssignmentFields({
             variant="outline"
             disabled={!ready || batch?.finished || busy}
             onClick={() => {
-              if (!batchRef.current || !alive() || recovered.current) return;
+              if (
+                !batchRef.current ||
+                batchRef.current.finished ||
+                !alive() ||
+                recovered.current
+              )
+                return;
               const saved = batchRef.current;
               if (
                 !saveBatch({
@@ -1469,6 +1519,8 @@ function AssignmentFields({
                 })
               )
                 return;
+              // A persisted batch closure has its own presentation identity; it is not an inventory write.
+              setFinishedFeedbackId('finish:' + String(++finishSerial.current));
               generation.current++;
               resetReceiptRead();
               dispatch({
@@ -1925,6 +1977,12 @@ function AssignmentFields({
           aria-label="Latest assignment receipt"
           className={panel + ' experience-spotlight space-y-3'}
         >
+          <ConfirmedSuccess
+            owner={successOwner}
+            eventId={state.receipt.result.eventId}
+            changed={state.receipt.result.changed}
+            restored={state.receipt.result.eventId !== confirmedAssignmentId}
+          />
           {state.receipt.result.custody ? (
             <CustodyReceiptView
               receipt={state.receipt.result.custody}

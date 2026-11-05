@@ -384,15 +384,17 @@ it.each([
   },
 );
 
-it.each([
-  [],
-  ['ITO'],
-  ['ITO', 'STAGING', 'STAGING'],
-  ['ITO', 'bad code', 'STAGING'],
-  ['ITO', 'X'.repeat(101), 'STAGING'],
-])(
+it.each(
+  [
+    [],
+    ['ITO'],
+    ['ITO', 'STAGING', 'STAGING'],
+    ['ITO', 'bad code', 'STAGING'],
+    ['ITO', 'X'.repeat(101), 'STAGING'],
+  ].map((ancestor_codes) => ({ ancestor_codes })),
+)(
   'rejects malformed canonical ancestry instead of guessing a space root: %j',
-  async (ancestor_codes) => {
+  async ({ ancestor_codes }) => {
     const { context } = client({
       inventory_locations: {
         data: { ...ref, code: 'STAGING', ancestor_codes },

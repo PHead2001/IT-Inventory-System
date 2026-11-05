@@ -369,6 +369,7 @@ async function reviewAndAcknowledge(name = 'Laptop') {
 }
 
 beforeEach(() => {
+  additionSignals.values = [];
   mocks.query = '';
   mocks.replace.mockReset();
   mocks.authChanged = null;

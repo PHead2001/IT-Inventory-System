@@ -63,7 +63,9 @@ beforeEach(() => {
     return frameId;
   });
   vi.stubGlobal('cancelAnimationFrame', (id: number) => frames.delete(id));
-  vi.spyOn(Element.prototype, 'getClientRects').mockImplementation(function () {
+  vi.spyOn(Element.prototype, 'getClientRects').mockImplementation(function (
+    this: Element,
+  ) {
     if (getComputedStyle(this).display === 'none')
       return [] as unknown as DOMRectList;
     for (let node = this.parentElement; node; node = node.parentElement)

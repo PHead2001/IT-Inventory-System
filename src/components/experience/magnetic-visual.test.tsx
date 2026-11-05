@@ -32,3 +32,24 @@ it('preserves the stationary action name, keyboard focus, disabled state and cli
   fireEvent.click(button);
   expect(click).toHaveBeenCalledOnce();
 });
+
+it('keeps tilt content semantic inside a stationary owner without adding magnetic action decoration', () => {
+  const { container } = render(
+    <div className="experience-tilt">
+      <MagneticVisual kind="tilt">
+        <dl>
+          <dt>Available units</dt>
+          <dd>12</dd>
+        </dl>
+      </MagneticVisual>
+    </div>,
+  );
+  const term = screen.getByRole('term');
+  expect(term).toHaveTextContent('Available units');
+  expect(screen.getByRole('definition')).toHaveTextContent('12');
+  expect(term.parentElement?.tagName).toBe('DL');
+  const host = container.firstElementChild as HTMLElement;
+  expect(host.querySelector(':scope > .experience-tilt-visual')).not.toBeNull();
+  expect(host.style.transform).toBe('');
+  expect(host.querySelector('.experience-magnetic-face')).toBeNull();
+});

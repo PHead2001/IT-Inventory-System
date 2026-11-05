@@ -683,10 +683,17 @@ export function registerRoomTestSupport() {
             labelCount: labels.length,
             labels: labels.slice(0, 4).map((element) => ({
               aria: element.getAttribute('aria-label')?.slice(0, 512) ?? null,
-              badge:
-                element
-                  .querySelector('[class*="countBadge"]')
-                  ?.textContent?.slice(0, 128) ?? null,
+              badge: (() => {
+                const counts = element.querySelectorAll(
+                  '[class*="countBadge"] [data-count-final]',
+                );
+                return counts.length > 0 && counts.length <= 3
+                  ? [...counts]
+                      .map((count) => count.textContent ?? '')
+                      .join(' / ')
+                      .slice(0, 128)
+                  : null;
+              })(),
               suppressed: element.dataset.labelSuppressed ?? null,
               compact: element.dataset.labelCompact ?? null,
               exposed: element.dataset.roomExposed ?? null,

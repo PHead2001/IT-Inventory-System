@@ -869,8 +869,12 @@ export function createRoomLabelRegistry(
         if (!connected) return;
         invalidateLayout(reason);
       };
-      const disconnectObstructions = connectRoomObstructions(element, () =>
-        changed('layout-external'),
+      // The runtime already owns all four viewport event subscriptions and their
+      // demand reasons; the bridge supplies only card/registry notifications.
+      const disconnectObstructions = connectRoomObstructions(
+        element,
+        () => changed('layout-external'),
+        false,
       );
       observer = new ResizeObserver((records) => {
         const labels = new Set(

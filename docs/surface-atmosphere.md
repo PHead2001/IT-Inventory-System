@@ -103,6 +103,11 @@ retirement, cached bounds and one demand frame. Coarse/touch, Reduced motion,
 withdrawal, hidden/inert/detached or disabled targets neutralize effects immediately.
 Current control-marker exclusions and primary-pointer ripple guards are preserved.
 Central magnetic/tilt intensity tokens allow calm combined-screen tuning.
-Overview hero/stat tilt remains an explicit extension gap, not W10 acceptance.
+The current Overview hero illustration and three stat tiles reuse the tilt kind
+of MagneticVisual inside stationary hosts. Stat terms and definitions retain
+their order, exact counts and separate semantic dl groups; Refresh and navigation
+links stay outside transformed layers. This source closes the present-host adapter
+gap, while future A403 replacement hosts must retain it. Visual acceptance remains
+pending.
 Fresh source review, focused regressions and populated native Full/Reduced both-
 theme desktop/390px hit-area, motion and performance proof remain pending.

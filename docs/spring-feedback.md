@@ -80,6 +80,6 @@ Focused local checks and frozen path hashes are recorded in the W11 handoff.
 They are not hosted/browser acceptance. Device placement, perceptual spring
 quality, actual assistive technology announcements, keyboard behavior in real
 browsers, native snapshot composition and measured room/GPU performance remain
-runtime criteria. The master audit's 76 dispositions are unchanged. W10 current magnetic consumers
-are integrated separately; Overview hero/stat tilt, future Overview queries and
-unrelated held modules remain explicit extension work.
+runtime criteria. The master audit's 76 dispositions are unchanged. W10 current magnetic consumers and current Overview hero/stat tilt
+are integrated separately; future Overview queries/replacement hosts and unrelated
+held modules remain explicit extension work.

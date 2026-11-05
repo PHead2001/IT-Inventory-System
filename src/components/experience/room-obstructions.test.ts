@@ -195,13 +195,141 @@ it('does not share external owners between documents', () => {
   expect(collectRoomObstructionRects(canvas)).toHaveLength(0);
 });
 
-it('stops collecting before another measurement when the current packing budget refuses work', () => {
+it('stops before any further client, style or bounding read when the current budget refuses work', () => {
   const { surface, canvas } = room();
   const first = card(surface);
   const second = card(surface);
-  const charge = vi.fn().mockReturnValueOnce(true).mockReturnValue(false);
-  expect(collectRoomObstructionRects(canvas, viewport, charge)).toEqual([viewport]);
+  let ancestors = 0;
+  for (
+    let node: HTMLElement | null = first.element;
+    node;
+    node = node.parentElement
+  )
+    ancestors++;
+  const firstCost = ancestors + 2; // client rects, every ancestor style, bounds
+  let remaining = firstCost;
+  const charge = vi.fn(() => remaining-- > 0);
+  expect(collectRoomObstructionRects(canvas, viewport, charge)).toEqual([
+    viewport,
+  ]);
   expect(first.measure).toHaveBeenCalledOnce();
+  expect(second.element.getClientRects).not.toHaveBeenCalled();
   expect(second.measure).not.toHaveBeenCalled();
-  expect(charge).toHaveBeenCalledTimes(2);
+  expect(charge).toHaveBeenCalledTimes(firstCost + 1);
+});
+
+it('performs no viewport, candidate or style layout reads when the budget is zero', () => {
+  const { surface, canvas } = room();
+  const value = card(surface);
+  const style = vi.spyOn(window, 'getComputedStyle');
+  expect(collectRoomObstructionRects(canvas, undefined, () => false)).toEqual(
+    [],
+  );
+  expect(canvas.getBoundingClientRect).not.toHaveBeenCalled();
+  expect(value.element.getClientRects).not.toHaveBeenCalled();
+  expect(value.measure).not.toHaveBeenCalled();
+  expect(style).not.toHaveBeenCalled();
+  expect(collectRoomObstructionRects(canvas, viewport, () => false)).toEqual(
+    [],
+  );
+  expect(value.element.getClientRects).not.toHaveBeenCalled();
+  expect(style).not.toHaveBeenCalled();
+});
+
+it('charges zero-rectangle hidden candidates and stops before reading the next one', () => {
+  const { surface, canvas } = room();
+  const first = card(surface);
+  const second = card(surface);
+  vi.mocked(first.element.getClientRects).mockReturnValue(
+    [] as unknown as DOMRectList,
+  );
+  const style = vi.spyOn(window, 'getComputedStyle');
+  const charge = vi.fn().mockReturnValueOnce(true).mockReturnValue(false);
+  expect(collectRoomObstructionRects(canvas, viewport, charge)).toEqual([]);
+  expect(first.element.getClientRects).toHaveBeenCalledOnce();
+  expect(second.element.getClientRects).not.toHaveBeenCalled();
+  expect(first.measure).not.toHaveBeenCalled();
+  expect(second.measure).not.toHaveBeenCalled();
+  expect(style).not.toHaveBeenCalled();
+});
+
+it('charges a style-hidden candidate before rejecting it and does not read another candidate after refusal', () => {
+  const { surface, canvas } = room();
+  const hidden = card(surface);
+  const next = card(surface);
+  hidden.element.style.visibility = 'hidden';
+  const style = vi.spyOn(window, 'getComputedStyle');
+  let remaining = 2; // client rects and the hidden leaf style
+  expect(
+    collectRoomObstructionRects(canvas, viewport, () => remaining-- > 0),
+  ).toEqual([]);
+  expect(hidden.element.getClientRects).toHaveBeenCalledOnce();
+  expect(style.mock.calls.map(([element]) => element)).toEqual([
+    hidden.element,
+  ]);
+  expect(hidden.measure).not.toHaveBeenCalled();
+  expect(next.element.getClientRects).not.toHaveBeenCalled();
+  expect(next.measure).not.toHaveBeenCalled();
+});
+
+it('charges each ancestor of a deeply nested candidate and ends collection immediately on refusal', () => {
+  const { surface, canvas } = room();
+  const outer = document.createElement('div');
+  const inner = document.createElement('div');
+  surface.append(outer);
+  outer.append(inner);
+  const deep = card(inner);
+  const next = card(surface);
+  const style = vi.spyOn(window, 'getComputedStyle');
+  let remaining = 3; // client rects, leaf style, inner style
+  const charge = vi.fn(() => remaining-- > 0);
+  expect(collectRoomObstructionRects(canvas, viewport, charge)).toEqual([]);
+  expect(deep.element.getClientRects).toHaveBeenCalledOnce();
+  expect(style.mock.calls.map(([element]) => element)).toEqual([
+    deep.element,
+    inner,
+  ]);
+  expect(deep.measure).not.toHaveBeenCalled();
+  expect(next.element.getClientRects).not.toHaveBeenCalled();
+  expect(next.measure).not.toHaveBeenCalled();
+});
+
+it('opts out of all viewport listeners while retaining card notifications and silencing cleanup', () => {
+  const visual = new EventTarget();
+  vi.stubGlobal('visualViewport', visual);
+  const { surface, canvas } = room();
+  const changed = vi.fn();
+  const disconnect = connectRoomObstructions(canvas, changed, false);
+  cleanups.push(disconnect);
+  const viewportEvents = () => {
+    window.dispatchEvent(new Event('resize'));
+    surface.dispatchEvent(new Event('scroll', { bubbles: false }));
+    visual.dispatchEvent(new Event('resize'));
+    visual.dispatchEvent(new Event('scroll'));
+  };
+  viewportEvents();
+  expect(changed).not.toHaveBeenCalled();
+  const session = owner();
+  const handle = session.register(card(document.body).element);
+  expect(changed).toHaveBeenCalledTimes(1);
+  handle.change();
+  expect(changed).toHaveBeenCalledTimes(2);
+  observers[0].callback([], {} as ResizeObserver);
+  expect(changed).toHaveBeenCalledTimes(3);
+  handle.dispose();
+  expect(changed).toHaveBeenCalledTimes(4);
+  session.register(card(document.body).element);
+  expect(changed).toHaveBeenCalledTimes(5);
+  session.retire();
+  expect(changed).toHaveBeenCalledTimes(6);
+  disconnect();
+  changed.mockClear();
+  const replacement = owner();
+  const next = replacement.register(card(document.body).element);
+  next.change();
+  observers[1].callback([], {} as ResizeObserver);
+  next.dispose();
+  replacement.retire();
+  viewportEvents();
+  expect(changed).not.toHaveBeenCalled();
 });

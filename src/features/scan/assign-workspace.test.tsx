@@ -14,6 +14,7 @@ import {
   invalidateAssignmentPrivacy,
   readBatch,
   batchKey,
+  BATCH_LIMIT,
   adoptAssignmentScope,
 } from './assign-batch';
 import {
@@ -28,6 +29,7 @@ import { ProtectedPrivacyContent } from '@/components/auth/privacy-content';
 import { useEffect } from 'react';
 import { holdTransitionCapture } from '../../../tests/helpers/transition-capture';
 const mocks = vi.hoisted(() => ({
+  success: [] as { eventId?: string; changed?: boolean; restored?: boolean }[],
   feedback: vi.fn(),
   find: vi.fn(),
   inspect: vi.fn(),
@@ -42,6 +44,25 @@ const mocks = vi.hoisted(() => ({
   privacyRead: vi.fn(),
   identityRead: vi.fn(),
 }));
+vi.mock('@/components/experience/confirmed-success', async (importOriginal) => {
+  const actual =
+    await importOriginal<
+      typeof import('@/components/experience/confirmed-success')
+    >();
+  return {
+    ...actual,
+    ConfirmedSuccess: (
+      props: React.ComponentProps<typeof actual.ConfirmedSuccess>,
+    ) => {
+      mocks.success.push({
+        eventId: props.eventId,
+        changed: props.changed,
+        restored: props.restored,
+      });
+      return <actual.ConfirmedSuccess {...props} />;
+    },
+  };
+});
 vi.mock('@/components/experience/scan-feedback', () => ({
   useScanFeedback: () =>
     Object.assign(mocks.feedback, { prime: vi.fn(), stop: vi.fn() }),
@@ -112,6 +133,14 @@ vi.mock('./assign-camera', async (importOriginal) => {
     },
   };
 });
+// Decorative ticker endpoints are hidden from assistive technology; inspect its final text only.
+function accessibleText(node: HTMLElement) {
+  const copy = node.cloneNode(true) as HTMLElement;
+  copy
+    .querySelectorAll('[aria-hidden="true"]')
+    .forEach((hidden) => hidden.remove());
+  return copy.textContent?.replace(/\s+/g, ' ').trim() ?? '';
+}
 const id = (n: number) =>
   `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
 // jsdom does not expose PointerEvent; retain pointer identity on mouse-backed events.
@@ -183,6 +212,7 @@ beforeEach(() => {
     backend: props.backend,
   });
   vi.resetAllMocks();
+  mocks.success = [];
   mocks.realCamera = false;
   mocks.guardFailure = false;
   mocks.privacyRead.mockResolvedValue({ status: 'absent' });
@@ -241,7 +271,16 @@ it('emits assignment feedback only for the current changed commit and stays quie
   );
   fireEvent.click(screen.getByRole('button', { name: 'Confirm assign' }));
   expect(mocks.feedback).not.toHaveBeenCalled();
+  expect(document.querySelector('[data-confirmed-success]')).toBeNull();
   await act(async () => finish(await committed));
+  expect(
+    mocks.success.filter((signal) => signal.eventId === id(8)).at(-1),
+  ).toMatchObject({ changed: true, restored: false });
+  expect(
+    screen
+      .getByRole('region', { name: 'Latest assignment receipt' })
+      .querySelectorAll('[data-confirmed-success]'),
+  ).toHaveLength(1);
   expect(mocks.feedback).toHaveBeenCalledExactlyOnceWith(
     'assignment',
     `assignment:${id(8)}`,
@@ -251,6 +290,9 @@ it('emits assignment feedback only for the current changed commit and stays quie
   render(<AssignmentWorkspace {...props} />);
   await screen.findByRole('region', { name: 'Latest assignment receipt' });
   expect(mocks.feedback).not.toHaveBeenCalled();
+  expect(
+    mocks.success.filter((signal) => signal.eventId === id(8)).at(-1)?.restored,
+  ).toBe(true);
 });
 it.each(['no-op', 'retry'])(
   'does not emit a new assignment cue for a %s result',
@@ -271,6 +313,13 @@ it.each(['no-op', 'retry'])(
     expect(mocks.feedback).not.toHaveBeenCalledWith(
       'assignment',
       expect.anything(),
+    );
+    expect(
+      mocks.success.filter((signal) => signal.eventId === id(8)).at(-1),
+    ).toMatchObject(
+      outcome === 'no-op'
+        ? { changed: false, restored: true }
+        : { changed: true, restored: true },
     );
   },
 );
@@ -311,7 +360,7 @@ it('suppresses an old lookup cue after the assignment scope retires', async () =
     target: { value: 'pending' },
   });
   fireEvent.submit(screen.getByRole('form', { name: 'Inspect equipment' }));
-  act(() => invalidateAssignmentPrivacy());
+  act(() => invalidateAssignmentPrivacy(false));
   await act(async () => finish({ ok: true, status: 'unknown', matches: [] }));
   expect(mocks.feedback).not.toHaveBeenCalled();
 });
@@ -1806,10 +1855,8 @@ it('saves immutable operation context, separates totals, and Finish/End never su
   ).toHaveAttribute('href', `/history/events/quantity/${id(8)}`);
   fireEvent.click(screen.getByRole('button', { name: 'Finish batch' }));
   expect(
-    screen.getByRole('region', { name: 'Batch summary' }),
-  ).toHaveTextContent(
-    '0 asset assignments · 1 quantity assignment (1 unit) confirmed',
-  );
+    accessibleText(screen.getByRole('region', { name: 'Batch summary' })),
+  ).toContain('0 asset assignments · 1 quantity assignment (1 unit) confirmed');
   expect(mocks.submit).toHaveBeenCalledTimes(1);
   view.unmount();
   render(<AssignmentWorkspace {...props} />);
@@ -1940,6 +1987,7 @@ it('retains original uncertain command if terminal ledger fails, then reconciles
   await screen.findByRole('button', { name: 'Retry same assignment' });
   const command = readAssignmentRecovery(scope).value!.command;
   expect(readBatch(scope).value?.entries[0].status).toBe('uncertain');
+  expect(document.querySelector('[data-confirmed-success]')).toBeNull();
   expect(screen.queryByText(/Nothing was submitted/)).not.toBeInTheDocument();
   expect(screen.getByRole('button', { name: 'Finish batch' })).toBeDisabled();
   for (const alert of screen.getAllByRole('alert'))
@@ -1954,6 +2002,9 @@ it('retains original uncertain command if terminal ledger fails, then reconciles
     readBatch(scope).value?.entries.filter((row) => row.status === 'success'),
   ).toHaveLength(1);
   expect(readAssignmentRecovery(scope).value).toBeNull();
+  expect(
+    mocks.success.filter((signal) => signal.eventId === id(8)).at(-1)?.restored,
+  ).toBe(true);
 });
 it('describes terminal save cleanup in plain language while retaining the original assignment until reload', async () => {
   const view = render(<AssignmentWorkspace {...props} />);
@@ -3055,8 +3106,8 @@ it('counts one replayed asset event once and two deliberate assignments as two e
   fireEvent.click(screen.getByRole('button', { name: 'Confirm assign' }));
   await waitFor(() =>
     expect(
-      screen.getByRole('region', { name: 'Batch checklist' }),
-    ).toHaveTextContent('2 asset assignments (1 individual asset)'),
+      accessibleText(screen.getByRole('region', { name: 'Batch checklist' })),
+    ).toContain('2 asset assignments (1 individual asset)'),
   );
   expect(
     readBatch(scope).value?.entries.filter((row) => row.status === 'success'),
@@ -3201,12 +3252,15 @@ it('defers assignment bootstrap and scope rebinding while privacy verification i
   const { PrivacyReadinessContext } =
     await import('@/components/auth/privacy-readiness');
   const get = vi.spyOn(Storage.prototype, 'getItem');
+  // The public personal motion preference carries no private assignment state.
+  const privateReads = () =>
+    get.mock.calls.filter(([key]) => key !== 'it-inventory-reduce-motion');
   const view = render(
     <PrivacyReadinessContext value={{ ready: false, generation: 'first' }}>
       <AssignmentWorkspace {...props} />
     </PrivacyReadinessContext>,
   );
-  expect(get).not.toHaveBeenCalled();
+  expect(privateReads()).toEqual([]);
   expect(
     screen.queryByRole('form', { name: 'Inspect equipment' }),
   ).not.toBeInTheDocument();
@@ -3225,7 +3279,7 @@ it('defers assignment bootstrap and scope rebinding while privacy verification i
       <AssignmentWorkspace {...props} />
     </PrivacyReadinessContext>,
   );
-  expect(get).not.toHaveBeenCalled();
+  expect(privateReads()).toEqual([]);
   view.rerender(
     <PrivacyReadinessContext value={{ ready: true, generation: 'first' }}>
       <AssignmentWorkspace {...props} />
@@ -3234,13 +3288,13 @@ it('defers assignment bootstrap and scope rebinding while privacy verification i
   expect(screen.getByLabelText('Scan, paste, or search inventory')).toHaveValue(
     'typed lookup',
   );
-  expect(get).not.toHaveBeenCalled();
+  expect(privateReads()).toEqual([]);
   view.rerender(
     <PrivacyReadinessContext value={{ ready: false, generation: 'first' }}>
       <AssignmentWorkspace {...props} actorId={id(98)} />
     </PrivacyReadinessContext>,
   );
-  expect(get).not.toHaveBeenCalled();
+  expect(privateReads()).toEqual([]);
   expect(
     screen.queryByRole('form', { name: 'Inspect equipment' }),
   ).not.toBeInTheDocument();
@@ -3470,3 +3524,186 @@ it('opens lazy current peeks from the inspection card and committed receipt with
   expect(current).toHaveAttribute('href', candidate.path);
   expect(mocks.submit).toHaveBeenCalledOnce();
 });
+
+it('ticks exact batch totals through inspection, unknown pending outcome and acknowledged completion without duplicate announcements', async () => {
+  let finish!: (value: unknown) => void;
+  const committed = await mocks.submit.getMockImplementation()!();
+  mocks.submit.mockImplementationOnce(
+    () =>
+      new Promise((resolve) => {
+        finish = resolve;
+      }),
+  );
+  render(<AssignmentWorkspace {...props} />);
+  const checklist = screen.getByRole('region', { name: 'Batch checklist' });
+  const values = () =>
+    [
+      ...within(checklist)
+        .getByRole('status')
+        .querySelectorAll('[data-count-final]'),
+    ].map((node) => node.textContent);
+  expect(values()).toEqual([
+    '0 asset assignments',
+    '0 quantity assignments',
+    '0 units',
+    '0',
+    '0',
+    '0',
+    '0',
+  ]);
+  await inspect();
+  expect(values().at(-2)).toBe('1');
+  fireEvent.click(screen.getByRole('button', { name: 'Confirm assign' }));
+  expect(values().at(-2)).toBe('0');
+  expect(values().at(-1)).toBe('1');
+  expect(document.querySelector('[data-confirmed-success]')).toBeNull();
+  await act(async () => finish(committed));
+  expect(values()).toEqual([
+    '0 asset assignments',
+    '1 quantity assignment',
+    '1 unit',
+    '0',
+    '0',
+    '0',
+    '0',
+  ]);
+  expect(accessibleText(within(checklist).getByRole('status'))).toBe(
+    '0 asset assignments · 1 quantity assignment (1 unit) confirmed · 0 failed · 0 skipped · 0 pending · 0 uncertain',
+  );
+  expect(
+    within(checklist).getByRole('status').querySelector('[aria-live]'),
+  ).toBeNull();
+  for (const visual of checklist.querySelectorAll(
+    '[data-count-visual], [data-count-footprint]',
+  ))
+    expect(visual).toHaveAttribute('aria-hidden', 'true');
+});
+
+it('preserves the maximum valid batch unit total exactly when restoring a closed batch', () => {
+  const context = {
+    siteId: site.id,
+    siteName: site.name,
+    sourceId: '',
+    reference: '',
+  };
+  const entries = Array.from({ length: BATCH_LIMIT }, (_, n) => ({
+    id: id(1000 + n),
+    status: 'success',
+    name: 'Adapters',
+    kind: 'quantity',
+    entityId: candidate.id,
+    identifier: candidate.identifier,
+    units: 2147483647,
+    source: 'Closet / Red',
+    context,
+    requestId: id(2000 + n),
+    eventId: id(3000 + n),
+    message: '',
+  }));
+  sessionStorage.setItem(
+    batchKey(scope),
+    JSON.stringify({
+      version: 1,
+      scope,
+      context,
+      entries,
+      historical: null,
+      finished: true,
+    }),
+  );
+  render(<AssignmentWorkspace {...props} />);
+  const summary = screen.getByRole('region', { name: 'Batch summary' });
+  const status = within(summary).getByRole('status');
+  expect(
+    [...status.querySelectorAll('[data-count-final]')].map(
+      (node) => node.textContent,
+    ),
+  ).toEqual([
+    '0 asset assignments',
+    `${BATCH_LIMIT} quantity assignments`,
+    `${BigInt(BATCH_LIMIT) * 2147483647n} units`,
+    '0',
+    '0',
+    '0',
+    '0',
+  ]);
+  expect(mocks.submit).not.toHaveBeenCalled();
+  expect(
+    mocks.success
+      .filter((signal) => signal.eventId === 'finished:restored')
+      .at(-1)?.restored,
+  ).toBe(true);
+});
+
+it('shows Finish feedback only after batch persistence and never replays a repeated or restored closure', async () => {
+  let view = render(<AssignmentWorkspace {...props} />);
+  await inspect();
+  const nativeWrite = Storage.prototype.setItem;
+  const blocked = vi
+    .spyOn(Storage.prototype, 'setItem')
+    .mockImplementation(function (this: Storage, key, value) {
+      if (key === batchKey(scope) && JSON.parse(value).finished)
+        throw new Error('quota');
+      nativeWrite.call(this, key, value);
+    });
+  fireEvent.click(screen.getByRole('button', { name: 'Finish batch' }));
+  expect(screen.queryByRole('region', { name: 'Batch summary' })).toBeNull();
+  expect(document.querySelector('[data-confirmed-success]')).toBeNull();
+  expect(readBatch(scope).value?.finished).toBe(false);
+  blocked.mockRestore();
+  view.unmount();
+  view = render(<AssignmentWorkspace {...props} />);
+  await waitFor(() =>
+    expect(screen.getByRole('button', { name: 'Finish batch' })).toBeEnabled(),
+  );
+  fireEvent.click(screen.getByRole('button', { name: 'Finish batch' }));
+  const summary = screen.getByRole('region', { name: 'Batch summary' });
+  expect(summary.querySelectorAll('[data-confirmed-success]')).toHaveLength(1);
+  expect(
+    mocks.success
+      .filter((signal) => signal.eventId?.startsWith('finish:'))
+      .at(-1)?.restored,
+  ).toBe(false);
+  const saved = readBatch(scope).raw;
+  fireEvent.click(screen.getByRole('button', { name: 'Finish batch' }));
+  expect(readBatch(scope).raw).toBe(saved);
+  expect(summary.querySelectorAll('[data-confirmed-success]')).toHaveLength(1);
+  view.unmount();
+  render(<AssignmentWorkspace {...props} />);
+  expect(
+    mocks.success
+      .filter((signal) => signal.eventId === 'finished:restored')
+      .at(-1)?.restored,
+  ).toBe(true);
+  expect(mocks.submit).not.toHaveBeenCalled();
+  expect(mocks.feedback).not.toHaveBeenCalledWith(
+    'assignment',
+    expect.anything(),
+  );
+});
+
+it.each(['missing event', 'different entity'] as const)(
+  'keeps an ambiguous %s acknowledgement from presenting assignment success',
+  async (outcome) => {
+    mocks.submit.mockResolvedValue({
+      ok: true,
+      changed: true,
+      entityId: outcome === 'different entity' ? id(99) : candidate.id,
+      version: '8',
+      eventId: outcome === 'missing event' ? undefined : id(8),
+    });
+    render(<AssignmentWorkspace {...props} />);
+    await inspect();
+    fireEvent.click(screen.getByRole('button', { name: 'Confirm assign' }));
+    await screen.findByRole('button', { name: 'Retry same assignment' });
+    expect(
+      screen.queryByRole('region', { name: 'Latest assignment receipt' }),
+    ).toBeNull();
+    expect(document.querySelector('[data-confirmed-success]')).toBeNull();
+    expect(mocks.feedback).not.toHaveBeenCalledWith(
+      'assignment',
+      expect.anything(),
+    );
+    expect(readBatch(scope).value?.entries[0].status).toBe('uncertain');
+  },
+);

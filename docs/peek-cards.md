@@ -35,9 +35,13 @@ the exact business result/rejection are preserved.
 
 ## Integration and verification limits
 
-The newer Overview and grouped custom-view modules from the donor are absent in
-this checkout. Their W19 link integration and five donor consumer cases remain
-pending with those host features; no replacement host is introduced here.
+The current Overview's attention-item title and View item and locations links
+use the existing quantity item UUID. Aggregate inventory filters and the CSV
+download have no single record target and retain ordinary navigation. Both
+current record links have consumer regressions. The newer Overview and grouped
+custom-view modules from the donor are absent in this checkout. Their additional
+W19 link integration and five donor consumer cases remain pending with those host
+features; no replacement host is introduced here.
 Focused mocked tests cover the present consumers and private lifecycle. They do
 not certify live RLS, concurrent database reads, Storage authorization, native
 keyboard/assistive technology, both-theme desktop/390 px appearance or browser

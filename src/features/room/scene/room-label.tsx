@@ -7,6 +7,7 @@ import {
   type LocationOccupancy,
 } from '../occupancy-contract';
 import { useRoomLabelLayout } from './label-layout-runtime';
+import { RoomOccupancyCounts } from './room-occupancy-counts';
 import type { LabelArea } from './label-layout';
 import styles from '../room-visual.module.css';
 
@@ -96,7 +97,15 @@ export function RoomLabel({
   const content = (
     <span data-room-label-full="true" className={styles.labelFull}>
       {label}
-      {counts !== null && <span className={styles.countBadge}>{counts}</span>}
+      {counts !== null && occupancy && (
+        <span className={styles.countBadge}>
+          <RoomOccupancyCounts
+            key={code ?? id}
+            occupancy={occupancy}
+            includeZero={selected}
+          />
+        </span>
+      )}
     </span>
   );
   return (
