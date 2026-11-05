@@ -1,4 +1,5 @@
 'use client';
+import { recordRoomDemand } from './room-demand-diagnostics';
 import { useSceneCurrent } from './scene-current';
 import { useFrame, useThree } from '@react-three/fiber';
 import { useEffect, useMemo, useRef } from 'react';
@@ -44,6 +45,7 @@ export function SelectionMaterial({
       finishPulse.current =
         effects?.beginActivity(`pulse:${material.current.uuid}`) ?? null;
     if (material.current) material.current.emissiveIntensity = baseEmissive;
+    recordRoomDemand(invalidate, 'selection-effect');
     invalidate();
     return () => {
       finishPulse.current?.();
@@ -72,7 +74,10 @@ export function SelectionMaterial({
       pulse.current = null;
       finishPulse.current?.();
       finishPulse.current = null;
-    } else invalidate();
+    } else {
+      recordRoomDemand(invalidate, 'selection-frame');
+      invalidate();
+    }
   });
   return (
     <meshStandardMaterial

@@ -822,7 +822,10 @@ describe('unified room label registry', () => {
     });
     const visual = new EventTarget();
     vi.stubGlobal('visualViewport', visual);
-    const registry = createRoomLabelRegistry(vi.fn());
+    // This exposure/invalidation contract is independent of wall-clock scheduling.
+    const registry = createRoomLabelRegistry(vi.fn(), undefined, undefined, {
+      clock: () => 0,
+    });
     const cleanup = registry.connect(canvas, invalidate);
     registry.register('location', item.element, item.leader, {
       priority: 1,

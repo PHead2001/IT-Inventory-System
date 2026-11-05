@@ -1,4 +1,5 @@
 'use client';
+import { recordRoomDemand } from './room-demand-diagnostics';
 
 import {
   createContext,
@@ -122,7 +123,10 @@ export function ScenePaletteProvider({ children }: { children: ReactNode }) {
   const effects = useOptionalSceneEffects();
   const isCurrent = useSceneCurrent(effects);
   useEffect(() => {
-    if (isCurrent()) invalidate();
+    if (isCurrent()) {
+      recordRoomDemand(invalidate, 'palette');
+      invalidate();
+    }
   }, [state.revision, invalidate, isCurrent]);
   return <PaletteContext value={state}>{children}</PaletteContext>;
 }

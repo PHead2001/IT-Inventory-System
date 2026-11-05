@@ -25,6 +25,11 @@ import {
   roomClickOutsideRest,
 } from './room-click-witness';
 import {
+  finishNativeRoomClick,
+  observeNativeRoomClick,
+  originalClickAgreement,
+} from './room-native-click-observation';
+import {
   observeRoomScene,
   captureRoomWitness,
   captureRoomReveal,
@@ -1321,18 +1326,60 @@ test('375px populated room shows every occupied target with passive badges and s
     'resized room exposes an independently witnessed new pointer selection',
   ).toBeDefined();
   const [resizedCode, resizedPoint] = nextSelection!;
-  await page.mouse.move(resizedPoint.x, resizedPoint.y);
-  await expect(canvas).toHaveAttribute('data-hover-visible-code', resizedCode);
-  await page.mouse.click(resizedPoint.x, resizedPoint.y);
-  await expect(viewer).toHaveAttribute('data-selected-code', resizedCode);
-  await expect(page).toHaveURL(
-    new RegExp('location=' + resizedCode + '(?:&|$)'),
+  const resizedSelection = await captureRoomSelectionWitness(page);
+  const originalAgreement = originalClickAgreement(
+    resizedScene,
+    resizedSelection,
+    resizedCode,
+    resizedPoint,
   );
-  await expect(
-    page
-      .getByRole('region', { name: 'Location inventory', exact: true })
-      .getByText(resizedCode, { exact: true }),
-  ).toBeVisible();
+  const resizedClicks = await uncoveredRoomClickWitnesses(
+    page,
+    resizedScene,
+    resizedSelection,
+    // Preserve the original logical target. A different code is not a retry.
+    new Map([[resizedCode, resizedWitnesses.get(resizedCode)!]]),
+  );
+  const resizedClick = resizedClicks.get(resizedCode)?.[0];
+  await testInfo.attach('390-resized-original-native-agreement', {
+    body: JSON.stringify({
+      originalAgreement,
+      nativeClick: resizedClick ?? null,
+    }),
+    contentType: 'application/json',
+  });
+  expect(
+    resizedClick,
+    'the original resized target has a visible native click with both ray owners',
+  ).toBeDefined();
+  await page.mouse.move(resizedClick!.client.x, resizedClick!.client.y);
+  await expect(canvas).toHaveAttribute('data-hover-visible-code', resizedCode);
+  const resizedObservation = await observeNativeRoomClick(page);
+  try {
+    // Exactly one native click. The panel remains open until application input
+    // handling closes it; no diagnostic moves the camera or changes selection.
+    await page.mouse.click(resizedClick!.client.x, resizedClick!.client.y);
+    await expect(viewer).toHaveAttribute('data-selected-code', resizedCode);
+    await expect(page).toHaveURL(
+      new RegExp('location=' + resizedCode + '(?:&|$)'),
+    );
+    await expect(
+      page
+        .getByRole('region', { name: 'Location inventory', exact: true })
+        .getByText(resizedCode, { exact: true }),
+    ).toBeVisible();
+  } finally {
+    const phases = await finishNativeRoomClick(
+      resizedObservation,
+      resizedClick!,
+    );
+    const diagnostic = JSON.stringify({ originalAgreement, ...phases });
+    console.log('ROOM_RESIZED_NATIVE_CLICK', diagnostic);
+    await testInfo.attach('390-resized-native-click-phases', {
+      body: diagnostic,
+      contentType: 'application/json',
+    });
+  }
   await page.mouse.move(15, 15);
   await settledLabels(page);
   // A passive badge is also a valid start for a native canvas pan; it cannot

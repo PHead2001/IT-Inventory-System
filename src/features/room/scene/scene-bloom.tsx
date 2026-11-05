@@ -1,5 +1,6 @@
 /* eslint-disable react-hooks/immutability -- Owned imperative composer and renderer telemetry boundary. */
 'use client';
+import { recordRoomDemand } from './room-demand-diagnostics';
 import { useFrame, useThree } from '@react-three/fiber';
 import { EffectComposer, SelectiveBloom } from '@react-three/postprocessing';
 import {
@@ -77,10 +78,12 @@ export default function SceneBloom({
     try {
       owned = createBloomOverlay(isCurrent);
       overlay.current = owned;
+      recordRoomDemand(invalidate, 'bloom-overlay');
       invalidate();
     } catch {
       if (isCurrent()) {
         effects.failBloom('overlay-allocation');
+        recordRoomDemand(invalidate, 'bloom-overlay');
         invalidate();
       }
     }
@@ -121,6 +124,7 @@ export default function SceneBloom({
       const owned = { frames, composer, release };
       attachment.current = owned;
       effects.setBloomReady(true);
+      recordRoomDemand(invalidate, 'bloom-attach');
       invalidate();
       return () => {
         release();
@@ -141,7 +145,10 @@ export default function SceneBloom({
     [frames],
   );
   useEffect(() => {
-    if (isCurrent()) invalidate();
+    if (isCurrent()) {
+      recordRoomDemand(invalidate, 'bloom-input');
+      invalidate();
+    }
   }, [selection, lights, paletteRevision, invalidate, isCurrent]);
   const light = palette.background.getHSL({ h: 0, s: 0, l: 0 }).l > 0.5;
   const intensity =
