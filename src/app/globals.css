@@ -834,7 +834,7 @@ a {
   gap: 10px;
 }
 .experience-filter-toggle {
-  min-height: 36px;
+  min-height: 44px;
   border: 0;
   padding: 4px 2px;
   color: var(--workspace-filter-toggle-text);
@@ -849,7 +849,7 @@ a {
 .experience-filter-chip {
   display: inline-flex;
   align-items: center;
-  min-height: 32px;
+  min-height: 44px;
   gap: 8px;
   border: 1px solid var(--workspace-filter-chip-border);
   border-radius: 999px;
@@ -900,7 +900,7 @@ a {
 }
 .experience-export-menu a {
   display: block;
-  min-height: 40px;
+  min-height: 44px;
   border-radius: 6px;
   padding: 10px;
   color: var(--workspace-export-link-text);
