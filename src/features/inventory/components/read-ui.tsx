@@ -151,7 +151,7 @@ export function InventoryRows({
               (row.location?.id ?? '') +
               (row.site?.id ?? '')
             }
-            className={styles.row}
+            className={`experience-spotlight ${styles.row}`}
           >
             <div
               className={`${styles.rowGrid}${hideCurrentLocation ? ' ' + styles.rowGridWithoutLocation : ''}`}

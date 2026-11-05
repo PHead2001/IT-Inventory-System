@@ -1,0 +1,133 @@
+:root {
+  --spotlight-intensity: 0.12;
+  --aurora-intensity: 0.5;
+  /* Texture alpha .24 × .29 = .0696 effective screen opacity. */
+  --grain-intensity: 0.29;
+  --blueprint-intensity: 0.65;
+  --ripple-intensity: 0.18;
+}
+/* Light overrides are owned once by the later theme-palette.css import. */
+.experience-spotlight {
+  position: relative;
+  isolation: isolate;
+}
+.experience-spotlight::before,
+.experience-spotlight::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  opacity: 0;
+  background: radial-gradient(
+    280px circle at var(--x, 50%) var(--y, 50%),
+    var(--accent),
+    transparent 75%
+  );
+  transition: opacity var(--motion-feedback) var(--ease-workspace);
+}
+.experience-spotlight::after {
+  padding: 1px;
+  mask:
+    linear-gradient(currentColor 0 0) content-box,
+    linear-gradient(currentColor 0 0);
+  mask-composite: exclude;
+}
+@media (hover: hover) and (pointer: fine) {
+  html[data-motion='full']
+    .experience-spotlight[data-spotlight-active='true']::before {
+    opacity: var(--spotlight-intensity);
+  }
+  html[data-motion='full']
+    .experience-spotlight[data-spotlight-active='true']::after {
+    opacity: calc(var(--spotlight-intensity) * 3);
+  }
+}
+.experience-app::before {
+  display: none;
+}
+.experience-app.experience-app::after,
+.experience-auth.experience-auth::after {
+  opacity: var(--grain-intensity);
+}
+.experience-ambient.experience-ambient-shell {
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  border-radius: 0;
+}
+.experience-ambient.experience-ambient-shell::before,
+.experience-ambient.experience-ambient-shell::after {
+  opacity: var(--aurora-intensity);
+  width: max(44%, 480px);
+}
+.experience-blueprint {
+  position: absolute;
+  inset: -48px;
+  opacity: var(--blueprint-intensity);
+  background-image:
+    linear-gradient(
+      var(--shell-grid-color, var(--workspace-blueprint-grid)) 1px,
+      transparent 1px
+    ),
+    linear-gradient(
+      90deg,
+      var(--shell-grid-color, var(--workspace-blueprint-grid)) 1px,
+      transparent 1px
+    );
+  background-size: 48px 48px;
+  mask-image: linear-gradient(to bottom, currentColor, transparent 80%);
+}
+.experience-app[data-room-atmosphere='true'] {
+  --shell-grid-color: color-mix(in srgb, var(--room-grid) 24%, transparent);
+}
+html[data-motion='full'] .experience-blueprint {
+  animation: experience-blueprint-pan 60s linear infinite;
+  animation-play-state: paused;
+}
+html[data-motion='full']
+  .experience-ambient[data-active='true']
+  .experience-blueprint {
+  animation-play-state: running;
+}
+html[data-motion='reduced'] .experience-blueprint {
+  animation: none;
+  transform: none;
+}
+@keyframes experience-blueprint-pan {
+  to {
+    transform: translate(48px, 48px);
+  }
+}
+@media (hover: none), (pointer: coarse) {
+  .experience-ambient.experience-ambient-shell::before,
+  .experience-ambient.experience-ambient-shell::after,
+  html[data-motion='full'] .experience-ambient .experience-blueprint {
+    animation: none;
+  }
+}
+.experience-background-ripple {
+  position: fixed;
+  width: 160px;
+  height: 160px;
+  border: 1px solid
+    color-mix(
+      in srgb,
+      var(--accent) calc(var(--ripple-intensity) * 100%),
+      transparent
+    );
+  border-radius: 50%;
+  pointer-events: none;
+  z-index: -1;
+  opacity: 0;
+}
+@media print {
+  .experience-app::after,
+  .experience-auth::after,
+  .experience-ambient,
+  .experience-background-ripple,
+  .experience-spotlight::before,
+  .experience-spotlight::after {
+    display: none;
+  }
+}

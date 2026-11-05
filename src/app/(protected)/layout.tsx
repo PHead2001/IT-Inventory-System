@@ -27,6 +27,7 @@ import {
   QuickThemeToggle,
 } from '@/components/experience/theme-preference';
 import { themeScope } from '@/components/experience/theme-scope';
+import { ShellAtmosphere } from '@/components/experience/shell-atmosphere';
 
 export const dynamic = 'force-dynamic';
 
@@ -76,7 +77,7 @@ export default async function ApplicationLayout({
                         )}
                       />
                     </ProtectedPrivacyContent>
-                    <div className="experience-app">
+                    <ShellAtmosphere>
                       <a href="#main-content" className="experience-skip-link">
                         Skip to content
                       </a>
@@ -137,7 +138,7 @@ export default async function ApplicationLayout({
                             process.env.SPEED_INSIGHTS_ENABLED,
                         }) && <PrivateSpeedInsights />}
                       </ProtectedPrivacyContent>
-                    </div>
+                    </ShellAtmosphere>
                   </CommandProvider>
                 </RouteMotionProvider>
               </MotionPreference>

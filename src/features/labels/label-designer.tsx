@@ -1516,7 +1516,10 @@ function LabelDesignerWorkspace({
                 tabIndex={0}
               >
                 {search?.rows.map((record) => (
-                  <div key={record.kind + record.key} className={styles.result}>
+                  <div
+                    key={record.kind + record.key}
+                    className={`experience-spotlight ${styles.result}`}
+                  >
                     <div className={styles.resultMain}>
                       <label
                         className={`${styles.fieldLabel} ${styles.selectionLabel}`}

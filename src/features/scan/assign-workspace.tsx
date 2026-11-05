@@ -1861,7 +1861,7 @@ function AssignmentFields({
       {state.receipt && (
         <section
           aria-label="Latest assignment receipt"
-          className={panel + ' space-y-3'}
+          className={panel + ' experience-spotlight space-y-3'}
         >
           {state.receipt.result.custody ? (
             <CustodyReceiptView

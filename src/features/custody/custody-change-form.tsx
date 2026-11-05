@@ -553,7 +553,7 @@ function CustodyFields(latest: Props & { startAnother: () => void }) {
     return (
       <InventoryCaptureRegion region="custody-completion">
         <section
-          className={panel + ' max-w-4xl space-y-4'}
+          className={panel + ' experience-spotlight max-w-4xl space-y-4'}
           aria-label="Custody completion"
         >
           {state.custody ? (
