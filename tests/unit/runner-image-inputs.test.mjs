@@ -3,8 +3,10 @@ import {
   mkdirSync,
   readFileSync,
   writeFileSync,
-  rmSync,
+  chmodSync,
+  existsSync,
 } from 'node:fs';
+import { rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
@@ -38,10 +40,10 @@ function fixture() {
   return root;
 }
 
-function removeFixture(root) {
-  // Windows may briefly retain fixture handles after synchronous file operations.
-  // Retry only these owned test trees; persistent cleanup failures still throw.
-  rmSync(root, {
+async function removeFixture(root) {
+  // Use the asynchronous rimraf path: Node 24 native rmSync does not reliably
+  // back off on Windows EPERM. Await cleanup and propagate persistent failures.
+  await rm(root, {
     recursive: true,
     force: true,
     maxRetries: 3,
@@ -49,7 +51,14 @@ function removeFixture(root) {
   });
 }
 describe('owner-reviewed runner image inputs', () => {
-  it('generates deterministic snapshots and checks complete exact inputs', () => {
+  it('removes owned fixtures containing read-only files', async () => {
+    const root = fixture();
+    chmodSync(join(root, 'package-lock.json'), 0o444);
+    await removeFixture(root);
+    expect(existsSync(root)).toBe(false);
+  });
+
+  it('generates deterministic snapshots and checks complete exact inputs', async () => {
     const root = fixture();
     try {
       const id = writeImageInputs(root);
@@ -90,11 +99,11 @@ describe('owner-reviewed runner image inputs', () => {
       );
       expect(() => writeImageInputs(root, true)).toThrow('stale');
     } finally {
-      removeFixture(root);
+      await removeFixture(root);
     }
   });
 
-  it('invalidates changed lockfiles and preparation scripts without selecting newer tooling', () => {
+  it('invalidates changed lockfiles and preparation scripts without selecting newer tooling', async () => {
     const root = fixture();
     try {
       const initial = writeImageInputs(root);
@@ -110,13 +119,13 @@ describe('owner-reviewed runner image inputs', () => {
       );
       expect(writeImageInputs(root)).not.toBe(changedLock);
     } finally {
-      removeFixture(root);
+      await removeFixture(root);
     }
   });
 
   it.each(['node', 'supabase', 'browser', 'services'])(
     'refuses an unreviewed %s pin or service selection',
-    (kind) => {
+    async (kind) => {
       const root = fixture();
       try {
         if (kind === 'node') writeFileSync(join(root, '.nvmrc'), '24.20.0');
@@ -140,7 +149,7 @@ describe('owner-reviewed runner image inputs', () => {
         }
         expect(() => createImageInputs(root)).toThrow(/review|pins changed/);
       } finally {
-        removeFixture(root);
+        await removeFixture(root);
       }
     },
   );
@@ -212,8 +221,8 @@ describe('owner-reviewed runner image inputs', () => {
 
   it.each([...LOCAL_STORAGE_IMAGES].slice(0, 3))(
     'caches every runtime Storage mirror from the one pulled %s image',
-    (resolved) => {
-      const result = aliasFixture(resolved);
+    async (resolved) => {
+      const result = await aliasFixture(resolved);
       expect(result.status, result.stderr).toBe(0);
       const aliases = JSON.parse(result.stdout);
       expect(aliases.map((entry) => entry.reference)).toEqual([
@@ -229,14 +238,14 @@ describe('owner-reviewed runner image inputs', () => {
 
   it.each(['tag-failure', 'wrong-id', 'inspect-failure', 'missing-source'])(
     'refuses Storage alias publication after %s',
-    (mode) => {
-      const result = aliasFixture([...LOCAL_STORAGE_IMAGES][0], mode);
+    async (mode) => {
+      const result = await aliasFixture([...LOCAL_STORAGE_IMAGES][0], mode);
       expect(result.status).not.toBe(0);
     },
   );
 
-  it('scrubs the builder network and leaves systemd identity uninitialized', () => {
-    const result = scrubFixture();
+  it('scrubs the builder network and leaves systemd identity uninitialized', async () => {
+    const result = await scrubFixture();
     expect(result.status, result.stderr).toBe(0);
     expect(result.stdout).toBe('scrub-verified\n');
   });
@@ -248,14 +257,14 @@ describe('owner-reviewed runner image inputs', () => {
     'old-machine-id',
     'missing-machine-id',
     'oversized-machine-id',
-  ])('refuses scrub proof after %s', (mode) => {
-    const result = scrubFixture(mode);
+  ])('refuses scrub proof after %s', async (mode) => {
+    const result = await scrubFixture(mode);
     expect(result.status).toBe(1);
     expect(result.stdout).not.toContain('scrub-verified');
   });
 });
 
-function scrubFixture(mode = 'success') {
+async function scrubFixture(mode = 'success') {
   const root = mkdtempSync(join(tmpdir(), 'itir-image-scrub-'));
   try {
     const recipe = readFileSync(
@@ -299,11 +308,11 @@ printf 'scrub-verified\\n'
     expect(result.error).toBeUndefined();
     return result;
   } finally {
-    removeFixture(root);
+    await removeFixture(root);
   }
 }
 
-function aliasFixture(resolved, mode = 'success') {
+async function aliasFixture(resolved, mode = 'success') {
   const root = mkdtempSync(join(tmpdir(), 'itir-image-alias-'));
   try {
     const recipe = readFileSync(
@@ -356,6 +365,6 @@ printf '%s' "$aliases"
       calls: readFileSync(calls, 'utf8').split('\n').filter(Boolean),
     };
   } finally {
-    removeFixture(root);
+    await removeFixture(root);
   }
 }
