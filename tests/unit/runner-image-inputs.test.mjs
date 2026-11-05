@@ -38,6 +38,16 @@ function fixture() {
   return root;
 }
 
+function removeFixture(root) {
+  // Windows may briefly retain fixture handles after synchronous file operations.
+  // Retry only these owned test trees; persistent cleanup failures still throw.
+  rmSync(root, {
+    recursive: true,
+    force: true,
+    maxRetries: 3,
+    retryDelay: 100,
+  });
+}
 describe('owner-reviewed runner image inputs', () => {
   it('generates deterministic snapshots and checks complete exact inputs', () => {
     const root = fixture();
@@ -80,7 +90,7 @@ describe('owner-reviewed runner image inputs', () => {
       );
       expect(() => writeImageInputs(root, true)).toThrow('stale');
     } finally {
-      rmSync(root, { recursive: true, force: true });
+      removeFixture(root);
     }
   });
 
@@ -100,7 +110,7 @@ describe('owner-reviewed runner image inputs', () => {
       );
       expect(writeImageInputs(root)).not.toBe(changedLock);
     } finally {
-      rmSync(root, { recursive: true, force: true });
+      removeFixture(root);
     }
   });
 
@@ -130,7 +140,7 @@ describe('owner-reviewed runner image inputs', () => {
         }
         expect(() => createImageInputs(root)).toThrow(/review|pins changed/);
       } finally {
-        rmSync(root, { recursive: true, force: true });
+        removeFixture(root);
       }
     },
   );
@@ -289,7 +299,7 @@ printf 'scrub-verified\\n'
     expect(result.error).toBeUndefined();
     return result;
   } finally {
-    rmSync(root, { recursive: true, force: true });
+    removeFixture(root);
   }
 }
 
@@ -346,6 +356,6 @@ printf '%s' "$aliases"
       calls: readFileSync(calls, 'utf8').split('\n').filter(Boolean),
     };
   } finally {
-    rmSync(root, { recursive: true, force: true });
+    removeFixture(root);
   }
 }
