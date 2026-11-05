@@ -3,7 +3,7 @@ import {
   layoutLabels,
   layoutLabelsDetailed,
   type LabelRect,
-} from './label-layout';
+} from './label-layout-test-harness';
 import actualBelow from '../../../../tests/fixtures/room/actual-80d-more-below.json';
 import {
   createLabelLayoutDiagnostics,
