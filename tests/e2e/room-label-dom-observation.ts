@@ -13,8 +13,10 @@ declare global {
     __readRoomLabelDomSnapshot?: () => RoomLabelDomSnapshot;
   }
 }
-/** Test-only DOM observation. Attribute writes witness registration metadata, not
- * exact register() calls: detached writes are deliberately not inferred. No
+/** Test-only DOM observation. Connected attribute writes witness registration
+ * metadata, not exact register() calls: detached writes and removals are not
+ * inferred. Observe only the registration attribute so unrelated page mounting
+ * cannot exhaust the diagnostic before the room registers its first label. No
  * element text, arbitrary identifiers, geometry, scheduling or DOM writes. */
 export function installRoomLabelDomObservation() {
   if (window.__readRoomLabelDomSnapshot) return;
@@ -51,10 +53,7 @@ export function installRoomLabelDomObservation() {
           : element.hasAttribute('data-room-decorative-label')
             ? 'decorative'
             : 'other';
-  const record = (
-    element: Element,
-    event: 'attributeWrites' | 'removals' | 'seen',
-  ) => {
+  const record = (element: Element, event: 'attributeWrites') => {
     const kind = kindOf(element);
     let identity = seen.get(element);
     if (!identity) {
@@ -66,51 +65,25 @@ export function installRoomLabelDomObservation() {
       seen.set(element, identity);
       kinds[kind].newElements++;
     }
-    if (event !== 'seen') {
-      if (kinds[kind][event] >= 1_000_000) {
-        saturate();
-        return false;
-      }
-      kinds[kind][event]++;
+    if (kinds[kind][event] >= 1_000_000) {
+      saturate();
+      return false;
     }
+    kinds[kind][event]++;
     recent.push({ kind, serial: identity, event });
     if (recent.length > 12) recent.shift();
     return true;
   };
   const observer = new MutationObserver((records) => {
     if (stopped) return;
-    // One delivery budget includes records, all added/removed nodes and every
-    // descendant/ancestor traversal step, including irrelevant DOM. Saturation
-    // disconnects; no full descendant list is allocated before applying the cap.
+    // Only registration-attribute records are subscribed. Cap a delivery before
+    // reading an unbounded set; no child-list/subtree traversal is performed.
     let work = 0;
     const spend = () => {
       if (stopped) return false;
       if (++work > 256) {
         saturate();
         return false;
-      }
-      return true;
-    };
-    const visit = (node: Node, event: 'seen' | 'removals') => {
-      if (!spend()) return false;
-      if (!(node instanceof Element)) return true;
-      const root = node;
-      let current: Element | null = root;
-      while (current) {
-        if (!spend()) return false;
-        if (
-          current.hasAttribute('data-label-layout-id') &&
-          !record(current, event)
-        )
-          return false;
-        if (current.firstElementChild) current = current.firstElementChild;
-        else {
-          while (current !== root && !current.nextElementSibling) {
-            if (!spend()) return false;
-            current = current.parentElement!;
-          }
-          current = current === root ? null : current.nextElementSibling;
-        }
       }
       return true;
     };
@@ -123,11 +96,6 @@ export function installRoomLabelDomObservation() {
             !record(mutation.target, 'attributeWrites')
           )
             return;
-        } else {
-          for (const node of mutation.addedNodes)
-            if (!visit(node, 'seen')) return;
-          for (const node of mutation.removedNodes)
-            if (!visit(node, 'removals')) return;
         }
       }
     } catch {
@@ -136,7 +104,6 @@ export function installRoomLabelDomObservation() {
   });
   observer.observe(document, {
     subtree: true,
-    childList: true,
     attributes: true,
     attributeFilter: ['data-label-layout-id'],
   });

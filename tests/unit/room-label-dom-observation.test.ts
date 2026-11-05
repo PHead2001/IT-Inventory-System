@@ -24,11 +24,11 @@ it('distinguishes same-element registration metadata writes from new tooltip, an
   anchor.dataset.labelLayoutId = 'private-id-must-not-leave';
   await tick();
   const tooltip = document.createElement('button');
-  tooltip.dataset.labelLayoutId = 'hover-tooltip';
   const marker = document.createElement('span');
   marker.dataset.roomOccupiedMarker = 'true';
-  marker.dataset.labelLayoutId = 'private-marker-id';
   document.body.append(tooltip, marker);
+  tooltip.dataset.labelLayoutId = 'hover-tooltip';
+  marker.dataset.labelLayoutId = 'private-marker-id';
   await tick();
   const first = window.__readRoomLabelDomSnapshot!();
   expect(first.kinds['anchored-action']).toEqual({
@@ -38,19 +38,21 @@ it('distinguishes same-element registration metadata writes from new tooltip, an
   });
   expect(first.kinds.tooltip.newElements).toBe(1);
   expect(first.kinds['occupied-marker'].newElements).toBe(1);
-  expect(first.kinds.tooltip.attributeWrites).toBe(0); // Detached writes cannot prove a call.
+  expect(first.kinds.tooltip.attributeWrites).toBe(1);
   const identity = first.recent.find(
     (entry) => entry.kind === 'tooltip',
   )!.serial;
   tooltip.remove();
   await tick();
+  tooltip.dataset.labelLayoutId = 'hover-tooltip'; // Detached writes are not witnessed.
   document.body.append(tooltip);
+  tooltip.dataset.labelLayoutId = 'hover-tooltip';
   await tick();
   const last = window.__readRoomLabelDomSnapshot!();
   expect(last.kinds.tooltip).toEqual({
     newElements: 1,
-    attributeWrites: 0,
-    removals: 1,
+    attributeWrites: 2,
+    removals: 0,
   });
   expect(last.recent.at(-1)).toMatchObject({
     kind: 'tooltip',
@@ -96,63 +98,58 @@ it('keeps the exact readiness read and single-frame cadence when both diagnostic
   });
   expect(frame).toHaveBeenCalledTimes(2); // Exactly the original one RAF per read.
 });
-it.each(['records', 'added', 'removed', 'deep'] as const)(
-  'caps actual callback/traversal work and disconnects on oversized %s input',
-  (variant) => {
-    let callback!: MutationCallback;
-    const disconnect = vi.fn();
-    vi.stubGlobal(
-      'MutationObserver',
-      class {
-        constructor(value: MutationCallback) {
-          callback = value;
-        }
-        observe() {}
-        disconnect = disconnect;
-      },
-    );
-    stop = installRoomLabelDomObservation();
-    const root = document.createElement('div');
-    const element = document.createElement('button');
-    element.dataset.labelLayoutId = 'hover-tooltip';
-    let records: MutationRecord[];
-    if (variant === 'records') {
-      records = Array.from(
-        { length: 1000 },
-        () =>
-          ({
-            type: 'attributes',
-            target: element,
-          }) as unknown as MutationRecord,
-      );
-    } else {
-      let parent: Element = root;
-      for (let index = 0; index < 1000; index++) {
-        const child = document.createElement('span');
-        child.dataset.labelLayoutId = 'private-unlogged-id';
-        parent.append(child);
-        if (variant === 'deep') parent = child;
+it('ignores unrelated initial page trees and still witnesses later room registration', async () => {
+  stop = installRoomLabelDomObservation();
+  const root = document.createElement('main');
+  for (let index = 0; index < 1000; index++)
+    root.append(document.createElement('span'));
+  document.body.append(root);
+  await tick();
+  const label = document.createElement('button');
+  label.dataset.roomLabelCode = 'private-location';
+  root.append(label);
+  label.dataset.labelLayoutId = 'private-label';
+  await tick();
+  expect(window.__readRoomLabelDomSnapshot!()).toMatchObject({
+    overflow: false,
+    kinds: { 'anchored-action': { newElements: 1, attributeWrites: 1 } },
+  });
+});
+it('caps actual registration callback work and disconnects on oversized input', () => {
+  let callback!: MutationCallback;
+  const disconnect = vi.fn();
+  vi.stubGlobal(
+    'MutationObserver',
+    class {
+      constructor(value: MutationCallback) {
+        callback = value;
       }
-      records = [
-        {
-          type: 'childList',
-          addedNodes: variant === 'removed' ? [] : [root],
-          removedNodes: variant === 'removed' ? [root] : [],
-        } as unknown as MutationRecord,
-      ];
-    }
-    const reads = vi.spyOn(Element.prototype, 'getAttribute');
-    const lists = vi.spyOn(Element.prototype, 'querySelectorAll');
-    callback(records, {} as MutationObserver);
-    const snapshot = window.__readRoomLabelDomSnapshot!();
-    expect(snapshot.overflow).toBe(true);
-    expect(disconnect).toHaveBeenCalledOnce();
-    expect(lists).not.toHaveBeenCalled();
-    expect(reads.mock.calls.length).toBeLessThanOrEqual(256);
-    expect(snapshot.recent.length).toBeLessThanOrEqual(12);
-    const before = reads.mock.calls.length;
-    callback(records, {} as MutationObserver); // Already queued deliveries do no work.
-    expect(reads).toHaveBeenCalledTimes(before);
-    expect(window.__readRoomLabelDomSnapshot!()).toEqual(snapshot);
-  },
-);
+      observe() {}
+      disconnect = disconnect;
+    },
+  );
+  stop = installRoomLabelDomObservation();
+  const element = document.createElement('button');
+  element.dataset.labelLayoutId = 'hover-tooltip';
+  const records: MutationRecord[] = Array.from(
+    { length: 1000 },
+    () =>
+      ({
+        type: 'attributes',
+        target: element,
+      }) as unknown as MutationRecord,
+  );
+  const reads = vi.spyOn(Element.prototype, 'getAttribute');
+  const lists = vi.spyOn(Element.prototype, 'querySelectorAll');
+  callback(records, {} as MutationObserver);
+  const snapshot = window.__readRoomLabelDomSnapshot!();
+  expect(snapshot.overflow).toBe(true);
+  expect(disconnect).toHaveBeenCalledOnce();
+  expect(lists).not.toHaveBeenCalled();
+  expect(reads.mock.calls.length).toBeLessThanOrEqual(256);
+  expect(snapshot.recent.length).toBeLessThanOrEqual(12);
+  const before = reads.mock.calls.length;
+  callback(records, {} as MutationObserver); // Already queued deliveries do no work.
+  expect(reads).toHaveBeenCalledTimes(before);
+  expect(window.__readRoomLabelDomSnapshot!()).toEqual(snapshot);
+});
