@@ -98,10 +98,12 @@ function discover(
     };
     let discoveryErrors: string[] | undefined;
     try {
-      const report = JSON.parse(result.stdout.slice(result.stdout.indexOf('{')));
-      discoveryErrors = report.errors?.slice(0, 3).map((error: { message?: string }) =>
-        excerpt(error.message ?? error),
+      const report = JSON.parse(
+        result.stdout.slice(result.stdout.indexOf('{')),
       );
+      discoveryErrors = report.errors
+        ?.slice(0, 3)
+        .map((error: { message?: string }) => excerpt(error.message ?? error));
     } catch {
       // Non-JSON output retains the bounded diagnostic excerpt below.
     }
