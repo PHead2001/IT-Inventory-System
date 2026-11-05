@@ -1055,6 +1055,13 @@ test('mixed queue retains copies across navigation, decodes quantity QR, and pri
     await expectTouchTarget(
       page.getByRole('link', { name: quantityName, exact: true }),
     );
+    await expectTouchTarget(
+      page
+        .getByRole('checkbox', {
+          name: new RegExp('^Select ' + quantityName + ','),
+        })
+        .locator('..'),
+    );
   }
   if (touchViewport) await page.setViewportSize(touchViewport);
   await expect(

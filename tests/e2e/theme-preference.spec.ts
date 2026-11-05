@@ -1,3 +1,4 @@
+import { expectTouchTarget } from './touch-target-controls';
 import { expect, test, type Page } from '@playwright/test';
 import { PNG } from 'pngjs';
 import fixture from '../fixtures/auth.json' with { type: 'json' };
@@ -226,6 +227,29 @@ test('first visit stays Dark even when the device prefers Light', async ({
     themeControls(page).getByRole('radio', { name: 'Dark', exact: true }),
   ).toBeChecked();
   await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
+  const viewport = page.viewportSize();
+  for (const width of [1280, 390]) {
+    await page.setViewportSize({ width, height: 844 });
+    const summary = page
+        .locator('summary')
+        .filter({ hasText: 'Build support details' }),
+      details = summary.locator('..');
+    await expectTouchTarget(summary);
+    await expect(summary).toHaveCSS('display', 'list-item');
+    await expect(details).not.toHaveAttribute('open');
+    await expect(summary).toHaveCSS('list-style-type', 'disclosure-closed');
+    await summary.click();
+    await expect(details).toHaveJSProperty('open', true);
+    await expect(details.getByText('Commit', { exact: true })).toBeVisible();
+    await expect(summary).toHaveCSS('display', 'list-item');
+    await expect(summary).toHaveCSS('list-style-type', 'disclosure-open');
+    await expectTouchTarget(summary);
+    await summary.click();
+    await expect(details).toHaveJSProperty('open', false);
+    await expect(details.getByText('Commit', { exact: true })).toBeHidden();
+    await expect(summary).toHaveCSS('list-style-type', 'disclosure-closed');
+  }
+  if (viewport) await page.setViewportSize(viewport);
 });
 
 for (const preference of ['Light', 'System'] as const) {

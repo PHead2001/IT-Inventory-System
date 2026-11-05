@@ -1518,7 +1518,9 @@ function LabelDesignerWorkspace({
                 {search?.rows.map((record) => (
                   <div key={record.kind + record.key} className={styles.result}>
                     <div className={styles.resultMain}>
-                      <label className={styles.fieldLabel}>
+                      <label
+                        className={`${styles.fieldLabel} ${styles.selectionLabel}`}
+                      >
                         <input
                           type="checkbox"
                           disabled={busy}
