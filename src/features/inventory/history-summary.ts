@@ -13,7 +13,9 @@ const eventNames: Record<string, string> = {
   location_corrected: 'Recorded location corrected',
   retired: 'Asset retired',
 };
-export const historyEventTitle = (event: HistoryEvent) =>
+export const historyEventTitle = (
+  event: Pick<HistoryEvent, 'eventType' | 'kind'>,
+) =>
   event.eventType.startsWith('site_')
     ? custodyEventLabel(event.eventType, event.kind)
     : (eventNames[event.eventType] ?? 'Inventory updated');

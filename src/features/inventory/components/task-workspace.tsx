@@ -67,6 +67,7 @@ export function TaskWorkspace({
   onRefresh,
   taskIntent,
   recordIdentity,
+  recordName,
 }: {
   choices: TaskChoice[];
   children: (id: string) => ReactNode;
@@ -75,6 +76,7 @@ export function TaskWorkspace({
   onRefresh?: () => void;
   taskIntent?: string;
   recordIdentity?: string;
+  recordName?: string;
 }) {
   const scope = useId();
   const workspaceRoot = useRef<HTMLElement>(null);
@@ -497,9 +499,19 @@ export function TaskWorkspace({
           <div
             role="alertdialog"
             aria-label="Discard task draft?"
+            aria-describedby={`${scope}-discard-context`}
             className="space-y-3 rounded border border-amber-700 p-3"
           >
-            <p>Your current task has unsaved entries.</p>
+            <p id={`${scope}-discard-context`} className="break-words">
+              {recordName?.trim() ? (
+                <>
+                  Your current task for <strong>{recordName}</strong> has
+                  unsaved entries.
+                </>
+              ) : (
+                'This draft has unsaved entries.'
+              )}
+            </p>
             <Button
               type="button"
               ref={stayButton}

@@ -6,9 +6,112 @@ import {
   auditOpenMetadataTask,
 } from './audit-two-controls';
 import { metadataReviewButton, metadataSaveButton } from './metadata-controls';
-import { openRecordTask } from './record-task-controls';
+import { expectRecordVersion, openRecordTask } from './record-task-controls';
+import { interfaceTest, interfaceLogin } from './interface-fixtures';
+import { setLocalReducedMotion } from './motion-settings';
 import { chooseLocation } from './location-picker';
 import fixture from '../fixtures/auth.json' with { type: 'json' };
+
+interfaceTest(
+  'metadata task review returns focus and names discarded records across motion and widths',
+  async ({ page, interfaceRecord }, info) => {
+    interfaceTest.setTimeout(150_000);
+    await interfaceLogin(page);
+    for (const width of [1280, 390]) {
+      await page.setViewportSize({ width, height: 900 });
+      for (const reduced of [false, true]) {
+        await setLocalReducedMotion(page, reduced);
+        await page.goto('/inventory/quantity/' + interfaceRecord.id);
+        const form = await openRecordTask(page, 'Edit quantity metadata');
+        const name = form.getByLabel('Name', { exact: true });
+        const draft = 'Unsaved review draft — ' + interfaceRecord.name;
+        await name.fill(draft);
+        await metadataReviewButton(form).click();
+        await form
+          .getByRole('button', { name: 'Edit values', exact: true })
+          .click();
+        await page.evaluate(
+          () =>
+            new Promise<void>((resolve) =>
+              requestAnimationFrame(() =>
+                requestAnimationFrame(() => resolve()),
+              ),
+            ),
+        );
+        await expect(name).toBeFocused();
+        await expect(name).toHaveValue(draft);
+        await page.keyboard.press('Tab');
+        await expect(
+          form.getByLabel('Category', { exact: true }),
+        ).toBeFocused();
+        const key = `${width}-${reduced ? 'reduced' : 'full'}`;
+        await page.screenshot({
+          path: info.outputPath(`metadata-edit-values-${key}.png`),
+          fullPage: true,
+        });
+
+        const tasks = page.getByRole('region', { name: 'Record tasks' });
+        await tasks
+          .getByRole('button', { name: 'Close task', exact: true })
+          .click();
+        const discard = tasks.getByRole('alertdialog', {
+          name: 'Discard task draft?',
+        });
+        await expect(discard).toHaveAccessibleDescription(
+          `Your current task for ${interfaceRecord.name} has unsaved entries.`,
+        );
+        await expect(discard).not.toContainText(interfaceRecord.id);
+        expect(
+          await page.evaluate(
+            () => document.documentElement.scrollWidth <= innerWidth,
+          ),
+        ).toBe(true);
+        await page.screenshot({
+          path: info.outputPath(`metadata-discard-${key}.png`),
+          fullPage: true,
+        });
+        await discard
+          .getByRole('button', { name: 'Stay with this task', exact: true })
+          .click();
+        await expect(
+          tasks.getByRole('heading', { name: 'Edit details', exact: true }),
+        ).toBeFocused();
+        await expect(name).toHaveValue(draft);
+        await form.getByRole('button', { name: 'Cancel', exact: true }).click();
+        await page
+          .getByRole('dialog')
+          .getByRole('button', { name: 'Keep editing', exact: true })
+          .click();
+        await expect(name).toHaveValue(draft);
+        await expect(
+          form.getByRole('button', { name: 'Cancel', exact: true }),
+        ).toBeFocused();
+        await tasks
+          .getByRole('button', { name: 'Close task', exact: true })
+          .click();
+        await discard
+          .getByRole('button', { name: 'Discard and close', exact: true })
+          .click();
+        await expect(form).toHaveCount(0);
+        const reopened = await openRecordTask(page, 'Edit quantity metadata');
+        await expect(reopened.getByLabel('Name', { exact: true })).toHaveValue(
+          interfaceRecord.name,
+        );
+        await tasks
+          .getByRole('button', { name: 'Close task', exact: true })
+          .click();
+        await expect(
+          tasks.getByRole('button', { name: 'Edit details', exact: true }),
+        ).toBeFocused();
+      }
+    }
+    await page.reload();
+    await expect(
+      page.getByRole('heading', { name: interfaceRecord.name, exact: true }),
+    ).toBeVisible();
+    await expectRecordVersion(page, 1);
+  },
+);
 
 test('explicit completed task reentry starts fresh, while an unconfirmed move retains its exact retry', async ({
   page,

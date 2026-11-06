@@ -1,5 +1,26 @@
 # Validation
 
+## A403 selective Overview integration
+
+The additive migration `20261019193000_overview_snapshot_v1.sql`, Overview SQL
+tests (including boundary and equal-time ordering cases), and registered
+`tests/integration/overview.ts` require clean local replay, forward-upgrade proof,
+canonical generated types, the complete database gate and query-cost evidence.
+Only that migration is imported; the held donor's older duplicate is excluded.
+Existing low-stock reports and their private reads, Peek links, CountTicker and
+motion owners remain intact. Overview uses those current shared components.
+
+[Overview](overview.md) records the single-statement, decimal-string, bounded
+projection and the donor's historical evidence. Those results do not certify
+this integration. Real authenticated timeout/concurrency proof, populated
+desktop/390px Dark/Light/System Full/Reduced inspection, exact-final-SHA CI,
+fresh review and hosted acceptance remain required. No A403 acceptance is claimed
+from source integration or unit tests. The current local checkpoint in
+[Overview](overview.md#selective-release-checkpoint--november-5-2026) records clean
+replay, generated types, focused UI/contract tests and composed database retry
+coverage, including the actual REST timeout. It does not claim an uninterrupted
+full database command or final application/hosted certification.
+
 ## Deferred-hydration browser probes
 
 The first-styled-paint and initial motion Settings probes share

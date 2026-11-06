@@ -158,7 +158,7 @@ describe('inventory CSV', () => {
           'Exported at (display zone)',
           ...(type === 'inventory'
             ? ['Type label', 'Status label', 'Custody label']
-            : ['Type label', 'Status label']),
+            : ['Type label', 'Status label', 'Shortfall']),
         ]);
         expect(result.exportedAt).toBe(at);
         expect(result.csv).toContain(csvText(at) + ',"Preview"');
@@ -750,10 +750,10 @@ it.each(['active', 'archived'])(
         csvText('Quantity'),
       );
       expect(values[headers.indexOf(csvText('Status'))]).toBe(csvText(status));
-      expect(headers.slice(-2)).toEqual(
+      expect(headers.slice(-3, -1)).toEqual(
         ['Type label', 'Status label'].map(csvText),
       );
-      expect(values.slice(-2)).toEqual(
+      expect(values.slice(-3, -1)).toEqual(
         ['Quantity item', status === 'active' ? 'Active' : 'Archived'].map(
           csvText,
         ),
@@ -761,3 +761,154 @@ it.each(['active', 'archived'])(
     }
   },
 );
+
+const shortfallExportRow = (patch: Record<string, unknown> = {}) => ({
+  entity_id: id,
+  name: 'Cable',
+  category_name: 'Cables',
+  manufacturer: null,
+  model: null,
+  status: 'active',
+  recorded_total: '25',
+  available_quantity: '25',
+  assigned_quantity: '0',
+  reorder_threshold: 30,
+  stock_state: 'needs_restocking',
+  holding_context: 'Current storage and site holdings',
+  custom_fields: {},
+  ...patch,
+});
+const shortfallSnapshot = (row = shortfallExportRow()) => ({
+  rows: [row],
+  total: 1,
+  exported_at: at,
+});
+
+it.each([false, true])(
+  'appends only the exact low-stock shortfall after all existing columns (custom %s)',
+  (custom) => {
+    for (const [available, threshold, expected] of [
+      ['25', 30, '5'],
+      ['30', 30, '0'],
+      ['31', 30, '0'],
+      ['0', 0, '0'],
+      ['0', 2147483647, '2147483647'],
+      ['9223372036854775807', 2147483647, '0'],
+      [undefined, 30, ''],
+      [null, 30, ''],
+    ] as const) {
+      const recorded = available ?? '100';
+      const snapshot = shortfallSnapshot(
+        shortfallExportRow({
+          available_quantity: available,
+          recorded_total: recorded,
+          reorder_threshold: threshold,
+        }),
+      );
+      const before = structuredClone(snapshot);
+      const [header, line] = exportCsv('low_stock', snapshot, 'Preview', custom)
+        .csv.slice(1)
+        .split('\r\n');
+      const headers = header.split(','),
+        values = line.split(',');
+      expect(headers.at(-1)).toBe(csvText('Shortfall'));
+      expect(values.at(-1)).toBe(expected);
+      expect(values[headers.indexOf(csvText('Available in Storage'))]).toBe(
+        available ?? '',
+      );
+      expect(values[headers.indexOf(csvText('Assigned to Sites'))]).toBe('0');
+      expect(values[headers.indexOf(csvText('Recorded Total'))]).toBe(recorded);
+      expect(headers.slice(0, legacyLowStockHeaders.length)).toEqual(
+        legacyLowStockHeaders.map(csvText),
+      );
+      expect(snapshot).toEqual(before);
+    }
+  },
+);
+it('keeps unconfigured thresholds outside low-stock snapshots rather than exporting a zero shortage', () => {
+  expect(() =>
+    exportCsv(
+      'low_stock',
+      shortfallSnapshot(shortfallExportRow({ reorder_threshold: null })),
+      'Preview',
+    ),
+  ).toThrow();
+});
+it.each([false, true])(
+  'retains low-stock CSV escaping and formula protection with the appended shortfall (custom %s)',
+  (custom) => {
+    const name = '\t=SUM("1,2")\r\nSnow 雪';
+    const holding = '\u0001@holdings, "quoted"\r\nsecond line';
+    const fields = { value: '=PRIVATE, "quoted"\nnext' };
+    const csv = exportCsv(
+      'low_stock',
+      shortfallSnapshot(
+        shortfallExportRow({
+          name,
+          holding_context: holding,
+          custom_fields: fields,
+        }),
+      ),
+      'Preview',
+      custom,
+    ).csv;
+    expect(csv.startsWith('\uFEFF')).toBe(true);
+    expect(csv).toContain(csvText(name));
+    expect(csv).toContain(csvText(holding));
+    expect(csv.includes(csvText(JSON.stringify(fields)))).toBe(custom);
+    expect(csv.endsWith(',5\r\n')).toBe(true);
+  },
+);
+it('includes the new low-stock header and cell in the exact existing 3 MiB UTF8 ceiling', () => {
+  const input = (name: string) =>
+    shortfallSnapshot(
+      shortfallExportRow({
+        name,
+        available_quantity: '0',
+        recorded_total: '0',
+        reorder_threshold: 2147483647,
+      }),
+    );
+  const encoder = new TextEncoder();
+  const base = encoder.encode(
+    exportCsv('low_stock', input(''), 'Preview').csv,
+  ).byteLength;
+  const remaining = 3 * 1024 * 1024 - base;
+  const name =
+    '"'.repeat(Math.floor(remaining / 2)) + (remaining % 2 ? 'A' : '');
+  const below =
+    '"'.repeat(Math.floor((remaining - 1) / 2)) +
+    ((remaining - 1) % 2 ? 'A' : '');
+  expect(
+    encoder.encode(exportCsv('low_stock', input(below), 'Preview').csv)
+      .byteLength,
+  ).toBe(3 * 1024 * 1024 - 1);
+  const bytes: number[] = [];
+  const csv = exportCsv(
+    'low_stock',
+    input(name),
+    'Preview',
+    false,
+    undefined,
+    (value) => bytes.push(value),
+  ).csv;
+  expect(encoder.encode(csv).byteLength).toBe(3 * 1024 * 1024);
+  expect(bytes.at(-1)).toBe(3 * 1024 * 1024);
+  expect(csv.endsWith(',2147483647\r\n')).toBe(true);
+  expect(() => exportCsv('low_stock', input(name + 'A'), 'Preview')).toThrow(
+    ExportTooLargeError,
+  );
+});
+it('preserves deadline checks after a shortfall row and never returns a partially completed file', () => {
+  let appended = 0,
+    expired = false;
+  const check = () => {
+    if (expired) throw new Error('deadline');
+  };
+  expect(() =>
+    exportCsv('low_stock', shortfallSnapshot(), 'Preview', false, check, () => {
+      if (++appended === 2) expired = true;
+    }),
+  ).toThrow('deadline');
+  expect(appended).toBe(2);
+});

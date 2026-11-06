@@ -1,8 +1,10 @@
 import { TransientFeedbackProvider } from '@/components/experience/transient-feedback';
+import type { ReactNode } from 'react';
 import { PrivacyReadinessContext } from '@/components/auth/privacy-readiness';
 import {
   assignmentEpoch,
   readPrivacyRevocationRevision,
+  revokePrivatePresentation,
 } from '@/features/scan/assign-batch';
 import { beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 import userEvent from '@testing-library/user-event';
@@ -25,7 +27,12 @@ import {
 } from './metadata-form';
 import type { MetadataForm as Form } from './contracts';
 import { TaskWorkspace } from '@/features/inventory/components/task-workspace';
-import { TaskStateContext } from '@/features/inventory/components/task-state';
+import {
+  TaskInteractionContext,
+  TaskStateContext,
+} from '@/features/inventory/components/task-state';
+import { holdTransitionCapture } from '../../../tests/helpers/transition-capture';
+import { TransitionCaptureBoundary } from '@/components/forms/transition-capture-boundary';
 import { readCreation, writeCreation } from './creation-recovery';
 import { readEdit } from './edit-recovery';
 import { requestAppNavigation } from '@/lib/navigation/guard';
@@ -158,6 +165,21 @@ const props = {
   locations: [],
   item,
 };
+function focusGrant(children: ReactNode, ready = true) {
+  return (
+    <PrivacyReadinessContext
+      value={{
+        ready,
+        visible: ready,
+        generation: 'metadata-focus',
+        revocationRevision: readPrivacyRevocationRevision(),
+        verifiedEpoch: assignmentEpoch(),
+      }}
+    >
+      {children}
+    </PrivacyReadinessContext>
+  );
+}
 describe('published metadata form', () => {
   it('replaces a deferred category form skeleton with retry guidance and then actual fields', async () => {
     let finish!: (value: Awaited<ReturnType<typeof fetchCategoryForm>>) => void;
@@ -3069,6 +3091,229 @@ describe('published metadata form', () => {
       });
     },
   );
+  it('returns Edit values focus to this form after settling and continues keyboard order', async () => {
+    const user = userEvent.setup();
+    const current = form();
+    current.published_definition.fields[0].required = false;
+    render(
+      focusGrant(
+        <>
+          <button type="button">Unrelated control</button>
+          <MetadataForm {...props} forms={{ [categoryId]: current }} />
+        </>,
+      ),
+    );
+    await user.clear(screen.getByLabelText('Name'));
+    await user.type(screen.getByLabelText('Name'), 'Edited cable');
+    await user.click(screen.getByRole('button', { name: 'Review details' }));
+    await user.click(screen.getByRole('button', { name: 'Edit values' }));
+    await act(async () => {
+      await new Promise<void>((resolve) =>
+        requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
+      );
+    });
+    expect(screen.getByLabelText('Name')).toHaveFocus();
+    expect(screen.getByLabelText('Name')).toHaveValue('Edited cable');
+    await user.tab();
+    expect(screen.getByLabelText('Category')).toHaveFocus();
+    expect(submitInventory).not.toHaveBeenCalled();
+  });
+  it.each([
+    'capture-boundary',
+    'benign-layout',
+    'same-click-hide',
+    'external-inert',
+    'active-hidden',
+    'old-hidden-style',
+  ] as const)(
+    'keeps only the admitted Edit values focus through %s',
+    async (change) => {
+      const inert = Object.getOwnPropertyDescriptor(
+        HTMLElement.prototype,
+        'inert',
+      );
+      // jsdom omits the native reflected inert property; the real boundary still
+      // owns every transition and focus decision in this regression.
+      Object.defineProperty(HTMLElement.prototype, 'inert', {
+        configurable: true,
+        get() {
+          return this.hasAttribute('inert');
+        },
+        set(value: boolean) {
+          this.toggleAttribute('inert', value);
+        },
+      });
+      const current = form();
+      current.published_definition.fields[0].required = false;
+      const capture = holdTransitionCapture(false);
+      let wrapper: HTMLDivElement | null = null;
+      const view = render(
+        focusGrant(
+          <div
+            ref={(node) => {
+              wrapper = node;
+            }}
+            onClick={(event) => {
+              if ((event.target as HTMLElement).textContent !== 'Edit values')
+                return;
+              if (change === 'same-click-hide') {
+                wrapper!.hidden = true;
+                wrapper!.hidden = false;
+              }
+              capture.begin();
+            }}
+          >
+            <TransitionCaptureBoundary>
+              <MetadataForm {...props} forms={{ [categoryId]: current }} />
+            </TransitionCaptureBoundary>
+          </div>,
+        ),
+      );
+      try {
+        fireEvent.change(screen.getByLabelText('Name'), {
+          target: { value: 'Boundary draft' },
+        });
+        fireEvent.click(screen.getByRole('button', { name: 'Review details' }));
+        const input = screen.getByLabelText('Name');
+        const focus = vi.spyOn(input, 'focus');
+        fireEvent.click(screen.getByRole('button', { name: 'Edit values' }));
+        if (change === 'benign-layout') {
+          wrapper!.style.transform = 'translateY(1px)';
+          wrapper!.className = 'min-w-0';
+        }
+        if (change === 'external-inert')
+          wrapper!.querySelector('fieldset')!.setAttribute('inert', '');
+        if (change === 'active-hidden') {
+          wrapper!.hidden = true;
+          wrapper!.hidden = false;
+        }
+        if (change === 'old-hidden-style') {
+          wrapper!.style.display = 'none';
+          wrapper!.style.display = 'block';
+        }
+        expect(focus).not.toHaveBeenCalled();
+        await act(capture.release);
+        if (
+          [
+            'same-click-hide',
+            'external-inert',
+            'active-hidden',
+            'old-hidden-style',
+          ].includes(change)
+        )
+          expect(focus).not.toHaveBeenCalled();
+        else expect(input).toHaveFocus();
+        expect(input).toHaveValue('Boundary draft');
+      } finally {
+        view.unmount();
+        await act(capture.release);
+        capture.dispose();
+        if (inert) Object.defineProperty(HTMLElement.prototype, 'inert', inert);
+        else Reflect.deleteProperty(HTMLElement.prototype, 'inert');
+      }
+    },
+  );
+  it.each([
+    'release',
+    'retired',
+    'unmount',
+    'hidden',
+    'actor',
+    'replacement',
+    're-review',
+    'hide-readmit',
+    'privacy-readmit',
+    'revoked-readmit',
+    'batched-hide-readmit',
+  ] as const)(
+    'holds Edit values focus through capture and cancels stale intent on %s',
+    async (outcome) => {
+      const user = userEvent.setup();
+      const current = form();
+      current.published_definition.fields[0].required = false;
+      let live = true;
+      const canStart = () => live;
+      let interaction = canStart;
+      const fixture = (hidden = false, actorId = props.actorId, ready = true) =>
+        focusGrant(
+          <TaskInteractionContext value={interaction}>
+            <div hidden={hidden}>
+              <MetadataForm
+                {...props}
+                actorId={actorId}
+                forms={{ [categoryId]: current }}
+              />
+            </div>
+          </TaskInteractionContext>,
+          ready,
+        );
+      const view = render(fixture());
+      await user.clear(screen.getByLabelText('Name'));
+      await user.type(screen.getByLabelText('Name'), 'Keep edited cable');
+      await user.click(screen.getByRole('button', { name: 'Review details' }));
+      const input = screen.getByLabelText('Name');
+      const focus = vi.spyOn(input, 'focus');
+      const capture = holdTransitionCapture();
+      try {
+        await user.click(screen.getByRole('button', { name: 'Edit values' }));
+        expect(focus).not.toHaveBeenCalled();
+        if (outcome === 'retired') live = false;
+        if (outcome === 'unmount') view.unmount();
+        if (outcome === 'hidden') view.rerender(fixture(true));
+        if (outcome === 'actor') view.rerender(fixture(false, 'new-actor'));
+        if (outcome === 'replacement') {
+          interaction = () => true;
+          view.rerender(fixture());
+        }
+        if (outcome === 're-review')
+          await user.click(
+            screen.getByRole('button', { name: 'Review details' }),
+          );
+        if (outcome === 'hide-readmit') {
+          view.rerender(fixture(true));
+          view.rerender(fixture());
+        }
+        if (outcome === 'privacy-readmit') {
+          view.rerender(fixture(false, props.actorId, false));
+          view.rerender(fixture());
+        }
+        if (outcome === 'revoked-readmit') {
+          act(revokePrivatePresentation);
+          view.rerender(fixture());
+        }
+        if (outcome === 'batched-hide-readmit') {
+          const wrapper = view.container.firstElementChild as HTMLElement;
+          wrapper.hidden = true;
+          wrapper.hidden = false;
+        }
+        await act(capture.release);
+        if (outcome === 'release') {
+          expect(input).toHaveFocus();
+          expect(input).toHaveValue('Keep edited cable');
+        } else expect(focus).not.toHaveBeenCalled();
+        if (
+          [
+            'hide-readmit',
+            'privacy-readmit',
+            'revoked-readmit',
+            'batched-hide-readmit',
+          ].includes(outcome)
+        ) {
+          await user.click(
+            screen.getByRole('button', { name: 'Review details' }),
+          );
+          await user.click(screen.getByRole('button', { name: 'Edit values' }));
+          expect(input).toHaveFocus();
+          expect(input).toHaveValue('Keep edited cable');
+        }
+        expect(submitInventory).not.toHaveBeenCalled();
+      } finally {
+        view.unmount();
+        await act(capture.release);
+        capture.dispose();
+      }
+    },
+  );
   it('prompts for dirty Cancel, traps focus and restores it on Keep editing and Escape', () => {
     render(
       <MetadataForm
@@ -3506,12 +3751,14 @@ describe('creation intent review', () => {
       message: 'Fixture captured',
     });
     render(
-      <MetadataForm
-        {...props}
-        item={undefined}
-        locations={[destination]}
-        forms={{ [categoryId]: completeForm() }}
-      />,
+      focusGrant(
+        <MetadataForm
+          {...props}
+          item={undefined}
+          locations={[destination]}
+          forms={{ [categoryId]: completeForm() }}
+        />,
+      ),
     );
     await waitFor(() => expect(screen.getByLabelText('Name')).toBeEnabled());
     fireEvent.change(screen.getByLabelText('Name'), {
