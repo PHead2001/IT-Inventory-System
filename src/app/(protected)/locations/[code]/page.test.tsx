@@ -22,6 +22,29 @@ const location = {
   parentId: null,
   spaceRootCode: 'ITO',
 };
+vi.mock('@/features/inventory/views.server', () => ({
+  getInventoryColumns: async () => ({ fields: [], truncated: false }),
+  getInventoryView: async (input: Record<string, string | undefined>) => {
+    const result = await m.inventory(input);
+    return {
+      ...result,
+      unit: input.view === 'holdings' ? 'holding row' : 'item',
+      holdingRows: result.rows.length,
+      rows: result.rows.map(
+        (row: import('@/features/inventory/contracts-ui').InventoryResult) => ({
+          row,
+          holdings: [row],
+          scopedStorage: String(row.quantity ?? 0),
+          scopedSite: '0',
+          holdingCount: row.location || row.site ? 1 : 0,
+        }),
+      ),
+    };
+  },
+}));
+vi.mock('@/features/inventory/components/view-controls', () => ({
+  InventoryViewControls: () => null,
+}));
 vi.mock('@/features/inventory/queries.server', () => ({
   getLocation: async () => location,
   getLocations: async () => [
@@ -72,20 +95,40 @@ it('retains the validated browser origin through status, pagination and child de
     page: 2,
     pageSize: 25,
   });
-  render(
-    await Page({
-      params: Promise.resolve({ code: 'ITO' }),
-      searchParams: Promise.resolve({
-        returnTo: scopedOrigin,
-        status: 'all',
-        q: 'Cable',
-        page: '2',
-      }),
+  const page = await Page({
+    params: Promise.resolve({ code: 'ITO' }),
+    searchParams: Promise.resolve({
+      returnTo: scopedOrigin,
+      status: 'all',
+      q: 'Cable',
+      page: '2',
     }),
-  );
+  });
+  render(page);
   // The child card and all 25 descendant holdings share an accessible
   // location name. Only the child card retains the browser return scope.
   const childName = 'IT Office / General Storage / Unsorted (ITO-GENERAL)';
+  const recordHref = new URL(
+    screen
+      .getByRole('link', { name: 'Descendant asset 1' })
+      .getAttribute('href')!,
+    'https://inventory.invalid',
+  );
+  const inventoryReturn = new URL(
+    recordHref.searchParams.get('returnTo')!,
+    'https://inventory.invalid',
+  );
+  expect(inventoryReturn.pathname).toBe('/locations/ITO');
+  expect(inventoryReturn.searchParams.get('view')).toBe('items');
+  expect(inventoryReturn.searchParams.get('density')).toBe('comfortable');
+  expect(inventoryReturn.searchParams.get('q')).toBe('Cable');
+  expect(inventoryReturn.hash).toBe('#inventory-row-1');
+  expect(inventoryReturn.searchParams.get('returnTo')).toBe(scopedOrigin);
+  const { recordDetailReturnPath } =
+    await import('@/features/inventory/detail-return');
+  expect(page.props.children.props.pairingHref).toBe(
+    recordDetailReturnPath(inventoryReturn.pathname + inventoryReturn.search),
+  );
   expect(screen.getAllByRole('link', { name: childName })).toHaveLength(26);
   const childSection = screen
     .getByRole('heading', { name: 'Child locations' })
@@ -124,7 +167,9 @@ it('retains the validated browser origin through status, pagination and child de
   );
   expect(child.pathname).toBe('/locations/ITO-GENERAL');
   const exported = new URL(
-    screen.getByRole('link', { name: 'Export' }).getAttribute('href')!,
+    screen
+      .getByRole('link', { name: 'Matching holdings CSV' })
+      .getAttribute('href')!,
     'https://inventory.invalid',
   );
   expect(exported.searchParams.has('returnTo')).toBe(false);
@@ -220,7 +265,9 @@ it('shows selected normalized scope and matching CSV, retaining filters and rese
   expect(
     within(actions).getByRole('link', { name: 'History' }),
   ).toHaveAttribute('href', '/history?location=ITO');
-  expect(screen.getByRole('link', { name: 'Export' })).toHaveAttribute(
+  expect(
+    screen.getByRole('link', { name: 'Matching holdings CSV' }),
+  ).toHaveAttribute(
     'href',
     '/api/exports/inventory?q=Cable&status=all&location=ITO&displayTimeZone=UTC',
   );
@@ -235,3 +282,67 @@ it('shows selected normalized scope and matching CSV, retaining filters and rese
   ).not.toHaveTextContent('IT Office /');
 });
 vi.mock('server-only', () => ({}));
+it.each(['items', 'holdings'] as const)(
+  'admits an implicit location route using its actual rendered %s return without invented page/location query state',
+  async (view) => {
+    const id = '00000000-0000-4000-8000-000000000009';
+    m.inventory.mockResolvedValue({
+      rows: [
+        {
+          kind: 'quantity',
+          id,
+          name: 'Scoped cable',
+          categoryName: 'Cables',
+          status: 'active',
+          location: { ...location, id, can_hold_inventory: true },
+          quantity: 2,
+          assetTag: null,
+          serialNumber: null,
+          recordedTotal: null,
+          reorderThreshold: null,
+          stockState: null,
+        },
+      ],
+      total: 1,
+      page: 1,
+      pageSize: 25,
+    });
+    const params =
+      view === 'items' ? { q: 'Cable' } : { q: 'Cable', view: 'holdings' };
+    const rendered = render(
+      await Page({
+        params: Promise.resolve({ code: 'ITO' }),
+        searchParams: Promise.resolve(params),
+      }),
+    );
+    const href = new URL(
+      screen.getByRole('link', { name: 'Scoped cable' }).getAttribute('href')!,
+      'https://inventory.invalid',
+    );
+    const returned = href.searchParams.get('returnTo')!;
+    const url = new URL(returned, 'https://inventory.invalid');
+    expect(url.searchParams.has('location')).toBe(false);
+    expect(url.searchParams.has('page')).toBe(false);
+    expect(url.searchParams.get('view')).toBe(view);
+    expect(url.searchParams.get('density')).toBe('comfortable');
+    const { groupedTitleTarget } =
+      await import('@/components/experience/route-motion-state');
+    const { routeKey } = await import('@/components/experience/route-key');
+    expect(
+      groupedTitleTarget(
+        { kind: 'quantity', id },
+        {
+          kind: 'location-inventory',
+          locationCode: 'ITO',
+          occurrence:
+            view === 'items'
+              ? { kind: 'aggregate' }
+              : { kind: 'holding', holding: { domain: 'storage', id } },
+        },
+        returned,
+        routeKey('/locations/ITO', params),
+      ),
+    ).not.toBeNull();
+    rendered.unmount();
+  },
+);

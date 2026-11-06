@@ -33,6 +33,39 @@ export function recordDetailReturnPath(
       url.password
     )
       return fallback;
+    if (/^\/locations\/[^/]+$/.test(url.pathname)) {
+      const accepted = inventoryReturnPath(value, '/invalid-return');
+      if (accepted === '/invalid-return') return fallback;
+      const parents = url.searchParams.getAll('returnTo');
+      if (parents.length > 1) return fallback;
+      if (parents.length === 0) return accepted;
+      // Exactly one directory parent may survive the record-detail round trip.
+      // Require the raw route before sanitizing, so another detail/inventory
+      // route cannot be normalized into a seemingly valid directory parent.
+      const parent = new URL(parents[0], 'https://inventory.invalid');
+      if (
+        parent.origin !== 'https://inventory.invalid' ||
+        parent.username ||
+        parent.password ||
+        parent.pathname !== '/locations' ||
+        parent.searchParams.has('returnTo')
+      )
+        return fallback;
+      const canonicalParent = recordDetailReturnPath(
+        parents[0],
+        '/invalid-return',
+      );
+      if (
+        canonicalParent === '/invalid-return' ||
+        (parent.hash &&
+          new URL(canonicalParent, 'https://inventory.invalid').hash !==
+            parent.hash)
+      )
+        return fallback;
+      const result = new URL(accepted, 'https://inventory.invalid');
+      result.searchParams.set('returnTo', canonicalParent);
+      return result.pathname + result.search + result.hash;
+    }
     if (url.pathname === '/inventory' || /^\/sites\/[^/]+$/.test(url.pathname))
       return inventoryReturnPath(value, fallback);
     if (url.pathname === '/history') {

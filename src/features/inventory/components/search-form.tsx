@@ -14,7 +14,7 @@ import type { CategoryRef, LocationRef } from '../contracts-ui';
 import type { Site } from '@/features/custody/queries.server';
 import { field } from './read-ui';
 import { readFilters } from '../read-model';
-import { inventoryFilterParams } from '../scope-presentation';
+import { inventoryViewParams } from '../view-preferences';
 
 type FilterKey =
   'q' | 'type' | 'status' | 'category' | 'location' | 'site' | 'lowStock';
@@ -55,7 +55,7 @@ export function SearchForm({
   const filters = readFilters(params);
   const router = useRouter();
   const [pending, startTransition] = useRouteTransition();
-  const appliedSignature = inventoryFilterParams(params).toString();
+  const appliedSignature = inventoryViewParams(params).toString();
   const [draft, setDraft] = useState(params);
   const [syncedSignature, setSyncedSignature] = useState(appliedSignature);
   const [unsentEdits, setUnsentEdits] = useState(false);
@@ -83,9 +83,21 @@ export function SearchForm({
       setDraft(Object.fromEntries(new URLSearchParams(window.location.search)));
     }
     window.addEventListener('popstate', restoreHistory);
+    function restoreView(event: Event) {
+      cancelDebounce();
+      composing.current = false;
+      setUnsentEdits(false);
+      const next = Object.fromEntries(
+        new URLSearchParams((event as CustomEvent<string>).detail),
+      );
+      draftRef.current = next;
+      setDraft(next);
+    }
+    window.addEventListener('inventory-view-navigation', restoreView);
     return () => {
       cancelDebounce();
       window.removeEventListener('popstate', restoreHistory);
+      window.removeEventListener('inventory-view-navigation', restoreView);
     };
   }, []);
   useEffect(() => {
@@ -138,7 +150,7 @@ export function SearchForm({
   ) {
     cancelDebounce();
     setUnsentEdits(false);
-    const query = inventoryFilterParams(next).toString();
+    const query = inventoryViewParams(next).toString();
     const href = action + (query ? '?' + query : '');
     startTransition(() => {
       if (deliberate) router.push(href, { scroll: false });

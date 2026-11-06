@@ -4,7 +4,10 @@ import {
   RecordTitle,
   InventoryBackLink,
 } from '@/components/experience/record-transition';
-import { locationDetailReturnPath } from '@/features/inventory/detail-return';
+import {
+  locationDetailReturnPath,
+  recordDetailReturnPath,
+} from '@/features/inventory/detail-return';
 import { routeReadyProps } from '@/components/experience/route-ready.server';
 import { PrivateDocumentTitle } from '@/components/auth/private-document-title';
 import { readLocationPage } from './read.server';
@@ -24,14 +27,9 @@ import {
   statusScope,
   hasInventoryConstraints,
 } from '@/features/inventory/scope-presentation';
+import { getLocations } from '@/features/inventory/queries.server';
 import {
-  getInventory,
-  getLocations,
-} from '@/features/inventory/queries.server';
-import {
-  InventoryRows,
   Pagination,
-  InventoryCount,
   LocationCode,
   panel,
 } from '@/features/inventory/components/read-ui';
@@ -54,22 +52,39 @@ export default async function LocationPage({
   const location = await readLocationPage(code);
   if (!location) notFound();
   const [result, locations] = await Promise.all([
-    getInventory({ ...filters, location: code }),
+    getInventoryView({ ...filters, location: code }),
     getLocations(),
   ]);
   const children = locations.filter((l) => l.parentId === location.id);
   const filter = readFilters({ ...filters, location: code });
   const scopeParams = inventoryFilterParams({ ...filters, location: code });
+  const navigationParams = inventoryViewParams({ ...filters, location: code });
+  const display = readViewPreferences(filters);
+  const [{ member }, catalog] = await Promise.all([
+    requireMember(),
+    getInventoryColumns(filters),
+  ]);
   const normalizedParams = {
-    ...Object.fromEntries(scopeParams),
+    ...Object.fromEntries(navigationParams),
     ...(filters.returnTo ? { returnTo } : {}),
     page: String(filter.page),
   };
   const base = '/locations/' + encodeURIComponent(code);
-  const recovery = pageRecoveryHref(base, normalizedParams, result);
+  const inventoryReturnParams = new URLSearchParams(normalizedParams);
+  // The path already owns the location scope. Do not invent query filters or
+  // pagination absent from the raw route used to admit this primary.
+  if (!filters.location) inventoryReturnParams.delete('location');
+  if (!filters.page) inventoryReturnParams.delete('page');
+  inventoryReturnParams.set('view', display.preferences.view);
+  inventoryReturnParams.set('density', display.preferences.density);
+  const inventoryReturnTo = base + '?' + inventoryReturnParams;
+  const recovery =
+    !result.error && !display.error
+      ? pageRecoveryHref(base, normalizedParams, result)
+      : null;
   if (recovery) redirect(recovery);
   const scopeHref = (status: string) => {
-    const query = inventoryFilterParams({ ...filters, status });
+    const query = inventoryViewParams({ ...filters, status });
     query.delete('location');
     if (filters.returnTo) query.set('returnTo', returnTo);
     return base + (query.size ? '?' + query : '');
@@ -87,6 +102,7 @@ export default async function LocationPage({
     <ProtectedPrivacyContent routeKey={readiness.routeKey}>
       <RouteReady
         {...readiness}
+        pairingHref={recordDetailReturnPath(inventoryReturnTo)}
         pairedInventory
         conventionalPrimary
         capture="regions"
@@ -149,7 +165,7 @@ export default async function LocationPage({
                 className="min-h-11 py-3 text-cyan-300 underline"
                 href={'/api/exports/inventory?' + scopeParams}
               >
-                Export
+                Matching holdings CSV
               </ExportLink>
             </nav>
           </InventoryCaptureGroup>
@@ -213,37 +229,72 @@ export default async function LocationPage({
                   ? 'Inventory at this location'
                   : 'Inventory in this area and its descendants'}
               </h2>
-              <InventoryCount result={result} compact />
+              {!result.error && !display.error && (
+                <InventoryViewCount result={result} />
+              )}
             </div>
-            <InventoryRows
-              rows={result.rows}
-              currentLocationId={location.id}
-              emptyState={
-                <div className={panel}>
-                  <p>
-                    {constrained
-                      ? 'No inventory here matches the selected filters.'
-                      : filter.status === 'active'
-                        ? 'No active inventory here.'
-                        : filter.status === 'historical'
-                          ? 'No archived or retired inventory here.'
-                          : 'No recorded inventory here.'}
-                  </p>
-                  <Link
-                    className="inline-flex min-h-11 items-center text-cyan-300 underline"
-                    href={
-                      filter.status === 'active'
-                        ? scopeHref('all')
-                        : '/inventory'
-                    }
-                  >
-                    {filter.status === 'active'
-                      ? 'Include all statuses'
-                      : 'Search all inventory'}
-                  </Link>
-                </div>
-              }
-            />
+            {member.user_id && process.env.NEXT_PUBLIC_SUPABASE_URL && (
+              <InventoryViewControls
+                params={{ ...filters, location: code }}
+                columns={catalog.fields}
+                truncated={catalog.truncated}
+                catalogError={catalog.error}
+                memberId={member.user_id}
+                backend={process.env.NEXT_PUBLIC_SUPABASE_URL}
+                action={base}
+              />
+            )}
+            {result.error && (
+              <div
+                role="alert"
+                className="experience-surface mb-3 p-4 text-amber-200"
+              >
+                <p>{result.error}</p>
+                <Link
+                  className="min-h-11 inline-flex items-center text-cyan-300 underline"
+                  href={`${base}?${inventoryViewParams({ ...filters, location: code, view: 'holdings' })}`}
+                >
+                  Use Holdings view
+                </Link>
+              </div>
+            )}
+            {display.error && (
+              <p role="alert" className="text-amber-200">
+                {display.error}
+              </p>
+            )}
+            {result.rows.length > 0 ? (
+              <InventoryViewRows
+                result={result}
+                preferences={display.preferences}
+                columns={catalog.fields}
+                returnTo={inventoryReturnTo}
+                currentLocationId={location.id}
+                currentLocationCode={location.code}
+              />
+            ) : !display.error && !result.error ? (
+              <div className={panel}>
+                <p>
+                  {constrained
+                    ? 'No inventory here matches the selected filters.'
+                    : filter.status === 'active'
+                      ? 'No active inventory here.'
+                      : filter.status === 'historical'
+                        ? 'No archived or retired inventory here.'
+                        : 'No recorded inventory here.'}
+                </p>
+                <Link
+                  className="inline-flex min-h-11 items-center text-cyan-300 underline"
+                  href={
+                    filter.status === 'active' ? scopeHref('all') : '/inventory'
+                  }
+                >
+                  {filter.status === 'active'
+                    ? 'Include all statuses'
+                    : 'Search all inventory'}
+                </Link>
+              </div>
+            ) : null}
             <Pagination
               result={result}
               base={'/locations/' + encodeURIComponent(code)}
@@ -256,3 +307,16 @@ export default async function LocationPage({
   );
 }
 import { ExportLink } from '@/components/operational-time';
+import {
+  getInventoryView,
+  getInventoryColumns,
+} from '@/features/inventory/views.server';
+import { InventoryViewRows } from '@/features/inventory/components/view-rows';
+import { InventoryViewControls } from '@/features/inventory/components/view-controls';
+import {
+  inventoryViewParams,
+  readViewPreferences,
+} from '@/features/inventory/view-preferences';
+import { requireMember } from '@/lib/auth/session.server';
+
+import { InventoryViewCount } from '@/features/inventory/components/view-count';

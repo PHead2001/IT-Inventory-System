@@ -32,10 +32,10 @@ scope/SHA. They establish neither final runtime acceptance nor the latest PR HEA
 A308/A403 are in the active Overview/restock release slice with final acceptance
 pending. All 76 rows and their full requirements remain present.
 
-A308's current ordinary rows, quantity detail, detailed low-stock dashboard and low-stock CSV reuse
-the exact shortfall helper. The future P11 `view-rows` consumer does not exist in
-this release tree; its A308 hookup remains required when that consumer lands.
-This follow-up edge does not remove P11 or broaden accepted A308 coverage.
+A308's ordinary rows, quantity detail, detailed low-stock dashboard and low-stock
+CSV reuse the exact shortfall helper. The local P11 grouped-row preparation now
+connects that same helper to item-wide availability; filtered holdings never
+become its shortfall input. This does not broaden accepted A308 coverage.
 
 ## Current delivery snapshot — 2026-11-05
 
@@ -950,3 +950,20 @@ comparison. No final new-commit CI or hosted acceptance is claimed.
 The retained run directory also holds `receipt.json`, `fixture-cleanup.json` and
 `e2e-performance.json`. All 76 acceptance rows, their history and pending broader
 criteria remain unchanged. No production, hosted configuration or data changed.
+
+## Selective grouped inventory preparation — 2026-11-06
+
+U303/A305 donor `31bc1d41` is selectively reconciled onto PR66 base
+`beba99049655fe7d0e7fbfae59ab8d679e3bb4ad`. Current PR64/65/66 dispositions,
+readiness/privacy, shared navigation, Peek and presentation ownership are retained.
+Only the separately held reader-retirement fixes and their tests are adapted
+from the default worktree; history donor `45999655` is not imported.
+
+The approved grouped RPC/migration, RLS, response caps and decimal contracts are
+preserved. A308 uses the current shared shortfall helper and item-wide available
+quantity. [Inventory views](inventory-views.md) separates historical donor test
+counts from this uncommitted candidate. Focused regression execution, DB replay
+and upgrade, generated types, actual REST/concurrency/query-cost proof, populated
+desktop/390px Full/Reduced both-theme captures and exact-SHA certification remain
+required. All 76 rows, 75 base IDs and existing acceptance dispositions remain
+unchanged; source preparation is not runtime or whole-ID acceptance.

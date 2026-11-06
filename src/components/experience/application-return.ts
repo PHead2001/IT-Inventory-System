@@ -6,6 +6,8 @@ import {
   samePresentationTarget,
   sameTitleSource,
   matchesTitleListRoute,
+  isInventoryTitleTarget,
+  type InventoryTitleTarget,
   type PresentationTarget,
   type TitleTarget,
 } from './route-motion-state';
@@ -13,7 +15,7 @@ import { routeKey } from './route-key';
 import { createInitialInventoryAnchor } from './initial-inventory-anchor';
 
 type Authority = { key: string; ready: boolean } | null;
-type Source = Extract<TitleTarget, { source: { kind: 'inventory' } }>;
+type Source = InventoryTitleTarget;
 type Pending = {
   kind: 'forward' | 'back';
   source: Source;
@@ -222,9 +224,9 @@ export function createApplicationReturn(
       authority = read;
     },
     registerSource: (target: TitleTarget, element: HTMLElement) => {
-      if (target.source.kind !== 'inventory' || disposed) return () => {};
+      if (!isInventoryTitleTarget(target) || disposed) return () => {};
       const token = Symbol();
-      sources.set(token, { target: target as Source, element });
+      sources.set(token, { target, element });
       // Canonical readiness registers only after all child layout effects.
       return () => {
         sources.delete(token);
@@ -243,10 +245,10 @@ export function createApplicationReturn(
       if (
         transaction &&
         value?.ready &&
-        target.source.kind === 'inventory' &&
-        visibleSource(target as Source)
+        isInventoryTitleTarget(target) &&
+        visibleSource(target)
       )
-        transaction.stage = { kind: 'forward', source: target as Source };
+        transaction.stage = { kind: 'forward', source: target };
     },
     stageBack: (record: PresentationTarget, href: string) => {
       const value = grant();

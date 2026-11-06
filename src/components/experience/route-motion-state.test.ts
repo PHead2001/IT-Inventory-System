@@ -6,6 +6,8 @@ import {
   historyTitleTarget,
   locationTitleTarget,
   sameTitleSource,
+  groupedTitleTarget,
+  type InventorySource,
 } from './route-motion-state';
 import { routeKey } from './route-key';
 
@@ -22,6 +24,232 @@ const recordUuid = {
   kind: 'quantity' as const,
   id: '00000000-0000-4000-8000-000000000001',
 };
+const aggregateSource = { kind: 'inventory-aggregate' as const };
+const groupedHref =
+  '/inventory?density=comfortable&q=cable&view=items#inventory-row-2';
+it('binds the canonical directory parent into exact location aggregate pairing and Back', () => {
+  const parent =
+    '/locations?q=Closet&selected=ITC-S4B&level=ITC&expanded=ITC#location-row-desktop-tree-' +
+    recordUuid.id;
+  const rawParams = new URLSearchParams({ q: 'cable', returnTo: parent });
+  const raw = routeKey('/locations/ITC-S4B', rawParams);
+  const params = new URLSearchParams(rawParams);
+  params.set('view', 'items');
+  params.set('density', 'comfortable');
+  const href = '/locations/ITC-S4B?' + params + '#inventory-row-2';
+  const source: InventorySource = {
+    kind: 'location-inventory',
+    locationCode: 'ITC-S4B',
+    occurrence: { kind: 'aggregate' },
+  };
+  const target = groupedTitleTarget(recordUuid, source, href, raw)!;
+  expect(target).not.toBeNull();
+  expect(target.rawSourceRouteKey).toBe(raw);
+  expect(
+    new URL(target.listHref, 'https://inventory.invalid').searchParams.get(
+      'returnTo',
+    ),
+  ).toBe(parent);
+  const state = createRouteMotionState();
+  state.arm(target);
+  state.finish();
+  expect(state.backTarget(recordUuid, href)).toEqual(target);
+  params.set('returnTo', parent.replace('Closet', 'Office'));
+  expect(
+    state.backTarget(
+      recordUuid,
+      '/locations/ITC-S4B?' + params + '#inventory-row-2',
+    ),
+  ).toBeNull();
+  expect(
+    groupedTitleTarget(
+      recordUuid,
+      source,
+      href,
+      routeKey('/locations/ITC-S4B', params),
+    ),
+  ).toBeNull();
+});
+it('admits implicit server defaults only as explicit default grouped returns, retaining exact raw readiness', () => {
+  const raw = '/inventory?q=cable';
+  const target = groupedTitleTarget(
+    recordUuid,
+    aggregateSource,
+    groupedHref,
+    raw,
+  )!;
+  expect(target).not.toBeNull();
+  expect(target.rawSourceRouteKey).toBe(raw);
+  expect(matchesTitleListRoute(target, raw)).toBe(true);
+  expect(matchesTitleListRoute(target, '/inventory?q=cable&view=items')).toBe(
+    false,
+  );
+  expect(target).not.toHaveProperty('holding');
+  expect(
+    groupedTitleTarget(
+      recordUuid,
+      aggregateSource,
+      groupedHref,
+      '/inventory?columns=&q=cable',
+    ),
+  ).not.toBeNull();
+  const state = createRouteMotionState();
+  state.arm(target);
+  state.finish();
+  expect(state.backTarget(recordUuid, groupedHref)).toEqual(target);
+  expect(
+    state.backTarget(recordUuid, groupedHref.replace('row-2', 'row-3')),
+  ).toBeNull();
+  expect(
+    state.backTarget(recordUuid, groupedHref.replace('cable', 'charger')),
+  ).toBeNull();
+});
+it.each([
+  '/inventory?density=compact&q=cable',
+  '/inventory?q=cable&view=holdings',
+  '/inventory?q=cable&view=bad',
+  '/inventory?density=bad&q=cable',
+  '/inventory?q=cable&view=items&view=items',
+  '/inventory?density=comfortable&density=comfortable&q=cable',
+  '/inventory?columns=not-a-uuid&q=cable',
+  '/inventory?columns=' + recordUuid.id + ',' + recordUuid.id + '&q=cable',
+  '/inventory?q=charger',
+  '/inventory?q=cable#inventory-row-2',
+  'https://hostile.test/inventory?q=cable',
+  '/inventory?view=items&q=cable', // raw routeKey ordering must remain exact
+])('rejects conflicting, invalid or non-exact grouped raw state %s', (raw) => {
+  expect(
+    groupedTitleTarget(recordUuid, aggregateSource, groupedHref, raw),
+  ).toBeNull();
+});
+it.each(['ITC-S4B', 'ITC-4B'])(
+  'binds location aggregate/holding origins, encoded code and exact occurrence: %s',
+  (code) => {
+    const path = '/locations/' + encodeURIComponent(code);
+    const source: InventorySource = {
+      kind: 'location-inventory',
+      locationCode: code,
+      occurrence: { kind: 'aggregate' },
+    };
+    const href =
+      path + '?density=comfortable&page=2&view=items#inventory-row-1';
+    const aggregate = groupedTitleTarget(recordUuid, source, href)!;
+    const holding = groupedTitleTarget(
+      recordUuid,
+      {
+        ...source,
+        occurrence: {
+          kind: 'holding',
+          holding: { domain: 'storage', id: recordUuid.id },
+        },
+      },
+      href.replace('view=items', 'view=holdings'),
+    )!;
+    expect(aggregate).not.toBeNull();
+    expect(holding).not.toBeNull();
+    expect(sameTitleSource(aggregate, holding)).toBe(false);
+    expect(
+      sameTitleSource(
+        aggregate,
+        groupedTitleTarget(
+          recordUuid,
+          { ...source, locationCode: 'OTHER' },
+          href.replace(code, 'OTHER'),
+        )!,
+      ),
+    ).toBe(false);
+    const state = createRouteMotionState();
+    state.arm(holding);
+    state.finish();
+    expect(
+      state.backTarget(recordUuid, href.replace('view=items', 'view=holdings')),
+    ).toEqual(holding);
+    expect(state.backTarget(recordUuid, href)).toBeNull();
+    expect(
+      groupedTitleTarget(
+        recordUuid,
+        source,
+        href,
+        path + '?density=comfortable&page=3&view=items',
+      ),
+    ).toBeNull();
+  },
+);
+it.each(['.', '..', 'a/b', 'a\\b', 'bad code', 'bad\u0000code', ''])(
+  'rejects unsupported location source codes %j',
+  (locationCode) => {
+    expect(
+      groupedTitleTarget(
+        recordUuid,
+        {
+          kind: 'location-inventory',
+          locationCode,
+          occurrence: { kind: 'aggregate' },
+        },
+        '/locations/' +
+          encodeURIComponent(locationCode) +
+          '?view=items#inventory-row-2',
+      ),
+    ).toBeNull();
+  },
+);
+it('does not pair grouped source/view conflicts, malformed records or foreign targets', () => {
+  expect(groupedTitleTarget(record, aggregateSource, groupedHref)).toBeNull();
+  expect(
+    groupedTitleTarget(
+      recordUuid,
+      aggregateSource,
+      groupedHref.replace('view=items', 'view=holdings'),
+    ),
+  ).toBeNull();
+  expect(
+    groupedTitleTarget(
+      recordUuid,
+      aggregateSource,
+      'https://hostile.test' + groupedHref,
+    ),
+  ).toBeNull();
+  expect(
+    groupedTitleTarget(
+      recordUuid,
+      aggregateSource,
+      groupedHref.replace('row-2', 'not-row'),
+    ),
+  ).toBeNull();
+});
+
+it('never substitutes compact for absent density and preserves validated explicit columns', () => {
+  expect(
+    groupedTitleTarget(
+      recordUuid,
+      aggregateSource,
+      groupedHref.replace('comfortable', 'compact'),
+      '/inventory?q=cable',
+    ),
+  ).toBeNull();
+  expect(
+    groupedTitleTarget(
+      recordUuid,
+      aggregateSource,
+      groupedHref.replace('view=items', 'view=items&view=items'),
+    ),
+  ).toBeNull();
+  const href = groupedHref.replace(
+    'density=comfortable',
+    'columns=' + recordUuid.id + '&density=compact',
+  );
+  const raw =
+    '/inventory?columns=' +
+    recordUuid.id +
+    '&density=compact&q=cable&view=items';
+  const target = groupedTitleTarget(recordUuid, aggregateSource, href, raw)!;
+  expect(target).not.toBeNull();
+  expect(
+    new URL(target.listHref, 'https://inventory.invalid').searchParams.get(
+      'columns',
+    ),
+  ).toBe(recordUuid.id);
+});
 const event = {
   kind: 'quantity' as const,
   id: '00000000-0000-4000-8000-000000000002',

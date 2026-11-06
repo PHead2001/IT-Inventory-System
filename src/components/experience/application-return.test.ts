@@ -2,7 +2,12 @@ import { afterEach, expect, it, vi } from 'vitest';
 import { createApplicationReturn } from './application-return';
 import { createRouteReadiness } from './route-readiness';
 import { createRoutePendingState } from './route-pending-state';
-import { titleTarget, type HoldingIdentity } from './route-motion-state';
+import {
+  titleTarget,
+  groupedTitleTarget,
+  type InventorySource,
+  type HoldingIdentity,
+} from './route-motion-state';
 import { routeKey } from './route-key';
 import { observeTransitionCapture } from '@/components/forms/transition-capture';
 
@@ -28,13 +33,19 @@ afterEach(() => {
 function fixture(
   scope = '/inventory?q=cable&type=quantity',
   forwardReturn = scope + '#inventory-row-2',
+  source?: InventorySource,
 ) {
+  const record = source
+    ? { kind: 'quantity' as const, id: '00000000-0000-4000-8000-000000000007' }
+    : { kind: 'quantity' as const, id: 'cable' };
   const returned = scope + '#inventory-row-2';
   const list = new URL(scope, location.origin);
   const canonicalScope = routeKey(list.pathname, list.searchParams);
-  const target = titleTarget(record, returned, holding, canonicalScope)!;
+  const target = source
+    ? groupedTitleTarget(record, source, returned, canonicalScope)!
+    : titleTarget(record, returned, holding, canonicalScope)!;
   const detail =
-    '/inventory/quantity/cable?' +
+    `/inventory/quantity/${record.id}?` +
     new URLSearchParams({ returnTo: forwardReturn });
   history.replaceState(null, '', scope);
   const navigation = new EventTarget();
@@ -98,15 +109,17 @@ function fixture(
       row.append(link);
       section.append(row);
       const source = options.wrongHolding
-        ? titleTarget(
-            record,
-            returned,
-            {
-              domain: 'storage',
-              id: '00000000-0000-4000-8000-000000000001',
-            },
-            canonicalScope,
-          )!
+        ? target.source.kind !== 'inventory'
+          ? { ...target, id: '00000000-0000-4000-8000-000000000008' }
+          : titleTarget(
+              record,
+              returned,
+              {
+                domain: 'storage',
+                id: '00000000-0000-4000-8000-000000000001',
+              },
+              canonicalScope,
+            )!
         : target;
       unregisterSources.push(controller.registerSource(source, link));
     }
@@ -250,6 +263,141 @@ it('leaves an already visible Full heading untouched after the pre-capture revea
   f.revealDetail({ top: 120 });
   await Promise.resolve();
   expect(f.forwardScroll).not.toHaveBeenCalled();
+});
+
+const groupedSources: InventorySource[] = [
+  { kind: 'inventory-aggregate' },
+  {
+    kind: 'location-inventory',
+    locationCode: 'ITC-S4B',
+    occurrence: { kind: 'aggregate' },
+  },
+  {
+    kind: 'location-inventory',
+    locationCode: 'ITC-S4B',
+    occurrence: {
+      kind: 'holding',
+      holding: {
+        domain: 'storage',
+        id: '00000000-0000-4000-8000-000000000003',
+      },
+    },
+  },
+];
+function groupedScope(source: InventorySource) {
+  const path =
+    source.kind === 'inventory-aggregate' ? '/inventory' : '/locations/ITC-S4B';
+  return (
+    path +
+    '?density=comfortable&q=cable&view=' +
+    (source.kind === 'location-inventory' &&
+    source.occurrence.kind === 'holding'
+      ? 'holdings'
+      : 'items')
+  );
+}
+it.each(['aggregate', 'holding'] as const)(
+  'preserves the filtered tree parent after location %s -> record -> App Back',
+  async (kind) => {
+    const parent =
+      '/locations?q=Closet&selected=ITC-S4B&level=ITC&expanded=ITC#location-row-desktop-tree-00000000-0000-4000-8000-000000000001';
+    const source: InventorySource = {
+      kind: 'location-inventory',
+      locationCode: 'ITC-S4B',
+      occurrence:
+        kind === 'aggregate'
+          ? { kind: 'aggregate' }
+          : { kind: 'holding', holding: { domain: 'unplaced' } },
+    };
+    const scope =
+      '/locations/ITC-S4B?' +
+      new URLSearchParams({
+        q: 'cable',
+        returnTo: parent,
+        view: kind === 'aggregate' ? 'items' : 'holdings',
+        density: 'comfortable',
+      });
+    const f = fixture(scope, scope + '#inventory-row-2', source);
+    const detail = new URL(f.detail, location.origin);
+    expect(
+      new URL(
+        detail.searchParams.get('returnTo')!,
+        location.origin,
+      ).searchParams.get('returnTo'),
+    ).toBe(parent);
+    f.navigateForward();
+    f.revealDetail();
+    await Promise.resolve();
+    f.back();
+    f.reveal();
+    await Promise.resolve();
+    expect(f.scroll).toHaveBeenCalledExactlyOnceWith({
+      block: 'start',
+      inline: 'nearest',
+      behavior: 'instant',
+    });
+    expect(location.pathname).toBe('/locations/ITC-S4B');
+    expect(location.hash).toBe('#inventory-row-2');
+    expect(new URL(location.href).searchParams.get('returnTo')).toBe(parent);
+  },
+);
+it.each(
+  groupedSources.flatMap((source) =>
+    ['full', 'reduced'].map((mode) => ({ source, mode })),
+  ),
+)(
+  'repairs the exact grouped occurrence after consumed-fragment App Back: %j',
+  async ({ source, mode }) => {
+    document.documentElement.dataset.motion = mode;
+    const scope = groupedScope(source);
+    const f = fixture(scope, scope + '#inventory-row-2', source);
+    f.navigateForward();
+    f.revealDetail();
+    await Promise.resolve();
+    // A prior native fragment is already consumed; App Back must use the source.
+    f.back();
+    f.reveal();
+    await Promise.resolve();
+    expect(f.scroll).toHaveBeenCalledExactlyOnceWith({
+      block: 'start',
+      inline: 'nearest',
+      behavior: 'instant',
+    });
+    delete document.documentElement.dataset.motion;
+  },
+);
+it.each(
+  groupedSources.flatMap((source) =>
+    [
+      'hidden',
+      'duplicateAnchor',
+      'wrongHolding',
+      'wrongActor',
+      'missing',
+      'authority',
+      'native',
+      'dirty',
+    ].map((failure) => ({ source, failure })),
+  ),
+)('fails closed for a grouped return %j', async ({ source, failure }) => {
+  const scope = groupedScope(source);
+  const f = fixture(scope, scope + '#inventory-row-2', source);
+  f.navigateForward();
+  f.revealDetail();
+  await Promise.resolve();
+  f.back();
+  if (failure === 'authority') f.deny();
+  if (failure === 'native') window.dispatchEvent(new PopStateEvent('popstate'));
+  if (failure === 'dirty') f.controller.invalidate();
+  f.reveal({
+    hidden: failure === 'hidden',
+    duplicateAnchor: failure === 'duplicateAnchor',
+    wrongHolding: failure === 'wrongHolding',
+    wrongActor: failure === 'wrongActor',
+    count: failure === 'missing' ? 0 : 1,
+  });
+  await Promise.resolve();
+  expect(f.scroll).not.toHaveBeenCalled();
 });
 
 it('places a fresh heading below a fixed header and its scroll margin without changing focus', async () => {
