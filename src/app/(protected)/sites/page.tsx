@@ -1,3 +1,4 @@
+import { ListEntrance } from '@/components/experience/list-feedback';
 import { RouteReady } from '@/components/experience/route-ready';
 import { routeReadyProps } from '@/components/experience/route-ready.server';
 import Link from '@/components/experience/route-link';
@@ -73,7 +74,10 @@ export default async function SitesPage({
             </button>
           </form>
           {rows.length ? (
-            <ul className="experience-surface divide-y divide-cyan-100/10 overflow-hidden">
+            <ListEntrance
+              identities={rows.map((site) => site.id)}
+              className="experience-surface divide-y divide-cyan-100/10 overflow-hidden"
+            >
               {rows.map((site) => (
                 <li
                   className="experience-spotlight min-w-0 p-4 transition-colors hover:bg-cyan-100/5"
@@ -95,7 +99,7 @@ export default async function SitesPage({
                   )}
                 </li>
               ))}
-            </ul>
+            </ListEntrance>
           ) : (
             <p className={panel}>No sites match these filters.</p>
           )}

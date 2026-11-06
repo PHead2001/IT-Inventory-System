@@ -6,6 +6,7 @@ import fixture from '../fixtures/auth.json' with { type: 'json' };
 import { setLocalReducedMotion } from './motion-settings';
 import { writeFileSync } from 'node:fs';
 import { withFailureGeometry } from './failure-geometry';
+import { countFeedback } from './count-feedback-support';
 
 async function signIn(page: Page) {
   await page.goto('/login');
@@ -479,9 +480,7 @@ test('representative shell and auth surfaces render at desktop and phone sizes w
       (url) =>
         url.pathname === '/inventory' && url.searchParams.get('q') === query,
     );
-    await expect(
-      page.getByText('2 matching rows', { exact: true }),
-    ).toBeVisible();
+    await expect(countFeedback(page, '2 matching rows')).toBeVisible();
     const activeFilters = page.getByRole('navigation', {
       name: 'Active inventory filters',
     });

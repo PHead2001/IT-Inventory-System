@@ -1,9 +1,14 @@
 'use client';
+import {
+  ConfirmedSuccess,
+  useFeedbackOwner,
+} from '@/components/experience/confirmed-success';
+
 import { useRouteTask } from '@/components/experience/route-pending';
 import { useRouteRouter as useRouter } from '@/components/experience/route-pending';
 
 import { useRouteActionResult } from '@/components/experience/route-pending';
-import { useRef, useState } from 'react';
+import { useId, useRef, useState } from 'react';
 
 import Link from '@/components/experience/route-link';
 import {
@@ -27,6 +32,7 @@ import { custodyEventLabel } from './vocabulary';
 import {
   useReportTaskState,
   useTaskReset,
+  useTaskInteraction,
 } from '@/features/inventory/components/task-state';
 import type { Site, SiteHolding } from './queries.server';
 import type { CustodyState } from './contracts';
@@ -141,8 +147,11 @@ function CustodyFields(latest: Props & { startAnother: () => void }) {
     currentSite,
   } = latest;
   const resetTask = useTaskReset();
+  const canStartTask = useTaskInteraction();
   const router = useRouter();
-  const scope = `${kind}-${action}`;
+  const successOwner = useFeedbackOwner(latest.actorId);
+  const instanceId = useId();
+  const scope = `${instanceId}-${kind}-${action}`;
   const [pending, startTask] = useRouteTask();
   const [state, setState] = useState<CustodyState | null>(null);
   const [closed, setClosed] = useState(false);
@@ -411,6 +420,7 @@ function CustodyFields(latest: Props & { startAnother: () => void }) {
   const validation = useFormValidation(collectIssues);
   const submit = (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+    if (!canStartTask()) return;
     if (
       pending ||
       inFlight.current ||
@@ -505,6 +515,7 @@ function CustodyFields(latest: Props & { startAnother: () => void }) {
     inFlight.current = true;
     reportTask({ pending: true });
     startTask(async () => {
+      if (!canStartTask()) return;
       try {
         const result = await observeRouteActionResult(submitCustody(command));
         setState(result);
@@ -556,6 +567,11 @@ function CustodyFields(latest: Props & { startAnother: () => void }) {
           className={panel + ' experience-spotlight max-w-4xl space-y-4'}
           aria-label="Custody completion"
         >
+          <ConfirmedSuccess
+            owner={successOwner}
+            eventId={state.eventId}
+            changed={state.changed}
+          />
           {state.custody ? (
             <>
               <CustodyReceiptView
@@ -621,6 +637,7 @@ function CustodyFields(latest: Props & { startAnother: () => void }) {
                   disabled={pending || actorMismatch}
                   onClick={() =>
                     startTask(async () => {
+                      if (!canStartTask()) return;
                       const detail = await loadCustodyReceipt({
                         kind,
                         entityId,
@@ -783,7 +800,7 @@ function CustodyFields(latest: Props & { startAnother: () => void }) {
         )}
         {fromStorage && (
           <LocationPicker
-            id={`${kind}-${action}-source`}
+            id={scope + '-source'}
             label="Storage source"
             locations={locations}
             mode="source"
@@ -818,7 +835,7 @@ function CustodyFields(latest: Props & { startAnother: () => void }) {
         {toStorage && (
           <>
             <LocationPicker
-              id={`${kind}-${action}-destination`}
+              id={scope + '-destination'}
               label="Storage location"
               locations={locations}
               mode="destination"

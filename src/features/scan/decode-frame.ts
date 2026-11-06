@@ -6,6 +6,7 @@ import {
   Result,
 } from '@zxing/library';
 import jsQR from 'jsqr';
+import { retainDecoderGeometry } from './decoder-geometry';
 
 // Limit fallback work even when a phone offers a 4K camera stream. The normal
 // ZXing pass still sees the original frame; only the QR fallback is resized.
@@ -37,7 +38,16 @@ export function decodeInventoryFrame(
   decodePrimary: () => Result,
 ): Result {
   try {
-    return decodePrimary();
+    const result = decodePrimary();
+    return retainDecoderGeometry(result, {
+      width: canvas.width,
+      height: canvas.height,
+      points: (result.getResultPoints() ?? []).map((point) => ({
+        x: point.getX(),
+        y: point.getY(),
+      })),
+      corners: false,
+    });
   } catch (primaryError) {
     if (
       !(primaryError instanceof NotFoundException) &&
@@ -55,14 +65,29 @@ export function decodeInventoryFrame(
         const qr = jsQR(pixels.data, pixels.width, pixels.height, {
           inversionAttempts: 'dontInvert',
         });
-        if (qr)
-          return new Result(
+        if (qr) {
+          const result = new Result(
             qr.data,
             new Uint8Array(qr.binaryData),
             qr.binaryData.length * 8,
             [],
             BarcodeFormat.QR_CODE,
           );
+          return retainDecoderGeometry(result, {
+            width: canvas.width,
+            height: canvas.height,
+            points: [
+              qr.location.topLeftCorner,
+              qr.location.topRightCorner,
+              qr.location.bottomRightCorner,
+              qr.location.bottomLeftCorner,
+            ].map((point) => ({
+              x: (point.x * canvas.width) / frame.width,
+              y: (point.y * canvas.height) / frame.height,
+            })),
+            corners: true,
+          });
+        }
       }
     } catch {
       // A failed canvas read or QR fallback is an ordinary scan miss. Keep the

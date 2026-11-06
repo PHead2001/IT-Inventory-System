@@ -1,4 +1,7 @@
 'use client';
+
+import { SpringPresence } from '@/components/experience/spring-presence';
+import { ListEntrance } from '@/components/experience/list-feedback';
 import { afterTransitionCapture } from '@/components/forms/transition-capture';
 
 import {
@@ -751,7 +754,7 @@ export function LocationPicker({
           </MapLoadingContext>
         </InventoryCaptureRegionsContext>
       )}
-      {(validationMessage || visibleOpen) && (
+      {(validationMessage || visibleOpen || !disabled) && (
         <InventoryCaptureGroup
           region={
             mode === 'source'
@@ -765,279 +768,283 @@ export function LocationPicker({
               {validationMessage}
             </p>
           )}
-          {visibleOpen && (
-            <div
-              style={
-                {
-                  '--picker-left': panelPosition.left + 'px',
-                  '--picker-top': panelPosition.top + 'px',
-                  '--picker-width': panelPosition.width + 'px',
-                  '--picker-height': panelPosition.height + 'px',
-                  '--picker-mobile-top': mobileViewport
-                    ? mobileViewport.top + 'px'
-                    : '0.75rem',
-                  '--picker-mobile-height': mobileViewport
-                    ? mobileViewport.height + 'px'
-                    : 'calc(100dvh - 1.5rem)',
-                } as React.CSSProperties
-              }
-              className="fixed inset-x-3 top-[var(--picker-mobile-top)] z-50 flex h-[var(--picker-mobile-height)] min-h-0 flex-col rounded-lg border border-slate-600 bg-slate-950 p-3 shadow-2xl sm:inset-auto sm:left-[var(--picker-left)] sm:top-[var(--picker-top)] sm:h-[var(--picker-height)] sm:w-[var(--picker-width)]"
-            >
-              <div className="mb-2 flex items-center justify-between gap-2">
-                <span className="text-sm font-semibold">Choose location</span>
-                <button
-                  type="button"
-                  onClick={() => close(true)}
-                  className="min-h-11 min-w-11 rounded text-cyan-300 focus-visible:outline-2 focus-visible:outline-cyan-400"
-                  aria-label="Close location picker"
-                >
-                  Close
-                </button>
-              </div>
-              <input
-                ref={searchRef}
-                id={searchId}
-                type="search"
-                role="combobox"
-                value={query}
-                autoComplete="off"
-                placeholder="Search name, code or area"
-                aria-label="Search locations"
-                aria-expanded="true"
-                aria-haspopup={searching ? 'listbox' : 'tree'}
-                aria-autocomplete={searching ? 'list' : 'none'}
-                aria-controls={listId}
-                aria-activedescendant={
-                  loading || loadError
-                    ? undefined
-                    : searching
-                      ? activeOptionIndex >= 0
-                        ? listId + '-' + activeOptionIndex
-                        : undefined
-                      : activeTreeIndex >= 0
-                        ? listId + '-tree-' + activeTreeIndex
-                        : undefined
-                }
-                onChange={(event) => {
-                  setQuery(event.target.value);
-                  setActiveIndex(0);
-                }}
-                onKeyDown={searchKey}
-                className="min-h-11 w-full rounded-md border border-slate-600 bg-slate-900 px-3 text-slate-100 outline-none focus-visible:border-cyan-400"
-              />
-              <div
-                id={listId}
-                role={searching ? 'listbox' : 'tree'}
-                aria-label={label}
-                className="mt-2 min-h-0 flex-1 overflow-y-auto overscroll-contain rounded border border-slate-800"
-                style={{
-                  scrollbarColor:
-                    'var(--color-slate-600) var(--color-slate-950)',
-                  scrollbarWidth: 'auto',
-                }}
+          <SpringPresence
+            open={visibleOpen}
+            instanceKey={searchId}
+            kind="popover"
+            retainExit
+            style={
+              {
+                '--picker-left': panelPosition.left + 'px',
+                '--picker-top': panelPosition.top + 'px',
+                '--picker-width': panelPosition.width + 'px',
+                '--picker-height': panelPosition.height + 'px',
+                '--picker-mobile-top': mobileViewport
+                  ? mobileViewport.top + 'px'
+                  : '0.75rem',
+                '--picker-mobile-height': mobileViewport
+                  ? mobileViewport.height + 'px'
+                  : 'calc(100dvh - 1.5rem)',
+              } as React.CSSProperties
+            }
+            className="fixed inset-x-3 top-[var(--picker-mobile-top)] z-50 flex h-[var(--picker-mobile-height)] min-h-0 flex-col rounded-lg border border-slate-600 bg-slate-950 p-3 shadow-2xl sm:inset-auto sm:left-[var(--picker-left)] sm:top-[var(--picker-top)] sm:h-[var(--picker-height)] sm:w-[var(--picker-width)]"
+          >
+            <div className="mb-2 flex items-center justify-between gap-2">
+              <span className="text-sm font-semibold">Choose location</span>
+              <button
+                type="button"
+                onClick={() => close(true)}
+                className="min-h-11 min-w-11 rounded text-cyan-300 focus-visible:outline-2 focus-visible:outline-cyan-400"
+                aria-label="Close location picker"
               >
-                {loading && (
-                  <p role="status" className="p-3 text-sm text-slate-300">
-                    Loading locations…
-                  </p>
-                )}
-                {loadError && (
-                  <p role="alert" className="p-3 text-sm text-amber-200">
-                    {loadError}
-                  </p>
-                )}
-                {!loading &&
-                  !loadError &&
-                  (searching
-                    ? options.length === 0
-                    : treeItems.length === 0) && (
-                    <p role="status" className="p-3 text-sm text-slate-300">
-                      No matching locations.
-                    </p>
-                  )}
-                {!loading &&
-                  !loadError &&
-                  (searching ? options : []).map((location, index) => {
-                    const optionValue = location
-                      ? pickerValue(location, mode)
-                      : '';
-                    return (
-                      <div key={location?.id ?? 'all'} role="presentation">
-                        <button
-                          type="button"
-                          role="option"
-                          aria-label={
-                            location
-                              ? `${location.name}, ${location.breadcrumb}, ${location.code}${stockLabel(location) ? ', ' + stockLabel(location) : ''}`
-                              : emptyAccessibleLabel
-                          }
-                          id={listId + '-' + index}
-                          aria-selected={selectedValue === optionValue}
-                          onMouseEnter={() => setActiveIndex(index)}
-                          onClick={() => choose(optionValue)}
-                          className={
-                            'flex min-h-11 w-full items-center justify-between gap-2 border-b border-slate-800 px-3 py-2 text-left text-sm hover:bg-slate-800 focus-visible:outline-2 focus-visible:outline-inset focus-visible:outline-cyan-400 ' +
-                            (index === activeOptionIndex ? 'bg-slate-800 ' : '')
-                          }
-                        >
-                          <span className="min-w-0 flex-1">
-                            <span className="block font-medium break-words text-slate-100">
-                              {location?.name ?? emptyLabel}
-                              {selectedValue === optionValue ? ' ✓' : ''}
-                            </span>
-                            <span className="block break-words text-xs text-slate-400">
-                              {location?.breadcrumb ??
-                                (emptyLabel === 'All locations'
-                                  ? 'No location filter'
-                                  : emptyLabel)}
-                            </span>
-                            {stockLabel(location) && (
-                              <span className="block text-sm text-slate-300">
-                                {stockLabel(location)}
-                              </span>
-                            )}
-                            {location && (
-                              <span className="experience-code mt-1 block w-fit max-w-full rounded bg-slate-900 px-1.5 py-0.5 text-sm font-normal break-all text-slate-400">
-                                {location.code}
-                              </span>
-                            )}
-                          </span>
-                        </button>
-                      </div>
-                    );
-                  })}
-                {!loading &&
-                  !loadError &&
-                  !searching &&
-                  treeItems.map((row, index) => {
-                    const location = row?.location;
-                    const rowId = location?.id ?? 'all';
-                    const isNavigation = Boolean(row && !row.selectable);
-                    const isGroup = Boolean(
-                      row && (!row.location.can_hold_inventory || isNavigation),
-                    );
-                    const siblings = row
-                      ? treeRows.filter(
-                          (item) => item.parentId === row.parentId,
-                        )
-                      : treeRows.filter((item) => item.parentId === null);
-                    const rootOffset =
-                      allowAll && (!row || row.parentId === null) ? 1 : 0;
-                    const selectedRow =
-                      (!row || row.selectable) &&
-                      selectedValue ===
-                        (location ? pickerValue(location, mode) : '') &&
-                      Boolean(location || allowAll);
-                    const isExpanded = Boolean(row && expanded.has(rowId));
-                    return (
-                      <div
-                        key={rowId}
-                        role="presentation"
-                        className="relative border-b border-slate-800"
-                      >
-                        <button
-                          type="button"
-                          role="treeitem"
-                          id={listId + '-tree-' + index}
-                          aria-level={row ? row.depth + 1 : 1}
-                          aria-posinset={
-                            row
-                              ? siblings.findIndex(
-                                  (item) => item.location.id === rowId,
-                                ) +
-                                1 +
-                                rootOffset
-                              : 1
-                          }
-                          aria-setsize={siblings.length + rootOffset}
-                          aria-expanded={
-                            row?.hasChildren ? isExpanded : undefined
-                          }
-                          aria-selected={
-                            row?.selectable || !row ? selectedRow : undefined
-                          }
-                          aria-label={
-                            location
-                              ? `${location.name}, ${isNavigation ? 'navigation group' : isGroup ? 'selectable group' : 'selectable location'}, ${location.code}${!isNavigation && stockLabel(location) ? ', ' + stockLabel(location) : ''}`
-                              : emptyAccessibleLabel
-                          }
-                          tabIndex={
-                            effectiveActiveTreeId === rowId ||
-                            (effectiveActiveTreeId === null &&
-                              treeItems[0] === row)
-                              ? 0
-                              : -1
-                          }
-                          onMouseEnter={() => setActiveTreeId(rowId)}
-                          onFocus={() => setActiveTreeId(rowId)}
-                          onKeyDown={(event) => treeKey(event, row)}
-                          onClick={(event) => {
-                            setActiveTreeId(rowId);
-                            if (
-                              row?.hasChildren &&
-                              (event.target as HTMLElement).closest(
-                                '[data-disclosure]',
-                              )
-                            )
-                              expandRow(row, !isExpanded);
-                            else activateTree(row);
-                          }}
-                          style={{
-                            paddingLeft: `${12 + (row?.depth ?? 0) * 16}px`,
-                          }}
-                          className={
-                            'flex min-h-11 w-full items-center gap-2 py-2 pr-2 text-left text-sm focus-visible:outline-2 focus-visible:outline-inset focus-visible:outline-cyan-400 hover:bg-slate-800 ' +
-                            (effectiveActiveTreeId === rowId
-                              ? 'bg-slate-800 '
-                              : '') +
-                            (isGroup
-                              ? 'bg-slate-900/70 text-slate-300 '
-                              : 'text-slate-100 ')
-                          }
-                        >
-                          <span
-                            data-disclosure={row?.hasChildren ? '' : undefined}
-                            aria-hidden="true"
-                            className={
-                              'flex size-7 shrink-0 items-center justify-center rounded ' +
-                              (row?.hasChildren
-                                ? 'border border-slate-600 text-cyan-300'
-                                : 'text-slate-500')
-                            }
-                          >
-                            {row?.hasChildren ? (isExpanded ? '⌄' : '›') : '·'}
-                          </span>
-                          <span className="min-w-0 flex-1 font-medium break-words">
-                            <span className="block">
-                              {location?.name ?? emptyLabel}
-                              {selectedRow ? ' ✓' : ''}
-                            </span>
-                            {!isNavigation && stockLabel(location) && (
-                              <span className="block text-sm font-normal text-slate-300">
-                                {stockLabel(location)}
-                              </span>
-                            )}
-                            {isGroup && (
-                              <span className="ml-2 text-xs font-normal text-slate-400">
-                                {row?.destinationCount}{' '}
-                                {mode === 'browse'
-                                  ? 'nested locations'
-                                  : 'eligible locations'}
-                              </span>
-                            )}
-                            {location && (
-                              <span className="experience-code mt-1 block w-fit max-w-full rounded bg-slate-900 px-1.5 py-0.5 text-sm font-normal break-all text-slate-400">
-                                {location.code}
-                              </span>
-                            )}
-                          </span>
-                        </button>
-                      </div>
-                    );
-                  })}
-              </div>
+                Close
+              </button>
             </div>
-          )}
+            <input
+              ref={searchRef}
+              id={searchId}
+              type="search"
+              role="combobox"
+              value={query}
+              autoComplete="off"
+              placeholder="Search name, code or area"
+              aria-label="Search locations"
+              aria-expanded="true"
+              aria-haspopup={searching ? 'listbox' : 'tree'}
+              aria-autocomplete={searching ? 'list' : 'none'}
+              aria-controls={listId}
+              aria-activedescendant={
+                loading || loadError
+                  ? undefined
+                  : searching
+                    ? activeOptionIndex >= 0
+                      ? listId + '-' + activeOptionIndex
+                      : undefined
+                    : activeTreeIndex >= 0
+                      ? listId + '-tree-' + activeTreeIndex
+                      : undefined
+              }
+              onChange={(event) => {
+                setQuery(event.target.value);
+                setActiveIndex(0);
+              }}
+              onKeyDown={searchKey}
+              className="min-h-11 w-full rounded-md border border-slate-600 bg-slate-900 px-3 text-slate-100 outline-none focus-visible:border-cyan-400"
+            />
+            <ListEntrance
+              as="div"
+              identities={
+                searching
+                  ? options.map((location) => location?.id ?? 'all')
+                  : treeItems.map((row) => row?.location.id ?? 'all')
+              }
+              pending={loading || !!loadError}
+              id={listId}
+              role={searching ? 'listbox' : 'tree'}
+              aria-label={label}
+              className="mt-2 min-h-0 flex-1 overflow-y-auto overscroll-contain rounded border border-slate-800"
+              style={{
+                scrollbarColor: 'var(--color-slate-600) var(--color-slate-950)',
+                scrollbarWidth: 'auto',
+              }}
+            >
+              {loading && (
+                <p role="status" className="p-3 text-sm text-slate-300">
+                  Loading locations…
+                </p>
+              )}
+              {loadError && (
+                <p role="alert" className="p-3 text-sm text-amber-200">
+                  {loadError}
+                </p>
+              )}
+              {!loading &&
+                !loadError &&
+                (searching ? options.length === 0 : treeItems.length === 0) && (
+                  <p role="status" className="p-3 text-sm text-slate-300">
+                    No matching locations.
+                  </p>
+                )}
+              {!loading &&
+                !loadError &&
+                (searching ? options : []).map((location, index) => {
+                  const optionValue = location
+                    ? pickerValue(location, mode)
+                    : '';
+                  return (
+                    <div key={location?.id ?? 'all'} role="presentation">
+                      <button
+                        type="button"
+                        role="option"
+                        aria-label={
+                          location
+                            ? `${location.name}, ${location.breadcrumb}, ${location.code}${stockLabel(location) ? ', ' + stockLabel(location) : ''}`
+                            : emptyAccessibleLabel
+                        }
+                        id={listId + '-' + index}
+                        aria-selected={selectedValue === optionValue}
+                        onMouseEnter={() => setActiveIndex(index)}
+                        onClick={() => choose(optionValue)}
+                        className={
+                          'flex min-h-11 w-full items-center justify-between gap-2 border-b border-slate-800 px-3 py-2 text-left text-sm hover:bg-slate-800 focus-visible:outline-2 focus-visible:outline-inset focus-visible:outline-cyan-400 ' +
+                          (index === activeOptionIndex ? 'bg-slate-800 ' : '')
+                        }
+                      >
+                        <span className="min-w-0 flex-1">
+                          <span className="block font-medium break-words text-slate-100">
+                            {location?.name ?? emptyLabel}
+                            {selectedValue === optionValue ? ' ✓' : ''}
+                          </span>
+                          <span className="block break-words text-xs text-slate-400">
+                            {location?.breadcrumb ??
+                              (emptyLabel === 'All locations'
+                                ? 'No location filter'
+                                : emptyLabel)}
+                          </span>
+                          {stockLabel(location) && (
+                            <span className="block text-sm text-slate-300">
+                              {stockLabel(location)}
+                            </span>
+                          )}
+                          {location && (
+                            <span className="experience-code mt-1 block w-fit max-w-full rounded bg-slate-900 px-1.5 py-0.5 text-sm font-normal break-all text-slate-400">
+                              {location.code}
+                            </span>
+                          )}
+                        </span>
+                      </button>
+                    </div>
+                  );
+                })}
+              {!loading &&
+                !loadError &&
+                !searching &&
+                treeItems.map((row, index) => {
+                  const location = row?.location;
+                  const rowId = location?.id ?? 'all';
+                  const isNavigation = Boolean(row && !row.selectable);
+                  const isGroup = Boolean(
+                    row && (!row.location.can_hold_inventory || isNavigation),
+                  );
+                  const siblings = row
+                    ? treeRows.filter((item) => item.parentId === row.parentId)
+                    : treeRows.filter((item) => item.parentId === null);
+                  const rootOffset =
+                    allowAll && (!row || row.parentId === null) ? 1 : 0;
+                  const selectedRow =
+                    (!row || row.selectable) &&
+                    selectedValue ===
+                      (location ? pickerValue(location, mode) : '') &&
+                    Boolean(location || allowAll);
+                  const isExpanded = Boolean(row && expanded.has(rowId));
+                  return (
+                    <div
+                      key={rowId}
+                      role="presentation"
+                      className="relative border-b border-slate-800"
+                    >
+                      <button
+                        type="button"
+                        role="treeitem"
+                        id={listId + '-tree-' + index}
+                        aria-level={row ? row.depth + 1 : 1}
+                        aria-posinset={
+                          row
+                            ? siblings.findIndex(
+                                (item) => item.location.id === rowId,
+                              ) +
+                              1 +
+                              rootOffset
+                            : 1
+                        }
+                        aria-setsize={siblings.length + rootOffset}
+                        aria-expanded={
+                          row?.hasChildren ? isExpanded : undefined
+                        }
+                        aria-selected={
+                          row?.selectable || !row ? selectedRow : undefined
+                        }
+                        aria-label={
+                          location
+                            ? `${location.name}, ${isNavigation ? 'navigation group' : isGroup ? 'selectable group' : 'selectable location'}, ${location.code}${!isNavigation && stockLabel(location) ? ', ' + stockLabel(location) : ''}`
+                            : emptyAccessibleLabel
+                        }
+                        tabIndex={
+                          effectiveActiveTreeId === rowId ||
+                          (effectiveActiveTreeId === null &&
+                            treeItems[0] === row)
+                            ? 0
+                            : -1
+                        }
+                        onMouseEnter={() => setActiveTreeId(rowId)}
+                        onFocus={() => setActiveTreeId(rowId)}
+                        onKeyDown={(event) => treeKey(event, row)}
+                        onClick={(event) => {
+                          setActiveTreeId(rowId);
+                          if (
+                            row?.hasChildren &&
+                            (event.target as HTMLElement).closest(
+                              '[data-disclosure]',
+                            )
+                          )
+                            expandRow(row, !isExpanded);
+                          else activateTree(row);
+                        }}
+                        style={{
+                          paddingLeft: `${12 + (row?.depth ?? 0) * 16}px`,
+                        }}
+                        className={
+                          'flex min-h-11 w-full items-center gap-2 py-2 pr-2 text-left text-sm focus-visible:outline-2 focus-visible:outline-inset focus-visible:outline-cyan-400 hover:bg-slate-800 ' +
+                          (effectiveActiveTreeId === rowId
+                            ? 'bg-slate-800 '
+                            : '') +
+                          (isGroup
+                            ? 'bg-slate-900/70 text-slate-300 '
+                            : 'text-slate-100 ')
+                        }
+                      >
+                        <span
+                          data-disclosure={row?.hasChildren ? '' : undefined}
+                          aria-hidden="true"
+                          className={
+                            'flex size-7 shrink-0 items-center justify-center rounded ' +
+                            (row?.hasChildren
+                              ? 'border border-slate-600 text-cyan-300'
+                              : 'text-slate-500')
+                          }
+                        >
+                          {row?.hasChildren ? (isExpanded ? '⌄' : '›') : '·'}
+                        </span>
+                        <span className="min-w-0 flex-1 font-medium break-words">
+                          <span className="block">
+                            {location?.name ?? emptyLabel}
+                            {selectedRow ? ' ✓' : ''}
+                          </span>
+                          {!isNavigation && stockLabel(location) && (
+                            <span className="block text-sm font-normal text-slate-300">
+                              {stockLabel(location)}
+                            </span>
+                          )}
+                          {isGroup && (
+                            <span className="ml-2 text-xs font-normal text-slate-400">
+                              {row?.destinationCount}{' '}
+                              {mode === 'browse'
+                                ? 'nested locations'
+                                : 'eligible locations'}
+                            </span>
+                          )}
+                          {location && (
+                            <span className="experience-code mt-1 block w-fit max-w-full rounded bg-slate-900 px-1.5 py-0.5 text-sm font-normal break-all text-slate-400">
+                              {location.code}
+                            </span>
+                          )}
+                        </span>
+                      </button>
+                    </div>
+                  );
+                })}
+            </ListEntrance>
+          </SpringPresence>
         </InventoryCaptureGroup>
       )}
     </div>

@@ -1,3 +1,5 @@
+import { ScanFeedbackToggle } from '@/components/experience/scan-feedback';
+import { ListEntrance } from '@/components/experience/list-feedback';
 import { RouteReady } from '@/components/experience/route-ready';
 import { routeReadyProps } from '@/components/experience/route-ready.server';
 import Link from '@/components/experience/route-link';
@@ -80,8 +82,12 @@ export default async function SettingsPage({
             <ThemeControl />
             <ShortcutPreference />
             <RoomEffectsPreference />
+            <ScanFeedbackToggle />
           </section>
-          <ul className="grid gap-3 md:grid-cols-2">
+          <ListEntrance
+            identities={sections.map((section) => section.href)}
+            className="grid gap-3 md:grid-cols-2"
+          >
             {sections.map((section) => (
               <li key={section.href}>
                 <Link
@@ -97,7 +103,7 @@ export default async function SettingsPage({
                 </Link>
               </li>
             ))}
-          </ul>
+          </ListEntrance>
           <BuildInfo provenance={readBuildProvenance()} />
         </div>
       </RouteReady>

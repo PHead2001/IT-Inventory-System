@@ -1,5 +1,6 @@
 'use client';
 
+import { invalidatePeeks } from '@/features/peek/invalidation';
 import type { PresentationDenialTicket } from './route-presentation-lifetime';
 
 type PresentationScope = {
@@ -61,6 +62,21 @@ export async function observeRouteActionResult<T>(
   }
   try {
     const result = await action;
+    try {
+      if (
+        scope &&
+        currentScope === scope &&
+        current?.() !== false &&
+        ownerCurrent?.() !== false &&
+        result &&
+        typeof result === 'object' &&
+        'ok' in result &&
+        result.ok === true
+      )
+        invalidatePeeks();
+    } catch {
+      /* Decorative cache invalidation never changes an acknowledged result. */
+    }
     if (scope && currentScope === scope && deniesActorOrAccess(result)) {
       try {
         if (

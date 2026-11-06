@@ -1,4 +1,9 @@
 'use client';
+
+import {
+  collectRoomObstructionRects,
+  connectRoomObstructions,
+} from '@/components/experience/room-obstructions';
 import { useFrame, useThree } from '@react-three/fiber';
 import { createContext, useContext, useEffect, type ReactNode } from 'react';
 import {
@@ -275,14 +280,9 @@ export function createRoomLabelRegistry(
       return labels;
     };
     const readReserved = () => {
-      const result: LabelArea[] = [];
-      for (const element of host
-        .closest('[data-room-surface]')
-        ?.querySelectorAll<HTMLElement>('[data-room-obstruction]') ?? []) {
-        if (!charge()) break;
-        if (element.getClientRects().length > 0)
-          result.push(element.getBoundingClientRect());
-      }
+      const result: LabelArea[] = canvas
+        ? collectRoomObstructionRects(canvas, viewport, charge)
+        : [];
       // Physical reservations remain packing masks, never visibility geometry.
       for (const entry of entries.values()) {
         if (!entry.options.pickReservation) continue;
@@ -869,6 +869,13 @@ export function createRoomLabelRegistry(
         if (!connected) return;
         invalidateLayout(reason);
       };
+      // The runtime already owns all four viewport event subscriptions and their
+      // demand reasons; the bridge supplies only card/registry notifications.
+      const disconnectObstructions = connectRoomObstructions(
+        element,
+        () => changed('layout-external'),
+        false,
+      );
       observer = new ResizeObserver((records) => {
         const labels = new Set(
           [...entries.values()].map((entry) => entry.element),
@@ -1026,6 +1033,7 @@ export function createRoomLabelRegistry(
       schedule();
       return () => {
         connected = false;
+        disconnectObstructions();
         releaseDemand();
         identityRevision++;
         continuation = null;

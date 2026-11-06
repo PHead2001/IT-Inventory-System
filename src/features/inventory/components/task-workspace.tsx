@@ -1,6 +1,8 @@
 'use client';
 import {
   useCallback,
+  useContext,
+  useInsertionEffect,
   useEffect,
   useEffectEvent,
   useId,
@@ -14,6 +16,7 @@ import {
   TaskDiscardContext,
   TaskWarningContext,
   TaskEligibilityContext,
+  TaskInteractionContext,
   type TaskState,
   type TaskDiscard,
 } from './task-state';
@@ -24,6 +27,26 @@ import {
 import { Button } from '@/components/ui/button';
 import { useConsumeRouteTask } from '@/components/experience/route-ready';
 import { afterTransitionCapture } from '@/components/forms/transition-capture';
+import { SpringPresence } from '@/components/experience/spring-presence';
+import { SpringDisclosure } from '@/components/experience/spring-disclosure';
+import { InventoryCaptureRegionsContext } from '@/components/experience/inventory-capture-region';
+type TaskInstance = {
+  taskId: string;
+  instance: number;
+  label: string;
+  live: boolean;
+  presentation?: {
+    waitingForRecord: boolean;
+    unavailable: boolean;
+    invalidated: boolean;
+    refreshError: boolean;
+  };
+  canStart: () => boolean;
+  report: (next: TaskState) => void;
+  registerDiscard: (discard: TaskDiscard | null) => void;
+  warning: (message: string) => void;
+  reset: () => void;
+};
 export type TaskChoice = {
   id: string;
   label: string;
@@ -57,6 +80,23 @@ export function TaskWorkspace({
   const workspaceRoot = useRef<HTMLElement>(null);
   const [selected, setSelected] = useState<string | null>(null);
   const [instance, setInstance] = useState(0);
+  const serial = useRef(0);
+  const activeInstance = useRef<TaskInstance | null>(null);
+  const mounted = useRef(true);
+  const captureCapability = useContext(InventoryCaptureRegionsContext);
+  const [instances, setInstances] = useState<TaskInstance[]>([]);
+  const presentation = useRef({
+    waitingForRecord: false,
+    unavailable: false,
+    invalidated: false,
+    refreshError: false,
+  });
+  useInsertionEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
   const [invalidated, setInvalidated] = useState(false);
   const selectedEligible =
     selected === null || choices.some((choice) => choice.id === selected);
@@ -79,9 +119,6 @@ export function TaskWorkspace({
   const [warning, setWarning] = useState('');
   const stateRef = useRef(clean);
   const discardTask = useRef<TaskDiscard | null>(null);
-  const registerDiscard = useCallback((discard: TaskDiscard | null) => {
-    discardTask.current = discard;
-  }, []);
   const requestedLauncher = useRef<HTMLButtonElement | null>(null);
   const [activeLabel, setActiveLabel] = useState('');
   const heading = useRef<HTMLHeadingElement | null>(null);
@@ -164,6 +201,14 @@ export function TaskWorkspace({
   ]);
   const launcher = useRef<HTMLButtonElement | null>(null);
   const unavailable = invalidated && !locked && !state.completed;
+  useInsertionEffect(() => {
+    presentation.current = {
+      waitingForRecord,
+      unavailable,
+      invalidated,
+      refreshError,
+    };
+  });
   useEffect(() => {
     if (
       selected !== null ||
@@ -196,6 +241,58 @@ export function TaskWorkspace({
     if (next.pending || next.uncertain || next.completed)
       setRequested(undefined);
   }, []);
+  // Existing semantic guards must approve before this presentation retirement.
+  // Keyed siblings stay under one parent: the original form fiber never moves.
+  const retireCurrentPresentation = (id: string | null, label: string) => {
+    const outgoing = activeInstance.current;
+    if (outgoing) {
+      outgoing.presentation = presentation.current;
+      outgoing.live = false;
+    }
+    discardTask.current = null;
+    const nextInstance = ++serial.current;
+    setInstance(nextInstance);
+    const entry: TaskInstance | null =
+      id === null
+        ? null
+        : {
+            taskId: id,
+            instance: nextInstance,
+            label,
+            live: true,
+            canStart: () =>
+              mounted.current &&
+              entry !== null &&
+              entry.live &&
+              activeInstance.current === entry,
+            report: (value) => {
+              if (entry?.canStart()) report(value);
+            },
+            registerDiscard: (discard) => {
+              if (entry?.canStart()) discardTask.current = discard;
+            },
+            warning: (message) => {
+              if (entry?.canStart()) setWarning(message);
+            },
+            reset: () => {
+              if (
+                !entry?.canStart() ||
+                stateRef.current.pending ||
+                stateRef.current.uncertain
+              )
+                return;
+              if (discardTask.current && !discardTask.current()) return;
+              retireCurrentPresentation(null, label);
+              stateRef.current = clean;
+              setInvalidated(false);
+              setSelected(null);
+              setState(clean);
+              returnFocusRequested.current = true;
+            },
+          };
+    activeInstance.current = entry;
+    setInstances([...(outgoing ? [outgoing] : []), ...(entry ? [entry] : [])]);
+  };
   const change = (id: string | null) => {
     if (
       stateRef.current.pending ||
@@ -214,7 +311,10 @@ export function TaskWorkspace({
     if (stateRef.current.dirty && !stateRef.current.completed) setRequested(id);
     else {
       setInvalidated(false);
-      setInstance((value) => value + 1);
+      retireCurrentPresentation(
+        id,
+        choices.find((choice) => choice.id === id)?.label ?? activeLabel,
+      );
       setRequiredVersion(id === null ? undefined : acknowledgedVersion.current);
       setRefreshError(false);
       if (
@@ -370,13 +470,18 @@ export function TaskWorkspace({
               {descriptions}
             </div>
           ) : (
-            <details key={group}>
-              <summary className="min-h-11 cursor-pointer py-2 font-semibold">
-                {group === 'secondary' ? 'Other tasks' : 'Retire or archive'}
-              </summary>
+            <SpringDisclosure
+              key={group}
+              summary={
+                group === 'secondary' ? 'Other tasks' : 'Retire or archive'
+              }
+              summaryProps={{
+                className: 'min-h-11 cursor-pointer py-2 font-semibold',
+              }}
+            >
               {controls}
               {descriptions}
-            </details>
+            </SpringDisclosure>
           );
         })}
         {locked && (
@@ -434,7 +539,11 @@ export function TaskWorkspace({
                     activeLabel,
                 );
                 setInvalidated(false);
-                setInstance((value) => value + 1);
+                retireCurrentPresentation(
+                  requested ?? null,
+                  choices.find((choice) => choice.id === requested)?.label ??
+                    activeLabel,
+                );
                 setSelected(requested);
                 setRequested(undefined);
                 stateRef.current = clean;
@@ -447,101 +556,133 @@ export function TaskWorkspace({
           </div>
         )}
       </InventoryCaptureGroup>
-      {selected && (
-        <div
-          key={`${selected}:${instance}`}
-          inert={requested !== undefined}
-          className="min-w-0 space-y-3"
-        >
-          <InventoryCaptureGroup region="task-heading" className="space-y-3">
-            <h3 ref={heading} tabIndex={-1} className="font-semibold">
-              {activeLabel}
-            </h3>
+      <div className="contents">
+        {instances.map((entry) => {
+          const view = entry.live
+            ? { waitingForRecord, unavailable, invalidated, refreshError }
+            : entry.presentation!;
+          return (
+            <SpringPresence
+              key={`${entry.taskId}:${entry.instance}`}
+              instanceKey={`${entry.taskId}:${entry.instance}`}
+              open={entry.live}
+              kind="panel"
+              retainExit
+              onExitComplete={() =>
+                setInstances((current) =>
+                  current.filter(
+                    (candidate) => candidate !== entry || candidate.live,
+                  ),
+                )
+              }
+              inert={!entry.live || requested !== undefined}
+              className="min-w-0 space-y-3"
+            >
+              <TaskInteractionContext value={entry.canStart}>
+                <InventoryCaptureRegionsContext
+                  value={
+                    entry.live || !captureCapability
+                      ? captureCapability
+                      : { ...captureCapability, enabled: false }
+                  }
+                >
+                  <InventoryCaptureGroup
+                    region="task-heading"
+                    className="space-y-3"
+                  >
+                    <h3
+                      ref={entry.live ? heading : undefined}
+                      tabIndex={-1}
+                      className="font-semibold"
+                    >
+                      {entry.label}
+                    </h3>
 
-            {invalidated && (
-              <p role="status">
-                This task is no longer available for a new transaction.
-                {unavailable && ' Close it or choose another task to continue.'}
-              </p>
-            )}
-          </InventoryCaptureGroup>
-          <TaskEligibilityContext.Provider
-            value={!invalidated && selectedEligible}
-          >
-            <TaskResetContext.Provider
-              value={() => {
-                if (stateRef.current.pending || stateRef.current.uncertain)
-                  return;
-                if (discardTask.current && !discardTask.current()) return;
-                stateRef.current = clean;
-                setInvalidated(false);
-                setSelected(null);
-                setState(clean);
-                returnFocusRequested.current = true;
-              }}
-            >
-              <TaskDiscardContext.Provider value={registerDiscard}>
-                <TaskStateContext.Provider value={report}>
-                  <TaskWarningContext.Provider value={setWarning}>
-                    {waitingForRecord ? (
-                      <div className="space-y-3">
-                        <p role={refreshError ? 'alert' : 'status'}>
-                          {refreshError
-                            ? 'The current record could not be loaded. Retry before starting another transaction.'
-                            : 'Loading the current record before starting another transaction…'}
-                        </p>
-                        <Button
-                          type="button"
-                          variant="outline"
-                          onClick={() => {
-                            setRefreshError(false);
-                            try {
-                              onRefresh?.();
-                            } catch {
-                              setRefreshError(true);
-                            }
-                          }}
-                        >
-                          Retry loading record
-                        </Button>
-                      </div>
-                    ) : (
-                      <fieldset
-                        hidden={unavailable}
-                        inert={unavailable}
-                        disabled={unavailable}
-                        onClickCapture={(event) => {
-                          if (!unavailable) return;
-                          event.preventDefault();
-                          event.stopPropagation();
-                        }}
-                        onSubmitCapture={(event) => {
-                          if (!unavailable) return;
-                          event.preventDefault();
-                          event.stopPropagation();
-                        }}
-                        className="min-w-0 space-y-3"
-                      >
-                        {children(selected)}
-                      </fieldset>
+                    {view.invalidated && (
+                      <p role="status">
+                        This task is no longer available for a new transaction.
+                        {view.unavailable &&
+                          ' Close it or choose another task to continue.'}
+                      </p>
                     )}
-                  </TaskWarningContext.Provider>
-                </TaskStateContext.Provider>
-              </TaskDiscardContext.Provider>
-            </TaskResetContext.Provider>
-          </TaskEligibilityContext.Provider>
-          <InventoryCaptureRegion region="task-close">
-            <Button
-              type="button"
-              variant="outline"
-              disabled={locked}
-              onClick={() => change(null)}
-            >
-              Close task
-            </Button>
-          </InventoryCaptureRegion>
-        </div>
-      )}
+                  </InventoryCaptureGroup>
+                  <TaskEligibilityContext.Provider
+                    value={entry.live && !invalidated && selectedEligible}
+                  >
+                    <TaskResetContext.Provider value={entry.reset}>
+                      <TaskDiscardContext.Provider
+                        value={entry.registerDiscard}
+                      >
+                        <TaskStateContext.Provider value={entry.report}>
+                          <TaskWarningContext.Provider value={entry.warning}>
+                            {view.waitingForRecord ? (
+                              <div className="space-y-3">
+                                <p
+                                  role={view.refreshError ? 'alert' : 'status'}
+                                >
+                                  {view.refreshError
+                                    ? 'The current record could not be loaded. Retry before starting another transaction.'
+                                    : 'Loading the current record before starting another transaction…'}
+                                </p>
+                                <Button
+                                  type="button"
+                                  variant="outline"
+                                  onClick={() => {
+                                    if (!entry.canStart()) return;
+                                    setRefreshError(false);
+                                    try {
+                                      onRefresh?.();
+                                    } catch {
+                                      setRefreshError(true);
+                                    }
+                                  }}
+                                >
+                                  Retry loading record
+                                </Button>
+                              </div>
+                            ) : (
+                              <fieldset
+                                hidden={view.unavailable}
+                                inert={view.unavailable}
+                                disabled={!entry.live || view.unavailable}
+                                onClickCapture={(event) => {
+                                  if (entry.live && !view.unavailable) return;
+                                  event.preventDefault();
+                                  event.stopPropagation();
+                                }}
+                                onSubmitCapture={(event) => {
+                                  if (entry.live && !view.unavailable) return;
+                                  event.preventDefault();
+                                  event.stopPropagation();
+                                }}
+                                className="min-w-0 space-y-3"
+                              >
+                                {children(entry.taskId)}
+                              </fieldset>
+                            )}
+                          </TaskWarningContext.Provider>
+                        </TaskStateContext.Provider>
+                      </TaskDiscardContext.Provider>
+                    </TaskResetContext.Provider>
+                  </TaskEligibilityContext.Provider>
+                  <InventoryCaptureRegion region="task-close">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      disabled={locked}
+                      onClick={() => {
+                        if (entry.canStart()) change(null);
+                      }}
+                    >
+                      Close task
+                    </Button>
+                  </InventoryCaptureRegion>
+                </InventoryCaptureRegionsContext>
+              </TaskInteractionContext>
+            </SpringPresence>
+          );
+        })}
+      </div>
     </section>
   );
 }

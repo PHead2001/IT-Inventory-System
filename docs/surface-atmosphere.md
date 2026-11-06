@@ -92,3 +92,22 @@ animation, contrast, layout stability or performance evidence.
   layout stability with SHA, browser, hardware, renderer/DPR and method limits.
   Confirm no effect-driven idle WebGL renders. Unit mocks and screenshots alone
   do not establish smooth GPU frames, zero CLS, screen-reader or physical-device proof.
+
+## Current W10 magnetic surfaces
+
+Add item and Print labels use MagneticVisual inside a stationary native owner;
+Start camera uses the same wrapper in the scanner port. Only decorative,
+pointer-transparent children translate, bounded radially to 4 px. The shared
+controller retains current privacy/route vetoes, permanent original-owner
+retirement, cached bounds and one demand frame. Coarse/touch, Reduced motion,
+withdrawal, hidden/inert/detached or disabled targets neutralize effects immediately.
+Current control-marker exclusions and primary-pointer ripple guards are preserved.
+Central magnetic/tilt intensity tokens allow calm combined-screen tuning.
+The current Overview hero illustration and three stat tiles reuse the tilt kind
+of MagneticVisual inside stationary hosts. Stat terms and definitions retain
+their order, exact counts and separate semantic dl groups; Refresh and navigation
+links stay outside transformed layers. This source closes the present-host adapter
+gap, while future A403 replacement hosts must retain it. Visual acceptance remains
+pending.
+Fresh source review, focused regressions and populated native Full/Reduced both-
+theme desktop/390px hit-area, motion and performance proof remain pending.

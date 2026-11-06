@@ -1,3 +1,10 @@
+import { PeekProvider } from '@/features/peek/peek-provider';
+import { PrivacyReadinessContext } from '@/components/auth/privacy-readiness';
+import {
+  assignmentEpoch,
+  readPrivacyRevocationRevision,
+} from '@/features/scan/assign-batch';
+import { peekInvalidationEvent } from '@/features/peek/invalidation';
 import {
   act,
   fireEvent,
@@ -12,6 +19,7 @@ import { useEffect, useState, type ComponentProps } from 'react';
 import type { InventoryFileCards } from './contract';
 
 const mocks = vi.hoisted(() => ({
+  path: '/inventory/assets/original',
   operation: vi.fn(),
   browserRpc: vi.fn(),
   reserve: vi.fn(),
@@ -19,9 +27,18 @@ const mocks = vi.hoisted(() => ({
   upload: vi.fn(),
   download: vi.fn(),
 }));
+vi.mock('next/navigation', () => ({
+  usePathname: () => mocks.path,
+  useSearchParams: () => new URLSearchParams(),
+}));
 vi.mock('@/lib/supabase/browser', () => ({
   createSupabaseBrowserClient: () => ({
     rpc: mocks.browserRpc,
+    auth: {
+      onAuthStateChange: () => ({
+        data: { subscription: { unsubscribe() {} } },
+      }),
+    },
     storage: {
       from: () => ({ upload: mocks.upload, download: mocks.download }),
     },
@@ -211,6 +228,7 @@ const pending = {
 
 beforeEach(() => {
   vi.resetAllMocks();
+  mocks.path = '/inventory/assets/original';
   mocks.upload.mockResolvedValue({ data: { path: 's/fixture' }, error: null });
   let cancelled = false;
   mocks.operation.mockImplementation(async (name: string) => {
@@ -3079,3 +3097,207 @@ describe('server-seeded cards and refresh isolation', () => {
     );
   });
 });
+
+it.each(['unmount', 'actor', 'navigation', 'away-and-back', 'current'])(
+  'scopes delayed publish cache invalidation to the exact %s owner',
+  async (change) => {
+    const actor = '00000000-0000-4000-8000-000000000001',
+      backend = 'https://files-peek.test';
+    let complete!: (value: unknown) => void;
+    const body = new Promise((resolve) => {
+      complete = resolve;
+    });
+    mocks.fetch.mockImplementation(async (url: string) =>
+      url.includes('/validate')
+        ? { ok: true, json: () => body }
+        : { ok: true, json: async () => ({ deleted: 0, pending: false }) },
+    );
+    const listener = vi.fn();
+    window.addEventListener(peekInvalidationEvent, listener);
+    const app = (who = actor, show = true) => (
+      <PrivacyReadinessContext
+        value={{
+          ready: true,
+          visible: true,
+          generation: 'file-peek',
+          verifiedEpoch: assignmentEpoch(),
+          revocationRevision: readPrivacyRevocationRevision(),
+        }}
+      >
+        <PeekProvider actor={who} backend={backend}>
+          {show ? (
+            <SeededFilesPanel
+              actorId={who}
+              parentType="asset"
+              parentId={id}
+              parentName="Fictional asset"
+              active
+              staff
+              initialState={{
+                status: 'ready',
+                envelope: { revision: '1', files: [pending] },
+              }}
+            />
+          ) : (
+            <p>Successor page</p>
+          )}
+        </PeekProvider>
+      </PrivacyReadinessContext>
+    );
+    const view = render(app());
+    try {
+      fireEvent.click(
+        await screen.findByRole('button', { name: 'Review and publish' }),
+      );
+      await waitFor(() =>
+        expect(mocks.fetch).toHaveBeenCalledWith(
+          '/api/inventory-files/validate',
+          expect.anything(),
+        ),
+      );
+      if (change === 'unmount') view.rerender(app(actor, false));
+      if (change === 'actor')
+        view.rerender(app('00000000-0000-4000-8000-000000000002'));
+      if (change === 'navigation' || change === 'away-and-back') {
+        const originalPanel = screen.getByRole('region', {
+          name: 'Inventory files',
+        });
+        mocks.path = '/inventory/assets/successor';
+        view.rerender(app());
+        if (change === 'away-and-back') {
+          mocks.path = '/inventory/assets/original';
+          view.rerender(app());
+          expect(screen.getByRole('region', { name: 'Inventory files' })).toBe(
+            originalPanel,
+          );
+        }
+      }
+      await act(async () => {
+        complete({ result: { changed: true } });
+        await body;
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+      await waitFor(() =>
+        expect(mocks.fetch).toHaveBeenCalledWith(
+          '/api/inventory-files/cleanup',
+          expect.anything(),
+        ),
+      );
+      if (change === 'current') expect(listener).toHaveBeenCalledOnce();
+      else expect(listener).not.toHaveBeenCalled();
+      expect(
+        mocks.fetch.mock.calls.filter(([url]) =>
+          String(url).includes('/validate'),
+        ),
+      ).toHaveLength(1);
+    } finally {
+      window.removeEventListener(peekInvalidationEvent, listener);
+      view.unmount();
+    }
+  },
+);
+
+it.each(['navigation', 'away-and-back', 'current'])(
+  'scopes delayed removal cache invalidation to the exact %s owner',
+  async (change) => {
+    const actor = '00000000-0000-4000-8000-000000000001',
+      backend = 'https://files-peek.test';
+    const ready = {
+      ...pending,
+      state: 'ready' as const,
+      type: 'application/pdf',
+      filename: 'manual.pdf',
+      purpose: 'asset_document',
+    };
+    let finish!: (value: unknown) => void;
+    let removed = false;
+    mocks.operation.mockImplementation(async (name: string) => {
+      if (name === 'inventory_file_remove')
+        return new Promise((resolve) => {
+          finish = (value) => {
+            removed = true;
+            resolve(value);
+          };
+        });
+      if (name === 'inventory_file_cards')
+        return {
+          data: {
+            revision: removed ? '2' : '1',
+            files: removed ? [] : [ready],
+          },
+          error: null,
+        };
+      if (name === 'inventory_file_history')
+        return { data: { rows: [], has_more: false }, error: null };
+      throw new Error('Unexpected ' + name);
+    });
+    const listener = vi.fn();
+    window.addEventListener(peekInvalidationEvent, listener);
+    const app = () => (
+      <PrivacyReadinessContext
+        value={{
+          ready: true,
+          visible: true,
+          generation: 'file-remove-peek',
+          verifiedEpoch: assignmentEpoch(),
+          revocationRevision: readPrivacyRevocationRevision(),
+        }}
+      >
+        <PeekProvider actor={actor} backend={backend}>
+          <SeededFilesPanel
+            actorId={actor}
+            parentType="asset"
+            parentId={id}
+            parentName="Fictional asset"
+            active
+            staff
+            initialState={{
+              status: 'ready',
+              envelope: { revision: '1', files: [ready] },
+            }}
+          />
+        </PeekProvider>
+      </PrivacyReadinessContext>
+    );
+    const view = render(app());
+    try {
+      fireEvent.click(screen.getByRole('button', { name: 'Remove' }));
+      fireEvent.click(screen.getByRole('button', { name: 'Remove file' }));
+      await waitFor(() =>
+        expect(mocks.operation).toHaveBeenCalledWith(
+          'inventory_file_remove',
+          expect.anything(),
+        ),
+      );
+      if (change === 'navigation' || change === 'away-and-back') {
+        const originalPanel = screen.getByRole('region', {
+          name: 'Inventory files',
+        });
+        mocks.path = '/inventory/assets/successor';
+        view.rerender(app());
+        if (change === 'away-and-back') {
+          mocks.path = '/inventory/assets/original';
+          view.rerender(app());
+          expect(screen.getByRole('region', { name: 'Inventory files' })).toBe(
+            originalPanel,
+          );
+        }
+      }
+      await act(async () => finish({ data: {}, error: null }));
+      await waitFor(() =>
+        expect(screen.getByRole('alert')).toHaveTextContent('File removed.'),
+      );
+      if (change === 'current') expect(listener).toHaveBeenCalledOnce();
+      else expect(listener).not.toHaveBeenCalled();
+      expect(
+        mocks.operation.mock.calls.filter(
+          ([name]) => name === 'inventory_file_remove',
+        ),
+      ).toHaveLength(1);
+    } finally {
+      window.removeEventListener(peekInvalidationEvent, listener);
+      view.unmount();
+    }
+  },
+);

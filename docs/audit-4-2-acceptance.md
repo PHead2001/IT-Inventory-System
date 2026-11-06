@@ -841,6 +841,22 @@ Earlier reference-performance evidence remains Git revision `b781b8530410494acb3
 
 PR57's local integration starts from `e4f28559ce8ec0c185447c2c79dd3cb1248c5114` and the main merge above. Automatic code/test merges and this acceptance reconciliation do not establish a passing joined candidate. The complete 76-row/75-base-ID scope, earlier per-ID histories, scoped dispositions and remaining gates are preserved, including main's merged PR52/E21 status for A304/A309 and PR57's command/evidence additions. A301/W20, PR62 and held scope still require their own exact-candidate and acceptance proof. No integrated staging release, production promotion or whole-goal completion is claimed.
 
+## W11 current-host source integration
+
+Spring popovers, disclosures and retained task panels reuse the reviewed W11
+artifact over the current protected provider tree. Existing task eligibility,
+draft/pending/uncertain guards, route readiness and accepted writes remain the
+authority; outgoing task instances receive only a presentation retirement veto.
+Transient generic confirmations supplement committed inline receipts. Label
+additions preserve one success announcement, and canvas obstruction collection
+uses its actual Document while retaining physical picks and packing budgets.
+See [spring feedback](spring-feedback.md). Source integration does not establish
+runtime acceptance or promote any audit disposition. Focused tests, fresh review,
+populated desktop/390px Full/Reduced both-theme proof and canonical exact-SHA
+certification remain pending. Current Overview hero/stat tilt uses the same stationary owner and decorative
+inner wrapper; native visual acceptance remains pending. Future A403 replacement
+hosts must retain these adapters.
+
 ## PR57 quiescence diagnostics checkpoint — 2026-11-05
 
 The retained exact-base [CI run 41983148817](https://github.com/PHead2001/IT-Inventory-System/actions/runs/41983148817), job `127097645261`, failed two room-quiescence cases at `b5189a8dcf8de229b68fea205c4fc6cfe451f1ee`. The Linux failure's root cause remains unresolved; neither the prior observer-amplification repair nor the following hosted result establishes its remediation.
@@ -848,3 +864,9 @@ The retained exact-base [CI run 41983148817](https://github.com/PHead2001/IT-Inv
 Normal-caller SDK fixture preparation `fixture-run-49575158-a18a-469e-b504-b2ec5cdfff36` and retained inspections verified two fictional quantity definitions with 879 units across 30 holdings: 31 units at each of 28 leaves, plus holdings of 7 and 4 units. The actual hosted 1280×1100 effects/Reduced D07 dense case passed in 23.288 seconds (`run-dbd0fa7a-92fd-4c6d-9ee7-49e8403e281b`) on native Intel ANGLE, including label settlement, surface ownership, native input and idle-draw checks. This is a scoped hardware/browser pass, not evidence that density caused the Linux CI failure. Approved archive-and-clear cleanup `fixture-run-4865cdba-2922-4100-8e89-4426497c5ef9` completed with zero assets, holdings and stock; movement history was retained.
 
 The subsequent 19-path passive-demand diagnostic batch is committed as PR57 source `7e3bd76b94367bb9823448ef39763402d331f098`, based on `b5189a8`. Its retained checks apply to that diagnostic source before the prepared PR62 join; the joined merge SHA and validation are pending. Its focused suite passed 98 tests across 10 files, with Next type generation, strict TypeScript, changed-path zero-warning lint and formatting passing; independent Astra boundary review was clear. Counters expose connected-only coverage explicitly, preserve existing invalidation behavior and keep diagnostic observations out of readiness decisions. These are source-level diagnostic checks, not a browser reproduction or a fix claim. Exact-final-SHA CI, fresh remote review and A301/W20 command/shortcut acceptance remain pending. All 76 rows, 75 base IDs, status dispositions and other evidence, including E20 and E22, remain unchanged; no whole-goal acceptance is claimed.
+
+## PR65 feedback and parent integration checkpoint — 2026-11-05
+
+PR65 source `39e1b8b40d0b17a7bff46127703e7dbeae633743` passed the normal pre-push gate with **6,194 tests across 400 files**, plus 87 focused Peek-related tests. Four representative local browser journeys passed: inventory search, room shelf/drawer selection, quantity lifecycle and site custody. Fresh Codex review was clean with zero unresolved threads, and preview checks passed. These are scoped candidate results; combined both-theme desktop/390 px Full/Reduced visual acceptance remains pending.
+
+The uncommitted join of reviewed PR64 parent `1aca4a410641695d9c0553e7babfb22d9cddb154` retains its label-only resize correction and bounded split diagnostics alongside PR65's obstruction bridge, final-value count projection and Peek fix. The joined source passed **245 tests across 17 suites**, Next type generation, strict TypeScript, changed-path zero-warning lint and formatting, with source and merge index unchanged. This local join ran no browser or database gate. It requires a new committed HEAD and its applicable complete CI, fresh review and visual proof before certification. All 76 rows, 75 base IDs, historical evidence and existing partial dispositions remain unchanged; this checkpoint promotes no row.

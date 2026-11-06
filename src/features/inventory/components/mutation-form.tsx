@@ -1,4 +1,10 @@
 'use client';
+import { SpringDisclosure } from '@/components/experience/spring-disclosure';
+import {
+  ConfirmedSuccess,
+  useFeedbackOwner,
+} from '@/components/experience/confirmed-success';
+
 import { afterTransitionCapture } from '@/components/forms/transition-capture';
 import { useRouteTask } from '@/components/experience/route-pending';
 import { useRouteRouter as useRouter } from '@/components/experience/route-pending';
@@ -8,6 +14,7 @@ import {
   useCallback,
   useEffect,
   useLayoutEffect,
+  useId,
   useRef,
   useState,
 } from 'react';
@@ -43,6 +50,7 @@ import type {
 import {
   useReportTaskState,
   useTaskReset,
+  useTaskInteraction,
   useTaskDiscard,
   useTaskWarning,
   useTaskEligibility,
@@ -312,6 +320,9 @@ function MutationFormFields({
 }) {
   const observeRouteActionResult = useRouteActionResult();
   const resetTask = useTaskReset();
+  const canStartTask = useTaskInteraction();
+  const instanceId = useId();
+  const domScope = `${instanceId}-${operation}`;
   const taskEligible = useTaskEligibility();
   const taskEligibleRef = useRef(taskEligible);
   useLayoutEffect(() => {
@@ -395,6 +406,7 @@ function MutationFormFields({
     retirement_note: '',
     move_all: 'false',
   });
+  const successOwner = useFeedbackOwner(actorId);
   const [state, setState] = useState<MutationState | null>(initialCompletion);
   const [previousReceipt, setPreviousReceipt] = useState(
     Boolean(initialCompletion),
@@ -590,13 +602,13 @@ function MutationFormFields({
     const amountIssues = [];
     if (operation === 'asset_retire' && !finalReason)
       amountIssues.push({
-        id: operation + '-reason',
+        id: domScope + '-reason',
         label: 'Reason',
         message: 'Enter a retirement reason.',
       });
     if (operation === 'asset_retire' && finalReason.length > 2000)
       amountIssues.push({
-        id: operation + '-reason',
+        id: domScope + '-reason',
         label: 'Reason',
         message:
           'Keep the reason and retirement note together within 2,000 characters.',
@@ -609,7 +621,7 @@ function MutationFormFields({
         2147483647
     )
       amountIssues.push({
-        id: operation + '-quantity',
+        id: domScope + '-quantity',
         label: 'Quantity to receive',
         message:
           'This receipt would exceed the location quantity limit. Enter a smaller amount.',
@@ -640,7 +652,7 @@ function MutationFormFields({
       if (invalid) {
         amountIssues.push({
           id:
-            operation +
+            domScope +
             (values.move_all === 'true' ? '-source_location_id' : '-quantity'),
           label:
             values.move_all === 'true' ? 'Source location' : 'Quantity to move',
@@ -689,7 +701,7 @@ function MutationFormFields({
       ).some((location) => location.id === values[name]);
       if (!valid) {
         locationIssues.push({
-          id: operation + '-' + name,
+          id: domScope + '-' + name,
           label:
             name === 'source_location_id'
               ? 'Source location'
@@ -708,7 +720,7 @@ function MutationFormFields({
   }
   const validation = useFormValidation(collectIssues);
   const amountError =
-    validation.issues.find((issue) => issue.id === operation + '-quantity')
+    validation.issues.find((issue) => issue.id === domScope + '-quantity')
       ?.message ?? '';
   const update = useCallback(
     (name: string, value: string) => {
@@ -734,12 +746,12 @@ function MutationFormFields({
     } = {},
   ) => (
     <div className="space-y-2" key={name}>
-      <label htmlFor={operation + '-' + name}>
+      <label htmlFor={domScope + '-' + name}>
         {label}
         {options.required && <RequiredMark />}
       </label>
       <Input
-        id={operation + '-' + name}
+        id={domScope + '-' + name}
         className={
           ['asset_tag', 'serial_number', 'item_code'].includes(name)
             ? 'experience-code'
@@ -760,25 +772,25 @@ function MutationFormFields({
         step={options.numeric ? 1 : undefined}
         aria-invalid={
           (moving && name === 'quantity' && !!amountError) ||
-          validation.issues.some((issue) => issue.id === operation + '-' + name)
+          validation.issues.some((issue) => issue.id === domScope + '-' + name)
             ? true
             : undefined
         }
         aria-describedby={
           validation.props(
-            operation + '-' + name,
+            domScope + '-' + name,
             moving && name === 'quantity'
-              ? operation + '-availability'
+              ? domScope + '-availability'
               : name === 'asset_tag'
-                ? operation + '-asset-tag-check'
+                ? domScope + '-asset-tag-check'
                 : undefined,
           )['aria-describedby']
         }
       />
-      {validation.error(operation + '-' + name)}
+      {validation.error(domScope + '-' + name)}
       {name === 'asset_tag' && (
         <AssetTagAdvisory
-          id={operation + '-asset-tag-check'}
+          id={domScope + '-asset-tag-check'}
           result={tagAdvisory.result}
         />
       )}
@@ -792,7 +804,7 @@ function MutationFormFields({
   ) => (
     <LocationPicker
       key={name}
-      id={operation + '-' + name}
+      id={domScope + '-' + name}
       label={label}
       locations={locations}
       mode={source ? 'source' : 'destination'}
@@ -822,7 +834,7 @@ function MutationFormFields({
       }
       required={required}
       error={
-        validation.issues.find((issue) => issue.id === operation + '-' + name)
+        validation.issues.find((issue) => issue.id === domScope + '-' + name)
           ?.message ||
         locationError ||
         (state && !state.ok ? state.fieldErrors?.[name] : undefined)
@@ -1030,6 +1042,7 @@ function MutationFormFields({
   };
   const submit = (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+    if (!canStartTask()) return;
     if (pending || inFlight.current || refreshRequested || completed) return;
     if (
       !uncertain &&
@@ -1057,6 +1070,7 @@ function MutationFormFields({
       setReviewKey(currentReviewKey);
       if (serialized && metadata && values.serial_number.trim()) {
         startTask(async () => {
+          if (!canStartTask()) return;
           try {
             setDuplicates(
               await findDuplicateSerials(values.serial_number, asset?.id),
@@ -1098,6 +1112,7 @@ function MutationFormFields({
     inFlight.current = true;
     reportTask({ pending: true });
     startTask(async () => {
+      if (!canStartTask()) return;
       try {
         const result = await observeRouteActionResult(submitInventory(command));
         setState(result);
@@ -1176,6 +1191,7 @@ function MutationFormFields({
       return;
     inFlight.current = true;
     startTask(async () => {
+      if (!canStartTask()) return;
       try {
         const fresh = await loadMoveSnapshot({
           entityId: item.id,
@@ -1228,6 +1244,7 @@ function MutationFormFields({
     if (!state?.ok || !state.eventId || !actorId || pending) return;
     const saved = state;
     startTask(async () => {
+      if (!canStartTask()) return;
       try {
         const movement = await reloadMoveReceipt({
           entityId: saved.entityId,
@@ -1255,7 +1272,7 @@ function MutationFormFields({
       </div>
     );
   const destructive = ['asset_retire', 'quantity_archive'].includes(operation);
-  const reviewContextId = operation + '-review-context';
+  const reviewContextId = domScope + '-review-context';
   return (
     <form
       {...validation.formProps}
@@ -1270,17 +1287,26 @@ function MutationFormFields({
         )) && (
         <InventoryCaptureGroup region="mutation-intro" className="space-y-4">
           {lastMove && (
-            <details className="text-sm">
-              <summary className="min-h-11 cursor-pointer py-2 font-semibold">
-                Last move
-                {lastMove.movement?.createdAt && (
-                  <>
-                    {' '}
-                    ·{' '}
-                    <OperationalTimestamp value={lastMove.movement.createdAt} />
-                  </>
-                )}
-              </summary>
+            <SpringDisclosure
+              className="text-sm"
+              summaryProps={{
+                className: 'min-h-11 cursor-pointer py-2 font-semibold',
+              }}
+              summary={
+                <>
+                  Last move
+                  {lastMove.movement?.createdAt && (
+                    <>
+                      {' '}
+                      ·{' '}
+                      <OperationalTimestamp
+                        value={lastMove.movement.createdAt}
+                      />
+                    </>
+                  )}
+                </>
+              }
+            >
               <p>
                 {onRecordPage
                   ? 'This item'
@@ -1314,7 +1340,7 @@ function MutationFormFields({
                   unavailable.
                 </p>
               )}
-            </details>
+            </SpringDisclosure>
           )}
           {['asset_move', 'asset_correct_location'].includes(operation) && (
             <p className="text-sm text-slate-300">
@@ -1341,14 +1367,14 @@ function MutationFormFields({
           >
             {input('name', 'Name', { required: true, max: 200 })}
             <div className="space-y-2">
-              <label htmlFor={operation + '-category'}>
+              <label htmlFor={domScope + '-category'}>
                 Category
                 <RequiredMark />
               </label>
               <select
-                id={operation + '-category'}
+                id={domScope + '-category'}
                 aria-label="Category"
-                {...validation.props(operation + '-category')}
+                {...validation.props(domScope + '-category')}
                 className={field}
                 value={values.category_id}
                 onChange={(event) => update('category_id', event.target.value)}
@@ -1363,7 +1389,7 @@ function MutationFormFields({
                     </option>
                   ))}
               </select>
-              {validation.error(operation + '-category')}
+              {validation.error(domScope + '-category')}
             </div>
             {input('manufacturer', 'Manufacturer (optional)', { max: 200 })}
             {input('model', 'Model (optional)', { max: 200 })}
@@ -1380,19 +1406,19 @@ function MutationFormFields({
               </div>
             )}
             <div className="space-y-2">
-              <label htmlFor={operation + '-description'}>
+              <label htmlFor={domScope + '-description'}>
                 Description (optional)
               </label>
               <textarea
                 className={field}
-                id={operation + '-description'}
-                {...validation.props(operation + '-description')}
+                id={domScope + '-description'}
+                {...validation.props(domScope + '-description')}
                 rows={3}
                 maxLength={4000}
                 value={values.description}
                 onChange={(event) => update('description', event.target.value)}
               />
-              {validation.error(operation + '-description')}
+              {validation.error(domScope + '-description')}
             </div>
             {serialized && (
               <>
@@ -1405,6 +1431,7 @@ function MutationFormFields({
                   variant="outline"
                   onClick={() =>
                     startTask(async () => {
+                      if (!canStartTask()) return;
                       try {
                         setDuplicates(
                           await findDuplicateSerials(
@@ -1483,7 +1510,7 @@ function MutationFormFields({
             {selectLocation('destination_location_id', 'Destination location')}
             <InventoryCaptureGroup region="mutation-move" className="space-y-4">
               <p
-                id={operation + '-availability'}
+                id={domScope + '-availability'}
                 className="text-sm text-slate-400"
               >
                 Recorded source availability:{' '}
@@ -1555,23 +1582,23 @@ function MutationFormFields({
                   onChange={(value) => update('reason', value)}
                 />
               )}
-              <label htmlFor={operation + '-reason'}>
+              <label htmlFor={domScope + '-reason'}>
                 Reason{requiresReason ? ' (required)' : ' (optional)'}
               </label>
               <textarea
                 className={field}
-                id={operation + '-reason'}
-                {...validation.props(operation + '-reason')}
+                id={domScope + '-reason'}
+                {...validation.props(domScope + '-reason')}
                 rows={2}
                 maxLength={2000}
                 required={requiresReason}
                 value={values.reason}
                 onChange={(event) => update('reason', event.target.value)}
               />
-              {validation.error(operation + '-reason')}
+              {validation.error(domScope + '-reason')}
               {operation === 'asset_retire' && (
                 <RetirementNote
-                  id={operation + '-retirement-note'}
+                  id={domScope + '-retirement-note'}
                   value={values.retirement_note}
                   onChange={(value) => update('retirement_note', value)}
                 />
@@ -1662,6 +1689,12 @@ function MutationFormFields({
             role="status"
             className="experience-spotlight space-y-2 text-sm text-cyan-200"
           >
+            <ConfirmedSuccess
+              owner={successOwner}
+              eventId={state.eventId}
+              changed={state.changed}
+              restored={previousReceipt}
+            />
             {moving ? (
               <>
                 {previousReceipt && <p>Previous move receipt</p>}
@@ -1813,16 +1846,15 @@ function MutationFormFields({
 export function OperationPanel(props: Props) {
   const [opened, setOpened] = useState(false);
   return (
-    <details
+    <SpringDisclosure
+      summaryProps={{ className: 'min-h-11 cursor-pointer font-medium' }}
+      summary={labels[props.operation]}
       className={panel}
       onToggle={(event) => {
         if (event.currentTarget.open) setOpened(true);
       }}
     >
-      <summary className="min-h-11 cursor-pointer font-medium">
-        {labels[props.operation]}
-      </summary>
       <div className="mt-4">{opened && <MutationForm {...props} />}</div>
-    </details>
+    </SpringDisclosure>
   );
 }

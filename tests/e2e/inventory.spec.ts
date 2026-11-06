@@ -17,6 +17,7 @@ import {
 } from './record-task-controls';
 import { metadataReviewButton, metadataSaveButton } from './metadata-controls';
 import { expect, test, type Page, type Locator } from '@playwright/test';
+import { countFeedback } from './count-feedback-support';
 import fixture from '../fixtures/auth.json' with { type: 'json' };
 import { chooseLocation } from './location-picker';
 import { createClient } from '@supabase/supabase-js';
@@ -979,8 +980,8 @@ test('quantity core persists multi-location receives, partial and all transfers,
       name: 'Current stock — 15 available in storage',
     }),
   });
-  await expect(stock.getByText('8 units', { exact: true })).toBeVisible();
-  await expect(stock.getByText('7 units', { exact: true })).toBeVisible();
+  await expect(countFeedback(stock, '8 units')).toBeVisible();
+  await expect(countFeedback(stock, '7 units')).toBeVisible();
   await expect(stock.getByRole('link', { name: /ITC-S1A/ })).toHaveCount(0);
   form = await openForm(page, 'Correct physical count');
   await choose(form, 'Counted location', 'ITC-S1B');

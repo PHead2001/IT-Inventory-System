@@ -7,6 +7,7 @@ import { expect, test, type Page } from '@playwright/test';
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import { z } from 'zod';
 import fixture from '../fixtures/auth.json' with { type: 'json' };
+import { countFeedback } from './count-feedback-support';
 
 async function signIn(page: Page, role: 'staff' | 'viewer' = 'staff') {
   await page.goto('/login');
@@ -254,13 +255,11 @@ test('location status, holding scope, matching rows and real CSV agree across na
     const all = page.getByRole('link', { name: 'All statuses', exact: true });
     await expect(active).toHaveAttribute('aria-current', 'page');
     await expect(page.getByText('Current scope: Active only')).toHaveCount(0);
-    await expect(
-      page.getByText('28 matching rows', { exact: true }),
-    ).toBeVisible();
+    await expect(countFeedback(page, '28 matching rows')).toBeVisible();
     const split = page.locator('li').filter({
       has: page.getByRole('link', { name: setup.splitName, exact: true }),
     });
-    await expect(split.getByText('1 unit', { exact: true })).toBeVisible();
+    await expect(countFeedback(split, '1 unit')).toBeVisible();
     await expect(split.getByText('At this location')).toBeVisible();
     const localGrid = split.locator('[class*="rowGrid"]').first();
     expect(
@@ -283,7 +282,7 @@ test('location status, holding scope, matching rows and real CSV agree across na
         ),
       )
       .toBe(1);
-    await expect(split.getByText('1 unit', { exact: true })).toBeVisible();
+    await expect(countFeedback(split, '1 unit')).toBeVisible();
     await page.screenshot({
       path: testInfo.outputPath('location-row-two-column-mobile.png'),
     });
@@ -316,31 +315,23 @@ test('location status, holding scope, matching rows and real CSV agree across na
     await all.click({ noWaitAfter: true });
     await expect.poll(() => slowStarted).toBe(true);
     await expect(active).toHaveAttribute('aria-current', 'page');
-    await expect(
-      page.getByText('28 matching rows', { exact: true }),
-    ).toBeVisible();
+    await expect(countFeedback(page, '28 matching rows')).toBeVisible();
     await active.click({ noWaitAfter: true });
     releaseScope();
     await expect.poll(() => slowDelivered).toBe(true);
     await expect(active).toHaveAttribute('aria-current', 'page');
-    await expect(
-      page.getByText('28 matching rows', { exact: true }),
-    ).toBeVisible();
+    await expect(countFeedback(page, '28 matching rows')).toBeVisible();
     await page.unroute('**/locations/ITC-BLACK?**');
     await all.click();
     await expect(all).toHaveAttribute('aria-current', 'page');
     await expect(active).not.toHaveAttribute('aria-current', 'page');
-    await expect(
-      page.getByText('29 matching rows', { exact: true }),
-    ).toBeVisible();
+    await expect(countFeedback(page, '29 matching rows')).toBeVisible();
     await expect(page).toHaveURL(/status=all/);
     await page.reload();
     await expect(all).toHaveAttribute('aria-current', 'page');
     await page.goBack();
     await expect(active).toHaveAttribute('aria-current', 'page');
-    await expect(
-      page.getByText('28 matching rows', { exact: true }),
-    ).toBeVisible();
+    await expect(countFeedback(page, '28 matching rows')).toBeVisible();
     await page.goForward();
     await expect(all).toHaveAttribute('aria-current', 'page');
     const downloading = page.waitForEvent('download');
@@ -369,9 +360,7 @@ test('location status, holding scope, matching rows and real CSV agree across na
         url.searchParams.get('q') === setup.prefix &&
         !url.searchParams.has('page'),
     );
-    await expect(
-      page.getByText('30 matching rows', { exact: true }),
-    ).toBeVisible();
+    await expect(countFeedback(page, '30 matching rows')).toBeVisible();
     await expect(page.getByText(/^On this page:/)).toBeVisible();
     const next = page
       .getByRole('navigation', { name: 'Pagination' })
@@ -388,9 +377,7 @@ test('location status, holding scope, matching rows and real CSV agree across na
         url.searchParams.get('page') === '2',
     );
     await expect(page.getByText('Page 2 of 2', { exact: true })).toBeVisible();
-    await expect(
-      page.getByText('30 matching rows', { exact: true }),
-    ).toBeVisible();
+    await expect(countFeedback(page, '30 matching rows')).toBeVisible();
     await expect(
       page.getByRole('link', { name: 'Next', exact: true }),
     ).toHaveCount(0);
@@ -403,13 +390,9 @@ test('location status, holding scope, matching rows and real CSV agree across na
     await expect(
       search.getByLabel('Search inventory', { exact: true }),
     ).toHaveValue(setup.prefix);
-    await expect(
-      page.getByText('31 matching rows', { exact: true }),
-    ).toBeVisible();
+    await expect(countFeedback(page, '31 matching rows')).toBeVisible();
     await page.goto('/inventory?q=' + encodeURIComponent(setup.splitName));
-    await expect(
-      page.getByText('2 matching rows', { exact: true }),
-    ).toBeVisible();
+    await expect(countFeedback(page, '2 matching rows')).toBeVisible();
     await expect(
       page.getByText('On this page: 2 quantity rows with stock'),
     ).toBeVisible();
@@ -601,7 +584,7 @@ test('Spaces preserves current contents across slow responses and uses coherent 
     const split = panel.locator('li').filter({
       has: page.getByRole('link', { name: setup.splitName, exact: true }),
     });
-    await expect(split.getByText('1 unit', { exact: true })).toBeVisible();
+    await expect(countFeedback(split, '1 unit')).toBeVisible();
     await expect(panel).toHaveAttribute('aria-busy', 'false');
     await expect(panel.locator('[data-loading-shape="contents"]')).toHaveCount(
       0,
@@ -620,7 +603,7 @@ test('Spaces preserves current contents across slow responses and uses coherent 
     await expect(
       panel.getByRole('heading', { name: 'Black Container' }),
     ).toBeVisible();
-    await expect(split.getByText('1 unit', { exact: true })).toBeVisible();
+    await expect(countFeedback(split, '1 unit')).toBeVisible();
     await page.unrouteAll({ behavior: 'wait' });
     await page.getByRole('button', { name: 'Clear selection' }).click();
     await page.getByRole('button', { name: 'Hide room' }).click();

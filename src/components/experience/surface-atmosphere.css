@@ -5,6 +5,8 @@
   --grain-intensity: 0.29;
   --blueprint-intensity: 0.65;
   --ripple-intensity: 0.18;
+  --magnetic-intensity: 0.8;
+  --tilt-intensity: 0.65;
 }
 /* Light overrides are owned once by the later theme-palette.css import. */
 .experience-spotlight {
@@ -19,6 +21,8 @@
   border-radius: inherit;
   pointer-events: none;
   opacity: 0;
+  /* Keep the glow above the transformed opaque W10 face. */
+  z-index: 1;
   background: radial-gradient(
     280px circle at var(--x, 50%) var(--y, 50%),
     var(--accent),
@@ -35,10 +39,12 @@
 }
 @media (hover: hover) and (pointer: fine) {
   html[data-motion='full']
+    [data-pointer-effects-ready='true']
     .experience-spotlight[data-spotlight-active='true']::before {
     opacity: var(--spotlight-intensity);
   }
   html[data-motion='full']
+    [data-pointer-effects-ready='true']
     .experience-spotlight[data-spotlight-active='true']::after {
     opacity: calc(var(--spotlight-intensity) * 3);
   }
@@ -128,6 +134,221 @@ html[data-motion='reduced'] .experience-blueprint {
   .experience-background-ripple,
   .experience-spotlight::before,
   .experience-spotlight::after {
+    display: none;
+  }
+}
+
+[data-pointer-effects-ready='false'] .experience-spotlight::before,
+[data-pointer-effects-ready='false'] .experience-spotlight::after,
+.experience-spotlight[data-pointer-withdrawn='true']::before,
+.experience-spotlight[data-pointer-withdrawn='true']::after {
+  transition: none !important;
+}
+.experience-app:not([data-atmosphere-active='true'])
+  .experience-ambient-shell::before,
+.experience-app:not([data-atmosphere-active='true'])
+  .experience-ambient-shell::after,
+.experience-app:not([data-atmosphere-active='true']) .experience-blueprint {
+  animation: none;
+  transform: none;
+}
+@media (prefers-reduced-motion: reduce) {
+  .experience-spotlight::before,
+  .experience-spotlight::after {
+    opacity: 0 !important;
+  }
+  .experience-ambient-shell::before,
+  .experience-ambient-shell::after,
+  .experience-blueprint {
+    animation: none !important;
+    transform: none !important;
+  }
+}
+
+/* W10: stationary action/focus owner, separately transformed decorative face. */
+.experience-magnetic {
+  position: relative;
+  isolation: isolate;
+  transform: none !important;
+  translate: none !important;
+  scale: none !important;
+  background: transparent !important;
+  border-color: transparent !important;
+  box-shadow: none !important;
+  --magnetic-face-background: transparent;
+  --magnetic-face-border: transparent;
+  --magnetic-face-shadow: none;
+}
+.experience-magnetic[data-magnetic-face='primary'] {
+  --magnetic-face-background: var(--button-primary-background);
+  --magnetic-face-border: var(--button-primary-border);
+  --magnetic-face-shadow: 0 0 24px var(--button-primary-shadow);
+}
+.experience-magnetic[data-magnetic-face='primary']:hover {
+  --magnetic-face-background: var(--button-primary-hover-background);
+}
+.experience-magnetic[data-magnetic-face='scan'] {
+  --magnetic-face-background: var(--scan-primary-button-background);
+  --magnetic-face-border: var(--scan-primary-button-border);
+}
+.experience-magnetic[data-magnetic-face='scan']:hover {
+  --magnetic-face-background: var(--scan-primary-button-hover-background);
+}
+.experience-magnetic[data-magnetic-face='labels'] {
+  --magnetic-face-background: var(--labels-primary-button-background);
+  --magnetic-face-border: var(--labels-primary-button-border);
+}
+.experience-magnetic[data-magnetic-face='labels']:hover {
+  --magnetic-face-background: var(--labels-primary-button-hover-background);
+}
+.experience-magnetic[data-magnetic-face='outline'] {
+  --magnetic-face-background: var(--workspace-feedback-background);
+  --magnetic-face-border: var(--button-outline-border);
+}
+.experience-magnetic[data-magnetic-face='outline']:hover {
+  --magnetic-face-background: var(--button-outline-hover-background);
+  --magnetic-face-border: var(--button-outline-hover-border);
+}
+.experience-magnetic-face {
+  position: absolute;
+  inset: -1px;
+  z-index: -1;
+  border: 1px solid var(--magnetic-face-border);
+  border-radius: inherit;
+  background: var(--magnetic-face-background);
+  box-shadow: var(--magnetic-face-shadow);
+}
+.experience-magnetic-visual {
+  display: inline-flex;
+  align-items: center;
+  justify-content: inherit;
+  gap: inherit;
+}
+.experience-magnetic-face,
+.experience-magnetic-visual,
+.experience-tilt-visual {
+  pointer-events: none;
+  transform: none;
+}
+.experience-tilt {
+  position: relative;
+  min-width: 0;
+  border-radius: 12px;
+}
+.experience-tilt-visual {
+  position: relative;
+  height: 100%;
+  margin: 0;
+  transform-origin: center;
+}
+.experience-tilt-visual::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  opacity: 0;
+  background: linear-gradient(
+    125deg,
+    transparent 20%,
+    color-mix(in srgb, var(--accent) 12%, transparent),
+    transparent 80%
+  );
+}
+@media (hover: hover) and (pointer: fine) {
+  html[data-motion='full']
+    [data-pointer-effects-ready='true']
+    .experience-magnetic-face,
+  html[data-motion='full']
+    [data-pointer-effects-ready='true']
+    .experience-magnetic-visual,
+  html[data-motion='full']
+    [data-pointer-effects-ready='true']
+    .experience-tilt-visual {
+    transition: transform var(--motion-feedback) var(--ease-workspace);
+  }
+  html[data-motion='full']
+    [data-pointer-effects-ready='true']
+    .experience-magnetic[data-pointer-active='true']
+    > .experience-magnetic-face,
+  html[data-motion='full']
+    [data-pointer-effects-ready='true']
+    .experience-magnetic[data-pointer-active='true']
+    > .experience-magnetic-visual {
+    transform: translate(
+      clamp(
+        -4px,
+        calc(
+          var(--pointer-x, 0) * clamp(0, var(--magnetic-intensity), 1) * 4px
+        ),
+        4px
+      ),
+      clamp(
+        -4px,
+        calc(
+          var(--pointer-y, 0) * clamp(0, var(--magnetic-intensity), 1) * 4px
+        ),
+        4px
+      )
+    );
+  }
+  html[data-motion='full']
+    [data-pointer-effects-ready='true']
+    .experience-tilt[data-pointer-active='true']
+    > .experience-tilt-visual {
+    transform: perspective(800px)
+      rotateX(
+        clamp(
+          -6deg,
+          calc(
+            var(--pointer-y, 0) * clamp(0, var(--tilt-intensity), 1) * -6deg
+          ),
+          6deg
+        )
+      )
+      rotateY(
+        clamp(
+          -6deg,
+          calc(var(--pointer-x, 0) * clamp(0, var(--tilt-intensity), 1) * 6deg),
+          6deg
+        )
+      );
+  }
+  html[data-motion='full']
+    [data-pointer-effects-ready='true']
+    .experience-tilt[data-pointer-active='true']
+    > .experience-tilt-visual::after {
+    opacity: clamp(0, var(--tilt-intensity), 1);
+  }
+}
+
+/* Withdrawal is immediate; regain requires a fresh eligible pointer event. */
+[data-pointer-effects-ready='false'] .experience-magnetic-face,
+[data-pointer-effects-ready='false'] .experience-magnetic-visual,
+[data-pointer-effects-ready='false'] .experience-tilt-visual,
+[data-pointer-withdrawn='true'] > .experience-magnetic-face,
+[data-pointer-withdrawn='true'] > .experience-magnetic-visual,
+[data-pointer-withdrawn='true'] > .experience-tilt-visual {
+  transition: none !important;
+}
+@media (prefers-reduced-motion: reduce) {
+  .experience-magnetic-face,
+  .experience-magnetic-visual,
+  .experience-tilt-visual {
+    transform: none !important;
+    transition: none !important;
+  }
+  .experience-tilt-visual::after {
+    opacity: 0 !important;
+  }
+}
+@media print {
+  .experience-magnetic-face,
+  .experience-magnetic-visual,
+  .experience-tilt-visual {
+    transform: none !important;
+  }
+  .experience-tilt-visual::after {
     display: none;
   }
 }

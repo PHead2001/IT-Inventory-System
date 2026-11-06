@@ -1,3 +1,9 @@
+import { TransientFeedbackProvider } from '@/components/experience/transient-feedback';
+import { PrivacyReadinessContext } from '@/components/auth/privacy-readiness';
+import {
+  assignmentEpoch,
+  readPrivacyRevocationRevision,
+} from '@/features/scan/assign-batch';
 import { beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 import userEvent from '@testing-library/user-event';
 import Link from 'next/link';
@@ -4982,4 +4988,74 @@ describe('existing edit recovery and review', () => {
     ).toBeNull();
     expect(screen.queryByRole('button', { name: 'Confirm save' })).toBeNull();
   });
+  it.each(['changed', 'noop', 'error'] as const)(
+    'publishes a generic transient notice only after current changed metadata acknowledgement (%s)',
+    async (outcome) => {
+      let settle!: (value: Awaited<ReturnType<typeof submitInventory>>) => void;
+      vi.mocked(submitInventory).mockImplementation(
+        () =>
+          new Promise((resolve) => {
+            settle = resolve;
+          }),
+      );
+      const view = render(
+        <PrivacyReadinessContext
+          value={{
+            ready: true,
+            visible: true,
+            generation: 'toast-consumer',
+            verifiedEpoch: assignmentEpoch(),
+            revocationRevision: readPrivacyRevocationRevision(),
+          }}
+        >
+          <TransientFeedbackProvider
+            actorId="actor"
+            backend="https://preview.example"
+          >
+            <MetadataForm {...props} forms={{ [categoryId]: form() }} />
+          </TransientFeedbackProvider>
+        </PrivacyReadinessContext>,
+      );
+      fireEvent.change(await screen.findByLabelText('Name'), {
+        target: { value: 'Confirmed local edit' },
+      });
+      fireEvent.click(screen.getByRole('button', { name: 'Review details' }));
+      fireEvent.click(screen.getByRole('button', { name: 'Confirm save' }));
+      await waitFor(() => expect(submitInventory).toHaveBeenCalledOnce());
+      expect(view.container.querySelector('[data-feedback-card]')).toBeNull();
+      await act(async () =>
+        settle(
+          outcome === 'error'
+            ? {
+                ok: false,
+                kind: 'unexpected',
+                code: 'unexpected',
+                message: 'Unknown outcome',
+              }
+            : {
+                ok: true,
+                entityId: item.id,
+                version: '2',
+                changed: outcome === 'changed',
+                eventId: '00000000-0000-4000-8000-000000000098',
+              },
+        ),
+      );
+      const card = view.container.querySelector('[data-feedback-card]');
+      if (outcome === 'changed') {
+        expect(card).toHaveTextContent('Details saved.');
+        expect(card).not.toHaveTextContent('Confirmed local edit');
+        expect(card?.querySelector('[role="status"]')).toHaveAttribute(
+          'aria-live',
+          'polite',
+        );
+        expect(
+          view.container.querySelector('.experience-spotlight'),
+        ).toHaveTextContent('Details saved.');
+        expect(
+          view.container.querySelector('.experience-spotlight'),
+        ).not.toHaveAttribute('role', 'status');
+      } else expect(card).toBeNull();
+    },
+  );
 });

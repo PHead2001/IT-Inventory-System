@@ -1,4 +1,6 @@
 'use client';
+
+import { SpringPresence } from '@/components/experience/spring-presence';
 import { afterTransitionCapture } from '@/components/forms/transition-capture';
 import {
   useEffect,
@@ -382,123 +384,125 @@ export function RoomToolbar({
           <MoreHorizontal aria-hidden="true" size={19} />
         </Button>
       </div>
-      {open && (
-        <div
-          ref={panel}
-          id={panelId}
-          role="region"
-          aria-label="More map controls"
-          data-room-obstruction="true"
-          className={styles.moreMenu}
+      <SpringPresence
+        open={open}
+        instanceKey={panelId}
+        kind="popover"
+        retainExit
+        surfaceRef={panel}
+        onPresentationChange={onOverlayChange}
+        id={panelId}
+        role="region"
+        aria-label="More map controls"
+        data-room-obstruction="true"
+        className={styles.moreMenu}
+      >
+        <Button
+          variant="outline"
+          onClick={() => {
+            close();
+            onCommand('recenter');
+          }}
         >
-          <Button
-            variant="outline"
-            onClick={() => {
-              close();
-              onCommand('recenter');
-            }}
-          >
-            Recenter
-          </Button>
-          <div
-            role="group"
-            aria-label="Orbit mode"
-            className={styles.controlGroup}
-          >
-            {(['guided', 'free'] as const).map((value) => (
-              <Button
-                key={value}
-                variant="outline"
-                aria-pressed={mode === value}
-                onClick={() => onModeChange(value)}
-              >
-                {value === 'guided' ? 'Guided' : 'Free Orbit'}
-              </Button>
-            ))}
-          </div>
-          <div role="group" aria-label="Pan" className={styles.panControls}>
-            <span />
-            {control('up', 'Pan up')}
-            <span />
-            {control('left', 'Pan left')}
-            <span aria-hidden="true">Pan</span>
-            {control('right', 'Pan right')}
-            <span />
-            {control('down', 'Pan down')}
-            <span />
-          </div>
-          <div
-            role="group"
-            aria-label="Rotate"
-            className={styles.secondaryControls}
-          >
-            {control('rotate-left', 'Rotate left')}
-            {control('rotate-right', 'Rotate right')}
-          </div>
-          <div
-            role="group"
-            aria-label="Tilt"
-            className={styles.secondaryControls}
-          >
-            {control('tilt-up', 'Tilt up')}
-            {control('tilt-down', 'Tilt down')}
-          </div>
-          <Button
-            variant="outline"
-            aria-pressed={showLabels}
-            onClick={onLabelsChange}
-          >
-            Show labels
-          </Button>
-          <Button
-            variant="outline"
-            aria-pressed={showCounts}
-            onClick={onCountsChange}
-          >
-            Show item counts
-          </Button>
-          <Button
-            variant="outline"
-            aria-expanded={help}
-            onClick={() => setHelp(!help)}
-          >
-            Controls
-          </Button>
-          {help && (
-            <div className={styles.controlsHelp}>
-              <p>
-                {selectionEnabled
-                  ? 'Click or tap a location to select it.'
-                  : 'This preview shows the recorded location.'}{' '}
-                Outside Interact mode, scroll and swipe move the page.
-              </p>
-              <p>
-                Choose Interact with map to rotate by dragging, or zoom with an
-                ordinary wheel or direct two-finger pinch. Ctrl/Command+wheel
-                and browser trackpad pinch remain browser zoom. Right-drag or
-                the Pan buttons move the view. Done, Escape or leaving the map
-                ends interaction.
-              </p>
-              <p>
-                Guided limits rotation; Free Orbit also views above and below.
-                Double-click exposed floor to recenter. Tab moves freely between
-                controls and the map; Enter or Space activates a button. The
-                location browser works without the map.
-              </p>
-              <p>
-                Counts mark occupied visible locations with read-only badges.
-                Select a location on the map or in the location browser to see
-                its distinct products, units and individual assets. Unknown
-                counts are omitted. Hidden locations remain in the location
-                browser.
-              </p>
-            </div>
-          )}
-          <Button variant="outline" onClick={() => close()}>
-            Close controls
-          </Button>
+          Recenter
+        </Button>
+        <div
+          role="group"
+          aria-label="Orbit mode"
+          className={styles.controlGroup}
+        >
+          {(['guided', 'free'] as const).map((value) => (
+            <Button
+              key={value}
+              variant="outline"
+              aria-pressed={mode === value}
+              onClick={() => onModeChange(value)}
+            >
+              {value === 'guided' ? 'Guided' : 'Free Orbit'}
+            </Button>
+          ))}
         </div>
-      )}
+        <div role="group" aria-label="Pan" className={styles.panControls}>
+          <span />
+          {control('up', 'Pan up')}
+          <span />
+          {control('left', 'Pan left')}
+          <span aria-hidden="true">Pan</span>
+          {control('right', 'Pan right')}
+          <span />
+          {control('down', 'Pan down')}
+          <span />
+        </div>
+        <div
+          role="group"
+          aria-label="Rotate"
+          className={styles.secondaryControls}
+        >
+          {control('rotate-left', 'Rotate left')}
+          {control('rotate-right', 'Rotate right')}
+        </div>
+        <div
+          role="group"
+          aria-label="Tilt"
+          className={styles.secondaryControls}
+        >
+          {control('tilt-up', 'Tilt up')}
+          {control('tilt-down', 'Tilt down')}
+        </div>
+        <Button
+          variant="outline"
+          aria-pressed={showLabels}
+          onClick={onLabelsChange}
+        >
+          Show labels
+        </Button>
+        <Button
+          variant="outline"
+          aria-pressed={showCounts}
+          onClick={onCountsChange}
+        >
+          Show item counts
+        </Button>
+        <Button
+          variant="outline"
+          aria-expanded={help}
+          onClick={() => setHelp(!help)}
+        >
+          Controls
+        </Button>
+        {help && (
+          <div className={styles.controlsHelp}>
+            <p>
+              {selectionEnabled
+                ? 'Click or tap a location to select it.'
+                : 'This preview shows the recorded location.'}{' '}
+              Outside Interact mode, scroll and swipe move the page.
+            </p>
+            <p>
+              Choose Interact with map to rotate by dragging, or zoom with an
+              ordinary wheel or direct two-finger pinch. Ctrl/Command+wheel and
+              browser trackpad pinch remain browser zoom. Right-drag or the Pan
+              buttons move the view. Done, Escape or leaving the map ends
+              interaction.
+            </p>
+            <p>
+              Guided limits rotation; Free Orbit also views above and below.
+              Double-click exposed floor to recenter. Tab moves freely between
+              controls and the map; Enter or Space activates a button. The
+              location browser works without the map.
+            </p>
+            <p>
+              Counts mark occupied visible locations with read-only badges.
+              Select a location on the map or in the location browser to see its
+              distinct products, units and individual assets. Unknown counts are
+              omitted. Hidden locations remain in the location browser.
+            </p>
+          </div>
+        )}
+        <Button variant="outline" onClick={() => close()}>
+          Close controls
+        </Button>
+      </SpringPresence>
     </div>
   );
 }

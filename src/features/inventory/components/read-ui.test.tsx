@@ -88,7 +88,9 @@ it('identifies one local unit separately from overall available and assigned sto
     />,
   );
   expect(screen.getByText('At this location')).toBeVisible();
-  expect(screen.getByText('1 unit')).toBeVisible();
+  expect(
+    screen.getByText('1 unit', { selector: '[data-count-final]' }),
+  ).toBeVisible();
   expect(screen.getByText(/Across all storage: 2 available/)).toBeVisible();
   expect(
     screen.getByText(/Overall totals: 1 assigned · 3 recorded/),
@@ -215,7 +217,9 @@ it('labels holding and distinct definition counts as page-local, with full match
       }}
     />,
   );
-  expect(screen.getByText('52 matching rows')).toBeVisible();
+  expect(
+    screen.getByText('52 matching rows', { selector: '[data-count-final]' }),
+  ).toBeVisible();
   expect(
     screen.getByText(/On this page: 2 quantity rows with stock/),
   ).toBeVisible();
@@ -244,7 +248,9 @@ it('exposes stable location links on search results with independent conventiona
   expect(
     screen.getByRole('link', { name: /IT Closet.*ITC-S4B/ }),
   ).toHaveAttribute('href', '/locations/ITC-S4B');
-  expect(screen.getByText('4 units')).toBeVisible();
+  expect(
+    screen.getByText('4 units', { selector: '[data-count-final]' }),
+  ).toBeVisible();
   expect(
     screen.getByRole('link', { name: 'Show ITC-S4B in room' }),
   ).toHaveAttribute('href', '/room?location=ITC-S4B');
@@ -270,7 +276,9 @@ it('labels item-wide low stock while retaining the location holding quantity', (
       ]}
     />,
   );
-  expect(screen.getByText('2 units')).toBeVisible();
+  expect(
+    screen.getByText('2 units', { selector: '[data-count-final]' }),
+  ).toBeVisible();
   expect(
     screen.getByText(
       /Needs restocking · Available in storage 3 \/ threshold 4/,
@@ -367,8 +375,12 @@ it('keeps separate holding quantities and provides a detail path for long custom
       }))}
     />,
   );
-  expect(screen.getByText('2 units')).toBeVisible();
-  expect(screen.getByText('3 units')).toBeVisible();
+  expect(
+    screen.getByText('2 units', { selector: '[data-count-final]' }),
+  ).toBeVisible();
+  expect(
+    screen.getByText('3 units', { selector: '[data-count-final]' }),
+  ).toBeVisible();
   expect(
     screen.queryByText(/Internal revision decoration/),
   ).not.toBeInTheDocument();
@@ -761,7 +773,9 @@ it('omits only the current location from scoped rows while retaining child locat
   expect(
     within(rows[0]).queryByRole('link', { name: /ITC-S4B/ }),
   ).not.toBeInTheDocument();
-  expect(within(rows[0]).getByText('3 units')).toBeVisible();
+  expect(
+    within(rows[0]).getByText('3 units', { selector: '[data-count-final]' }),
+  ).toBeVisible();
   expect(
     within(rows[0]).getByText('Overall totals: 2 assigned · 9 recorded'),
   ).toBeVisible();
@@ -781,7 +795,9 @@ it('keeps informative aggregate counts while suppressing redundant one-row locat
       result={{ rows: [scopedRow], total: 1, page: 1, pageSize: 25 }}
     />,
   );
-  expect(screen.getByText('1 matching row')).toBeVisible();
+  expect(
+    screen.getByText('1 matching row', { selector: '[data-count-final]' }),
+  ).toBeVisible();
   expect(
     screen.queryByText(/On this page|Distinct quantity products/),
   ).not.toBeInTheDocument();
@@ -828,7 +844,9 @@ it('keeps page-local counts when a location has more results beyond a single-row
       result={{ rows: [scopedRow], total: 26, page: 2, pageSize: 25 }}
     />,
   );
-  expect(screen.getByText('26 matching rows')).toBeVisible();
+  expect(
+    screen.getByText('26 matching rows', { selector: '[data-count-final]' }),
+  ).toBeVisible();
   expect(
     screen.getByText(/On this page: 1 quantity row with stock/),
   ).toBeVisible();

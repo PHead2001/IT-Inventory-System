@@ -1,4 +1,8 @@
 'use client';
+import { MagneticVisual } from '@/components/experience/magnetic-visual';
+import { PeekLink } from '@/features/peek/peek-link';
+import { CountTicker } from '@/components/experience/count-ticker';
+import { ListEntrance } from '@/components/experience/list-feedback';
 import { useRouteTask } from '@/components/experience/route-pending';
 
 import { useState } from 'react';
@@ -105,45 +109,81 @@ export function DashboardSnapshotView({
         </div>
       </div>
 
-      <dl className="experience-stat-grid">
-        <div className="experience-spotlight experience-stat experience-surface">
-          <dt className="experience-muted text-xs">Needs restocking</dt>
-
-          <dd
-            className={
-              result.configuredCount ? 'text-amber-200' : 'text-slate-300'
-            }
+      <ListEntrance
+        as="div"
+        role="group"
+        aria-label="Storage health counts"
+        identities={['restocking', 'out-of-stock', 'monitored']}
+        className="experience-stat-grid"
+      >
+        <div className="experience-spotlight experience-tilt">
+          <MagneticVisual
+            kind="tilt"
+            className="experience-stat experience-surface"
           >
-            {result.configuredCount ? (
-              result.needsRestockingCount
-            ) : (
-              <span className="text-base">Not configured</span>
-            )}
-          </dd>
+            <dl>
+              <dt className="experience-muted text-xs">Needs restocking</dt>
+
+              <dd
+                className={
+                  result.configuredCount ? 'text-amber-200' : 'text-slate-300'
+                }
+              >
+                {result.configuredCount ? (
+                  <CountTicker
+                    value={result.needsRestockingCount}
+                    initialZero
+                  />
+                ) : (
+                  <span className="text-base">Not configured</span>
+                )}
+              </dd>
+            </dl>
+          </MagneticVisual>
         </div>
 
-        <div className="experience-spotlight experience-stat experience-surface">
-          <dt className="experience-muted text-xs">Out of stock (subset)</dt>
-
-          <dd
-            className={
-              result.configuredCount ? 'text-red-200' : 'text-slate-300'
-            }
+        <div className="experience-spotlight experience-tilt">
+          <MagneticVisual
+            kind="tilt"
+            className="experience-stat experience-surface"
           >
-            {result.configuredCount ? (
-              result.outOfStockCount
-            ) : (
-              <span className="text-base">Not configured</span>
-            )}
-          </dd>
+            <dl>
+              <dt className="experience-muted text-xs">
+                Out of stock (subset)
+              </dt>
+
+              <dd
+                className={
+                  result.configuredCount ? 'text-red-200' : 'text-slate-300'
+                }
+              >
+                {result.configuredCount ? (
+                  <CountTicker value={result.outOfStockCount} initialZero />
+                ) : (
+                  <span className="text-base">Not configured</span>
+                )}
+              </dd>
+            </dl>
+          </MagneticVisual>
         </div>
 
-        <div className="experience-spotlight experience-stat experience-surface">
-          <dt className="experience-muted text-xs">Monitored active items</dt>
+        <div className="experience-spotlight experience-tilt">
+          <MagneticVisual
+            kind="tilt"
+            className="experience-stat experience-surface"
+          >
+            <dl>
+              <dt className="experience-muted text-xs">
+                Monitored active items
+              </dt>
 
-          <dd>{result.configuredCount}</dd>
+              <dd>
+                <CountTicker value={result.configuredCount} initialZero />
+              </dd>
+            </dl>
+          </MagneticVisual>
         </div>
-      </dl>
+      </ListEntrance>
 
       <p className="experience-muted text-sm">
         {countLabel(result.configuredCount, 'monitored active quantity item')}.{' '}
@@ -250,30 +290,35 @@ export function DashboardSnapshotView({
           </div>
         ) : (
           <>
-            <ul className="experience-surface overflow-hidden">
+            <ListEntrance
+              identities={result.rows.map((row) => row.id)}
+              className="experience-surface overflow-hidden"
+            >
               {result.rows.map((row) => (
                 <li
                   key={row.id}
                   className="experience-spotlight experience-attention-row"
                 >
                   <div className="min-w-0">
-                    <Link
+                    <PeekLink
+                      peekTarget={{ kind: 'quantity', id: row.id }}
                       href={'/inventory/quantity/' + row.id}
 
                       className="block truncate text-sm font-semibold"
                     >
                       {row.name}
-                    </Link>
+                    </PeekLink>
 
                     <p className="experience-muted mt-1 truncate text-xs">
                       {row.categoryName} ·{' '}
-                      <Link
+                      <PeekLink
+                        peekTarget={{ kind: 'quantity', id: row.id }}
                         href={'/inventory/quantity/' + row.id}
 
                         className="text-cyan-200"
                       >
                         View item and locations
-                      </Link>
+                      </PeekLink>
                     </p>
                   </div>
 
@@ -296,7 +341,7 @@ export function DashboardSnapshotView({
                   </strong>
                 </li>
               ))}
-            </ul>
+            </ListEntrance>
 
             <Pagination result={result} base="/dashboard" params={params} />
           </>
