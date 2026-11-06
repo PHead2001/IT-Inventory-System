@@ -2,7 +2,47 @@
 
 This is the durable acceptance index for the complete owner-authorized Audit 4.2 goal: 65 numbered requirements, with D303 split into two acceptance rows, plus C402–C404 and N01–N07 (76 rows, 75 distinct base IDs). All A and W requirements remain implementation scope, including U303, U313 and A307. This document tracks disposition and dependencies; recordings, logs and one-time measurements belong in the relevant PR or retained protected artifacts, following Playbook §7.4.
 
-## Current delivery snapshot — 2026-11-05
+## PR62 theme, room and logout evidence checkpoint — 2026-11-05
+
+This checkpoint records PR62 at base `c5c8e09c66c7b61eecb78dd0212c695607a51630` plus local reviewed
+Theme and Room fixes. Those fixes are uncommitted; this is not a new HEAD or a final-SHA CI claim.
+
+- **PR57 integration:** PR #57 merged as main `aef008490373e79a6148b69e1a91d3a7be6a002f`.
+  Final candidate `17782ace` has an identical tree.
+- **PR62 checks at c5:** The normal hook reported `5792/371` passed. Fresh Codex receipt
+  `6675756066` was uniquely clean on the full SHA with zero unresolved findings.
+- **Complete CI:** Run `42158560591` failed and did not complete all planned E2E; it is not waived.
+  The 375→390 room click selected Red instead of S1A twice, and Full native theme animation
+  completion failed twice. Logout response-body collection failed once, then passed on retry.
+- **Room correction:** The More panel now defers its cancellable layout update until the next task
+  after the complete click, so pointerdown no longer removes the 205px inline flow before the scene
+  handler. Exact native run `bec461b0…` passed in 107.999s: the flow remained present; every click
+  phase used stable frame (30, 311.046875, 330, 408), selected S1A and matched inventory.
+- **Theme correction:** The former 500ms effects exceeded the 650ms total watchdog after 59ms capture
+  plus 96ms effect-ready time. The revised 450ms Full circle is within the Audit 450–600ms interval:
+  all five effects completed at visual-transition 618.2ms. The 180ms System effect completed at
+  296.8ms. The 650ms watchdog remains unchanged.
+- **Logout correction:** The real HTTP response capture test preserves logout, cookie, body-read-failure
+  and hard-reload coverage. Both focused native runs passed; 81 focused and sibling tests passed,
+  with ordinary review clear.
+- **Retained visual/source evidence:** Eight actual before/after images are attached to comment
+  `6676566647`. Source-qualified 835-inventory/header evidence is equivalent to main `aef008490373e79a6148b69e1a91d3a7be6a002f`.
+  The after source is `7fd08332`→`c5c8e09c` documentation-only. Compared images use different
+  fictional records and deployments; they do not establish History or Settings before/after, or
+  motion from stills.
+- **Artifacts and cleanup:** Source manifests and run evidence remain under
+  `.local-tools/pr62-theme-logout-ci-fix` and `.local-tools/pr62-room-menu-click`. Auth configuration
+  restoration, key retirement and process cleanup were proved. The old three-unit fixture is
+  unchanged (receipt prefix `61EC2761`).
+- **Remaining scope:** Independent focused theme-experience review is clear. The collector-limited
+  broader Labels workflow remains open. Helper candidate `197E89` has code review clear but still
+  needs final-source/deployment handoff and runtime evidence. Held U303/U313/A305 source and child
+  PR64/65/66 gates remain. No whole D402, W12 or Audit goal acceptance is claimed.
+- **Boundaries and next gate:** No room geometry, stock or RLS changes were made. The lead retains
+  batch commit, pre-push validation, fresh Codex review, complete CI and applicable hosted proof
+  before marking ready; automatic merge remains frozen. No production action occurred.
+
+## Historical snapshot before PR57 merge — 2026-11-05
 
 The lead verified PR #56 merged into `origin/main` `5bbf8ced7d865291ffd74d26491ee55484170dcb` from final candidate `22cd6c1f3153a5fd1bba4ffa03cc1c18d16f941d`. E22 records its exact-candidate CI, review and scoped runtime evidence. Those results do not certify the newly joined PR57 tree or integrated staging.
 

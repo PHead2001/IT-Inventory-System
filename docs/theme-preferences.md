@@ -61,7 +61,7 @@ membership, data access or mutation authority.
 ## Snapshot ownership
 
 The existing route owner also binds a native theme lease and its real transition
-handle. A Full-motion control change reveals for 500 ms with `--ease-workspace`,
+handle. A Full-motion control change reveals for 450 ms with `--ease-workspace`,
 from the activated control's center to the farthest visual-viewport corner.
 OS-driven System changes crossfade for 180 ms. Same appearance, Reduced motion,
 unsupported APIs, hidden documents and pending route/server presentation apply
@@ -77,7 +77,10 @@ inputs and scanner streams are never replaced for theme motion. Unsupported medi
 masking or pseudo-element animation falls back instantly. ResizeObserver invalidates
 changed region geometry. A single frame check runs only during the active native
 lease, retaining media and conventional-region identity and rectangles. A single
-650 ms deadline bounds even a hung native handle; cleanup removes names/background,
+650 ms total deadline, measured before native capture begins, bounds even a hung
+native handle. Capture readiness and WAAPI play readiness consume that same
+budget; the 450 ms reveal leaves their completion margin without extending the
+lease. System's 180 ms crossfade is unchanged. Cleanup removes names/background,
 cancels the frame/timer and clears captured node references. Discovery visits at
 most 2,048 elements, 256 conventional regions and 32 live-media elements before
 any name assignment/layout measurement; saturation or unsupported ResizeObserver
@@ -88,6 +91,30 @@ frame is awaited inside the update callback.
 All native ready/update/finished rejections are observed. Because skipped native
 transitions still run their update callback, lease and store-generation checks
 prevent late updates/failures from restoring an older preference.
+
+### November 6, 2026 UTC watchdog regression checkpoint
+
+The exact native-completion assertion from candidate `c5c8e09c` reproduced
+locally with the unchanged 500 ms reveal: the 650 ms watchdog skipped the real
+transition and rejected all five running/progressed pseudo-element animations.
+Passive observations measured roughly 59 ms to native readiness and another
+96 ms to animation play readiness. The approved 450 ms nominal reveal stays
+within Audit W12's 450–600 ms range and preserves the single total 650 ms lease;
+neither completion assertions nor privacy/geometry cancellation are relaxed.
+
+The corrected focused canonical local run passed both actual native circle/System
+and real logout-first-cleanup-failure/hard-reload journeys. All five 450 ms circle
+effects completed, with native finish at 618.2 ms from deadline registration;
+all five 180 ms System effects completed at 296.8 ms. No watchdog skip occurred.
+The logout test forwards the real server response/cookies and retains its bytes
+before browser delivery, avoiding document-bound response-body eviction.
+Eighty-one focused/sibling tests, strict typecheck, scoped lint and formatting
+passed. Retained artifacts are under
+`.local-tools/pr62-theme-logout-ci-fix/run-17ecf3ab-59ff-4c72-8e0c-3334fcaa96a5`
+(unchanged-product RED) and `run-efd06b47-1de9-4ab6-9f59-832f13186cc9` (GREEN).
+Both runs restored the exact local Auth container/configuration and retired their
+test signing key. These source-bound local results are not new-HEAD Linux CI,
+hosted certification, broader room/theme acceptance or resource-capacity proof.
 
 ## Palettes and exceptions
 

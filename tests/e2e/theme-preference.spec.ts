@@ -32,6 +32,7 @@ type ThemeProof = {
     snapshots: number;
     overlays: number;
   }[];
+  events: { at: number; kind: string; index?: number; pseudo?: string }[];
 };
 declare global {
   interface Window {
@@ -77,8 +78,29 @@ async function observeAppearance(page: Page, unsupported = false) {
         animations: [],
         observing: true,
         instantFrames: [],
+        events: [],
       };
       window.themeAcceptanceProof = proof;
+      const timeout = window.setTimeout.bind(window);
+      window.setTimeout = ((
+        handler: TimerHandler,
+        delay?: number,
+        ...args: unknown[]
+      ) => {
+        if (delay !== 650 || typeof handler !== 'function')
+          return timeout(handler, delay, ...args);
+        proof.events.push({
+          at: performance.now(),
+          kind: '650ms-timeout-registered',
+        });
+        return timeout(() => {
+          proof.events.push({
+            at: performance.now(),
+            kind: '650ms-timeout-fired',
+          });
+          handler.apply(window, args);
+        }, delay);
+      }) as typeof window.setTimeout;
       new PerformanceObserver((list) => {
         for (const entry of list.getEntries())
           proof.paints.push({ name: entry.name, time: entry.startTime });
@@ -113,22 +135,71 @@ async function observeAppearance(page: Page, unsupported = false) {
       ) => {
         const entry = { ready: false, finished: false, rejected: false };
         proof.transitions.push(entry);
+        const index = proof.transitions.length - 1;
+        proof.events.push({
+          at: performance.now(),
+          kind: 'transition-start',
+          index,
+        });
         const transition = native(...args);
+        const skip = transition.skipTransition.bind(transition);
+        transition.skipTransition = () => {
+          proof.events.push({
+            at: performance.now(),
+            kind: 'transition-skip',
+            index,
+          });
+          skip();
+        };
+        void transition.updateCallbackDone.then(
+          () =>
+            proof.events.push({
+              at: performance.now(),
+              kind: 'transition-updated',
+              index,
+            }),
+          () =>
+            proof.events.push({
+              at: performance.now(),
+              kind: 'transition-update-rejected',
+              index,
+            }),
+        );
         void transition.ready.then(
           () => {
             entry.ready = true;
+            proof.events.push({
+              at: performance.now(),
+              kind: 'transition-ready',
+              index,
+            });
           },
           () => {
             entry.rejected = true;
+            proof.events.push({
+              at: performance.now(),
+              kind: 'transition-ready-rejected',
+              index,
+            });
           },
         );
         void transition.finished.then(
           () => {
             entry.finished = true;
+            proof.events.push({
+              at: performance.now(),
+              kind: 'transition-finished',
+              index,
+            });
           },
           () => {
             entry.finished = true;
             entry.rejected = true;
+            proof.events.push({
+              at: performance.now(),
+              kind: 'transition-finished-rejected',
+              index,
+            });
           },
         );
         return transition;
@@ -166,20 +237,42 @@ async function observeAppearance(page: Page, unsupported = false) {
             rejected: false,
           };
           proof.animations.push(entry);
+          const index = proof.animations.length - 1;
+          proof.events.push({
+            at: performance.now(),
+            kind: 'animation-start',
+            index,
+            pseudo: entry.pseudo,
+          });
           // A skipped native transition may fulfill its own finished promise
           // while cancelling these effects. Observe each browser animation's
           // real result separately; readiness/progress is insufficient.
           void animation.finished.then(
             () => {
               entry.completed = true;
+              proof.events.push({
+                at: performance.now(),
+                kind: 'animation-completed',
+                index,
+              });
             },
             () => {
               entry.rejected = true;
+              proof.events.push({
+                at: performance.now(),
+                kind: 'animation-rejected',
+                index,
+              });
             },
           );
           void animation.ready.then(
             () => {
               entry.running = animation.playState === 'running';
+              proof.events.push({
+                at: performance.now(),
+                kind: 'animation-ready',
+                index,
+              });
               requestAnimationFrame(() => {
                 const previous = Number(animation.currentTime);
                 requestAnimationFrame(() => {
@@ -205,6 +298,7 @@ async function clearTransitions(page: Page) {
   await page.evaluate(() => {
     window.themeAcceptanceProof!.transitions = [];
     window.themeAcceptanceProof!.animations = [];
+    window.themeAcceptanceProof!.events = [];
   });
 }
 async function noOverlay(page: Page) {
@@ -407,6 +501,10 @@ test('Full theme circle runs on native pseudo-elements from the current control 
     })
     .toBe(true);
   const circle = await proof(page);
+  await info.attach('native-theme-circle-before-assert.json', {
+    body: JSON.stringify(circle),
+    contentType: 'application/json',
+  });
   expect(circle.transitions).toHaveLength(1);
   expect(circle.transitions[0]).toEqual({
     ready: true,

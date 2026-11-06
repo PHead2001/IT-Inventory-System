@@ -148,7 +148,7 @@ it('uses the control center and farthest visual viewport corner, excluding every
     'path(evenodd, "M0 0h100v80h-100ZM10 10h10v30h-10ZM20 10h20v40h-20ZM40 20h10v30h-10Z")',
   );
 });
-it('owns the actual native handle, animates only new disjoint snapshots for 500ms and never remounts media', async () => {
+it('owns the actual native handle, animates only new disjoint snapshots for 450ms and never remounts media', async () => {
   const { jobs, animate } = native();
   const canvas = document.querySelector('canvas');
   const apply = vi.fn();
@@ -173,7 +173,7 @@ it('owns the actual native handle, animates only new disjoint snapshots for 500m
   expect(apply).toHaveBeenCalledOnce();
   expect(animate).toHaveBeenCalled();
   for (const [frames, options] of animate.mock.calls) {
-    expect(options).toMatchObject({ duration: 500, fill: 'both' });
+    expect(options).toMatchObject({ duration: 450, fill: 'both' });
     expect(options.pseudoElement).toMatch(/^::view-transition-new\(theme-/);
     expect(Object.keys(frames[0])).toEqual(['clipPath']);
   }
@@ -289,6 +289,27 @@ it('uses a 180ms OS crossfade, while same appearance and pending navigation appl
   expect(start).toHaveBeenCalledOnce();
   expect(apply).toHaveBeenCalledTimes(2);
   unbind();
+});
+it('completes the nominal reveal inside the total lease after observed native setup overhead', async () => {
+  vi.useFakeTimers();
+  const { jobs, animate } = native();
+  revealTheme({ apply: () => {}, changed: true, automatic: false });
+  vi.advanceTimersByTime(60);
+  jobs[0].update();
+  jobs[0].updated.resolve();
+  jobs[0].ready.resolve();
+  await Promise.resolve();
+  const duration = Number(animate.mock.calls[0][1].duration);
+  // The real native failure had ~59ms capture plus ~96ms effect play readiness.
+  vi.advanceTimersByTime(95 + duration - 1);
+  expect(jobs[0].skipTransition).not.toHaveBeenCalled();
+  vi.advanceTimersByTime(1);
+  expect(duration).toBe(450);
+  jobs[0].finished.resolve();
+  await Promise.resolve();
+  expect(document.querySelector('[data-theme-region]')).toBeNull();
+  expect(frames.pending.size).toBe(0);
+  expect(vi.getTimerCount()).toBe(0);
 });
 it('latest intent wins when skipped callbacks and rejected native promises arrive out of order', async () => {
   const { jobs } = native();
