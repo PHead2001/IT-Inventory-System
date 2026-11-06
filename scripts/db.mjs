@@ -63,7 +63,24 @@ const test = () => {
     localTestEnv(status),
   );
   node(
+    ['--import', 'tsx', 'tests/integration/low-stock-cap-cleanup.ts'],
+    localTestEnv(status),
+  );
+  node(
     ['--import', 'tsx', 'tests/integration/low-stock.ts'],
+    localTestEnv(status),
+  );
+  node(
+    [
+      '--test',
+      '--import',
+      'tsx',
+      'tests/integration/overview-contract.test.ts',
+    ],
+    localTestEnv(status),
+  );
+  node(
+    ['--import', 'tsx', 'tests/integration/overview.ts'],
     localTestEnv(status),
   );
   node(

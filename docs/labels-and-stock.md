@@ -143,4 +143,20 @@ Authenticated `GET /api/exports/inventory` downloads are private/no-store and us
 
 Both CSV types append `Item Code (SKU)` after their existing columns, preserving established column positions. The existing raw snapshot and encoded CSV byte caps still apply.
 
+Low-stock CSV additionally appends `Shortfall` after every existing column,
+including display metadata. It is `max(current threshold - available storage, 0)`
+with exact decimal arithmetic. Missing/null availability is blank; recorded totals
+and assigned site holdings do not substitute for available storage. Equality
+retains zero in CSV and an At threshold label on current inventory/dashboard rows.
+Existing formula neutralization, custom-field opt-in, column positions and private
+snapshot reads remain intact.
+
+The data snapshot and 2 MiB raw-result limit are unchanged. The actual encoded
+header and cells pass through the existing 3 MiB UTF-8 CSV budget before a success
+response is built. An int32 threshold bounds the extra numeric cell to ten ASCII
+digits: at most 11 bytes per row plus 12 header bytes, or 110,012 bytes at 10,000
+rows. The final exact byte check includes those bytes, BOM, quoting and line
+endings; an oversized result returns the existing actionable error without a
+partial successful file.
+
 Both staff and viewers can export inventory they can already read. The feature adds no import, bulk mutation, styled report, or export-job service.

@@ -2245,6 +2245,7 @@ export type Database = {
         Returns: Json
       }
       metadata_publish_review: { Args: { p_payload: Json }; Returns: Json }
+      overview_snapshot_v1: { Args: { p_time_zone?: string }; Returns: Json }
       quantity_adjust: {
         Args: { p_payload: Json; p_request_id: string }
         Returns: Json
