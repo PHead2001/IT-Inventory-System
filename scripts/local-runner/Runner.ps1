@@ -208,10 +208,11 @@ function Save-Heartbeat($State) {
     } finally { Exit-RunnerLock $mutex }
 }
 
-function Assert-SessionAlive($State) {
+function Assert-SessionAlive($State, [switch] $Monitor) {
     $State = [pscustomobject]$State
     # This wait is never called under the state mutex. Only the guardian repairs.
     while ($true) {
+        if ($Monitor) { [void](Get-RunnerMonitorRemainingMs) }
         $now = Get-RunnerRecoveryNow
         $deadlineReached = $now -ge [DateTime]::Parse($State.deadlineUtc).ToUniversalTime()
         $stopReason = 'unavailable'
@@ -219,6 +220,7 @@ function Assert-SessionAlive($State) {
         # Stop inspection can wait for a publisher; never reuse the pre-wait clock.
         $now = Get-RunnerRecoveryNow
         $deadlineReached = $deadlineReached -or $now -ge [DateTime]::Parse($State.deadlineUtc).ToUniversalTime()
+        if ($Monitor) { [void](Get-RunnerMonitorRemainingMs) }
         if ($deadlineReached -or $stopRequested) {
             $reason = if ($deadlineReached) { 'deadline' } else { 'stop' }
             throw (New-RunnerObservedFailure 'Session deadline or Stop reached.' (New-RunnerFailureObservation 'session-initial' $reason $State $now $stopReason '' @{ deadlineReached = $deadlineReached }))
@@ -227,6 +229,7 @@ function Assert-SessionAlive($State) {
         $sealedState = $null
         $mutex = Enter-RunnerLock
         try {
+            if ($Monitor) { [void](Get-RunnerMonitorRemainingMs) }
             $current = Get-RunnerState
             if ($null -eq $current -or $current.vmName -cne $State.vmName -or
                 ($State.PSObject.Properties.Name -contains 'vmId' -and ($current.PSObject.Properties.Name -notcontains 'vmId' -or [guid]$current.vmId -ne [guid]$State.vmId))) { throw 'Runner state was removed or replaced.' }
@@ -238,6 +241,7 @@ function Assert-SessionAlive($State) {
             $stopRequested = -not $deadlineReached -and (Test-RunnerSessionStopRequested $current ([ref]$stopReason))
             $now = Get-RunnerRecoveryNow
             $deadlineReached = $deadlineReached -or $now -ge [DateTime]::Parse($current.deadlineUtc).ToUniversalTime()
+            if ($Monitor) { [void](Get-RunnerMonitorRemainingMs) }
             if ($deadlineReached -or $stopRequested) {
                 $reason = if ($deadlineReached) { 'deadline' } else { 'stop' }
                 throw (New-RunnerObservedFailure 'Session deadline or Stop reached.' (New-RunnerFailureObservation 'session-current' $reason $current $now $stopReason '' @{ deadlineReached = $deadlineReached }))
@@ -265,7 +269,8 @@ function Assert-SessionAlive($State) {
             Assert-RunnerSealedPreparation $sealedState (Get-RunnerRecoveryNow)
             return
         }
-        Start-Sleep -Milliseconds 250
+        $waitMs = if ($Monitor) { Get-RunnerMonitorRemainingMs 250 } else { 250 }
+        Start-Sleep -Milliseconds $waitMs
     }
 }
 
@@ -417,14 +422,17 @@ function Get-RunnerJitAdmission($State) {
     finally { Exit-RunnerLock $mutex }
 }
 
-function Save-RunnerLaunchEvent($State, [string] $Event, [long] $RunnerId = 0, [string] $LaunchId = '', [int] $ExitCode = 0, $Admission = $null, $Config = $null) {
+function Save-RunnerLaunchEvent($State, [string] $Event, [long] $RunnerId = 0, [string] $LaunchId = '', [int] $ExitCode = 0, $Admission = $null, $Config = $null, [switch] $ForMonitor, $MonitorAdmission = $null, [switch] $MonitorContended) {
+    if ($ForMonitor -and $Event -cne 'dispatch') { throw 'Only committed dispatch establishes monitor admission.' }
     $mutex = Enter-RunnerLock
     try {
         $current = Get-RunnerState
+        if ($null -ne $MonitorAdmission) { Assert-RunnerMonitorAdmission $current $MonitorAdmission -AfterContention:$MonitorContended }
         if ($null -eq $current -or $current.vmName -cne $State.vmName -or [guid]$current.vmId -ne [guid]$State.vmId -or
             ($current.PSObject.Properties.Name -contains 'purpose' -and $current.purpose -cne 'job') -or
             (Test-Path -LiteralPath (Join-Path $script:RunnerRoot 'stop.requested')) -or
             (Test-RunnerSessionStopRequested $current) -or (Get-RunnerRecoveryNow) -ge [DateTime]::Parse($current.deadlineUtc).ToUniversalTime()) { throw 'Runner launch session removed/stopped/expired.' }
+        if ($MonitorContended) { [void](Get-RunnerMonitorRemainingMs) }
         if ($Event -ceq 'intent') {
             if ($null -eq $Admission) { throw 'JIT intent requires admission captured before the demand lookup.' }
             [void](Assert-RunnerJitAdmission $State $current $Admission)
@@ -459,7 +467,12 @@ function Save-RunnerLaunchEvent($State, [string] $Event, [long] $RunnerId = 0, [
                 Invoke-RunnerTransitionCheckpoint 'jit-registration-registered'
             } elseif ($registration.phase -cne 'registered' -or $registration.runnerId -ne $next.runnerId) { throw 'Guest dispatch lacks its sole validated registration.' }
         }
+        # Stop/identity reads, decision work and the acquisition itself may have
+        # consumed the remaining contention budget. Check under this same mutex
+        # before changing the journal and immediately before its publication.
+        if ($MonitorContended) { [void](Get-RunnerMonitorRemainingMs) }
         $current | Add-Member runnerLaunch $next -Force
+        if ($MonitorContended) { [void](Get-RunnerMonitorRemainingMs) }
         Write-RunnerJson $script:RunnerStatePath $current
         if ($Event -ceq 'dispatch') {
             Invoke-RunnerTransitionCheckpoint 'jit-dispatch-state'
@@ -469,38 +482,117 @@ function Save-RunnerLaunchEvent($State, [string] $Event, [long] $RunnerId = 0, [
             Write-RunnerJitRegistration $registration
             Invoke-RunnerTransitionCheckpoint 'jit-handed-off'
         }
+        if ($ForMonitor) {
+            return New-RunnerMonitorAdmission $current
+        }
         return $next
     } finally { Exit-RunnerLock $mutex }
 }
 
-function Wait-DetachedRunner($State, $Config) {
-    # One dispatch already occurred. All retries below are read-only receipt
-    # monitor attachment; no registration or launch API/command belongs here.
-    while ($true) {
-        Assert-SessionAlive $State
-        $current = Get-RunnerState
-        $journal = $current.runnerLaunch
-        $receipt = $null
-        $result = $null
-        try {
-            $result = Invoke-RunnerReceiptNative 'ssh.exe' ((Get-SshArgs $State) + @("runner@$($Config.guestIp)", (Get-RunnerReceiptCommand $journal.launchId)))
-        } catch { $result = $null }
-        # A transport outage may be retried read-only. A successfully received
-        # malformed/different receipt is an integrity failure, never adopted.
-        if ($null -ne $result -and $result.ExitCode -eq 0) {
-            try { $receipt = ConvertFrom-RunnerGuestReceipt $result.Output $journal }
-            catch {
-                try { $_.Exception.Data['runnerFailureClass'] = 'receipt-invalid' } catch { }
-                throw
+function New-RunnerMonitorAdmission($State) {
+    if ($null -eq $State -or $State.runnerLaunch.phase -cnotin @('launch-intent', 'running', 'transport-uncertain') -or
+        $State.runnerLaunch.launchId -cnotmatch '^[0-9a-f]{32}$' -or $State.runnerLaunch.runnerId -le 0) { throw 'Monitor requires its sole committed dispatch.' }
+    return [pscustomobject]@{
+        claimHash = Get-RunnerRecoveryClaimHash $State
+        generation = $State.networkRecovery.generation
+        launchId = $State.runnerLaunch.launchId; runnerId = $State.runnerLaunch.runnerId
+    }
+}
+
+function Assert-RunnerMonitorAdmission($State, $Admission, [switch] $AfterContention) {
+    if ($null -eq $State -or $null -eq $Admission -or $State.PSObject.Properties.Name -notcontains 'runnerLaunch' -or
+        $State.runnerLaunch.phase -cnotin @('launch-intent', 'running', 'transport-uncertain') -or
+        $State.runnerLaunch.launchId -cne $Admission.launchId -or $State.runnerLaunch.runnerId -ne $Admission.runnerId -or
+        (Get-RunnerRecoveryClaimHash $State) -cne $Admission.claimHash -or
+        ($AfterContention -and $State.networkRecovery.generation -ne $Admission.generation)) { throw 'Dispatched runner monitor ownership changed.' }
+}
+
+function Invoke-RunnerMonitorTransaction($State, $Admission, [scriptblock] $Work) {
+    # Only Wait-DetachedRunner enters this scope AFTER the durable handoff. The
+    # single monotonic budget includes the first 20s acquisition; no retry resets
+    # it. Nested state reads use the remaining budget, never a second full wait.
+    if ($null -ne $script:RunnerMonitorLockBudget) { throw 'Monitor transactions may not nest.' }
+    $script:RunnerMonitorLockBudget = [Diagnostics.Stopwatch]::StartNew()
+    $script:RunnerMonitorContentionActive = $false
+    $contended = $false
+    try {
+        while ($true) {
+            if ((Get-RunnerRecoveryNow) -ge [DateTime]::Parse($State.deadlineUtc).ToUniversalTime() -or
+                ($contended -and (Get-RunnerMonitorElapsedMs) -ge 30000)) { throw 'Dispatched monitor contention or session deadline reached.' }
+            try {
+                $mutex = Enter-RunnerLock
+                try {
+                    $current = Get-RunnerState
+                    Assert-RunnerMonitorAdmission $current $Admission -AfterContention:$contended
+                    # No heartbeat or successful liveness result while state is
+                    # inaccessible. Assert-SessionAlive rechecks current Stop,
+                    # guardian and all lifetime limits after releasing this lock.
+                } finally { Exit-RunnerLock $mutex }
+                Assert-SessionAlive $State -Monitor
+                if ($contended -and (Get-RunnerMonitorElapsedMs) -ge 30000) { throw 'Dispatched monitor contention budget expired.' }
+                $mutex = Enter-RunnerLock
+                try { Assert-RunnerMonitorAdmission (Get-RunnerState) $Admission -AfterContention:$contended }
+                finally { Exit-RunnerLock $mutex }
+                $result = & $Work $contended
+                if ($contended -and (Get-RunnerMonitorElapsedMs) -ge 30000) { throw 'Dispatched monitor contention budget expired.' }
+                return $result
+            } catch {
+                if (-not (Test-RunnerStateLockBusy $_)) { throw }
+                $contended = $true
+                # Preserve the original transaction/acquisition clock, including
+                # the failed first 20s wait; activation never starts a new clock.
+                $script:RunnerMonitorContentionActive = $true
+                if ((Get-RunnerMonitorElapsedMs) -ge 30000) { throw }
+                Start-Sleep -Milliseconds 100
             }
         }
-        if ($null -eq $receipt) {
-            [void](Save-RunnerLaunchEvent $State 'transport-lost')
-        } elseif ($receipt.phase -ceq 'exited') {
-            [void](Save-RunnerLaunchEvent $State 'runner-exited' $journal.runnerId $journal.launchId $receipt.exitCode)
-            if ($receipt.exitCode -ne 0) { throw (New-RunnerExecutionFailure 'runner-exit' $receipt.exitCode) }
-            return
-        } else { [void](Save-RunnerLaunchEvent $State 'receipt' $journal.runnerId $journal.launchId) }
+    } finally { $script:RunnerMonitorLockBudget = $null; $script:RunnerMonitorContentionActive = $false }
+}
+
+function Wait-DetachedRunner($State, $Config, $Admission = $null) {
+    # One dispatch already occurred. All retries below are read-only receipt
+    # monitor attachment; no registration or launch API/command belongs here.
+    if ($null -eq $Admission) {
+        # Compatibility callers receive no contention retry before this initial
+        # protected proof of an already committed, exact dispatch.
+        $Admission = New-RunnerMonitorAdmission (Get-RunnerState)
+    }
+    while ($true) {
+        $step = Invoke-RunnerMonitorTransaction $State $Admission {
+            param([bool] $AfterContention)
+            $current = Get-RunnerState
+            Assert-RunnerMonitorAdmission $current $Admission -AfterContention:$AfterContention
+            $journal = $current.runnerLaunch
+            $receipt = $null
+            $result = $null
+            try {
+                $result = Invoke-RunnerReceiptNative 'ssh.exe' ((Get-SshArgs $State) + @("runner@$($Config.guestIp)", (Get-RunnerReceiptCommand $journal.launchId))) -TimeoutMilliseconds (Get-RunnerMonitorRemainingMs 12000)
+            } catch { $result = $null }
+            # A timed-out read cannot start journal publication or a new monitor
+            # iteration after consuming the same transaction's remaining budget.
+            [void](Get-RunnerMonitorRemainingMs)
+            # A transport outage may be retried read-only. A successfully received
+            # malformed/different receipt is an integrity failure, never adopted.
+            if ($null -ne $result -and $result.ExitCode -eq 0) {
+                try { $receipt = ConvertFrom-RunnerGuestReceipt $result.Output $journal }
+                catch {
+                    try { $_.Exception.Data['runnerFailureClass'] = 'receipt-invalid' } catch { }
+                    throw
+                }
+            }
+            if ($null -eq $receipt) {
+                [void](Save-RunnerLaunchEvent $State 'transport-lost' -MonitorAdmission $Admission -MonitorContended:$AfterContention)
+            } elseif ($receipt.phase -ceq 'exited') {
+                [void](Save-RunnerLaunchEvent $State 'runner-exited' $journal.runnerId $journal.launchId $receipt.exitCode -MonitorAdmission $Admission -MonitorContended:$AfterContention)
+                if ($receipt.exitCode -ne 0) { throw (New-RunnerExecutionFailure 'runner-exit' $receipt.exitCode) }
+                return [pscustomobject]@{ exited = $true; admission = $null }
+            } else { [void](Save-RunnerLaunchEvent $State 'receipt' $journal.runnerId $journal.launchId -MonitorAdmission $Admission -MonitorContended:$AfterContention) }
+            $latest = Get-RunnerState
+            Assert-RunnerMonitorAdmission $latest $Admission -AfterContention:$AfterContention
+            return [pscustomobject]@{ exited = $false; admission = New-RunnerMonitorAdmission $latest }
+        }
+        if ($step.exited) { return }
+        $Admission = $step.admission
         Start-Sleep -Seconds 1
     }
 }
@@ -1056,14 +1148,14 @@ function Invoke-RunnerSession($Config, $PilotAttempt = $null, [string] $ProfileL
             # The fixed JIT runner launches exactly once in a guest service. SSH is
             # only dispatch/monitor transport; its loss never reruns the command.
             $script:RunnerOperationStage = 'job-execution'
-            [void](Save-RunnerLaunchEvent $state 'dispatch')
+            $monitorAdmission = Save-RunnerLaunchEvent $state 'dispatch' -ForMonitor
             $command = Get-RunnerDetachedCommand $image.prepared $launchId $runnerId
             try {
                 $exitCode = Invoke-RunnerNative 'ssh.exe' ($sshArgs + @("runner@$($Config.guestIp)", $command)) $jit.encoded_jit_config -TimeoutSeconds 15
                 if ($exitCode -ne 0) { [void](Save-RunnerLaunchEvent $state 'transport-lost') }
             } catch { [void](Save-RunnerLaunchEvent $state 'transport-lost') }
             finally { $jit = $null }
-            Wait-DetachedRunner $state $Config
+            Wait-DetachedRunner $state $Config $monitorAdmission
             Write-Host 'Runner process ended; consult GitHub Actions for the actual job result.'
             return [pscustomobject]@{ name = $name; id = $runnerId; outcome = 'runner-exited' }
         } catch {

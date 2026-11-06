@@ -13,6 +13,8 @@ $script:RunnerStatePath = Join-Path $script:RunnerRoot 'state.json'
 $script:RunnerOperationStage = 'idle'
 $script:RunnerSessionName = $null
 $script:RunnerPreparationAuthorized = $false
+$script:RunnerMonitorLockBudget = $null
+$script:RunnerMonitorContentionActive = $false
 
 function Initialize-RunnerDpapi {
     # Fresh Windows PowerShell 5.1 sessions do not preload ProtectedData.
@@ -413,6 +415,11 @@ function New-RunnerSessionFailureRecord($Failure, [string] $Stage) {
             if ($class -ceq 'runner-exit' -and $exit -is [int]) { $record.exitCode = $exit }
         }
         $probe = $Failure.Exception.Data['runnerIsolationProbe']
+        $control = $Failure.Exception.Data['runnerControlDiagnostic']
+        if ($null -ne $control) {
+            Assert-RunnerControlDiagnostic $control
+            $record.controlDiagnostic = [ordered]@{ purpose = $control.purpose; waitMs = $control.waitMs; preflightStage = $control.preflightStage }
+        }
         if ($null -ne $probe) {
             Assert-RunnerIsolationProbeDiagnostic $probe
             $record.isolationProbe = [ordered]@{ kind = $probe.kind; exitCode = $probe.exitCode; listener = $probe.listener }
@@ -439,6 +446,7 @@ function Assert-RunnerSessionFailureJournal($Journal) {
         if ($null -ne $session.vmId -and ($session.vmId -isnot [string] -or $session.vmId -cnotmatch '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' -or [guid]$session.vmId -eq [guid]::Empty)) { throw 'Invalid session failure VM identity.' }
         foreach ($record in @($session.first, $session.latest)) {
             $fields = @('atUtc','capture','category','errorId','exceptionType','exitCode','failureClass','hResult','line','source','stage')
+            if ($record.PSObject.Properties.Name -contains 'controlDiagnostic') { $fields += 'controlDiagnostic' }
             if ($null -ne $record -and $record.PSObject.Properties.Name -contains 'isolationProbe') { $fields += 'isolationProbe' }
             if ($null -ne $record -and $record.PSObject.Properties.Name -contains 'guestReadiness') { $fields += 'guestReadiness' }
             if ($record -isnot [pscustomobject] -or (@($record.PSObject.Properties.Name | Sort-Object) -join ',') -cne (@($fields | Sort-Object) -join ',') -or
@@ -447,6 +455,7 @@ function Assert-RunnerSessionFailureJournal($Journal) {
             if ($record.line -isnot [int] -or $record.line -lt 0 -or $record.line -gt 100000 -or $record.hResult -isnot [int] -or
                 ($null -ne $record.exitCode -and ($record.exitCode -isnot [int] -or $record.failureClass -cne 'runner-exit'))) { throw 'Invalid session failure number.' }
             if ($record.PSObject.Properties.Name -contains 'isolationProbe') { Assert-RunnerIsolationProbeDiagnostic $record.isolationProbe }
+            if ($record.PSObject.Properties.Name -contains 'controlDiagnostic') { Assert-RunnerControlDiagnostic $record.controlDiagnostic }
             if ($record.PSObject.Properties.Name -contains 'guestReadiness') { Assert-RunnerGuestReadinessDiagnostic $record.guestReadiness }
         }
     }
@@ -605,6 +614,43 @@ function Assert-RunnerMutexSecurity($Security, [string] $Name) {
         $rights['S-1-5-18'] -ne $full -or $rights['S-1-5-32-544'] -ne $full) { throw 'Runner mutex ACL does not match protected SYSTEM/Administrators access.' }
 }
 
+function Assert-RunnerControlDiagnostic($Diagnostic) {
+    if ($Diagnostic -isnot [pscustomobject] -or
+        (@($Diagnostic.PSObject.Properties | Where-Object { $_.MemberType -ne 'NoteProperty' }).Count -ne 0) -or
+        (@($Diagnostic.PSObject.Properties.Name | Sort-Object) -join ',') -cne 'preflightStage,purpose,waitMs' -or
+        $Diagnostic.purpose -isnot [string] -or $Diagnostic.purpose -cnotin @('state', 'control', 'supervisor', 'archive', 'other', 'recovery-preflight') -or
+        $Diagnostic.preflightStage -isnot [string] -or $Diagnostic.preflightStage -cnotin @('', 'vm', 'switch', 'adapter', 'binding') -or
+        (($Diagnostic.purpose -ceq 'recovery-preflight') -ne ($Diagnostic.preflightStage -cne ''))) { throw 'Invalid runner control diagnostic.' }
+    [void](Get-RunnerRecoveryDiagnosticNumber $Diagnostic.waitMs 30000)
+}
+
+function New-RunnerLockBusyFailure([string] $Purpose, [long] $WaitMs) {
+    $failure = [TimeoutException]::new('Runner state lock acquisition timed out.')
+    $failure.Data['runnerLockBusy'] = 'validated-mutex-wait-v1'
+    $failure.Data['runnerControlDiagnostic'] = [pscustomobject]@{ purpose = $Purpose; waitMs = [long][Math]::Min(30000, [Math]::Max(0, $WaitMs)); preflightStage = '' }
+    return $failure
+}
+
+function Test-RunnerStateLockBusy($Failure) {
+    try {
+        return $Failure.Exception -is [TimeoutException] -and
+            $Failure.Exception.Data['runnerLockBusy'] -ceq 'validated-mutex-wait-v1' -and
+            $Failure.Exception.Data['runnerControlDiagnostic'].purpose -ceq 'state'
+    } catch { return $false }
+}
+
+function Get-RunnerMonitorElapsedMs { return $script:RunnerMonitorLockBudget.ElapsedMilliseconds }
+
+function Get-RunnerMonitorRemainingMs([int] $Maximum = 30000) {
+    if ($null -eq $script:RunnerMonitorLockBudget) { throw 'Monitor budget requires its active dispatched scope.' }
+    # Ordinary recovery is still governed by its existing outage/progress/hard
+    # deadlines. Only a validated failed mutex acquisition activates this bound.
+    if (-not $script:RunnerMonitorContentionActive) { return $Maximum }
+    $remaining = 30000 - (Get-RunnerMonitorElapsedMs)
+    if ($remaining -le 0) { throw 'Dispatched monitor contention budget expired.' }
+    return [int][Math]::Min($Maximum, $remaining)
+}
+
 function Enter-RunnerLock([string] $Name = 'Global\ITInventoryLocalRunner-v1', [switch] $FailFast) {
     $created = $false
     # Windows ignores the supplied descriptor for an existing object. Validate
@@ -613,9 +659,21 @@ function Enter-RunnerLock([string] $Name = 'Global\ITInventoryLocalRunner-v1', [
     try {
         Assert-RunnerMutexSecurity ($mutex.GetAccessControl()) $Name
         try {
-            $timeout = if ($FailFast) { [TimeSpan]::Zero } else { [TimeSpan]::FromSeconds(20) }
+            $waitMs = if ($FailFast) { 0 } else { 20000 }
+            if ($Name -ceq 'Global\ITInventoryLocalRunner-v1' -and $null -ne $script:RunnerMonitorLockBudget -and $script:RunnerMonitorContentionActive) {
+                $waitMs = [int][Math]::Max(0, [Math]::Min($waitMs, 30000 - (Get-RunnerMonitorElapsedMs)))
+            }
+            $timeout = [TimeSpan]::FromMilliseconds($waitMs)
+            $wait = [Diagnostics.Stopwatch]::StartNew()
             if (-not $mutex.WaitOne($timeout)) {
-                throw 'Runner state is busy; retry after the other operation finishes.'
+                $purpose = switch -CaseSensitive ($Name) {
+                    'Global\ITInventoryLocalRunner-v1' { 'state' }
+                    'Global\ITInventoryLocalRunner-Control-v1' { 'control' }
+                    'Global\ITInventoryLocalRunner-Supervisor-v1' { 'supervisor' }
+                    'Global\ITInventoryLocalRunner-Archive-v1' { 'archive' }
+                    default { 'other' }
+                }
+                throw (New-RunnerLockBusyFailure $purpose $wait.ElapsedMilliseconds)
             }
         } catch [Threading.AbandonedMutexException] {
             # Windows grants ownership to this caller when the former owner dies.
@@ -1723,7 +1781,7 @@ function Remove-RunnerInstance($State) {
 
 . (Join-Path $PSScriptRoot 'PreparedImage.ps1')
 
-function Invoke-RunnerReceiptNative([string] $Executable, [string[]] $Arguments, [ValidateRange(1, 30)][int] $TimeoutSeconds = 12) {
+function Invoke-RunnerReceiptNative([string] $Executable, [string[]] $Arguments, [ValidateRange(1, 30)][int] $TimeoutSeconds = 12, [ValidateRange(0, 30000)][int] $TimeoutMilliseconds = 0) {
     # Only a fixed non-secret guest receipt is captured. Limit memory before
     # appending, discard stderr, and bound the SSH process independently.
     $start = [Diagnostics.ProcessStartInfo]::new()
@@ -1732,8 +1790,9 @@ function Invoke-RunnerReceiptNative([string] $Executable, [string[]] $Arguments,
     $start.UseShellExecute = $false; $start.CreateNoWindow = $true
     $start.RedirectStandardOutput = $true; $start.RedirectStandardError = $true; $start.RedirectStandardInput = $true
     $start.StandardOutputEncoding = [Text.UTF8Encoding]::new($false)
-    $process = [Diagnostics.Process]::Start($start)
+    $limitMs = if ($TimeoutMilliseconds -gt 0) { [Math]::Min($TimeoutMilliseconds, $TimeoutSeconds * 1000) } else { $TimeoutSeconds * 1000 }
     $clock = [Diagnostics.Stopwatch]::StartNew()
+    $process = [Diagnostics.Process]::Start($start)
     try {
         $process.StandardInput.Close()
         $discard = $process.StandardError.BaseStream.CopyToAsync([IO.Stream]::Null)
@@ -1742,17 +1801,23 @@ function Invoke-RunnerReceiptNative([string] $Executable, [string[]] $Arguments,
         while ($true) {
             $read = $process.StandardOutput.ReadAsync($buffer, 0, $buffer.Length)
             while (-not $read.IsCompleted) {
-                if ($clock.Elapsed.TotalSeconds -ge $TimeoutSeconds) { throw 'Receipt transport timed out.' }
-                [void]$read.Wait(100)
+                $remaining = $limitMs - $clock.ElapsedMilliseconds
+                if ($remaining -le 0) { throw 'Receipt transport timed out.' }
+                [void]$read.Wait([int][Math]::Min(100, $remaining))
             }
             $length = $read.GetAwaiter().GetResult()
             if ($length -eq 0) { break }
             if ($output.Length + $length -gt 4096) { throw 'Guest receipt exceeded its bounded protocol.' }
             [void]$output.Append($buffer, 0, $length)
-            if ($clock.Elapsed.TotalSeconds -ge $TimeoutSeconds) { throw 'Receipt transport timed out.' }
+            if ($clock.ElapsedMilliseconds -ge $limitMs) { throw 'Receipt transport timed out.' }
         }
-        $remaining = [Math]::Max(1, [int](($TimeoutSeconds - $clock.Elapsed.TotalSeconds) * 1000))
-        if (-not $process.WaitForExit($remaining)) { throw 'Receipt transport timed out.' }
+        $remaining = $limitMs - $clock.ElapsedMilliseconds
+        if ($remaining -le 0 -or -not $process.WaitForExit([int]$remaining)) { throw 'Receipt transport timed out.' }
+        while (-not $discard.IsCompleted) {
+            $remaining = $limitMs - $clock.ElapsedMilliseconds
+            if ($remaining -le 0) { throw 'Receipt transport timed out.' }
+            [void]$discard.Wait([int][Math]::Min(100, $remaining))
+        }
         [void]$discard.GetAwaiter().GetResult()
         return [pscustomobject]@{ ExitCode = $process.ExitCode; Output = $output.ToString() }
     } finally {

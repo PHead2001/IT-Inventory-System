@@ -128,6 +128,8 @@ if ($LASTEXITCODE -ne 0) { throw 'Network.Probe.Bootstrap.Tests.mjs failed.' }
 if ($LASTEXITCODE -ne 0) { throw 'Network.Probe.Diagnostics.Tests.ps1 failed.' }
 & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'Network.Integration.Tests.ps1')
 if ($LASTEXITCODE -ne 0) { throw 'Network.Integration.Tests.ps1 failed.' }
+& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'Runner.Contention.Tests.ps1') -NativeContention
+if ($LASTEXITCODE -ne 0) { throw 'Runner.Contention.Tests.ps1 failed.' }
 & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'Failure.Observation.Tests.ps1')
 if ($LASTEXITCODE -ne 0) { throw 'Failure.Observation.Tests.ps1 failed.' }
 & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'Session.Failure.Tests.ps1')

@@ -47,7 +47,9 @@ function Write-RunnerJson($Path, $Value) {
     }
 }
 function Get-RunnerLaunchDecision($Journal, $Event, $RunnerId, $LaunchId, $ExitCode) {
-    $script:decisions++; return & $script:realLaunchDecision $Journal $Event $RunnerId $LaunchId $ExitCode
+    $script:decisions++; $decision = & $script:realLaunchDecision $Journal $Event $RunnerId $LaunchId $ExitCode
+    if ($null -ne $script:afterLaunchDecision) { & $script:afterLaunchDecision }
+    return $decision
 }
 function Invoke-RunnerTransitionCheckpoint($Name) { $script:checkpoints += $Name }
 function Assert-RunnerProtectedPath($Path) { [void](Assert-OwnedPath $Path) }
@@ -68,7 +70,7 @@ function New-Fixture {
     $registrationPath = Join-Path $root 'jit-registration.json'
     if (Test-Path -LiteralPath $registrationPath) { Remove-Item -LiteralPath $registrationPath }
     $script:now = [DateTime]::UtcNow; $script:alive = $true; $script:deadGuardian = $false; $script:sleeps = 0; $script:heartbeats = 0; $script:queries = 0; $script:badReceipt = $false
-    $script:nextLockMutation = $null; $script:stateWrites = 0; $script:registrationWrites = 0; $script:decisions = 0; $script:checkpoints = @()
+    $script:nextLockMutation = $null; $script:stateWrites = 0; $script:registrationWrites = 0; $script:decisions = 0; $script:checkpoints = @(); $script:afterLaunchDecision = $null
     $script:state = [pscustomobject]@{ layoutVersion = 2; tag = $script:RunnerTag; purpose = 'job'; resourceLabel = 'it-inventory-heavy'; vmName = 'ITIR-' + ('a' * 32); vmId = '00000000-0000-0000-0000-000000000001'; instancePath = Join-Path (Join-Path $root 'instances') ('ITIR-' + ('a' * 32)); deadlineUtc = $script:now.AddMinutes(5).ToString('o'); guardianPid = 42; guardianStartUtc = $script:now.ToString('o'); guardianReady = $true
         supervisorPid = 43; supervisorStartUtc = $script:now.ToString('o')
         networkRecovery = [pscustomobject]@{ phase = 'healthy'; generation = 0; failure = ''; hardDeadlineUtc = $script:now.AddMinutes(5).ToString('o'); episodeDeadlineUtc = ''; progressUtc = $script:now.ToString('o') } }
@@ -291,6 +293,43 @@ try {
         $journal = [pscustomobject]@{ launchId = 'c' * 32; runnerId = 123 }
         foreach ($text in @(('d' * 32) + '|123|running|-', ('c' * 32) + '|124|exited|0', ('c' * 32) + '|123|exited|256', ('c' * 32) + '|123|running|0', ('c' * 32) + '|123|exited|0|success')) { Refuse { ConvertFrom-RunnerGuestReceipt $text $journal } }
     }
+    Check 'committed dispatch supplies exact monitor admission and later journal replacement cannot receive its event' {
+        New-Fixture
+        [void](Save-RunnerLaunchEvent $script:state 'intent' 0 ('c' * 32) -Admission (Get-RunnerJitAdmission $script:state))
+        [void](Save-RunnerLaunchEvent $script:state 'registered' 123)
+        $admission = Save-RunnerLaunchEvent $script:state 'dispatch' -ForMonitor
+        if ($admission.launchId -cne ('c' * 32) -or $admission.runnerId -ne 123 -or $admission.generation -ne $script:state.networkRecovery.generation -or
+            $admission.claimHash -cne (Get-RunnerRecoveryClaimHash $script:state)) { throw 'Committed handoff did not bind the exact monitor.' }
+        $script:state.runnerLaunch.launchId = 'd' * 32
+        $before = $script:state.runnerLaunch | ConvertTo-Json -Compress
+        Refuse { Save-RunnerLaunchEvent $script:state 'transport-lost' -MonitorAdmission $admission }
+        if (($script:state.runnerLaunch | ConvertTo-Json -Compress) -cne $before) { throw 'Old monitor mutated a replacement launch.' }
+    }
+    Check 'contended receipt events refuse expiry inside the acquired lock and immediately before publication' {
+        foreach ($boundary in @('lock', 'stop-read', 'publication')) {
+            foreach ($event in @('receipt', 'runner-exited', 'transport-lost')) {
+                New-Fixture
+                [void](Save-RunnerLaunchEvent $script:state 'intent' 0 ('c' * 32) -Admission (Get-RunnerJitAdmission $script:state))
+                [void](Save-RunnerLaunchEvent $script:state 'registered' 123); [void](Save-RunnerLaunchEvent $script:state 'dispatch')
+                $admission = New-RunnerMonitorAdmission $script:state
+                $before = $script:state.runnerLaunch | ConvertTo-Json -Compress
+                $script:stateWrites = 0; $script:registrationWrites = 0; $script:monitorElapsed = 29900
+                $script:RunnerMonitorLockBudget = [Diagnostics.Stopwatch]::StartNew(); $script:RunnerMonitorContentionActive = $true
+                if ($boundary -ceq 'lock') { $script:nextLockMutation = { $script:monitorElapsed = 30000 } }
+                else { $script:afterLaunchDecision = { $script:monitorElapsed = 30000 } }
+                try {
+                    & {
+                        function Get-RunnerMonitorElapsedMs { return $script:monitorElapsed }
+                        if ($boundary -ceq 'stop-read') {
+                            function Test-RunnerSessionStopRequested { $script:monitorElapsed = 30000; return $false }
+                        }
+                        Refuse { Save-RunnerLaunchEvent $script:state $event 123 ('c' * 32) 0 -MonitorAdmission $admission -MonitorContended }
+                    }
+                    if ($script:stateWrites -ne 0 -or $script:registrationWrites -ne 0 -or ($script:state.runnerLaunch | ConvertTo-Json -Compress) -cne $before) { throw "Late $event crossed $boundary publication boundary." }
+                } finally { $script:RunnerMonitorLockBudget = $null; $script:RunnerMonitorContentionActive = $false; $script:afterLaunchDecision = $null }
+            }
+        }
+    }
     Check 'SSH loss reattaches only receipt monitor to same launch and preserves result meaning' {
         New-Fixture; $script:exitCode = 0
         [void](Save-RunnerLaunchEvent $script:state 'intent' 0 ('c' * 32) -Admission (Get-RunnerJitAdmission $script:state)); [void](Save-RunnerLaunchEvent $script:state 'registered' 123); [void](Save-RunnerLaunchEvent $script:state 'dispatch')
@@ -324,6 +363,24 @@ try {
         if ($result.ExitCode -ne 0 -or $result.Output -cne 'receipt') { throw 'Fixed native receipt capture changed output.' }
         Refuse { & $script:realReceiptNative $exe @('-NoProfile', '-NonInteractive', '-Command', '[Console]::Out.Write((''x'' * 5000))') 3 }
         Refuse { & $script:realReceiptNative $exe @('-NoProfile', '-NonInteractive', '-Command', 'Start-Sleep -Seconds 10') 1 }
+    }
+    Check 'native receipt millisecond cap preempts its normal twelve-second timeout and closes its owned process' {
+        $child = Join-Path $root 'receipt-timeout.ps1'; $pidPath = Join-Path $root 'receipt-timeout.pid'
+        [IO.File]::WriteAllText($child, 'param($Path); [IO.File]::WriteAllText($Path, [string]$PID); Start-Sleep -Seconds 5', [Text.UTF8Encoding]::new($false))
+        $watch = [Diagnostics.Stopwatch]::StartNew(); $failure = $null
+        try { & $script:realReceiptNative (Join-Path $PSHOME 'powershell.exe') @('-NoProfile', '-NonInteractive', '-File', $child, $pidPath) -TimeoutMilliseconds 900 }
+        catch { $failure = $_ }
+        if ($null -eq $failure -or $failure.Exception.Message -cne 'Receipt transport timed out.' -or $watch.ElapsedMilliseconds -gt 2500) { throw 'Native receipt ignored its remaining millisecond cap.' }
+        if (-not (Test-Path -LiteralPath $pidPath)) { throw 'Receipt timeout fixture did not establish its process identity.' }
+        $childPid = [int][IO.File]::ReadAllText($pidPath)
+        $limit = [DateTime]::UtcNow.AddSeconds(2)
+        do {
+            $childProcess = Get-Process -Id $childPid -ErrorAction SilentlyContinue
+            if ($null -eq $childProcess) { break }
+            $childProcess.Dispose()
+            Microsoft.PowerShell.Utility\Start-Sleep -Milliseconds 25
+        } while ([DateTime]::UtcNow -lt $limit)
+        if ($null -ne $childProcess) { throw 'Receipt timeout left its owned monitor process running.' }
     }
     Write-Host "Network integration offline regressions passed: $script:checks cases; no live continuity proof."
 } finally {
