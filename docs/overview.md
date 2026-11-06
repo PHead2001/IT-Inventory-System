@@ -33,10 +33,45 @@ timed out; the corrected focused Node 24 run reached the cap and returned its
 required rejection in 1,703.8 ms. The initial timeout's cause is unproven; no
 export SQL or rejection assertion was weakened.
 
-Forward-upgrade comparison, nested Overview query plans/cost, full application
-certification, populated desktop/phone visual and browser inspection, exact-SHA
-CI/review and isolated hosted proof remain pending. A403 is not accepted by this
-local checkpoint. The older donor evidence below remains historical.
+The subsequent forward-upgrade and local plan checkpoint below closes those
+specific local evidence gaps. Full application certification, populated Overview
+desktop/phone visual and browser inspection, exact-SHA CI/review and isolated
+hosted proof remain pending. A403 is not accepted by these local checkpoints.
+The older donor evidence below remains historical.
+
+### Forward upgrade and local plans — November 6, 2026 UTC
+
+The corrected guarded cycle at committed `5718d446f4d36353cb9515c3b2b532f02d5db611`
+passed in 107.897 seconds. It reset the disposable local database to 46 migrations
+through `20261019151034`, then applied only `20261019193000`. Eight normal
+authenticated mutation calls used an explicitly configuration-capable fictional
+fixture maintainer. Before/after fingerprints preserved inventory, balances,
+versions, history, receipts, membership capability and prior function contracts;
+the quantity retained 10 available, two assigned and 12 recorded units. Canonical
+generated-type comparison passed after upgrade and after the final clean
+47-migration reset. An authenticated HTTP Overview availability read passed in
+151.28 ms; this was a small committed fixture, not volume-latency proof.
+
+Four rollback fixtures measured the actual authenticated SQL function separately
+from a source-derived inner `EXPLAIN (ANALYZE, BUFFERS)`: zero inventory,
+1,000 quantity definitions/100 assets, 5,000 events per stream, and a 5,001-event
+quantity overflow. Function times were 29.29/33.08/55.81/36.19 ms; inner execution
+times were 0.958/5.907/33.172/12.650 ms. Recent-event ordering matched History,
+activity counted 0/1,100/10,000/5,001 events, and overflow returned unavailable
+`ledger_budget` with zero line-lookup loops. The representative ledger used
+`quantity_events_overview_ledger` and the line primary key. All observed buffer
+reads were warm-cache hits with no temp I/O; this does not establish cold-cache,
+hosted/provider or arbitrary aggregate-growth capacity. The earlier real REST
+five-second timeout proof remains separate.
+
+Retained local artifacts are `.local-tools/overview-integration/forward-current-binding.json`,
+`forward-before.json`, `forward-after.json`, `plan-*.json` and
+`db-forward-plans-corrected/receipt.json`. The migration SHA-256 remains
+`504E1AB60399F0483D154E67853BA24851FB56538F8B3C0E34944C73E0BEA84F`.
+The first fixture attempt lacked the required configuration capability and
+stopped before inventory committed; its failed receipt is retained. No product
+permission was weakened. Volume fixtures rolled back, and the final supported
+reset removed the disposable upgrade fixtures without deleting history by SQL.
 
 The RPC is additive, stable and `SECURITY INVOKER`, pins an empty search path,
 checks `auth.uid()` against active `app_members` before validating input, and
@@ -112,7 +147,8 @@ Eligible definitions retrieve unsorted raw storage-line candidates through the
 event-key index with a 20,001-row sentinel limit. The overflow subset need not be
 deterministic because it is never reconstructed. Only a complete set of at most
 20,000 candidates is sorted and checked for location chains. Actual execution
-plans still require verification; a bounded emitted result alone is not cost proof.
+plans require environment-specific verification; the scoped local witness above
+does not establish hosted cost. A bounded emitted result alone is not cost proof.
 
 Creation/receives add real storage lines; corrections use signed deltas; storage
 moves have two lines and net zero; issues remove storage; returns add storage;
@@ -345,10 +381,11 @@ alone can replace these acceptance results.
    host. Record environment, fixture dimensions and measured results rather than
    asserting arbitrary throughput or capacity.
 
-Database replay/upgrade, canonical generated types, concurrency, nested plans and
-actual Data API timeout proof have not run in this reconciliation. Full app gates,
-independent boundary review, exact-SHA remote checks, real downloads and populated
-visual/runtime acceptance remain required before A308/A403 acceptance.
+The historical reconciliation plan above predates the selective-release local
+checkpoints, which record composed database coverage, generated types,
+concurrency/REST timeout, forward upgrade and scoped inner plans. Full app gates,
+exact-SHA remote checks, real downloads and populated Overview/hosted runtime
+acceptance remain required before A308/A403 acceptance.
 
 ### November 4, 2026 focused local runtime checkpoint
 

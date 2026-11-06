@@ -14,8 +14,9 @@ populated visual/browser and hosted proof remain pending. This source checkpoint
 does not promote A403/A308 or change the 76 acceptance rows and full scope below.
 The subsequent scoped local checkpoint passed 97 focused tests, strict types,
 actual generated-type comparison and composed database coverage after fixture
-repairs. It includes real REST timeout/concurrency proof; forward upgrade, nested
-query cost, visual/browser, hosted and final exact-SHA gates remain open. See
+repairs. It includes real REST timeout/concurrency proof; a later guarded local
+checkpoint also passed forward upgrade and four scoped inner-plan cases.
+Populated Overview visual/browser, hosted and final exact-SHA gates remain open. See
 [Overview](overview.md#selective-release-checkpoint--november-5-2026). No row is
 promoted by that local evidence.
 
@@ -904,3 +905,48 @@ The subsequent 19-path passive-demand diagnostic batch is committed as PR57 sour
 PR65 source `39e1b8b40d0b17a7bff46127703e7dbeae633743` passed the normal pre-push gate with **6,194 tests across 400 files**, plus 87 focused Peek-related tests. Four representative local browser journeys passed: inventory search, room shelf/drawer selection, quantity lifecycle and site custody. Fresh Codex review was clean with zero unresolved threads, and preview checks passed. These are scoped candidate results; combined both-theme desktop/390 px Full/Reduced visual acceptance remains pending.
 
 The uncommitted join of reviewed PR64 parent `1aca4a410641695d9c0553e7babfb22d9cddb154` retains its label-only resize correction and bounded split diagnostics alongside PR65's obstruction bridge, final-value count projection and Peek fix. The joined source passed **245 tests across 17 suites**, Next type generation, strict TypeScript, changed-path zero-warning lint and formatting, with source and merge index unchanged. This local join ran no browser or database gate. It requires a new committed HEAD and its applicable complete CI, fresh review and visual proof before certification. All 76 rows, 75 base IDs, historical evidence and existing partial dispositions remain unchanged; this checkpoint promotes no row.
+
+## PR66 shared task UX checkpoint — 2026-11-06 UTC
+
+The unnamed Close task discard warning and existing-edit Review → Edit values
+focus loss were already present in main `aef008490373e79a6148b69e1a91d3a7be6a002f`
+and tested PR62 `7fd08332b230b154c8bb4fcdd29688a5c26fe983`. PR66 corrects the
+shared paths; these are tracked pre-existing PR62 findings, not waived criteria
+or final-goal acceptance. The warning names the affected record and wraps on a
+phone. A one-shot original-click ticket restores focus only to its own form;
+privacy/task withdrawal retires it permanently while exact capture-owned inert
+transitions remain valid.
+
+The nine-file working diff on `5718d446` is bound by local
+`.local-tools/overview-integration/task-ux-owner-manifest.json`, SHA-256
+`359F58AD43697125BF666A3862C82174C9575416F6FFB02FD1C14A9AD5543DAC`.
+Focused RED/GREEN regressions and **212 tests across five suites**, strict types,
+zero-warning scoped lint and formatting passed. Independent Astra review was
+clear on that manifest, including real capture-boundary, same-click hidden pulse,
+extra inert write, privacy readmission and fresh deliberate retry coverage.
+
+Canonical local `npm run test:e2e` built and ran one focused journey containing
+all four 1280/390 px × Full/Reduced combinations in 84.09 seconds. It verified
+settled Name focus and Tab order, named Close task confirmation, retained draft,
+Stay/Keep editing, explicit discard/reopen and unchanged committed version. The
+supervisor observed source/index stability, exact original Auth container/config
+restoration, signing-key retirement and no recovery requirement. A read-only
+cleanup check found the one owned quantity archived with zero stock and reassigned
+to Cables, its fixture category removed, and all three history events retained.
+
+Eight actual local captures are retained below; these local-only artifact links
+must be attached to the PR for durable remote access. They are not hosted or
+physical-phone proof. The earlier untouched PR62 `live-10.png` is the observed
+unnamed-warning baseline, with its own environment/fixture rather than a pixel
+comparison. No final new-commit CI or hosted acceptance is claimed.
+
+| Local view   | Edit/keyboard capture                                                                                                                | Named discard capture                                                                                                               |
+| ------------ | ------------------------------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------- |
+| 1280 Full    | [Edit](../.local-tools/overview-integration/run-889c8d57-13cc-4383-b638-27e4b76b7d42/captures/metadata-edit-values-1280-full.png)    | [Discard](../.local-tools/overview-integration/run-889c8d57-13cc-4383-b638-27e4b76b7d42/captures/metadata-discard-1280-full.png)    |
+| 1280 Reduced | [Edit](../.local-tools/overview-integration/run-889c8d57-13cc-4383-b638-27e4b76b7d42/captures/metadata-edit-values-1280-reduced.png) | [Discard](../.local-tools/overview-integration/run-889c8d57-13cc-4383-b638-27e4b76b7d42/captures/metadata-discard-1280-reduced.png) |
+| 390 Full     | [Edit](../.local-tools/overview-integration/run-889c8d57-13cc-4383-b638-27e4b76b7d42/captures/metadata-edit-values-390-full.png)     | [Discard](../.local-tools/overview-integration/run-889c8d57-13cc-4383-b638-27e4b76b7d42/captures/metadata-discard-390-full.png)     |
+| 390 Reduced  | [Edit](../.local-tools/overview-integration/run-889c8d57-13cc-4383-b638-27e4b76b7d42/captures/metadata-edit-values-390-reduced.png)  | [Discard](../.local-tools/overview-integration/run-889c8d57-13cc-4383-b638-27e4b76b7d42/captures/metadata-discard-390-reduced.png)  |
+
+The retained run directory also holds `receipt.json`, `fixture-cleanup.json` and
+`e2e-performance.json`. All 76 acceptance rows, their history and pending broader
+criteria remain unchanged. No production, hosted configuration or data changed.
