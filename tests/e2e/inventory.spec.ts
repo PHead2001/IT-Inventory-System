@@ -1,3 +1,4 @@
+import { expectTouchTarget } from './touch-target-controls';
 import { randomUUID } from 'node:crypto';
 import { expectPrivateTitleExcluded } from '../helpers/private-title';
 import { interfaceTest, interfaceLogin } from './interface-fixtures';
@@ -152,6 +153,38 @@ test('empty normalized edits leave history unchanged, Receive defaults once, and
     8,
   );
   const detailUrl = page.url();
+  const name = await page.getByRole('heading', { level: 1 }).innerText(),
+    viewport = page.viewportSize();
+  await page.goto('/inventory?q=' + encodeURIComponent(name));
+  const record = page.getByRole('link', { name, exact: true }),
+    row = page.locator('[id^="inventory-row-"]').filter({ has: record });
+  await expect(record).toBeVisible();
+  for (const width of [1280, 390]) {
+    await page.setViewportSize({ width, height: 844 });
+    await expectTouchTarget(
+      page.getByRole('button', { name: 'More filters', exact: true }),
+    );
+    await expectTouchTarget(
+      page
+        .getByRole('navigation', { name: 'Active inventory filters' })
+        .getByRole('link', {
+          name: 'Remove Search: ' + name + ' filter',
+          exact: true,
+        }),
+    );
+    await expectTouchTarget(record);
+    await expectTouchTarget(row.locator('a[href="/locations/ITC-S1A"]'));
+  }
+  if (viewport) await page.setViewportSize(viewport);
+  await page.goto(detailUrl);
+  await version(page, 1);
+  for (const width of [1280, 390]) {
+    await page.setViewportSize({ width, height: 844 });
+    await expectTouchTarget(
+      page.getByRole('link', { name: /Back to inventory/ }),
+    );
+  }
+  if (viewport) await page.setViewportSize(viewport);
   const itemId = detailUrl.split('/').at(-1)!;
   const api = new URL(process.env.LOCAL_API_URL!);
   expect(['127.0.0.1', 'localhost']).toContain(api.hostname);
@@ -291,7 +324,8 @@ test('a saved event link survives more than one page of newer history and later 
 }) => {
   test.setTimeout(120_000);
   await login(page);
-  await createQuantity(page, 'Stable history link ' + crypto.randomUUID());
+  const itemName = 'Stable history link ' + crypto.randomUUID();
+  await createQuantity(page, itemName);
   const detailUrl = page.url();
   const itemId = detailUrl.split('/').at(-1)!;
   const api = new URL(process.env.LOCAL_API_URL!);
@@ -343,7 +377,37 @@ test('a saved event link survives more than one page of newer history and later 
     expect(href).toBe('/history/events/quantity/' + eventId);
     for (let index = 0; index < 30; index++)
       await receive('Newer receipt ' + index);
-    await page.goto('/history?type=quantity&entityId=' + itemId);
+    await page.goto(
+      '/history?type=quantity&entityId=' + itemId + '&location=ITC-S1A',
+    );
+    const filterForm = page.getByRole('form', { name: 'Filter history' });
+    await expect(filterForm).toBeVisible();
+    for (const width of [1280, 390]) {
+      for (const reducedMotion of ['no-preference', 'reduce'] as const) {
+        await page.setViewportSize({ width, height: 844 });
+        await page.emulateMedia({ reducedMotion });
+        await expectTouchTarget(
+          filterForm.getByRole('link', { name: itemName, exact: true }),
+        );
+        await expectTouchTarget(
+          filterForm.getByRole('link', {
+            name: 'Clear record filter',
+            exact: true,
+          }),
+        );
+        await expectTouchTarget(
+          page.getByRole('link', {
+            name: 'Clear location filter',
+            exact: true,
+          }),
+        );
+        expect(
+          await page
+            .locator('main')
+            .evaluate((main) => main.scrollWidth <= main.clientWidth),
+        ).toBe(true);
+      }
+    }
     await expect(
       page.locator('#history-event-quantity-' + eventId),
     ).toHaveCount(0);

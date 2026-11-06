@@ -551,7 +551,7 @@ function SortableControl({
       className={`${styles.control} relative min-w-0 rounded border p-2 text-sm ${selected ? 'border-cyan-400' : 'border-transparent'} ${isDragging ? 'opacity-40' : ''}`}
     >
       <div
-        className={`min-w-0 space-y-2 rounded ${selected ? 'bg-cyan-400/[0.04] shadow-[0_8px_22px_-12px_rgba(34,211,238,0.9)]' : ''}`}
+        className={`min-w-0 space-y-2 rounded ${selected ? 'experience-metadata-selected' : ''}`}
       >
         <button
           type="button"

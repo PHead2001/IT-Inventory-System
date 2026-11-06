@@ -9,6 +9,12 @@ export function readFailureGeometry() {
       : null;
   const elements = [
     ['header', '.experience-header'],
+    ['header-inner', '.experience-header-inner'],
+    ['inventory-search', 'form[aria-label="Search inventory"]'],
+    ['filter-chip', '.experience-filter-chip'],
+    ['inventory-results', '.experience-inventory-results'],
+    ['inventory-list', 'ul.experience-surface:has(> li[id^="inventory-row-"])'],
+    ['inventory-first-row', 'li[id^="inventory-row-"]'],
     ['account', '.experience-account'],
     ['mobile-menu', '.experience-mobile-menu'],
     ['main', '#main-content'],
@@ -35,6 +41,23 @@ export function readFailureGeometry() {
       height: finite(window.innerHeight),
       scrollX: finite(window.scrollX),
       scrollY: finite(window.scrollY),
+    },
+    root: {
+      clientWidth: finite(document.documentElement.clientWidth),
+      scrollWidth: finite(document.documentElement.scrollWidth),
+    },
+    fontStatus:
+      document.fonts?.status === 'loaded'
+        ? 'loaded'
+        : document.fonts?.status === 'loading'
+          ? 'loading'
+          : document.fonts
+            ? 'other'
+            : 'unavailable',
+    narrowMedia: {
+      maxWidth640: window.matchMedia('(max-width: 640px)').matches,
+      maxWidth360: window.matchMedia('(max-width: 360px)').matches,
+      maxWidth320: window.matchMedia('(max-width: 320px)').matches,
     },
     ready: document.readyState,
     focused: document.hasFocus(),
@@ -65,12 +88,27 @@ export function readFailureGeometry() {
     elements: elements.map(([owner, selector]) => {
       const node = document.querySelector(selector);
       const rect = node?.getBoundingClientRect();
+      const style = node ? getComputedStyle(node) : null;
+      const pixels = (value: string | undefined) =>
+        value === undefined ? null : finite(Number.parseFloat(value));
       return {
         owner,
         present: !!node,
         tag: tag(node),
         hidden: !!node?.closest('[hidden], [inert], [aria-hidden="true"]'),
         disabled: node instanceof HTMLButtonElement ? node.disabled : null,
+        scrollWidth: node ? finite(node.scrollWidth) : null,
+        clientWidth: node ? finite(node.clientWidth) : null,
+        spacing: style
+          ? {
+              columnGap: pixels(style.columnGap),
+              rowGap: pixels(style.rowGap),
+              paddingTop: pixels(style.paddingTop),
+              paddingRight: pixels(style.paddingRight),
+              paddingBottom: pixels(style.paddingBottom),
+              paddingLeft: pixels(style.paddingLeft),
+            }
+          : null,
         rect: rect
           ? {
               x: finite(rect.x),
@@ -87,7 +125,10 @@ export function readFailureGeometry() {
 export async function withFailureGeometry(
   page: Page,
   scenario:
-    'native-task-reentry' | 'inventory-first-row' | 'cold-title-admission',
+    | 'native-task-reentry'
+    | 'inventory-first-row'
+    | 'cold-title-admission'
+    | 'inventory-horizontal-overflow',
   assertion: () => Promise<void>,
 ) {
   try {

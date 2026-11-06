@@ -22,6 +22,11 @@ import {
 } from '@/features/commands/command-provider';
 import { admitDocumentRecord } from './document-admission.server';
 import { DocumentAdmission } from './document-admission';
+import {
+  VerifiedThemeScope,
+  QuickThemeToggle,
+} from '@/components/experience/theme-preference';
+import { themeScope } from '@/components/experience/theme-scope';
 
 export const dynamic = 'force-dynamic';
 
@@ -63,6 +68,14 @@ export default async function ApplicationLayout({
                     }
                     staff={member.role === 'staff'}
                   >
+                    <ProtectedPrivacyContent>
+                      <VerifiedThemeScope
+                        scope={themeScope(
+                          process.env.NEXT_PUBLIC_SUPABASE_URL ?? '',
+                          member.user_id,
+                        )}
+                      />
+                    </ProtectedPrivacyContent>
                     <div className="experience-app">
                       <a href="#main-content" className="experience-skip-link">
                         Skip to content
@@ -90,6 +103,7 @@ export default async function ApplicationLayout({
                           </ProtectedPrivacyContent>
                           <div className="experience-account">
                             <ProtectedPrivacyContent>
+                              <QuickThemeToggle />
                               <CommandButtons />
                               <AccountIdentity
                                 name={member.display_name}

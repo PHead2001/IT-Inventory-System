@@ -1,3 +1,4 @@
+import { holdHydrationScripts } from './deferred-hydration';
 import { openRecordTask } from './record-task-controls';
 import { auditCreateRecord, auditReadback } from './audit-two-controls';
 import { expect, test, type Page, type TestInfo } from '@playwright/test';
@@ -17,17 +18,20 @@ async function signIn(page: Page) {
 }
 
 async function noHorizontalOverflow(page: Page) {
-  const dimensions = await page.evaluate(() => ({
-    viewport: document.documentElement.clientWidth,
-    content: document.documentElement.scrollWidth,
-  }));
-  expect(dimensions.content).toBeLessThanOrEqual(dimensions.viewport + 1);
+  await withFailureGeometry(page, 'inventory-horizontal-overflow', async () => {
+    const dimensions = await page.evaluate(() => ({
+      viewport: document.documentElement.clientWidth,
+      content: document.documentElement.scrollWidth,
+    }));
+    expect(dimensions.content).toBeLessThanOrEqual(dimensions.viewport + 1);
+  });
 }
 
 async function headerControlsFit(page: Page) {
   const header = page.locator('.experience-header');
   const controls = [
     header.getByRole('link', { name: 'IT Inventory overview' }),
+    header.getByRole('button', { name: /^Switch to (Light|Dark) theme$/ }),
     header.getByRole('button', { name: 'Search and commands' }),
     header.getByRole('button', { name: 'Keyboard shortcuts' }),
     header.getByLabel('Account: Test staff, staff', { exact: true }),
@@ -685,26 +689,33 @@ test('the first styled paint is reduced before hydration and the saved preferenc
   await page.emulateMedia({ reducedMotion: 'no-preference' });
 
   async function inspect(saved: boolean) {
-    await page.evaluate(
-      (value) =>
-        localStorage.setItem('it-inventory-reduce-motion', String(value)),
-      saved,
+    const savedTheme = saved ? 'light' : 'dark';
+    const scope = await page.evaluate(
+      ({ motion, theme }) => {
+        localStorage.setItem('it-inventory-reduce-motion', String(motion));
+        const scope = document.documentElement.dataset.themeScope;
+        if (!scope || !window.inventoryTheme)
+          throw new Error('The signed-in theme bootstrap must be available');
+        localStorage.setItem(
+          window.inventoryTheme.key(scope),
+          JSON.stringify({ version: 1, preference: theme }),
+        );
+        return scope;
+      },
+      { motion: saved, theme: savedTheme },
     );
     const probe = await context.newPage();
     await probe.emulateMedia({ reducedMotion: 'no-preference' });
-    let release!: () => void;
-    const scripts = new Promise<void>((resolve) => {
-      release = resolve;
-    });
-    await probe.route('**/*', async (route) => {
-      if (route.request().resourceType() === 'script') await scripts;
-      await route.continue();
-    });
+    const { release, heldScriptCount } = await holdHydrationScripts(
+      probe,
+      page.url(),
+    );
     try {
       await probe.goto('/dashboard', { waitUntil: 'commit' });
       await probe.waitForFunction(
         () => document.body !== null && document.styleSheets.length > 0,
       );
+      await expect.poll(() => heldScriptCount()).toBeGreaterThan(0);
       const before = await probe.evaluate(() => {
         const element = document.createElement('div');
         element.style.animation = 'first-paint-probe 2s linear';
@@ -714,10 +725,20 @@ test('the first styled paint is reduced before hydration and the saved preferenc
         return {
           motion: document.documentElement.dataset.motion,
           duration: Number.parseFloat(duration),
+          bootstrapReady: !!window.inventoryTheme,
+          scope: document.documentElement.dataset.themeScope,
+          theme: document.documentElement.dataset.theme,
+          preference: document.documentElement.dataset.themePreference,
+          scheme: getComputedStyle(document.documentElement).colorScheme,
         };
       });
       expect(before.motion).toBe('reduced');
       expect(before.duration).toBeLessThan(0.001);
+      expect(before.bootstrapReady).toBe(true);
+      expect(before.scope).toBe(scope);
+      expect(before.theme).toBe(savedTheme);
+      expect(before.preference).toBe(savedTheme);
+      expect(before.scheme).toBe(savedTheme);
       release();
       await expect(
         probe.getByRole('heading', { name: 'Low-stock overview' }),
@@ -726,12 +747,24 @@ test('the first styled paint is reduced before hydration and the saved preferenc
         'data-motion',
         saved ? 'reduced' : 'full',
       );
+      await expect(probe.locator('html')).toHaveAttribute(
+        'data-theme',
+        savedTheme,
+      );
       await probe.goto('/settings');
       await expect(
         probe.getByRole('switch', {
           name: 'Reduce motion in this browser',
         }),
       ).toHaveAttribute('aria-checked', String(saved));
+      await expect(
+        probe
+          .getByRole('group', { name: 'Theme in this browser' })
+          .getByRole('radio', {
+            name: savedTheme === 'light' ? 'Light' : 'Dark',
+            exact: true,
+          }),
+      ).toBeChecked();
     } finally {
       release();
       await probe.close();

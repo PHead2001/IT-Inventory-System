@@ -81,9 +81,9 @@ export function InventoryCount({
 }
 export function LocationLink({ location }: { location: LocationRef }) {
   return (
-    <span className="inline-flex min-w-0 max-w-full flex-wrap items-center gap-x-3">
+    <span className="inline-flex min-w-0 max-w-full flex-wrap items-center gap-x-3 align-middle">
       <Link
-        className="break-words text-cyan-300 underline"
+        className={`break-words text-cyan-300 underline ${styles.textTarget}`}
         aria-label={`${location.breadcrumb} (${location.code})`}
         href={'/locations/' + encodeURIComponent(location.code)}
       >
@@ -240,7 +240,7 @@ export function InventoryRows({
                   <span className={styles.label}>Storage / custody</span>
                   {row.site ? (
                     <Link
-                      className="text-cyan-300 underline [overflow-wrap:anywhere]"
+                      className={`text-cyan-300 underline [overflow-wrap:anywhere] ${styles.textTarget}`}
                       href={`/sites/${encodeURIComponent(row.site.code)}`}
                     >
                       Assigned to {row.site.name} ({row.site.code}) · no room
@@ -306,7 +306,7 @@ export function InventoryRows({
                       </span>
                     ))}
                   </span>
-                  <Link href={recordHref}>
+                  <Link href={recordHref} className={styles.textTarget}>
                     {row.customPreview.truncated
                       ? 'View all details'
                       : 'Full details'}
@@ -349,7 +349,7 @@ export function Pagination({
       </span>
       {result.page > 1 && (
         <Link
-          className="min-h-11 py-3 text-cyan-300 underline"
+          className={`py-3 text-cyan-300 underline ${styles.textTarget}`}
           href={href(result.page - 1)}
         >
           Previous
@@ -357,7 +357,7 @@ export function Pagination({
       )}
       {result.page < pages && (
         <Link
-          className="min-h-11 py-3 text-cyan-300 underline"
+          className={`py-3 text-cyan-300 underline ${styles.textTarget}`}
           href={href(result.page + 1)}
         >
           Next
@@ -409,13 +409,13 @@ export function HistoryList({
                   event.entityId,
                   `${returnTo}#history-event-${event.kind}-${event.id}`,
                 )}
-                className="text-cyan-300 underline"
+                className={`text-cyan-300 underline ${styles.textTarget}`}
               >
                 {event.entityName}
               </HistoryRecordLink>
             ) : (
               <Link
-                className="text-cyan-300 underline"
+                className={`text-cyan-300 underline ${styles.textTarget}`}
                 href={
                   '/inventory/' +
                   (event.kind === 'quantity' ? 'quantity' : 'assets') +
@@ -544,7 +544,7 @@ export function HistoryList({
             {event.customMetadataPresent && (
               <p className="mt-3 text-sm">
                 <Link
-                  className="text-cyan-300 underline"
+                  className={`text-cyan-300 underline ${styles.textTarget}`}
                   href={`/history?event=${event.kind}:${event.id}`}
                 >
                   {event.customMetadataChanged
@@ -582,7 +582,7 @@ export function HistoryList({
             </details>
             {linkToEvent && (
               <Link
-                className="inline-block min-h-11 py-3 text-sm text-cyan-300 underline"
+                className={`py-3 text-sm text-cyan-300 underline ${styles.textTarget}`}
                 href={`/history/events/${event.kind}/${event.id}`}
               >
                 Open recorded event

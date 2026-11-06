@@ -1,5 +1,23 @@
 # Validation
 
+## Deferred-hydration browser probes
+
+The first-styled-paint and initial motion Settings probes share
+`tests/e2e/deferred-hydration.ts`. Only the exact same-origin
+`/theme-bootstrap.v1.js` may run before the barrier releases: this synchronous
+head script must complete for the parser to reach server-rendered body content.
+Every other external script remains held. The probes retain their privacy,
+pre-hydration motion, saved-choice and first-keyboard-activation assertions.
+Focused unit coverage rejects foreign/query variants of the bootstrap exception
+and leaves non-script requests unchanged. Deliberately JavaScript-disabled or
+other negative-capability cases do not adopt this helper automatically.
+
+The Free Orbit pole/clamp journey keeps its real activation, fresh canvas bounds,
+35%-height vertical drag and native-pointer/focus/elevation assertions. Its start
+uses the existing `uncoveredCanvasGesture` helper, which requires all nine
+sampled path points to hit the actual canvas. An overlay covering the old fixed
+start is not forced through or hidden; absence of a valid path remains a failure.
+
 ## Iteration and authoritative CI
 
 Batch related findings and fixes before one push. Run focused regressions during
@@ -56,7 +74,7 @@ clean worktree, local/remote parity or applicable preview/visual acceptance.
 
 ## Browser scheduling and interruption diagnostics
 
-The room spec is named `00-room.spec.ts` to start its unchanged sequential file
+The room spec is named `00-room.spec.ts` to start its remaining sequential file
 journeys early in the existing two-worker parallel phase. Pinned Playwright's
 collector sorts files lexically and dispatches those file groups in order. Shared
 fixtures retain the exclusive phase; focused runs retain one worker. Discovery
@@ -64,9 +82,30 @@ regressions require identical test coverage in both modes and room-first orderin
 This targets the observed late single-worker tail; it does not establish a measured
 end-to-end saving or a pass within the existing job deadline.
 
+The three global occupancy snapshot journeys live in
+`room-occupancy-exclusive.spec.ts`: multi-pose reveal/picking, optional counts
+reconciliation, and the populated 375 px label/action journey. Their expected
+snapshots and later rendered labels or contents require a stable global inventory
+between observations. Unique records owned by another parallel spec can still
+legitimately change those shared physical-location totals. The new file remains
+outside the parallel allowlist and completes in the existing exclusive phase;
+all remaining `00-room.spec.ts` journeys retain room-first parallel scheduling.
+This isolates the fixture contract; it does not prove temporal overlap caused a
+historical CI mismatch.
+
+Both specs explicitly call `registerRoomTestSupport` from the non-spec
+`room-test-support.ts` module. Each invocation owns its fixture identities,
+cleanup journals and failure-diagnostic maps, retains the local-target guard,
+and archives/clears its own stock through the audited RPC. Importing that module
+registers no hooks. The moved cases and their occupied-witness helpers preserve
+their assertions. Scheduling regressions require exactly those three titles in
+the exclusive file, matching focused/full discovery without duplicates or loss,
+and no spec-to-spec imports. Source and collection checks do not replace actual
+focused browser execution or final-candidate CI.
+
 Failed attempts publish bounded source coordinates immediately, before final
 reporting, so process cancellation and unavailable artifact uploads still leave
-an assertion-site pointer. Only this known test file's source coordinates are
+an assertion-site pointer. Only the fixed room spec/support files' source coordinates are
 retained from at most three errors per attempt and twenty attempts. Test titles,
 assertion messages, expected/actual values, requests and attachments are excluded.
 The final report retains its existing bounded summary and omission count.
@@ -80,7 +119,56 @@ repair removes a timing vulnerability; unavailable historical assertion details 
 not establish it as the cause of the prior failure. Exact-candidate canonical
 browser execution and full certification are required separately.
 
-### Opt-in room demand attribution
+## Theme foundation integration checkpoint
+
+The local D402/W12 foundation on `assist/audit-four-theme-foundation` selectively
+reuses only the 37-path theme slice from `60f7f12bc8f3913ca136973ff3171c4ac91c3fb4`
+against current-main baseline `7febcf4a074ac5273407af6bbd2abc2aba26e3cf`.
+Current route/command/native-task
+authority, original-binding privacy grants and the guarded, coalesced production
+ScenePalette remain authoritative. Joined ordering regressions require auxiliary
+capture withdrawal before navigation, pending or private theme cancellation.
+Historical test evidence remains bound to its earlier candidate; the current
+local results and pending checks are recorded in
+[theme preferences](theme-preferences.md#october-27-current-main-integration).
+
+The native Windows working-tree cycle passes fresh normal `npm ci` with both
+postinstall corrections, 735 tests in 33 disjoint suites, zero-warning lint for
+29 JavaScript/TypeScript paths and formatting for all 37 candidate paths. The
+512 MiB, one-worker batches preserve their exact 88 inputs and all 76 acceptance
+rows. Their retained manifest is
+`b3fcab1b68c737ef8a5989430f1945d75a96a6de971b218ad070aaca57b98d38`;
+the subsequent three-document evidence update is separate from those test inputs.
+
+Full types, build, database, exact-SHA CI and fresh review remain pending. Real
+Dark/Light/System first paint, native circle/System crossfade, rendered contrast,
+print/PDF and live media/GPU continuity require separate runtime proof. Authored
+browser probes are not execution evidence. No acceptance row is promoted here.
+
+### PR62 History targets and resized-click diagnostic checkpoint, 2026-11-05
+
+Pre-join source `13af3f39af14201c5fc172af49b37f685188f611` adds the existing
+44px text-target treatment to History links and 44px saved-link controls. The
+eight-path focused gate passed 31 tests in three suites (History 16, saved links
+8, native-click diagnostics 7), canonical Next type generation/TypeScript,
+changed-path zero-warning lint and formatting. This is source-level evidence,
+not populated-screen inspection or browser execution. The History browser case
+retains 1280/390px Full/Reduced native hit-surface and overflow assertions.
+
+Exact-`8886a73effc434807d670e70dfbfda102289d0dd` CI run `41983830476` failed
+the mounted 375→390 room click with S1A expected and Red selected. The diagnostic
+retains the logical target, one native click and selection/URL/details assertions,
+uses the canonical uncovered native-click witnesses, and separately records the
+original hover agreement and raw pointer phases. Event-phase geometry owners
+remain explicitly unbound; older captured geometry cannot establish them.
+Passing unit tests do not establish the browser failure's cause or remediation.
+
+The prepared join with PR57 passive diagnostic source
+`7e3bd76b94367bb9823448ef39763402d331f098` has no final merge SHA or new gate
+result yet. Final-source focused browser execution, populated visual inspection,
+complete pre-push validation, exact-SHA CI and fresh review remain required.
+
+## Opt-in room demand attribution
 
 The existing `__roomLayoutDiagnosticsEnabled` test gate also enables read-only
 `window.__readRoomDemandSnapshot(canvas)` counters. The existing label-driver connection

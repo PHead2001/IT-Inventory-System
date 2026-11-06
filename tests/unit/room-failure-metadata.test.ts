@@ -108,6 +108,57 @@ describe('room failure metadata', () => {
     });
   });
 
+  it('retains bounded coordinates from the extracted spec and explicit support only', () => {
+    for (const file of [
+      'room-occupancy-exclusive.spec.ts',
+      'room-test-support.ts',
+    ]) {
+      for (const stack of [
+        'Error: private\n    at helper (/private/tests/e2e/' +
+          file +
+          ':123:45)',
+        'Error: private\n    at C:\\private\\tests\\e2e\\' + file + ':123:45',
+      ]) {
+        const output = roomFailureMetadata({
+          status: 'failed',
+          retry: 0,
+          errors: [{ stack }],
+        });
+        expect(output.records[0].location).toEqual({
+          file: 'tests/e2e/' + file,
+          line: 123,
+          column: 45,
+        });
+        expect(JSON.stringify(output)).not.toMatch(/private|Error/);
+      }
+    }
+    for (const suffix of [
+      'other.spec.ts:123:45',
+      'room-test-support.ts.backup:123:45',
+      'room-occupancy-exclusive.spec.ts/../private.ts:123:45',
+      '../room-test-support.ts:123:45',
+      'room-test-support.ts:0:45',
+      'room-test-support.ts:123:0',
+      'room-test-support.ts:1234567:45',
+      'room-test-support.ts:123:45?secret',
+    ])
+      expect(
+        roomFailureMetadata({
+          status: 'failed',
+          retry: 0,
+          errors: [
+            {
+              stack:
+                'Error: private\n    at helper (/private/tests/e2e/' +
+                suffix +
+                ')',
+            },
+          ],
+        }).records[0].location,
+        suffix,
+      ).toBeNull();
+  });
+
   it('does not infer matcher names from messages or expose private error fields and causes', () => {
     const error = {
       message: 'Error: expect(private).toHaveAttribute(secret)',

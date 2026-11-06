@@ -1,4 +1,6 @@
 @import 'tailwindcss';
+@import '../components/experience/theme-palette.css';
+@import '../components/experience/theme-controls.css';
 @theme inline {
   --font-sans: var(--font-ui), system-ui, sans-serif;
   --font-mono: var(--font-code), Consolas, monospace;
@@ -832,7 +834,7 @@ a {
   gap: 10px;
 }
 .experience-filter-toggle {
-  min-height: 36px;
+  min-height: 44px;
   border: 0;
   padding: 4px 2px;
   color: var(--workspace-filter-toggle-text);
@@ -847,7 +849,7 @@ a {
 .experience-filter-chip {
   display: inline-flex;
   align-items: center;
-  min-height: 32px;
+  min-height: 44px;
   gap: 8px;
   border: 1px solid var(--workspace-filter-chip-border);
   border-radius: 999px;
@@ -898,7 +900,7 @@ a {
 }
 .experience-export-menu a {
   display: block;
-  min-height: 40px;
+  min-height: 44px;
   border-radius: 6px;
   padding: 10px;
   color: var(--workspace-export-link-text);
@@ -1206,10 +1208,11 @@ html[data-motion='full'] .experience-auth-panel {
   .experience-search-top > button {
     grid-column: 1 / -1;
   }
+  /* Keep all six controls within 320px throughout mobile viewport resizing. */
   .experience-header-inner {
-    padding: 11px 20px;
+    padding: 11px 12px;
     align-items: flex-start;
-    gap: 12px;
+    gap: 8px;
   }
   .experience-header .experience-brand,
   .experience-header .experience-brand > span:last-child {
@@ -1229,7 +1232,7 @@ html[data-motion='full'] .experience-auth-panel {
   }
   .experience-account {
     position: relative;
-    gap: 7px;
+    gap: 4px;
     flex-wrap: nowrap;
     flex-shrink: 0;
     max-width: none;

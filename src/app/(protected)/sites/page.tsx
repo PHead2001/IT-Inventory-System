@@ -68,7 +68,7 @@ export default async function SitesPage({
                 <option value="all">All, including archived</option>
               </select>
             </label>
-            <button className="min-h-11 rounded-lg bg-cyan-700 px-4 font-semibold">
+            <button className="min-h-11 rounded-lg bg-[var(--button-solid-background)] px-4 font-semibold text-[var(--button-solid-text)]">
               Search
             </button>
           </form>
