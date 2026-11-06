@@ -222,6 +222,12 @@ try {
             $script:state | Add-Member runnerLaunch ([pscustomobject]@{ launchId = ('a' * 32); runnerId = 41 })
             $failure = & {
                 function Assert-SessionAlive {}
+                # This fixture owns receipt classification only; the complete
+                # monitor admission/contention contract has its own suite.
+                function New-RunnerMonitorAdmission { return [pscustomobject]@{} }
+                function Assert-RunnerMonitorAdmission {}
+                function Invoke-RunnerMonitorTransaction($State, $Admission, $Work) { return & $Work }
+                function Get-RunnerMonitorRemainingMs([int] $Maximum = 30000) { return $Maximum }
                 function Get-RunnerState { return $script:state }
                 function Get-SshArgs { return @() }
                 function Get-RunnerReceiptCommand { return 'fixed-command' }

@@ -653,6 +653,7 @@ function Invoke-RunnerRecoveryReconnect($Binding, [long] $Generation, [ValidateS
         Write-RunnerJson $script:RunnerStatePath $state
         try {
             [void](Invoke-RunnerRecoveryAdapterEffect $state $r $effect)
+            Complete-RunnerRecoveryEffect $state $r
             # Adapter-effect finally records admission/elapsed evidence only after
             # provider readback. Persist it while still holding this generation's lock.
             Write-RunnerJson $script:RunnerStatePath $state
@@ -705,6 +706,21 @@ function Assert-RunnerSealedPreparation($State, [DateTime] $NowUtc) {
     Assert-RunnerInstanceUnreferenced $State
 }
 
+function Complete-RunnerRecoveryEffect($State, $Recovery) {
+    # Positive provider readback is completed progress, never a heartbeat for a
+    # pending/hung call. It cannot revive an expired or replaced operation.
+    $current = Get-RunnerState
+    $stop = Test-RunnerSessionStopRequested $State
+    $ownerAlive = Test-RunnerProcessIdentity $State.supervisorPid $State.supervisorStartUtc
+    $guardianAlive = Test-RunnerProcessIdentity $State.guardianPid $State.guardianStartUtc
+    $now = Get-RunnerRecoveryNow
+    if (-not (Test-RunnerRecoveryGeneration $current $Recovery.binding $Recovery.generation $Recovery.operation) -or
+        -not $ownerAlive -or -not $guardianAlive -or $stop -or
+        (Get-RunnerRecoveryExpiry $Recovery $now) -or $now -ge [DateTime]::Parse($State.deadlineUtc).ToUniversalTime() -or
+        $now -lt [DateTime]::Parse($Recovery.progressUtc).ToUniversalTime()) { throw 'Completed recovery effect lost its lifetime or ownership.' }
+    $Recovery.progressUtc = $now.ToString('o')
+}
+
 function Invoke-RunnerNetworkRecoveryTick([string] $SessionName, $Config, $Outcome = $null) {
     # Only the exact guardian invokes this function. Observation/probe IO occurs
     # outside the mutex; provider mutations retain the existing serialization.
@@ -735,13 +751,35 @@ function Invoke-RunnerNetworkRecoveryTick([string] $SessionName, $Config, $Outco
             Write-RunnerJson $script:RunnerStatePath $state
             return [pscustomobject]@{ continue = $true; outcome = $null }
         }
-        # Do not authorize a connection from an observation that waited for a lock.
-        $staleObservation = ($now - $observedUtc).TotalSeconds -gt 2 -or ($now - $observedUtc).TotalSeconds -lt 0
-        if ($staleObservation) { $observation = $null }
-        $preflightStartedUtc = Get-RunnerRecoveryNow
-        $vm = Get-VM -Id ([guid]$recovery.binding.vmId) -ErrorAction Stop
-        $switch = Get-VMSwitch -Id ([guid]$recovery.binding.switchId) -ErrorAction Stop
+        # Capture immutable ownership/generation before slow READ-ONLY provider
+        # inspection. Stop/watchdog/session readers retain access to the journal.
+        $captured = $state | ConvertTo-Json -Depth 30 -Compress | ConvertFrom-Json
+        $recoveryKey = Get-RunnerRecoveryHash ($recovery | ConvertTo-Json -Depth 30 -Compress)
+    } finally { Exit-RunnerLock $mutex }
+    $preflightStage = 'vm'; $preflightFailure = $null
+    $preflightStartedUtc = Get-RunnerRecoveryNow
+    try {
+        $vm = Get-VM -Id ([guid]$captured.networkRecovery.binding.vmId) -ErrorAction Stop
+        $preflightStage = 'switch'
+        $switch = Get-VMSwitch -Id ([guid]$captured.networkRecovery.binding.switchId) -ErrorAction Stop
+        $preflightStage = 'adapter'
         $adapters = @(Get-VMNetworkAdapter -VM $vm -ErrorAction Stop)
+        $preflightStage = 'binding'
+    } catch { $preflightFailure = $_ }
+    $preflightElapsedMs = ((Get-RunnerRecoveryNow) - $preflightStartedUtc).TotalMilliseconds
+    $mutex = Enter-RunnerLock
+    try {
+        $state = Get-RunnerState
+        if ($null -eq $state -or $state.vmName -cne $SessionName) { return [pscustomobject]@{ continue = $false; outcome = $null } }
+        Assert-StateIdentity $state
+        if ((Get-RunnerRecoveryClaimHash $state) -cne (Get-RunnerRecoveryClaimHash $captured) -or
+            $state.guardianPid -ne $PID -or -not (Test-RunnerProcessIdentity $state.guardianPid $state.guardianStartUtc) -or
+            (Get-RunnerRecoveryHash ($state.networkRecovery | ConvertTo-Json -Depth 30 -Compress)) -cne $recoveryKey) { throw 'Recovery preflight ownership or generation changed.' }
+        $recovery = $state.networkRecovery
+        if ($null -ne $preflightFailure) {
+            try { $preflightFailure.Exception.Data['runnerControlDiagnostic'] = [pscustomobject]@{ purpose = 'recovery-preflight'; waitMs = [long][Math]::Min(30000, [Math]::Max(0, $preflightElapsedMs)); preflightStage = $preflightStage } } catch { }
+            throw $preflightFailure
+        }
         $identityChanged = $false
         $adapter = $null
         try { $adapter = Assert-RunnerNetworkBinding $state $recovery.binding $vm $adapters $switch } catch { $identityChanged = $true }
@@ -751,6 +789,11 @@ function Invoke-RunnerNetworkRecoveryTick([string] $SessionName, $Config, $Outco
         $stopReason = 'unavailable'
         $stop = Test-RunnerSessionStopRequested $state ([ref]$stopReason)
         $ownerDead = -not (Test-RunnerProcessIdentity $state.supervisorPid $state.supervisorStartUtc)
+        # Both provider preflight and Stop inspection may block. Decide from the
+        # CURRENT clock and retained observation age after all those reads.
+        $now = Get-RunnerRecoveryNow
+        $staleObservation = ($now - $observedUtc).TotalSeconds -gt 2 -or ($now - $observedUtc).TotalSeconds -lt 0
+        if ($staleObservation) { $observation = $null }
         $plan = Get-RunnerNetworkRecoveryPlan $recovery $observation $now ([string]$vm.State) $Outcome -Stop:$stop -OwnerDead:$ownerDead -IdentityChanged:$identityChanged -ConnectivityLost:$connectivityLost
         $state.networkRecovery = $plan.recovery
         Set-RunnerRecoveryDiagnostic $plan.recovery 'observationElapsedMs' $observationElapsedMs
@@ -758,7 +801,7 @@ function Invoke-RunnerNetworkRecoveryTick([string] $SessionName, $Config, $Outco
             Set-RunnerRecoveryDiagnostic $plan.recovery 'staleAdmissionCount' 1
             Set-RunnerRecoveryDiagnostic $plan.recovery 'refusal' 'stale-observation'
         }
-        Set-RunnerRecoveryDiagnostic $plan.recovery 'preflightElapsedMs' (((Get-RunnerRecoveryNow) - $preflightStartedUtc).TotalMilliseconds)
+        Set-RunnerRecoveryDiagnostic $plan.recovery 'preflightElapsedMs' $preflightElapsedMs
         if ($plan.recovery.phase -ceq 'healthy') { $state.networkFingerprint = $plan.recovery.fingerprint }
         Write-RunnerJson $script:RunnerStatePath $state
         if ($plan.action -ceq 'cleanup') {
@@ -775,6 +818,7 @@ function Invoke-RunnerNetworkRecoveryTick([string] $SessionName, $Config, $Outco
             try {
                 $installed = @(Invoke-RunnerRecoveryAdapterEffect $state $plan.recovery $plan.action)
                 if ($plan.action -ceq 'apply') { $state.networkRecovery.verifiedRules = $installed }
+                Complete-RunnerRecoveryEffect $state $plan.recovery
                 # Both apply and quarantine may finish with new diagnostics.
                 # Publish their completed state before exposing a success outcome.
                 Write-RunnerJson $script:RunnerStatePath $state
@@ -782,9 +826,11 @@ function Invoke-RunnerNetworkRecoveryTick([string] $SessionName, $Config, $Outco
             } catch {
                 # No provider cancellation/retry claim. Canonical cleanup can
                 # itself refuse; retain protected state/files in that case.
-                Set-RunnerRecoveryDiagnostic $plan.recovery 'refusal' 'provider-uncertain'
+                $expiry = Get-RunnerRecoveryExpiry $plan.recovery (Get-RunnerRecoveryNow)
+                $failure = if ($expiry) { $expiry } else { 'provider-uncertain' }
+                Set-RunnerRecoveryDiagnostic $plan.recovery 'refusal' $failure
                 Write-RunnerCleanupObservation 'recovery-plan' 'provider-uncertain' $state ([DateTime]::UtcNow)
-                $state.networkRecovery.phase = 'failed'; $state.networkRecovery.failure = 'provider-uncertain'; $state.networkRecovery.generation++
+                $state.networkRecovery.phase = 'failed'; $state.networkRecovery.failure = $failure; $state.networkRecovery.generation++
                 Write-RunnerJson $script:RunnerStatePath $state
                 Remove-RunnerInstance $state
                 return [pscustomobject]@{ continue = $false; outcome = $null }

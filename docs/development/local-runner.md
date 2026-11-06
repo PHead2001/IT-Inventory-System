@@ -552,6 +552,52 @@ Windows PowerShell 5.1 with disposable files and mocked host providers.
 
 Protected state readers share the writers' existing reentrant state mutex across existence and JSON reads. Session liveness evaluates its fresh state and Stop decision coherently under that mutex, samples time after lock waits, and releases the mutex before recovery waits. A captured session exception is persisted before that invocation's canonical cleanup removes ephemeral state, preserving its original observed decision rather than reconstructing it from later state. Missing state and invalid identity still fail closed. Canonical native publication stress reproduced a sharing exception with unlocked readers; the locked fixture completed 1000 writes and 10034 reads without errors or nulls. Only an earlier noncanonical null-backup stress returned null. Cleanup-order regressions establish attached-observation retention. These checks prove the repaired source contracts; a live `state-absent` observation alone does not identify who removed state or prove the initiating cause.
 
+Only the already-dispatched detached receipt monitor may retry a classified state
+mutex acquisition timeout. The classification is a fixed tag emitted after mutex
+security validation and an unsuccessful `WaitOne`; ACL, provider and unrelated
+timeout failures remain fatal. Each interrupted monitor transaction has one
+30-second monotonic contention budget including its first 20-second acquisition.
+The bound activates only after the first classified acquisition timeout; the
+original clock still includes that first wait and is never restarted on catch.
+Ordinary available-lock recovery through the detached monitor retains its
+configured recovery deadlines. Subsequent contended acquisitions consume the
+remaining budget. The monitor-scoped
+liveness loop also checks the remaining budget
+on every recovery iteration, even when the state mutex is available. Its receipt
+transport receives the remaining millisecond budget capped by the usual
+12-second transport timeout; an expired read cannot publish a journal event or
+start another iteration. Ordinary liveness outside this monitor scope retains
+the configured recovery deadlines. No inaccessible state is reported alive, and
+successful continuation requires fresh Stop, hard deadline,
+guardian/progress/outage checks plus the original claim, launch and runner
+identities. A generation change during contention refuses continuation. Registration,
+handoff and guest dispatch are never replayed. A completed transaction ends that
+contention scope; it does not extend any session or recovery deadline.
+
+The guardian captures the protected claim, guardian and recovery generation, then
+performs read-only VM/switch/adapter preflight outside the broad state mutex. It
+reacquires the mutex and rejects changed ownership or recovery state before
+publishing a plan. The reducer samples time and observation age after preflight
+and Stop inspection. A stale capture therefore requests containment rather than
+connection. Provider mutations and their fresh live admission/readback remain
+serialized. Successful containment/effects publish actual completion time only
+after renewed ownership, Stop, process and expiry checks; a completed call cannot
+revive an expired operation. Hung synchronous effects still cannot be cancelled
+or treated as progress, and may delay cleanup while holding the mutex.
+
+Optional `controlDiagnostic` failure evidence contains only fixed lock purpose,
+wait duration (0–30000 ms), and read-only preflight stage enums. Preflight duration
+in this small projection saturates at 30000 ms; existing recovery timing evidence
+retains its existing bounds. Historical journals without this field remain readable.
+`Runner.Contention.Tests.ps1 -NativeContention` proves real independent-process
+22-second contention survival and permanent-contention refusal at the fixed total
+budget using only an ordinary-user GUID mutex. Its provider and guest receipt
+operations are fixtures; it does not certify production ACLs, Hyper-V containment
+or same-job network continuity. Slow-preflight/expiry regressions use a simulated
+clock. The timing-separation fixture retains a one-second initial preflight so its
+capture remains within the unchanged two-second admission lease; separate slow
+preflight cases explicitly require stale-observation containment.
+
 After the credential-free builder shuts down gracefully and its exact Off VM registration is authoritatively removed, the owner commits a sealed preparation state with the scrub proof, image binding and fenced recovery generation. The guardian remains active while bulk disk copying runs outside the state mutex. Its sealed supervision path checks the exact preparation identity, owner/guardian processes, Stop, deadlines, progress, committed proof, authoritative VM absence and remaining disk/configuration references before refreshing progress. It never treats a missing ordinary job or verifier VM as a preparation seal, resumes a removed VM or accepts old network/probe outcomes. Watchdog and session liveness retain the same guards. Session liveness samples evaluation time after heartbeat and the fresh protected-state read, then rechecks Stop and the current deadline; guardian progress that advanced during the mutex wait is evaluated against that later time, while true future progress still refuses continuation. Candidate retention still requires fresh post-copy proof and unchanged image selection. Provider uncertainty, reappearing registration, cancellation or invalid proof fails closed through canonical cleanup.
 
 While the exact owned adapter is disconnected and its VM is Off or Paused, policy replacement queries its existing ACL objects and removes each with the supported [InputObject parameter set](https://learn.microsoft.com/en-us/powershell/module/hyper-v/remove-vmnetworkadapterextendedacl?view=windowsserver2025-ps). A fresh adapter with no ACLs skips removal. A second query must prove the old policy empty before any replacement rule is added; query/removal failures or surviving rules fail closed through canonical cleanup. Exact post-add readback remains required before reconnect or resume.

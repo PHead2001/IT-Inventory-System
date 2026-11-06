@@ -51,11 +51,12 @@ function Test-RunnerProcessIdentity { return $script:alive }
 function Get-RunnerRecoveryNow { return $script:clock }
 function Get-VM {
     $script:vmQueries++
+    if (-not $script:locked -and $null -ne $script:afterPreflightRead) { & $script:afterPreflightRead }
     if ($script:fail -ceq 'timing-success') { $script:clock = $script:clock.AddMilliseconds(100) }
     if ($script:fail -ceq 'timing-stages') {
         # Tick preflight, effect preflight, then final adapter readback. These
         # deliberately differ from the ACL installation's per-rule duration.
-        $delaySeconds = switch ($script:vmQueries) { 1 { 3 }; 2 { 5 }; 3 { 7 }; default { 0 } }
+        $delaySeconds = switch ($script:vmQueries) { 1 { 1 }; 2 { 5 }; 3 { 7 }; default { 0 } }
         $script:clock = $script:clock.AddSeconds($delaySeconds)
     }
     return $script:vm
@@ -138,6 +139,7 @@ function New-Fixture {
     $script:clock = $script:now; $script:RunnerRecoveryProbe = $null
     $script:afterObservation = $null
     $script:afterDisconnect = $null
+    $script:afterPreflightRead = $null
     $script:locked = $false; $script:alive = $true; $script:fail = ''; $script:effects = @(); $script:cleanups = 0; $script:addCount = 0; $script:removeCount = 0; $script:aclQueries = 0; $script:rules = @(); $script:queriedRules = @()
     $script:captures = @(New-Capture); $script:readIndex = -1
     $script:state = [pscustomobject]@{
@@ -328,7 +330,7 @@ try {
         Assert-Equal $script:vmQueries 3 'Timing fixture did not exercise both preflights and final readback.'
         Assert-Equal $r.diagnostics.preflightElapsedMs 5000 'Longest preflight timing was lost.'
         Assert-Equal $r.diagnostics.applyElapsedMs ($script:addCount * 100) 'Apply timing included identity preflight or final adapter readback.'
-        Assert-Equal ($script:clock - $script:now).TotalMilliseconds (15000 + $script:addCount * 100) 'Timing fixture did not separate stages.'
+        Assert-Equal ($script:clock - $script:now).TotalMilliseconds (13000 + $script:addCount * 100) 'Timing fixture did not separate stages.'
         Assert-Equal $r.episodeDeadlineUtc $script:now.AddSeconds(120).ToString('o') 'Stage timing changed episode deadline.'
         Assert-Equal $r.diagnostics.applyCount 1 'Stage timing duplicated the apply intent.'
         if ($script:effects -contains 'connect' -or $script:effects -contains 'resume' -or $script:effects -contains 'cleanup') { throw 'Stage timing changed provider actions.' }
@@ -339,13 +341,12 @@ try {
         $r.phase = 'isolated'; $r.episodeStartedUtc = $script:now.ToString('o'); $r.episodeDeadlineUtc = $script:now.AddSeconds(120).ToString('o')
         $r.candidateFingerprint = $observation.fingerprint; $r.candidateRules = $observation.rules; $r.stableObservations = 2; $r.lastStableUtc = $script:now.AddSeconds(-2).ToString('o')
         $script:fail = 'slow-apply'; $p = Invoke-RunnerNetworkRecoveryTick $script:state.vmName ([pscustomobject]@{})
-        $r = $script:state.networkRecovery
+        Assert-Equal $p.continue $false 'Expired completed apply exposed a successful outcome.'
+        $r = $script:lastCleanupState.networkRecovery
         Assert-Equal $r.diagnostics.applyCount 1 'Apply intent was not counted.'
         Assert-Equal $r.diagnostics.applyElapsedMs ($script:addCount * 6000) 'Apply timing lost synchronous work.'
         Assert-Equal $r.episodeDeadlineUtc $script:now.AddSeconds(120).ToString('o') 'Slow apply extended deadline.'
         if ($script:clock -le $script:now.AddSeconds(120)) { throw 'Long apply fixture did not cross outage deadline.' }
-        $script:fail = ''; $p = Invoke-RunnerNetworkRecoveryTick $script:state.vmName ([pscustomobject]@{}) $p.outcome
-        Assert-Equal $p.continue $false 'Expired long apply continued.'
         $data = New-RunnerRecoveryDiagnostic $script:lastCleanupState.networkRecovery $script:clock
         Assert-Equal $data.operation 'apply' 'Cleanup erased initiating operation.'
         Assert-Equal $data.refusal 'outage-deadline' 'Cleanup lost exact expiry refusal.'
@@ -656,6 +657,68 @@ try {
         Assert-Refused { New-RunnerNetworkBinding $script:state $script:vm $script:adapter $script:switch } 'Invalid MAC admitted.'
     }
     Check 'resume provider error is explicit and cannot fake running readback' { New-Fixture; $script:vm.State = 'Paused'; $script:state.networkRecovery.operation = 'resume'; $script:state.networkRecovery.resumeRequired = $true; Set-FixtureVerifiedRules; $script:fail = 'resume'; Assert-Refused { Invoke-RunnerRecoveryAdapterEffect $script:state $script:state.networkRecovery 'resume' } 'Resume error accepted.'; Assert-Equal $script:effects @('resume') 'Resume error path not reached.'; Assert-Equal $script:vm.State 'Paused' 'Resume error guessed running.' }
+    Check 'slow preflight releases mutex rejects stale observation and publishes actual containment completion' {
+        New-Fixture
+        $script:state.networkRecovery.fingerprint = (Get-RunnerNetworkObservation).fingerprint
+        $script:afterPreflightRead = {
+            Assert-Equal $script:locked $false 'Slow read-only preflight held state mutex.'
+            $script:clock = $script:clock.AddSeconds(26)
+        }
+        $script:afterDisconnect = { $script:clock = $script:clock.AddMilliseconds(6661) }
+        $p = Invoke-RunnerNetworkRecoveryTick $script:state.vmName ([pscustomobject]@{})
+        Assert-Equal $p.outcome.operation 'quarantine' 'Stale preflight authorized connection or stayed healthy.'
+        Assert-Equal $script:effects @('pause', 'disconnect') 'Stale preflight escaped containment.'
+        Assert-Equal $script:state.networkRecovery.progressUtc $script:clock.ToString('o') 'Completed containment published an old clock.'
+        Assert-Equal $script:state.networkRecovery.episodeStartedUtc $script:now.AddSeconds(26).ToString('o') 'Reducer reused pre-preflight time.'
+        Assert-Equal $script:state.networkRecovery.episodeDeadlineUtc $script:now.AddSeconds(146).ToString('o') 'Episode did not retain decision-time 120s bound.'
+        $script:afterPreflightRead = $null; $script:afterDisconnect = $null
+        $p = Invoke-RunnerNetworkRecoveryTick $script:state.vmName ([pscustomobject]@{}) $p.outcome
+        Assert-Equal $p.continue $true 'Genuine completed progress was falsely expired.'
+    }
+    Check 'Stop hard deadline progress expiry owner VM session and generation changes during preflight cannot publish success' {
+        foreach ($change in @('stop', 'hard', 'progress', 'owner', 'vm', 'session', 'generation', 'guardian')) {
+            New-Fixture; $script:change = $change
+            $stopPath = Join-Path $script:state.instancePath 'stop.requested'
+            [void][IO.Directory]::CreateDirectory($script:state.instancePath)
+            $script:afterPreflightRead = {
+                switch ($script:change) {
+                    'stop' { [IO.File]::WriteAllText($stopPath, '') }
+                    'hard' { $script:clock = $script:clock.AddMinutes(11) }
+                    'progress' { $script:clock = $script:clock.AddSeconds(31) }
+                    'owner' { $script:alive = $false }
+                    'vm' { $script:vm.Id = [guid]'00000000-0000-0000-0000-000000000003' }
+                    'session' { $script:state.vmName = 'ITIR-' + ('b' * 32) }
+                    'generation' { $script:state.networkRecovery.generation++ }
+                    'guardian' { $script:state.guardianStartUtc = $script:clock.AddSeconds(1).ToString('o') }
+                }
+            }
+            $result = $null; $failure = $null; $name = $script:state.vmName
+            try { $result = Invoke-RunnerNetworkRecoveryTick $name ([pscustomobject]@{}) } catch { $failure = $_ }
+            finally { if (Test-Path -LiteralPath $stopPath) { Remove-Item -LiteralPath $stopPath } }
+            if ($null -eq $failure -and ($null -eq $result -or $result.continue)) { throw "Preflight accepted $change." }
+            if (@($script:effects | Where-Object { $_ -cne 'cleanup' }).Count -ne 0) { throw "Preflight mutation after $change." }
+        }
+    }
+    Check 'failed read-only preflight carries only bounded fixed stage diagnostics' {
+        New-Fixture; $script:afterPreflightRead = { throw 'SECRET provider command output' }
+        $failure = $null; try { Invoke-RunnerNetworkRecoveryTick $script:state.vmName ([pscustomobject]@{}) } catch { $failure = $_ }
+        if ($null -eq $failure) { throw 'Uncertain preflight accepted.' }
+        $record = New-RunnerSessionFailureRecord $failure 'guardian'
+        Assert-Equal $record.controlDiagnostic.preflightStage 'vm' 'Preflight stage was not retained.'
+        if (($record | ConvertTo-Json -Depth 6 -Compress) -cmatch 'SECRET|command output') { throw 'Preflight diagnostic leaked provider details.' }
+        Assert-Equal $script:effects @() 'Uncertain preflight mutated provider.'
+    }
+    Check 'late containment completion cannot revive expired progress or expose a successful outcome' {
+        New-Fixture
+        $originalProgress = $script:state.networkRecovery.progressUtc
+        $script:afterDisconnect = { $script:clock = $script:clock.AddSeconds(31) }
+        $p = Invoke-RunnerNetworkRecoveryTick $script:state.vmName ([pscustomobject]@{})
+        Assert-Equal $p.continue $false 'Late containment completion reported liveness.'
+        Assert-Equal $p.outcome $null 'Expired containment returned success.'
+        Assert-Equal $script:lastCleanupState.networkRecovery.progressUtc $originalProgress 'Expired containment fabricated progress.'
+        Assert-Equal $script:lastCleanupState.networkRecovery.failure 'guardian-progress-expired' 'Late containment lost expiry reason.'
+        Assert-Equal $script:effects @('pause', 'disconnect', 'cleanup') 'Late containment changed cleanup or isolation.'
+    }
     Check 'guardian tick observes outside mutex then quarantines exact provider' { New-Fixture; $p = Invoke-RunnerNetworkRecoveryTick $script:state.vmName ([pscustomobject]@{}); Assert-Equal $p.outcome.operation 'quarantine' 'Tick did not quarantine.'; Assert-Equal $script:locked $false 'Tick retained mutex.'; Assert-Equal $script:effects @('pause', 'disconnect') 'Tick mutated beyond quarantine.' }
     Check 'unchanged host fingerprint cannot leave detached bound adapter healthy' {
         New-Fixture; $r = $script:state.networkRecovery; $r.fingerprint = (Get-RunnerNetworkObservation).fingerprint
