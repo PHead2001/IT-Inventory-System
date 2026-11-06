@@ -22,6 +22,7 @@ type ThemeAnimation = {
   rejected: boolean;
 };
 type ThemeProof = {
+  events: { time: number; event: string; pseudo?: string }[];
   frames: AppearanceFrame[];
   paints: { name: string; time: number }[];
   transitions: { ready: boolean; finished: boolean; rejected: boolean }[];
@@ -43,6 +44,17 @@ test.beforeEach(async ({ baseURL }) => {
   const origin = new URL(baseURL!);
   expect(['localhost', '127.0.0.1', '[::1]']).toContain(origin.hostname);
   expect(origin.port).toBe('3000');
+});
+test.afterEach(async ({ page }, info) => {
+  if (info.status === info.expectedStatus) return;
+  const observation = await page
+    .evaluate(() => window.themeAcceptanceProof ?? null)
+    .catch(() => null);
+  if (observation)
+    await info.attach('failed-native-theme-observation.json', {
+      body: JSON.stringify(observation),
+      contentType: 'application/json',
+    });
 });
 
 async function signIn(page: Page) {
@@ -71,6 +83,7 @@ async function observeAppearance(page: Page, unsupported = false) {
   await page.addInitScript(
     ({ unsupported }) => {
       const proof: ThemeProof = {
+        events: [],
         frames: [],
         paints: [],
         transitions: [],
@@ -79,6 +92,12 @@ async function observeAppearance(page: Page, unsupported = false) {
         instantFrames: [],
       };
       window.themeAcceptanceProof = proof;
+      const record = (event: string, pseudo?: string) => {
+        if (proof.events.length < 100)
+          proof.events.push({ time: performance.now(), event, pseudo });
+      };
+      for (const event of ['scroll', 'resize', 'visibilitychange'])
+        addEventListener(event, () => record(event), true);
       new PerformanceObserver((list) => {
         for (const entry of list.getEntries())
           proof.paints.push({ name: entry.name, time: entry.startTime });
@@ -113,20 +132,25 @@ async function observeAppearance(page: Page, unsupported = false) {
       ) => {
         const entry = { ready: false, finished: false, rejected: false };
         proof.transitions.push(entry);
+        record('transition-start');
         const transition = native(...args);
         void transition.ready.then(
           () => {
+            record('transition-ready');
             entry.ready = true;
           },
           () => {
+            record('transition-ready-rejected');
             entry.rejected = true;
           },
         );
         void transition.finished.then(
           () => {
+            record('transition-finished');
             entry.finished = true;
           },
           () => {
+            record('transition-finished-rejected');
             entry.finished = true;
             entry.rejected = true;
           },
@@ -166,14 +190,17 @@ async function observeAppearance(page: Page, unsupported = false) {
             rejected: false,
           };
           proof.animations.push(entry);
+          record('animation-start', entry.pseudo);
           // A skipped native transition may fulfill its own finished promise
           // while cancelling these effects. Observe each browser animation's
           // real result separately; readiness/progress is insufficient.
           void animation.finished.then(
             () => {
+              record('animation-completed', entry.pseudo);
               entry.completed = true;
             },
             () => {
+              record('animation-rejected', entry.pseudo);
               entry.rejected = true;
             },
           );
