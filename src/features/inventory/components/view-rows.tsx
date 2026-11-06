@@ -30,6 +30,7 @@ import { RestockShortfall } from './restock-shortfall';
 import { ShowInRoom } from '@/features/room/show-in-room';
 
 import styles from './view-rows.module.css';
+import visualStyles from './inventory-visual.module.css';
 
 export function InventoryViewRows({
   result,
@@ -321,7 +322,10 @@ export function InventoryViewRows({
                       <PeekLink
                         peekTarget={{ kind: row.kind, id: row.id }}
                         href={href}
-                        className="text-xs text-cyan-300 underline"
+                        className={
+                          visualStyles.textTarget +
+                          ' text-xs text-cyan-300 underline'
+                        }
                       >
                         Preview shortened · full details
                       </PeekLink>
@@ -375,7 +379,7 @@ function HoldingRows({
           {row.site ? (
             <Link
               href={`/sites/${encodeURIComponent(row.site.code)}`}
-              className="text-cyan-300 underline"
+              className={visualStyles.textTarget + ' text-cyan-300 underline'}
             >
               Assigned to {row.site.name} ({row.site.code}) · no room model
             </Link>

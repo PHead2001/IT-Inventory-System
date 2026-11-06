@@ -11,7 +11,11 @@ vi.mock('@/lib/auth/session.server', () => ({
 }));
 import { render, screen, within } from '@testing-library/react';
 import { expect, it, vi } from 'vitest';
-const m = vi.hoisted(() => ({ inventory: vi.fn(), redirect: vi.fn() }));
+const m = vi.hoisted(() => ({
+  inventory: vi.fn(),
+  columns: vi.fn(async () => ({ fields: [], truncated: false })),
+  redirect: vi.fn(),
+}));
 const location = {
   id: 'root',
   code: 'ITO',
@@ -23,7 +27,7 @@ const location = {
   spaceRootCode: 'ITO',
 };
 vi.mock('@/features/inventory/views.server', () => ({
-  getInventoryColumns: async () => ({ fields: [], truncated: false }),
+  getInventoryColumns: m.columns,
   getInventoryView: async (input: Record<string, string | undefined>) => {
     const result = await m.inventory(input);
     return {
@@ -346,3 +350,56 @@ it.each(['items', 'holdings'] as const)(
     rendered.unmount();
   },
 );
+
+it('starts the column catalog while location inventory is pending and awaits both reads', async () => {
+  const result = { rows: [], total: 0, page: 1, pageSize: 25 };
+  let releaseInventory!: (value: typeof result) => void;
+  let releaseColumns!: (value: { fields: []; truncated: false }) => void;
+  m.inventory.mockReturnValueOnce(
+    new Promise<typeof result>((resolve) => {
+      releaseInventory = resolve;
+    }),
+  );
+  m.columns.mockClear();
+  m.columns.mockReturnValueOnce(
+    new Promise<{ fields: []; truncated: false }>((resolve) => {
+      releaseColumns = resolve;
+    }),
+  );
+  let settled = false;
+  const page = Page({
+    params: Promise.resolve({ code: 'ITO' }),
+    searchParams: Promise.resolve({ columnSearch: 'Enabled' }),
+  }).then((value) => {
+    settled = true;
+    return value;
+  });
+  await vi.waitFor(() => {
+    expect(m.columns).toHaveBeenCalledExactlyOnceWith({
+      columnSearch: 'Enabled',
+    });
+    expect(releaseInventory).toBeTypeOf('function');
+  });
+  releaseInventory(result);
+  await Promise.resolve();
+  expect(settled).toBe(false);
+  releaseColumns({ fields: [], truncated: false });
+  await page;
+});
+
+it('propagates the original column-catalog error on location inventory', async () => {
+  const original = new Error('column catalog unavailable');
+  m.inventory.mockResolvedValueOnce({
+    rows: [],
+    total: 0,
+    page: 1,
+    pageSize: 25,
+  });
+  m.columns.mockRejectedValueOnce(original);
+  await expect(
+    Page({
+      params: Promise.resolve({ code: 'ITO' }),
+      searchParams: Promise.resolve({}),
+    }),
+  ).rejects.toBe(original);
+});

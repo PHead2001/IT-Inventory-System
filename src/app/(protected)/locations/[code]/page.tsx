@@ -51,19 +51,17 @@ export default async function LocationPage({
   const returnTo = locationDetailReturnPath(filters.returnTo);
   const location = await readLocationPage(code);
   if (!location) notFound();
-  const [result, locations] = await Promise.all([
+  const [result, locations, catalog] = await Promise.all([
     getInventoryView({ ...filters, location: code }),
     getLocations(),
+    getInventoryColumns(filters),
   ]);
   const children = locations.filter((l) => l.parentId === location.id);
   const filter = readFilters({ ...filters, location: code });
   const scopeParams = inventoryFilterParams({ ...filters, location: code });
   const navigationParams = inventoryViewParams({ ...filters, location: code });
   const display = readViewPreferences(filters);
-  const [{ member }, catalog] = await Promise.all([
-    requireMember(),
-    getInventoryColumns(filters),
-  ]);
+  const { member } = await requireMember();
   const normalizedParams = {
     ...Object.fromEntries(navigationParams),
     ...(filters.returnTo ? { returnTo } : {}),

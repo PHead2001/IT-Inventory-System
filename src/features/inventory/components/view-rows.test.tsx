@@ -8,6 +8,7 @@ import {
 } from '@testing-library/react';
 import { expect, it, vi } from 'vitest';
 import { InventoryViewRows as ActualRows } from './view-rows';
+import visualStyles from './inventory-visual.module.css';
 import { PeekProvider } from '@/features/peek/peek-provider';
 import { PrivacyReadinessContext } from '@/components/auth/privacy-readiness';
 import {
@@ -449,3 +450,69 @@ it('omits the current location breadcrumb while preserving its room action and d
   expect(screen.getAllByRole('link', { name: 'Show in room' })).toHaveLength(2);
   view.unmount();
 });
+
+it.each(['comfortable', 'compact'] as const)(
+  'keeps site and shortened-preview navigation touch-sized in %s density',
+  (density) => {
+    const siteHolding = {
+      ...row,
+      location: null,
+      site: { id: id(9), code: 'OFFICE', name: 'Office', active: true },
+    };
+    const view = render(
+      <InventoryViewRows
+        result={{
+          rows: [
+            {
+              row,
+              holdings: [siteHolding],
+              scopedStorage: '0',
+              scopedSite: '10',
+              holdingCount: 1,
+              preview: {
+                answers: [
+                  {
+                    fieldId: id(4),
+                    label: 'Notes',
+                    type: 'text',
+                    displayValue: 'Short preview',
+                    present: true,
+                    absence: null,
+                    legacy: false,
+                    truncated: true,
+                  },
+                ],
+                truncated: true,
+              },
+            },
+          ],
+          total: 1,
+          page: 1,
+          pageSize: 25,
+          unit: 'item',
+          holdingRows: 1,
+        }}
+        preferences={{ view: 'items', density, columns: [id(4)] }}
+        returnTo="/inventory?view=items"
+      />,
+    );
+    const preview = screen.getByRole('link', {
+      name: 'Preview shortened · full details',
+    });
+    expect(preview).toHaveClass(visualStyles.textTarget);
+    expect(preview).toHaveAttribute(
+      'href',
+      expect.stringContaining('/inventory/quantity/' + row.id),
+    );
+    fireEvent.click(
+      screen.getByText('Storage and sites within these filters (1)'),
+    );
+    const site = screen.getByRole('link', {
+      name: 'Assigned to Office (OFFICE) · no room model',
+    });
+    expect(site).toHaveClass(visualStyles.textTarget);
+    expect(site).toHaveAttribute('href', '/sites/OFFICE');
+    expect(site.closest('details')).toHaveAttribute('open');
+    view.unmount();
+  },
+);

@@ -5,6 +5,7 @@ vi.mock('server-only', () => ({}));
 const mocks = vi.hoisted(() => ({
   requireMember: vi.fn(),
   getInventory: vi.fn(),
+  getInventoryColumns: vi.fn(),
   hasRecordedInventory: vi.fn(),
   redirect: vi.fn(),
   getCategories: vi.fn(),
@@ -17,7 +18,7 @@ vi.mock('@/lib/auth/session.server', () => ({
   requireMember: mocks.requireMember,
 }));
 vi.mock('@/features/inventory/views.server', () => ({
-  getInventoryColumns: async () => ({ fields: [], truncated: false }),
+  getInventoryColumns: mocks.getInventoryColumns,
   getInventoryView: async (input: Record<string, string | undefined>) => {
     const result = await mocks.getInventory(input);
     return {
@@ -70,6 +71,7 @@ beforeEach(() => {
   vi.stubEnv('VERCEL_ENV', 'preview');
   mocks.requireMember.mockResolvedValue({ member: { role: 'staff' } });
   mocks.getInventory.mockResolvedValue(result);
+  mocks.getInventoryColumns.mockResolvedValue({ fields: [], truncated: false });
   mocks.hasRecordedInventory.mockResolvedValue(false);
   mocks.getCategories.mockResolvedValue([]);
   mocks.getLocations.mockResolvedValue([]);
@@ -156,7 +158,7 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-it('times concurrent inventory reads and waits for their result before file summaries', async () => {
+it('starts the column catalog with concurrent inventory reads and waits for inventory before file summaries', async () => {
   const info = vi.spyOn(console, 'info').mockImplementation(() => {});
   let releaseInventory: (value: typeof result) => void = () => {};
   mocks.getInventory.mockReturnValue(
@@ -170,6 +172,7 @@ it('times concurrent inventory reads and waits for their result before file summ
     expect(mocks.getCategories).toHaveBeenCalledOnce();
     expect(mocks.getLocations).toHaveBeenCalledOnce();
     expect(mocks.getSites).toHaveBeenCalledOnce();
+    expect(mocks.getInventoryColumns).toHaveBeenCalledExactlyOnceWith({});
   });
   expect(mocks.getFileListSummaries).not.toHaveBeenCalled();
   releaseInventory(result);
@@ -349,4 +352,27 @@ it('keeps an overflow page actionable without pretending it is empty or recoveri
   expect(mocks.redirect).not.toHaveBeenCalled();
   expect(mocks.hasRecordedInventory).not.toHaveBeenCalled();
   expect(screen.queryByText('No inventory has been recorded yet.')).toBeNull();
+});
+
+it('gates all independent reads on membership and propagates column-catalog failure', async () => {
+  vi.stubEnv('AUTH_DIAGNOSTICS', '0');
+  const denied = new Error('membership denied');
+  mocks.requireMember.mockRejectedValueOnce(denied);
+  await expect(
+    InventoryPage({ searchParams: Promise.resolve({}) }),
+  ).rejects.toBe(denied);
+  expect(mocks.getInventory).not.toHaveBeenCalled();
+  expect(mocks.getInventoryColumns).not.toHaveBeenCalled();
+
+  const original = new Error('column catalog unavailable');
+  mocks.getInventoryColumns.mockRejectedValueOnce(original);
+  await expect(
+    InventoryPage({
+      searchParams: Promise.resolve({ columnSearch: 'Enabled' }),
+    }),
+  ).rejects.toBe(original);
+  expect(mocks.getInventoryColumns).toHaveBeenCalledExactlyOnceWith({
+    columnSearch: 'Enabled',
+  });
+  expect(mocks.getFileListSummaries).not.toHaveBeenCalled();
 });

@@ -41,10 +41,8 @@ export default async function InventoryPage({
   const params = Object.fromEntries(
     Object.entries(raw).map(([k, v]) => [k, Array.isArray(v) ? v[0] : v]),
   );
-  const [result, categories, locations, sites] = await observeAuthStage(
-    diagnostic,
-    'inventory.parallelReads',
-    () =>
+  const [result, categories, locations, sites, columnCatalog] =
+    await observeAuthStage(diagnostic, 'inventory.parallelReads', () =>
       Promise.all([
         observeAuthStage(diagnostic, 'inventory.search', () =>
           getInventoryView(params),
@@ -56,8 +54,9 @@ export default async function InventoryPage({
           getLocations(),
         ),
         observeAuthStage(diagnostic, 'inventory.sites', () => getSites()),
+        getInventoryColumns(params),
       ]),
-  );
+    );
   const fileSummaries = await observeAuthStage(
     diagnostic,
     'inventory.fileSummaries',
@@ -66,7 +65,6 @@ export default async function InventoryPage({
   const filters = readFilters(params);
   const exportParams = inventoryFilterParams(params);
   const display = readViewPreferences(params);
-  const columnCatalog = await getInventoryColumns(params);
   const navigationParams = inventoryViewParams(params);
   const recovery =
     !result.error && !display.error
