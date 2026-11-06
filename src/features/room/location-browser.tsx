@@ -38,7 +38,10 @@ function BrowserLocation({
   detailPresentation?: LocationDetailPresentation;
 }) {
   return (
-    <div className="min-w-0 flex-1" style={{ marginLeft: indent }}>
+    <div
+      className="experience-spotlight min-w-0 flex-1"
+      style={{ marginLeft: indent }}
+    >
       <button
         aria-current={selected ? 'location' : undefined}
         aria-label={`${search ? location.breadcrumb : location.name} ${location.code}${!location.active ? ' Inactive' : ''}`}

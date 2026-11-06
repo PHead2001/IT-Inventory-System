@@ -86,7 +86,7 @@ export default async function SettingsPage({
               <li key={section.href}>
                 <Link
                   href={section.href}
-                  className="experience-surface block h-full min-w-0 p-5 transition-colors hover:border-cyan-400/60 hover:bg-slate-800/70 focus-visible:outline-2 focus-visible:outline-cyan-300"
+                  className="experience-spotlight experience-surface block h-full min-w-0 p-5 transition-colors hover:border-cyan-400/60 hover:bg-slate-800/70 focus-visible:outline-2 focus-visible:outline-cyan-300"
                 >
                   <span className="block text-lg font-semibold text-cyan-200">
                     {section.title}

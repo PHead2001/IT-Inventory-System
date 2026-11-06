@@ -76,7 +76,7 @@ export default async function SitesPage({
             <ul className="experience-surface divide-y divide-cyan-100/10 overflow-hidden">
               {rows.map((site) => (
                 <li
-                  className="min-w-0 p-4 transition-colors hover:bg-cyan-100/5"
+                  className="experience-spotlight min-w-0 p-4 transition-colors hover:bg-cyan-100/5"
                   key={site.id}
                 >
                   <Link

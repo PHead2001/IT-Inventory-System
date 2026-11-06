@@ -4,7 +4,6 @@ import Link from '@/components/experience/route-link';
 import { ProtectedPrivacyContent } from '@/components/auth/privacy-content';
 import { Map, ArrowRight } from 'lucide-react';
 import { ClosetPreview } from '@/components/experience/closet-preview';
-import { AmbientLight } from '@/components/experience/ambient-light';
 import { redirect } from 'next/navigation';
 import { loadDashboardSnapshot } from './snapshot.server';
 import { DashboardSnapshotView } from './snapshot-view';
@@ -24,7 +23,6 @@ export default async function DashboardPage({
       <RouteReady {...await routeReadyProps('/dashboard', searchParams)}>
         <div className="space-y-5">
           <section className="experience-overview-hero experience-surface-bright">
-            <AmbientLight />
             <div>
               <p className="experience-eyebrow">
                 Storage availability · Overview

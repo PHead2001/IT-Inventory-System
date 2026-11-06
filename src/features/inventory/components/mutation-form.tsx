@@ -1660,7 +1660,7 @@ function MutationFormFields({
             ref={completionRef}
             tabIndex={-1}
             role="status"
-            className="space-y-2 text-sm text-cyan-200"
+            className="experience-spotlight space-y-2 text-sm text-cyan-200"
           >
             {moving ? (
               <>

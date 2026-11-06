@@ -106,7 +106,7 @@ export function DashboardSnapshotView({
       </div>
 
       <dl className="experience-stat-grid">
-        <div className="experience-stat experience-surface">
+        <div className="experience-spotlight experience-stat experience-surface">
           <dt className="experience-muted text-xs">Needs restocking</dt>
 
           <dd
@@ -122,7 +122,7 @@ export function DashboardSnapshotView({
           </dd>
         </div>
 
-        <div className="experience-stat experience-surface">
+        <div className="experience-spotlight experience-stat experience-surface">
           <dt className="experience-muted text-xs">Out of stock (subset)</dt>
 
           <dd
@@ -138,7 +138,7 @@ export function DashboardSnapshotView({
           </dd>
         </div>
 
-        <div className="experience-stat experience-surface">
+        <div className="experience-spotlight experience-stat experience-surface">
           <dt className="experience-muted text-xs">Monitored active items</dt>
 
           <dd>{result.configuredCount}</dd>
@@ -252,7 +252,10 @@ export function DashboardSnapshotView({
           <>
             <ul className="experience-surface overflow-hidden">
               {result.rows.map((row) => (
-                <li key={row.id} className="experience-attention-row">
+                <li
+                  key={row.id}
+                  className="experience-spotlight experience-attention-row"
+                >
                   <div className="min-w-0">
                     <Link
                       href={'/inventory/quantity/' + row.id}
