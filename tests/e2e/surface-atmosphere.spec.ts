@@ -26,6 +26,8 @@ test('shared shell decoration preserves targets and becomes static with reduced 
   }
   await page.goto('/settings');
   const card = page.locator('.experience-spotlight').first();
+  // Hover scrolls offscreen targets into view; establish the viewport baseline first.
+  await card.scrollIntoViewIfNeeded();
   const before = await card.boundingBox();
   expect(before).not.toBeNull();
   await card.hover({ position: { x: 20, y: 20 } });
@@ -41,9 +43,14 @@ test('shared shell decoration preserves targets and becomes static with reduced 
       })
       .click();
     await expect(page.locator('html')).toHaveAttribute('data-theme', theme);
+    // The theme control scrolls away from the card. Compare this hover against
+    // its own viewport baseline after scrolling back, rather than the old scroll.
+    await card.scrollIntoViewIfNeeded();
+    const themeBefore = await card.boundingBox();
+    expect(themeBefore).not.toBeNull();
     await card.hover({ position: { x: 20, y: 20 } });
     await expect(card).toHaveAttribute('data-spotlight-active', 'true');
-    expect(await card.boundingBox()).toEqual(before);
+    expect(await card.boundingBox()).toEqual(themeBefore);
     const timing = await page
       .locator('.experience-blueprint')
       .evaluate((element) => ({
