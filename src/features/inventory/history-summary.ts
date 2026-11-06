@@ -2,7 +2,7 @@ import { custodyEventLabel } from '@/features/custody/vocabulary';
 import type { HistoryEvent } from './contracts-ui';
 import { countLabel } from '@/lib/count';
 
-const eventNames: Record<string, string> = {
+export const historyEventNames: Record<string, string> = {
   created: 'Created',
   received: 'Stock received',
   moved: 'Physically moved',
@@ -12,13 +12,26 @@ const eventNames: Record<string, string> = {
   restored: 'Restored',
   location_corrected: 'Recorded location corrected',
   retired: 'Asset retired',
+  site_opened: 'Site opening recorded',
+  site_issued: 'Issued to site',
+  site_assigned: 'Assigned to site',
+  site_returned: 'Returned from site',
+  site_transferred: 'Transferred between sites',
+  site_corrected: 'Site custody corrected',
+  site_written_off: 'Written off at site',
+  site_retired: 'Retired at site',
 };
+export function historyEventLabel(
+  eventType: string,
+  kind?: HistoryEvent['kind'],
+) {
+  return kind && eventType.startsWith('site_')
+    ? custodyEventLabel(eventType, kind)
+    : (historyEventNames[eventType] ?? 'Inventory updated');
+}
 export const historyEventTitle = (
   event: Pick<HistoryEvent, 'eventType' | 'kind'>,
-) =>
-  event.eventType.startsWith('site_')
-    ? custodyEventLabel(event.eventType, event.kind)
-    : (eventNames[event.eventType] ?? 'Inventory updated');
+) => historyEventLabel(event.eventType, event.kind);
 
 type LedgerLine = HistoryEvent['lines'][number];
 const locationLabel = (location: HistoryEvent['fromLocation']) =>
@@ -130,7 +143,7 @@ export function historySummary(event: HistoryEvent): string | null {
   const endpoints = endpointSummary(event);
   if (endpoints) return endpoints;
   // The heading already names these operations. Details retain their snapshots/reason.
-  if (eventNames[event.eventType] || event.eventType.startsWith('site_'))
+  if (historyEventNames[event.eventType] || event.eventType.startsWith('site_'))
     return null;
   if (event.metadataChanges.length || event.customMetadataChanged)
     return 'Record details updated';

@@ -816,3 +816,29 @@ single holding for shared-title pairing. A308 reuses item-wide available storage
 for exact shortfall; scoped quantities never replace availability. Full holdings
 CSV scope and existing columns remain unchanged. This local integration adds no
 mutation, role, geometry authority or acceptance claim.
+
+## U313 filtered history source integration
+
+History adds caller-invoker, active-member bounded reads in forward migration
+20261020151124_inventory_history_tools.sql. The internal event-key view and matcher
+remain private; only the three bounded page/person/export RPCs are public. Literal
+search, stable historical actor identity, named-zone microsecond ranges, record
+locks and applied URL/export alignment preserve current route/privacy/motion/peek
+ownership. Filtered CSV is one snapshot with event rows and complete storage/site
+ledger lines; overflow never truncates an event. See [history tools](history-tools.md)
+for exact limits, recorded/current provenance, token verification and pending DB,
+generated-type, REST and native acceptance. Existing mutation/version authority and
+legacy event/detail/custom-snapshot reads remain unchanged.
+
+History person searches have an exact request lifetime within their verified
+component scope. Query/page replacement retires that request before the central
+route-action denial observer receives a late result. The same guard owns request
+start, denial processing and local result/error handling; current owned denial
+still uses the existing presentation suppression contract. No central denial-ticket
+or membership semantics change.
+
+This current U313 integration also retires the history transport when its owned
+query/reference callback settles, including early success, failure and late
+headers/body. Known RPC failures are checked before awaiting reference siblings;
+current denial remains explicit and late results cannot publish a replacement.
+Canonical grouped and one-level location-directory parent returns remain intact.

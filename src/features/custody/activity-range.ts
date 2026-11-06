@@ -1,7 +1,8 @@
 import { z } from 'zod';
 import { resolveDisplayTimeZone } from '@/lib/operational-time';
 
-export type ActivityPreset = 'today' | 'yesterday' | 'last7' | 'custom';
+export type ActivityPreset =
+  'today' | 'yesterday' | 'last7' | 'lastweek' | 'custom';
 export type ActivityErrors = Partial<Record<'from' | 'until', string>>;
 export function parseActivityRange(input: { from?: unknown; until?: unknown }) {
   const errors: ActivityErrors = {};
@@ -113,6 +114,15 @@ export function resolveActivityPreset(
   if (zone.fallback || !Number.isFinite(now.getTime()))
     throw new Error('Choose a supported named timezone.');
   const today = calendarParts(now, zone.timeZone);
+  if (preset === 'lastweek') {
+    const calendar = new Date(0);
+    calendar.setUTCFullYear(today.year, today.month - 1, today.day);
+    const mondayOffset = (calendar.getUTCDay() + 6) % 7;
+    return {
+      from: startOfDay(shiftDay(today, -mondayOffset - 7), zone.timeZone),
+      until: startOfDay(shiftDay(today, -mondayOffset), zone.timeZone),
+    };
+  }
   const fromDay = shiftDay(
     today,
     preset === 'yesterday' ? -1 : preset === 'last7' ? -6 : 0,

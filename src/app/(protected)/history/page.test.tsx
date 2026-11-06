@@ -9,18 +9,47 @@ vi.mock('@/lib/auth/session.server', () => ({
     },
   }),
 }));
-import { render, screen } from '@testing-library/react';
+import { render as actualRender, screen } from '@testing-library/react';
+import { PrivacyReadinessContext } from '@/components/auth/privacy-readiness';
+import {
+  assignmentEpoch,
+  readPrivacyRevocationRevision,
+} from '@/features/scan/assign-batch';
+function render(ui: React.ReactNode) {
+  return actualRender(ui, {
+    wrapper: ({ children }) => (
+      <PrivacyReadinessContext
+        value={{
+          ready: true,
+          visible: true,
+          generation: 'history-page-test',
+          verifiedEpoch: assignmentEpoch(),
+          revocationRevision: readPrivacyRevocationRevision(),
+        }}
+      >
+        {children}
+      </PrivacyReadinessContext>
+    ),
+  });
+}
 import { beforeEach, expect, it, vi } from 'vitest';
 const m = vi.hoisted(() => ({
   history: vi.fn(),
   identity: vi.fn(),
   redirect: vi.fn(),
   custom: vi.fn(),
+  actors: vi.fn(),
 }));
 vi.mock('@/features/inventory/queries.server', () => ({
-  getHistory: m.history,
   getHistoryRecord: m.identity,
   getLocations: async () => [],
+}));
+vi.mock('@/features/inventory/history-queries.server', () => ({
+  getFilteredHistory: m.history,
+  getHistoryActors: m.actors,
+}));
+vi.mock('@/lib/supabase/config', () => ({
+  supabaseConfig: () => ({ url: 'https://backend.test' }),
 }));
 vi.mock('@/features/metadata/queries.server', () => ({
   getEventCustomPage: m.custom,
@@ -28,17 +57,100 @@ vi.mock('@/features/metadata/queries.server', () => ({
 vi.mock('next/navigation', () => ({
   notFound: vi.fn(),
   redirect: m.redirect,
-  useRouter: () => ({ push: vi.fn() }),
+  useRouter: () => ({ push: vi.fn(), replace: vi.fn() }),
 }));
 import Page from './page';
 import styles from '@/features/inventory/components/inventory-visual.module.css';
 import { OperationalTimeProvider } from '@/components/operational-time';
 import * as operationalTime from '@/lib/operational-time';
+import { routeKey } from '@/components/experience/route-key';
+import { historyTitleTarget } from '@/components/experience/route-motion-state';
 const id = '00000000-0000-4000-8000-000000000001';
 beforeEach(() => {
+  m.actors.mockResolvedValue({ rows: [], total: 0 });
   m.history.mockResolvedValue({ rows: [], total: 0, page: 1, pageSize: 25 });
   m.identity.mockResolvedValue({ id, name: 'Adapters', kind: 'quantity' });
 });
+it.each([
+  { eventType: 'all' },
+  { entityId: id, type: 'quantity', eventType: 'all', page: '2' },
+  { entityId: id, type: 'asset', eventType: 'all', page: '2' },
+])(
+  'binds canonical event-return content separately from exact raw readiness for %j',
+  async (raw) => {
+    const eventId = '00000000-0000-4000-8000-000000000002';
+    m.history.mockResolvedValue({
+      rows: [
+        {
+          id: eventId,
+          kind: 'quantity',
+          entityId: id,
+          entityName: 'Canonical event item',
+          eventType: 'created',
+          at: '2026-10-13T10:00:00Z',
+          actorName: 'Staff',
+          reason: null,
+          assignment: null,
+          lines: [],
+          fromLocation: null,
+          toLocation: null,
+          metadataChanges: [],
+          customMetadataPresent: false,
+          customMetadataChanged: false,
+        },
+      ],
+      total: 30,
+      page: raw.page === '2' ? 2 : 1,
+      pageSize: 25,
+    });
+    const page = await Page({ searchParams: Promise.resolve(raw) });
+    render(page);
+    const detail = new URL(
+      screen
+        .getByRole('link', { name: 'Canonical event item' })
+        .getAttribute('href')!,
+      'https://inventory.invalid',
+    );
+    const returned = detail.searchParams.get('returnTo')!;
+    const origin = new URL(returned, 'https://inventory.invalid');
+    const primary = page.props.children;
+    const content = new URL(
+      primary.props.pairingHref,
+      'https://inventory.invalid',
+    );
+    expect(routeKey(content.pathname, content.searchParams)).toBe(
+      routeKey(origin.pathname, origin.searchParams),
+    );
+    expect(content.hash).toBe('');
+    expect(origin.hash).toBe('#history-event-quantity-' + eventId);
+    expect(origin.searchParams.has('eventType')).toBe(false);
+    const rawKey = routeKey('/history', raw);
+    expect(primary.props.routeKey).toBe(rawKey);
+    expect(page.props.routeKey).toBe(rawKey);
+    const target = historyTitleTarget(
+      { kind: 'quantity', id },
+      { kind: 'quantity', id: eventId },
+      returned,
+      rawKey,
+    );
+    // A reconciled record type changes canonical content, never raw authority.
+    if (raw.type === 'asset') expect(target).toBeNull();
+    else
+      expect(target?.listHref).toBe(
+        routeKey(content.pathname, content.searchParams),
+      );
+    const mismatch = new URLSearchParams(rawKey.split('?')[1]);
+    mismatch.set('page', '3');
+    expect(
+      historyTitleTarget(
+        { kind: 'quantity', id },
+        { kind: 'quantity', id: eventId },
+        returned,
+        routeKey('/history', mismatch),
+      ),
+    ).toBeNull();
+  },
+);
 it('passes canonical main history filter/page scope to its event entity links', async () => {
   const eventId = '00000000-0000-4000-8000-000000000002';
   m.history.mockResolvedValue({
@@ -349,4 +461,72 @@ it('uses wrapping touch targets for every custom snapshot navigation and option-
   expect(
     screen.getByRole('navigation', { name: 'Event snapshot side' }),
   ).toHaveClass('flex-wrap');
+});
+it.each([
+  { from: 'invalid' },
+  { actor: 'bad' },
+  { type: 'quantity', eventType: 'retired' },
+  { type: 'asset', eventType: 'received' },
+  { from: '2026-10-02T00:00:00Z', until: '2026-10-01T00:00:00Z' },
+])(
+  'preserves the protected shell and local errors for invalid history scope %#',
+  async (params) => {
+    render(await Page({ searchParams: Promise.resolve(params) }));
+    expect(
+      screen.getByRole('heading', { name: 'Inventory history' }),
+    ).toBeVisible();
+    expect(screen.getByRole('alert')).toBeVisible();
+    expect(m.history).not.toHaveBeenCalled();
+    expect(
+      screen.queryByRole('link', { name: 'Export history CSV' }),
+    ).toBeNull();
+  },
+);
+it('retains all new filters in event record return paths', async () => {
+  const query = {
+    type: 'quantity',
+    actor: id,
+    eventType: 'movements',
+    q: 'old code',
+    from: '2026-11-01T06:59:59.123456Z',
+    until: '2026-11-01T06:59:59.123457Z',
+    zone: 'America/Chicago',
+    page: '2',
+  };
+  m.history.mockResolvedValue({
+    rows: [
+      {
+        id,
+        kind: 'quantity',
+        entityId: id,
+        entityName: 'Complete scope',
+        eventType: 'moved',
+        at: query.from,
+        actorName: 'Alex',
+        reason: null,
+        assignment: null,
+        lines: [],
+        fromLocation: null,
+        toLocation: null,
+        metadataChanges: [],
+        customMetadataPresent: false,
+        customMetadataChanged: false,
+      },
+    ],
+    total: 30,
+    page: 2,
+    pageSize: 25,
+  });
+  render(await Page({ searchParams: Promise.resolve(query) }));
+  const link = new URL(
+    screen.getByRole('link', { name: 'Complete scope' }).getAttribute('href')!,
+    'https://inventory.invalid',
+  );
+  const origin = new URL(
+    link.searchParams.get('returnTo')!,
+    'https://inventory.invalid',
+  );
+  for (const [key, value] of Object.entries(query))
+    expect(origin.searchParams.get(key)).toBe(value);
+  expect(origin.hash).toBe(`#history-event-quantity-${id}`);
 });

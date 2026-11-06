@@ -1,3 +1,4 @@
+import { historyExportCsv } from '../../src/features/inventory/history-export';
 import assert from 'node:assert/strict';
 import { performance } from 'node:perf_hooks';
 import {
@@ -181,5 +182,205 @@ console.log(
     csvLimit,
     exactRawAccepted: true,
     oversizeRawRejected: true,
+  }),
+);
+
+// U313 uses the same raw/CSV primitives, with independent event identities.
+const historyRows = Array.from({ length: 8 }, (_, index) => ({
+  row_type: 'event',
+  event_id: `00000000-0000-4000-8000-${String(index + 1).padStart(12, '0')}`,
+  entity_id: id,
+  kind: 'quantity',
+  event_type: 'metadata_updated',
+  created_at: '2026-10-10T12:00:00.123456Z',
+  actor_id: id,
+  actor_name: '😀"\\\n'.repeat(24000),
+  name_current: 'Measured history',
+  name_before: null,
+  name_after: null,
+  item_code_current: null,
+  item_code_before: null,
+  item_code_after: null,
+  asset_tag_current: null,
+  asset_tag_before: null,
+  asset_tag_after: null,
+  serial_number_current: null,
+  serial_number_before: null,
+  serial_number_after: null,
+  reason: null,
+  reference: null,
+  event_quantity: null,
+  from_location_id: null,
+  from_location_code: null,
+  from_label: null,
+  to_location_id: null,
+  to_location_code: null,
+  to_label: null,
+  from_site_id: null,
+  from_site_code: null,
+  to_site_id: null,
+  to_site_code: null,
+  endpoint_label_provenance: 'current reference labels',
+}));
+const historyRaw = new TextEncoder().encode(
+  JSON.stringify({
+    rows: historyRows,
+    event_count: 8,
+    row_count: 8,
+    exported_at: '2026-10-10T12:00:00.123456Z',
+  }),
+);
+assert.ok(historyRaw.byteLength < maxSnapshotBytes);
+global.gc?.();
+const historyMemory = sampler();
+const historyStarted = performance.now();
+const historyParsed = await readBoundedJson(
+  streamedResponse(historyRaw),
+  maxSnapshotBytes,
+  historyMemory.check,
+);
+const historyCsv = historyExportCsv(
+  historyParsed,
+  'Preview',
+  'UTC',
+  historyMemory.check,
+);
+const historyResult = historyMemory.result(historyRaw.byteLength);
+assert.ok(
+  historyResult.sampledIncrementalBytes <= 64 * MiB,
+  'history reader/parse/CSV sampled 64MiB incremental budget',
+);
+assert.ok(
+  performance.now() - historyStarted < 10000,
+  'history local processing deadline',
+);
+assert.ok(Buffer.byteLength(historyCsv.csv, 'utf8') <= 3 * MiB);
+console.log(
+  JSON.stringify({
+    historyExport: historyResult,
+    csvBytes: Buffer.byteLength(historyCsv.csv, 'utf8'),
+  }),
+);
+
+// Also measure realistic per-row work: hundreds of events, each followed by a
+// complete debit/credit ledger pair, mixing physical and custody movements.
+// Pad bounded reasons to approach the JSON cap without giant actor fields.
+const mixedEventCount = 700;
+const sourceLocation = '33333333-3333-4333-8333-333333333333';
+const destinationLocation = '44444444-4444-4444-8444-444444444444';
+const destinationSite = '55555555-5555-4555-8555-555555555555';
+const mixedEvents = Array.from({ length: mixedEventCount }, (_, index) => {
+  const custody = index % 2 === 1;
+  return {
+    ...historyRows[0],
+    event_id: `10000000-0000-4000-8000-${String(index + 1).padStart(12, '0')}`,
+    event_type: custody ? 'site_issued' : 'moved',
+    actor_name: 'Recorded Person 😀',
+    name_current: `Quoted "adapter" 😀 ${index}`,
+    item_code_current: '=SAFE-CODE-' + index,
+    reason: '=Review "quoted" 😀 reason\r\n',
+    reference: 'REF-' + index,
+    event_quantity: custody ? 3 : null,
+    from_location_id: sourceLocation,
+    from_location_code: 'ITC-RED',
+    from_label: 'Recorded Red',
+    to_location_id: custody ? null : destinationLocation,
+    to_location_code: custody ? null : 'ITC-BLACK',
+    to_label: custody ? 'Recorded Site' : 'Black Container',
+    to_site_id: custody ? destinationSite : null,
+    to_site_code: custody ? 'SITE-TEST' : null,
+    endpoint_label_provenance: custody
+      ? 'recorded assignment labels'
+      : 'current reference labels',
+  };
+});
+const mixedRows: Array<Record<string, unknown>> = [];
+for (const event of mixedEvents) {
+  const custody = event.event_type === 'site_issued';
+  const ledger = {
+    row_type: 'quantity_line',
+    kind: 'quantity',
+    event_id: event.event_id,
+    entity_id: id,
+    site_id: null,
+    site_code: null,
+    site_label: null,
+    line_label_provenance: 'current reference labels',
+  };
+  mixedRows.push(
+    event,
+    {
+      ...ledger,
+      location_id: sourceLocation,
+      location_code: 'ITC-RED',
+      location_label: 'Red Container',
+      before_quantity: 7,
+      delta: -3,
+      after_quantity: 4,
+    },
+    {
+      ...ledger,
+      location_id: custody ? null : destinationLocation,
+      location_code: custody ? null : 'ITC-BLACK',
+      location_label: custody ? null : 'Black Container',
+      site_id: custody ? destinationSite : null,
+      site_code: custody ? 'SITE-TEST' : null,
+      site_label: custody ? 'Site 😀' : null,
+      before_quantity: 0,
+      delta: 3,
+      after_quantity: 3,
+    },
+  );
+}
+const mixedSnapshot = {
+  rows: mixedRows,
+  event_count: mixedEventCount,
+  row_count: mixedRows.length,
+  exported_at: '2026-10-10T12:00:00.123456Z',
+};
+const mixedBaseBytes = Buffer.byteLength(JSON.stringify(mixedSnapshot), 'utf8');
+const reasonPadding = Math.floor(
+  (maxSnapshotBytes - 32768 - mixedBaseBytes) / mixedEventCount,
+);
+assert.ok(
+  reasonPadding >= 0 && reasonPadding + mixedEvents[0].reason.length <= 2000,
+);
+for (const event of mixedEvents) event.reason += 'r'.repeat(reasonPadding);
+const mixedRaw = new TextEncoder().encode(JSON.stringify(mixedSnapshot));
+assert.ok(mixedRaw.byteLength >= maxSnapshotBytes * 0.95);
+assert.ok(mixedRaw.byteLength <= maxSnapshotBytes);
+global.gc?.();
+const mixedMemory = sampler();
+const mixedStarted = performance.now();
+const mixedParsed = await readBoundedJson(
+  streamedResponse(mixedRaw),
+  maxSnapshotBytes,
+  mixedMemory.check,
+);
+const mixedCsv = historyExportCsv(
+  mixedParsed,
+  'Preview',
+  'America/Chicago',
+  mixedMemory.check,
+);
+const mixedResult = mixedMemory.result(mixedRaw.byteLength);
+assert.equal(mixedCsv.eventCount, mixedEventCount);
+assert.equal(mixedCsv.rowCount, mixedEventCount * 3);
+assert.ok(mixedCsv.csv.includes(',-3,'), 'debit cells remain numeric');
+assert.ok(
+  mixedResult.sampledIncrementalBytes <= 64 * MiB,
+  'mixed history processing stays within 64MiB incremental budget',
+);
+assert.ok(
+  performance.now() - mixedStarted < 10000,
+  'mixed history local processing deadline',
+);
+assert.ok(Buffer.byteLength(mixedCsv.csv, 'utf8') <= 3 * MiB);
+console.log(
+  JSON.stringify({
+    mixedHistoryExport: mixedResult,
+    eventCount: mixedCsv.eventCount,
+    rowCount: mixedCsv.rowCount,
+    csvBytes: Buffer.byteLength(mixedCsv.csv, 'utf8'),
   }),
 );

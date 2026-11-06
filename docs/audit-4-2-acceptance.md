@@ -967,3 +967,23 @@ and upgrade, generated types, actual REST/concurrency/query-cost proof, populate
 desktop/390px Full/Reduced both-theme captures and exact-SHA certification remain
 required. All 76 rows, 75 base IDs and existing acceptance dispositions remain
 unchanged; source preparation is not runtime or whole-ID acceptance.
+
+## Selective U313 history preparation — 2026-11-06
+
+Donor `45999655` is selectively reconciled onto reviewed grouped checkpoint
+`9ee2d63bcbc5810004e4dcf1f0886131079e06fa`. Current grouped/nested location
+return paths, PR64/65/66 presentation, metadata snapshots, actor/relative-time
+rendering and A308 inventory CSV Shortfall remain intact. Only the specified
+held history query/reader lifetime fixes are adapted from the read-only donor.
+
+An already-completed history RPC error is checked inside its read scope before
+joining reference reads; a known denial cannot become a timeout while a reference
+lookup is pending. The existing denial taxonomy is unchanged. Read-scope cleanup
+retires supported transport and late results; physical cancellation of unrelated
+SDK reference/Auth requests is not claimed.
+
+The forward migration and complete-event snapshot/row/wire/CSV bounds retain the
+contracts in [history tools](history-tools.md). Replay/upgrade, actual generated
+types, DB/RLS/REST/concurrency, memory and populated browser/visual/full gates are
+pending for this candidate. All 76 matrix rows, 75 base IDs and dispositions are
+unchanged; source integration is not runtime acceptance.

@@ -2018,3 +2018,19 @@ checks and real API/concurrency/timeout/query-cost proof. Populated desktop and
 390px Full/Reduced both-theme browser inspection, before/after captures, exact-SHA
 CI and fresh review remain required. No application, database or browser gate is
 claimed by this source-only integration checkpoint.
+
+## Selective U313 current-tree validation — 2026-11-06
+
+The history donor is reconciled onto grouped checkpoint `9ee2d63b`, retaining
+current UI, privacy and grouped return contracts. Historical donor test/memory
+counts in [history tools](history-tools.md) do not certify this candidate. Current
+focused typecheck/Vitest, DB replay/upgrade/types/RLS, actual REST timeout/snapshot
+proof, export-memory, authenticated downloads, desktop/390px both-theme
+Full/Reduced/native AT and final exact-SHA gates remain required.
+
+The canonical `test:db` path already runs `tests/integration/custody.ts`, which
+awaits `historyToolsProof` from `tests/integration/history-tools.ts` with its owned
+caller/session. No duplicate standalone invocation is added. The existing
+`test:export:memory` gate includes the authored complete-history fixtures. All
+history proof and download endpoints use the current shared loopback target validator before
+new client construction. None of these runtime gates was run during preparation.
