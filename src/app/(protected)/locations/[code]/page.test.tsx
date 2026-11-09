@@ -9,7 +9,7 @@ vi.mock('@/lib/auth/session.server', () => ({
     },
   }),
 }));
-import { render, screen, within } from '@testing-library/react';
+import { fireEvent, render, screen, within } from '@testing-library/react';
 import { expect, it, vi } from 'vitest';
 const m = vi.hoisted(() => ({
   inventory: vi.fn(),
@@ -133,6 +133,22 @@ it('retains the validated browser origin through status, pagination and child de
   expect(page.props.children.props.pairingHref).toBe(
     recordDetailReturnPath(inventoryReturn.pathname + inventoryReturn.search),
   );
+  // Item groups retain their holdings while collapsed, but those links are not
+  // accessible until staff open the corresponding storage and sites summary.
+  const summaries = screen.getAllByText(
+    'Storage and sites within these filters (1)',
+    { selector: 'summary' },
+  );
+  expect(summaries).toHaveLength(25);
+  expect(screen.getAllByRole('link', { name: childName })).toHaveLength(1);
+  expect(
+    screen.getAllByRole('link', { name: childName, hidden: true }),
+  ).toHaveLength(26);
+  for (const summary of summaries) {
+    expect(summary).toHaveAttribute('aria-expanded', 'false');
+    fireEvent.click(summary);
+    expect(summary).toHaveAttribute('aria-expanded', 'true');
+  }
   expect(screen.getAllByRole('link', { name: childName })).toHaveLength(26);
   const childSection = screen
     .getByRole('heading', { name: 'Child locations' })

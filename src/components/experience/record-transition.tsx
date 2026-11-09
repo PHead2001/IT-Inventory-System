@@ -108,13 +108,15 @@ export function InventoryRecordLink({
     target &&
     sameRecord(intent, record) &&
     sameTitleSource(intent, target) &&
-    intent.anchor === target.anchor &&
+    (target.source.kind === 'inventory' || intent.anchor === target.anchor) &&
     listRouteKey(intent.listHref) === targetListKey &&
     listRouteKey(contentIdentity ? contentIdentity.listHref : listHref) ===
       targetListKey &&
     matchesTitleListRoute(
       target,
-      contentIdentity?.rawRouteKey ?? listHref ?? '',
+      contentIdentity?.rawRouteKey ??
+        listRouteKey(contentIdentity ? contentIdentity.listHref : listHref) ??
+        '',
     );
   return (
     <PeekAnchor target={record}>

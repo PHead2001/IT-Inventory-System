@@ -51,8 +51,20 @@ it.each([0, 1, 3])(
           rows: [
             {
               row,
-              holdings: Array.from({ length: count }, () => row),
-              scopedStorage: '0',
+              holdings: Array.from({ length: count }, (_, index) => ({
+                ...row,
+                location: {
+                  id: `00000000-0000-4000-8000-${String(index + 2).padStart(12, '0')}`,
+                  code: `ITC-S1${String.fromCharCode(65 + index)}`,
+                  name: `Shelf 1${String.fromCharCode(65 + index)}`,
+                  breadcrumb: `IT Closet / Shelf 1${String.fromCharCode(65 + index)}`,
+                  active: true,
+                  can_hold_inventory: true,
+                  parentId: null,
+                },
+                quantity: 1,
+              })),
+              scopedStorage: String(count),
               scopedSite: '0',
               holdingCount: count,
             },

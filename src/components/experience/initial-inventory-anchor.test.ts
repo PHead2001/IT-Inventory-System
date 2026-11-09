@@ -111,7 +111,7 @@ async function fixture(
   const unregister: Array<() => void> = [];
   let row: HTMLLIElement;
   const reveal = (
-    options: {
+    revealOptions: {
       missing?: boolean;
       duplicate?: boolean;
       hidden?: boolean;
@@ -129,10 +129,10 @@ async function fixture(
       section = document.createElement('section');
     root.append(section);
     document.body.append(root);
-    if (!options.missing) {
+    if (!revealOptions.missing) {
       row = document.createElement('li');
       row.id = 'inventory-row-2';
-      row.hidden = options.hidden ?? false;
+      row.hidden = revealOptions.hidden ?? false;
       row.getBoundingClientRect = () =>
         ({
           top: position.rowTop - position.y,
@@ -153,25 +153,26 @@ async function fixture(
             options.source,
             groupedReturn,
             registeredRawRoute,
-          )!
+          )
         : titleTarget(
             record,
-            options.wrongScope
+            revealOptions.wrongScope
               ? '/inventory?q=other#inventory-row-2'
               : canonicalReturn,
             { domain: 'unplaced' },
-            options.wrongScope ? '/inventory?q=other' : registeredRawRoute,
-          )!;
-      if (!options.unregistered)
-        unregister.push(owner.registerSource(target, link));
-      if (options.duplicate) {
+            revealOptions.wrongScope ? '/inventory?q=other' : registeredRawRoute,
+          );
+      expect(target).not.toBeNull();
+      if (!revealOptions.unregistered)
+        unregister.push(owner.registerSource(target!, link));
+      if (revealOptions.duplicate) {
         const duplicate = row.cloneNode(true);
         section.append(duplicate);
       }
-      if (options.outsidePrimary) document.body.append(row);
+      if (revealOptions.outsidePrimary) document.body.append(row);
     }
     unready = readiness.register({
-      actorId: options.wrongActor ? 'other' : 'actor',
+      actorId: revealOptions.wrongActor ? 'other' : 'actor',
       routeKey: routeKey(
         location.pathname,
         new URLSearchParams(location.search),
