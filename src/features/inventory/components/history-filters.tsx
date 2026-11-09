@@ -240,7 +240,11 @@ export function HistoryFilters({
   };
   const update = (changes: HistoryParams, deliberate = true) => {
     if (!owned()) return;
-    const next = { ...draftRef.current, ...changes, page: undefined };
+    const next: HistoryParams = {
+      ...draftRef.current,
+      ...changes,
+      page: undefined,
+    };
     if (record) {
       next.entityId = record.id;
       next.type = record.kind;
