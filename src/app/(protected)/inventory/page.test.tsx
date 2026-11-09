@@ -142,10 +142,10 @@ it.each([
     const explicit = new URL(canonical, 'https://inventory.invalid');
     explicit.searchParams.set('view', 'items');
     explicit.searchParams.set('density', 'comfortable');
-    const actualReturn = new URL(
-      rows.props.returnTo,
-      'https://inventory.invalid',
-    );
+    const returnTo = rows.props.returnTo;
+    if (typeof returnTo !== 'string')
+      throw new Error('Expected the inventory return path to be a string');
+    const actualReturn = new URL(returnTo, 'https://inventory.invalid');
     expect(routeKey(actualReturn.pathname, actualReturn.searchParams)).toBe(
       routeKey(explicit.pathname, explicit.searchParams),
     );

@@ -11,6 +11,7 @@ import { InventoryViewRows as ActualRows } from './view-rows';
 import visualStyles from './inventory-visual.module.css';
 import { PeekProvider } from '@/features/peek/peek-provider';
 import { PrivacyReadinessContext } from '@/components/auth/privacy-readiness';
+import type { InventoryResult } from '@/features/inventory/contracts-ui';
 import {
   assignmentEpoch,
   readPrivacyRevocationRevision,
@@ -371,7 +372,7 @@ it.each([
 ])(
   'uses only item-wide storage availability for A308: %j',
   ({ available, threshold, expected }) => {
-    const item = {
+    const item: InventoryResult = {
       ...row,
       quantity: 999,
       recordedTotal: 999,

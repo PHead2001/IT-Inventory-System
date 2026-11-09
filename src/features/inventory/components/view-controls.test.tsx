@@ -357,7 +357,10 @@ it('cannot publish a storage result that retires its generation during the read'
     ],
   });
   const original = Storage.prototype.getItem;
-  vi.spyOn(Storage.prototype, 'getItem').mockImplementation(function (name) {
+  vi.spyOn(Storage.prototype, 'getItem').mockImplementation(function (
+    this: Storage,
+    name,
+  ) {
     if (name === key) {
       revokePrivatePresentation();
       return text;
