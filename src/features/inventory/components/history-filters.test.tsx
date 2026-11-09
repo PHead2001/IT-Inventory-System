@@ -7,6 +7,7 @@ import { PrivacyReadinessContext } from '@/components/auth/privacy-readiness';
 import {
   assignmentEpoch,
   readPrivacyRevocationRevision,
+  revokePrivatePresentation,
 } from '@/features/scan/assign-batch';
 function HistoryFilters(
   props: Omit<
@@ -516,9 +517,9 @@ it('does not admit unmanaged controls or issue private actor reads', async () =>
     vi.useRealTimers();
   }
 });
-it.each(['actor', 'backend', 'generation'] as const)(
+it.each(['generation'] as const)(
   'retires queued typing and late people after %s A/B/A without reviving old callbacks',
-  async (change) => {
+  async () => {
     vi.useFakeTimers();
     let finish!: (value: unknown) => void;
     m.people.mockImplementationOnce(
@@ -548,13 +549,7 @@ it.each(['actor', 'backend', 'generation'] as const)(
         { target: { value: 'unsent after read' } },
       );
       view.rerender(
-        retained(
-          change === 'generation' ? 'generation-B' : 'generation-A',
-          change === 'actor' ? 'actor-B' : 'actor-A',
-          change === 'backend'
-            ? 'https://other-backend.test'
-            : 'https://backend.test',
-        ),
+        retained('generation-B', 'actor-A', 'https://backend.test'),
       );
       view.rerender(retained('generation-A'));
       await act(async () => {
@@ -584,6 +579,137 @@ it.each(['actor', 'backend', 'generation'] as const)(
       expect(
         screen.getByRole('textbox', { name: 'Item or tag search' }),
       ).toHaveValue('fresh applied');
+    } finally {
+      view.unmount();
+      vi.useRealTimers();
+    }
+  },
+);
+it.each(['actor', 'backend'] as const)(
+  'permanently retires the mounted %s owner across A/B/A and admits a fresh verified page owner',
+  async (change) => {
+    vi.useFakeTimers();
+    let finishOld!: (value: unknown) => void;
+    m.people.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finishOld = resolve;
+        }),
+    );
+    let view = render(retained('generation-A'));
+    try {
+      fireEvent.click(screen.getByText('More filters'));
+      fireEvent.change(
+        screen.getByRole('textbox', { name: 'Item or tag search' }),
+        { target: { value: 'retired draft' } },
+      );
+      fireEvent.click(screen.getByText('Find a person in history'));
+      fireEvent.change(screen.getByRole('textbox', { name: 'Person name' }), {
+        target: { value: 'private search' },
+      });
+      await act(async () => {
+        vi.advanceTimersByTime(250);
+      });
+      expect(m.people).toHaveBeenCalledTimes(1);
+      m.replace.mockClear();
+      const retiredInput = screen.getByRole('textbox', {
+        name: 'Item or tag search',
+      });
+      fireEvent.change(retiredInput, {
+        target: { value: 'unsent after read' },
+      });
+      const expectWithdrawn = () => {
+        expect(
+          screen.queryByRole('textbox', { name: 'Item or tag search' }),
+        ).toBeNull();
+        expect(screen.queryByRole('combobox', { name: 'Person' })).toBeNull();
+        expect(
+          screen.queryByRole('textbox', { name: 'Person name' }),
+        ).toBeNull();
+        expect(
+          screen.queryByRole('link', { name: 'Export history CSV' }),
+        ).toBeNull();
+        expect(
+          screen.queryByRole('option', { name: /Retired secret/ }),
+        ).toBeNull();
+      };
+      view.rerender(
+        retained(
+          'generation-A',
+          change === 'actor' ? 'actor-B' : 'actor-A',
+          change === 'backend'
+            ? 'https://other-backend.test'
+            : 'https://backend.test',
+        ),
+      );
+      expectWithdrawn();
+      view.rerender(retained('generation-A'));
+      expectWithdrawn();
+      // Returning to A cannot revive the retired mounted owner or its queued edit.
+      fireEvent.change(retiredInput, { target: { value: 'retired callback' } });
+      await act(async () => {
+        vi.advanceTimersByTime(500);
+      });
+      expectWithdrawn();
+      expect(m.replace).not.toHaveBeenCalled();
+      expect(m.push).not.toHaveBeenCalled();
+      expect(m.people).toHaveBeenCalledTimes(1);
+
+      view.unmount();
+      const oldEpoch = assignmentEpoch();
+      const oldRevision = readPrivacyRevocationRevision();
+      act(() => revokePrivatePresentation());
+      expect(assignmentEpoch()).toBeGreaterThan(oldEpoch);
+      expect(readPrivacyRevocationRevision()).toBeGreaterThan(oldRevision);
+      // Model the page/gate remount after fresh verification, not an auto-keyed control.
+      view = render(
+        <PrivacyReadinessContext value={managed('generation-fresh')}>
+          <ActualFilters
+            {...base}
+            params={{ q: 'fresh applied' }}
+            memberId="actor-A"
+            backend="https://backend.test"
+          />
+        </PrivacyReadinessContext>,
+      );
+      const currentInput = screen.getByRole('textbox', {
+        name: 'Item or tag search',
+      });
+      expect(currentInput).toHaveValue('fresh applied');
+      expect(screen.getByRole('combobox', { name: 'Person' })).toBeVisible();
+      fireEvent.change(currentInput, { target: { value: 'current draft' } });
+      fireEvent.click(screen.getByText('Find a person in history'));
+      fireEvent.change(screen.getByRole('textbox', { name: 'Person name' }), {
+        target: { value: 'current search' },
+      });
+      await act(async () => {
+        vi.advanceTimersByTime(250);
+      });
+      expect(m.people).toHaveBeenCalledTimes(2);
+      await act(async () => {
+        finishOld({
+          rows: [{ ...actors[0], actor_name: 'Retired secret' }],
+          total: 1,
+        });
+        vi.advanceTimersByTime(500);
+      });
+      expect(
+        screen.queryByRole('option', { name: /Retired secret/ }),
+      ).toBeNull();
+      expect(
+        screen.getAllByRole('option', { name: /Alex.*first activity/ }),
+      ).toHaveLength(2);
+      expect(currentInput).toHaveValue('current draft');
+      expect(screen.getByRole('textbox', { name: 'Person name' })).toHaveValue(
+        'current search',
+      );
+      expect(m.replace).toHaveBeenCalledExactlyOnceWith(
+        '/history?q=current+draft',
+        {
+          scroll: false,
+        },
+      );
+      expect(m.push).not.toHaveBeenCalled();
     } finally {
       view.unmount();
       vi.useRealTimers();
