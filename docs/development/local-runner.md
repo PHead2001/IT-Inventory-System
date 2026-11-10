@@ -523,6 +523,17 @@ After a consumed pilot fails, preserve `pilot-attempt.json` and the recorded fai
 
 A separate per-session Windows guardian starts and confirms readiness before VM boot. Its protected recovery journal retains the exact VM GUID, adapter ID, Internal switch GUID, static MAC, claim and process identities. It observes host IPv4/IPv6 addresses and routes, including destination, next hop and interface, between one-second loop waits. On drift or failed inspection, it pauses its running VM, disconnects the owned adapter and verifies isolation before changing ACLs. An Off VM stays Off. Fingerprint and policy consume one retained capture bracketed by matching complete captures; three spaced matching observations precede policy installation and three more precede reconnect. After reducer identity/connectivity reads, a new observation outside the state lock precedes serialized Connect/Resume admission with final live provider/ACL readbacks and deadline, generation, Stop and observation-age checks. The supervisor waits for this guardian rather than repairing independently or reusing startup ACL arrays. Flaps keep the original 120-second outage episode and unchanged hard deadline. Uncertain provider results, ownership changes, Stop, dead owners or expired guardian progress use canonical cleanup; refusal retains protected state/files.
 
+Resume intent belongs to the guardian's actual pause dispatch, not an unlocked
+provider snapshot. A new outage starts without resume authority. Under the
+current identity, generation, operation, Stop and lifetime fences, quarantine
+records resume intent before suspending a live Running VM. An actual Off read
+clears it; an already Paused VM retains only the guardian intent from that same
+outage. This intent write changes no progress or deadline and proves no completed
+containment: positive pause/disconnection readback is still required. Thus a
+legitimate guarded boot after an earlier Off snapshot can be paused and later
+resumed through the normal fresh-policy/probe gates, while an Off or unrelated
+paused VM never gains boot/resume authority from a cached Running prediction.
+
 Connect/Resume handoff does not repeat an early ACL inspection before that final
 observation. It retains the reducer's VM/switch/adapter identity and connectivity
 reads, then performs every final live VM, adapter, switch, isolation and exact ACL

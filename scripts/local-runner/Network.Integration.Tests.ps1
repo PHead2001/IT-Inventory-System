@@ -89,7 +89,7 @@ function New-Fixture {
 }
 function Get-HostNetworkFingerprint { throw 'Supervisor attempted competing network observation/repair.' }
 function Get-RunnerConfig { [pscustomobject]@{ guestIp = '172.30.240.2'; gatewayIp = '172.30.240.1'; repo = 'example/fixture'; activation = 'active'; label = 'it-inventory-ephemeral'; runnerGroupId = 1 } }
-function Get-VM { if (-not $script:locked) { $script:now = $script:now.AddMilliseconds($script:preflightDelayMs) }; $script:vm }
+function Get-VM { if (-not $script:locked) { $script:now = $script:now.AddMilliseconds($script:preflightDelayMs) }; $script:vm | ConvertTo-Json -Depth 8 -Compress | ConvertFrom-Json }
 function Get-VMSwitch { $script:switch }
 function Get-VMNetworkAdapter { $script:adapter }
 function Get-VMNetworkAdapterExtendedAcl { $script:state.networkRules }
@@ -110,6 +110,32 @@ function Invoke-RunnerReceiptNative($Executable, $Arguments) {
     }
 }
 try {
+    Check 'actual guarded boot after detached Off preflight is paused with durable resume intent' {
+        function Start-VM($VM,[switch]$AsJob){if(-not $AsJob -or [guid]$VM.Id -ne [guid]$script:state.vmId -or $script:vm.State -cne 'Off'){throw 'Boot provider fixture identity differs.'};$script:effects+='boot';$script:vm.State='Running';[pscustomobject]@{State='Completed'}}
+        function Receive-Job {}
+        function Remove-Job {}
+        foreach($condition in @('drift','unavailable')){
+            New-Fixture
+            foreach($name in @('networkRecovery','guardianPid','guardianStartUtc','guardianReady')){$script:state.PSObject.Properties.Remove($name)}
+            $script:state|Add-Member guestMac '02AABBCCDDEE';$script:state|Add-Member networkFingerprint ('a'*64)
+            $rule=[pscustomobject]@{Action='Deny';Direction='Outbound';Weight=2;LocalIPAddress='';RemoteIPAddress='';LocalPort='';RemotePort='';Protocol='';Stateful=$false}
+            $script:state|Add-Member networkRules @($rule)
+            $script:vm=[pscustomobject]@{Id=[guid]$script:state.vmId;Name=$script:state.vmName;Notes=$script:RunnerTag;Path=(Get-RunnerSessionPaths $script:state).vmPath;State='Off';AutomaticStartAction='Nothing';AutomaticStopAction='TurnOff'}
+            $script:switch=[pscustomobject]@{Id=[guid]'00000000-0000-0000-0000-000000000002';Name=$script:RunnerSwitch;SwitchType='Internal'}
+            $script:adapter=[pscustomobject]@{Id='fixture-adapter';VMId=$script:vm.Id;VMName=$script:vm.Name;MacAddress=$script:state.guestMac;DynamicMacAddressEnabled=$false;SwitchId=$script:switch.Id;SwitchName=$script:switch.Name}
+            $script:observation=[pscustomobject]@{fingerprint=('a'*64);rules=@($rule);observedUtc=$script:now.ToString('o')};$script:effects=@()
+            if(-not(Invoke-GuardCheck $script:state.vmName)){throw 'Boot race initial guardian admission failed.'}
+            $script:bootCondition=$condition
+            $script:duringObservation={
+                if($script:locked){throw 'Boot race observation retained state lock.'}
+                Start-GuardedVm $script:state
+                $script:duringObservation=$null
+                if($script:bootCondition -ceq 'unavailable'){$script:observation=$null}else{$script:observation.fingerprint='b'*64}
+            }
+            $p=Invoke-RunnerNetworkRecoveryTick $script:state.vmName (Get-RunnerConfig)
+            if($p.outcome.operation -cne 'quarantine' -or -not $script:state.networkRecovery.resumeRequired -or $script:vm.State -cne 'Paused' -or ($script:effects -join ',') -cne 'boot,pause,disconnect'){throw 'Detached Off preflight lost actual guarded-boot pause intent.'}
+        }
+    }
     Check 'stalled capture cannot extend healthy owner admission and isolated checkpoints remain unready' {
         $cleanup = (Get-Command Remove-RunnerInstance).ScriptBlock
         $lifecycle = (Get-Command Assert-RunnerVmLifecycle).ScriptBlock

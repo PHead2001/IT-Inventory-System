@@ -321,7 +321,6 @@ function Get-RunnerNetworkRecoveryPlanCore($Recovery, $Observation, [DateTime] $
             return [pscustomobject]@{ recovery = $next; action = 'cleanup' }
         }
         $next.phase = 'quarantining'; $next.operation = 'quarantine'; $next.operationStartedUtc = $NowUtc.ToUniversalTime().ToString('o'); $next.progressUtc = $next.operationStartedUtc
-        if ($VmState -ceq 'Running') { $next.resumeRequired = $true }
         return [pscustomobject]@{ recovery = $next; action = 'quarantine' }
     }
     if ($next.operation) {
@@ -357,7 +356,9 @@ function Get-RunnerNetworkRecoveryPlanCore($Recovery, $Observation, [DateTime] $
             $hard = [DateTime]::Parse($next.hardDeadlineUtc).ToUniversalTime()
             if ($deadline -gt $hard) { $deadline = $hard }
             $next.episodeDeadlineUtc = $deadline.ToUniversalTime().ToString('o')
-            $next.resumeRequired = $VmState -ceq 'Running'; $next.phase = 'quarantining'; $next.generation++; $action = 'quarantine'
+            # Cached provider state cannot grant future resume authority. Only
+            # the fenced guardian pause dispatch establishes that intent.
+            $next.resumeRequired = $false; $next.phase = 'quarantining'; $next.generation++; $action = 'quarantine'
         }
     } elseif ($next.phase -cin @('isolated', 'verified')) {
         if (-not $observed) { $next.candidateFingerprint = ''; $next.candidateRules = @(); $next.stableObservations = 0; $next.lastStableUtc = '' }
@@ -481,6 +482,38 @@ function Assert-RunnerRecoveryDispatch($State, $Recovery, $Vm, $Adapter) {
     }
 }
 
+function Set-RunnerRecoveryQuarantineResumeIntent($State, $Recovery, [bool] $Intent, [switch] $PublishUnchanged) {
+    # Existing state mutex is held. Intent is not progress or completed
+    # containment. Recheck after publication too: IO may consume the lifetime.
+    $publish=$PublishUnchanged -or $Recovery.resumeRequired -ne $Intent
+    foreach($pass in 0..1){
+        $current=Get-RunnerState
+        if(-not(Test-RunnerRecoveryGeneration $current $Recovery.binding $Recovery.generation 'quarantine') -or
+            $current.guardianPid -ne $PID -or (Get-RunnerRecoveryClaimHash $State) -cne $Recovery.binding.claimHash -or
+            $current.networkRecovery.phase -cne 'quarantining' -or $Recovery.phase -cne 'quarantining' -or $Recovery.operation -cne 'quarantine' -or
+            [string]::IsNullOrEmpty($Recovery.episodeStartedUtc) -or [string]::IsNullOrEmpty($Recovery.episodeDeadlineUtc) -or
+            (Get-RunnerRecoveryHash ($current.networkRecovery.binding|ConvertTo-Json -Depth 8 -Compress)) -cne (Get-RunnerRecoveryHash ($Recovery.binding|ConvertTo-Json -Depth 8 -Compress)) -or
+            $current.networkRecovery.resumeRequired -isnot [bool] -or $Recovery.resumeRequired -isnot [bool] -or
+            $current.networkRecovery.resumeRequired -ne $Recovery.resumeRequired){throw 'Quarantine pause intent lost its current identity or operation.'}
+        Assert-StateIdentity $current
+        foreach($name in @('hardDeadlineUtc','episodeStartedUtc','episodeDeadlineUtc','progressUtc','operationStartedUtc')){
+            if($current.networkRecovery.$name -cne $Recovery.$name){throw 'Quarantine pause intent lifetime changed.'}
+        }
+        $stop=Test-RunnerSessionStopRequested $current
+        $ownersAlive=(Test-RunnerProcessIdentity $current.supervisorPid $current.supervisorStartUtc) -and (Test-RunnerProcessIdentity $current.guardianPid $current.guardianStartUtc)
+        $now=Get-RunnerRecoveryNow
+        if($stop -or -not $ownersAlive -or (Get-RunnerRecoveryExpiry $Recovery $now) -or
+            $now -ge [DateTime]::Parse($current.deadlineUtc).ToUniversalTime() -or $now -lt [DateTime]::Parse($Recovery.progressUtc).ToUniversalTime()){
+            throw 'Quarantine pause intent lost its lifetime.'
+        }
+        if($pass -eq 0 -and $publish){
+            $Recovery.resumeRequired=$Intent
+            $current.networkRecovery=$Recovery
+            Write-RunnerJson $script:RunnerStatePath $current
+        }else{break}
+    }
+}
+
 function Invoke-RunnerRecoveryAdapterEffect($State, $Recovery, [ValidateSet('quarantine', 'apply', 'connect', 'resume')][string] $Action) {
     # Caller MUST hold the checked session mutex. No sleeps/network probes here.
     # These provider calls are synchronous, not bounded cancellation promises.
@@ -498,10 +531,16 @@ function Invoke-RunnerRecoveryAdapterEffect($State, $Recovery, [ValidateSet('qua
     Set-RunnerRecoveryDiagnostic $Recovery 'preflightElapsedMs' (((Get-RunnerRecoveryNow) - $preflightStartedUtc).TotalMilliseconds)
     if ($Action -ceq 'quarantine') {
         if ([string]$vm.State -ceq 'Running') {
+            Set-RunnerRecoveryQuarantineResumeIntent $State $Recovery $true -PublishUnchanged
             Suspend-VM -VM $vm -ErrorAction Stop
             $vm = Get-VM -Id ([guid]$binding.vmId) -ErrorAction Stop
+            if([string]$vm.State -ceq 'Off'){Set-RunnerRecoveryQuarantineResumeIntent $State $Recovery $false}
             if ([string]$vm.State -cne 'Paused') { throw 'Recovery pause was not verified.' }
-        } elseif ([string]$vm.State -cnotin @('Off', 'Paused')) { throw 'Recovery cannot quarantine an uncertain VM state.' }
+        } elseif ([string]$vm.State -ceq 'Off') {
+            Set-RunnerRecoveryQuarantineResumeIntent $State $Recovery $false
+        } elseif ([string]$vm.State -ceq 'Paused') {
+            Set-RunnerRecoveryQuarantineResumeIntent $State $Recovery $Recovery.resumeRequired
+        } else { throw 'Recovery cannot quarantine an uncertain VM state.' }
         Disconnect-VMNetworkAdapter -VMNetworkAdapter $adapter -ErrorAction Stop
     } elseif ($Action -ceq 'apply') {
         [void](Assert-RunnerNetworkBinding $State $binding $vm $adapters $switch -RequireDisconnected)
@@ -524,6 +563,7 @@ function Invoke-RunnerRecoveryAdapterEffect($State, $Recovery, [ValidateSet('qua
     $vm = Get-VM -Id ([guid]$binding.vmId) -ErrorAction Stop
     $adapters = @(Get-VMNetworkAdapter -VM $vm -ErrorAction Stop)
     $adapter = Assert-RunnerNetworkBinding $State $binding $vm $adapters $switch -RequireDisconnected:($Action -cin @('quarantine', 'apply'))
+    if($Action -ceq 'quarantine' -and [string]$vm.State -ceq 'Off'){Set-RunnerRecoveryQuarantineResumeIntent $State $Recovery $false}
     if ($Action -ceq 'connect' -and ([guid]$adapter.SwitchId -ne [guid]$binding.switchId -or [string]$vm.State -cnotin @('Paused', 'Off'))) { throw 'Recovery connect readback failed.' }
     if ($Action -ceq 'resume' -and [string]$vm.State -cne 'Running') { throw 'Recovery resume readback failed.' }
     if ($Action -ceq 'apply') { return $installed }
