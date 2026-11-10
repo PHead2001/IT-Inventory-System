@@ -204,8 +204,17 @@ function Wait-RunnerUpdateIdle([int] $TimeoutSeconds = 35) {
         if ((Get-RunnerState) -or @(Get-RunnerVmInventory | Where-Object Name -Like "$($script:RunnerPrefix)*").Count -gt 0) {
             throw 'Update requires no session or owned-prefix VM; no job was stopped.'
         }
+        if ($null -ne $script:RunnerOwnerOperationContext) {
+            Assert-RunnerPauseUnchanged $script:RunnerOwnerOperationContext.record.expectedPause
+            Set-RunnerOwnerOperationStage 'pause-write-dispatching'
+            $script:RunnerOwnerOperationContext.record.pauseWriteDispatched = $true
+        }
         Write-RunnerBytes $marker ([Text.Encoding]::UTF8.GetBytes('stop'))
         Assert-RunnerProtectedPath $marker
+        if ($null -ne $script:RunnerOwnerOperationContext) {
+            $script:RunnerOwnerOperationContext.record.expectedPause = Get-RunnerPauseEvidence
+            Set-RunnerOwnerOperationStage 'paused'
+        }
         Invoke-RunnerTransitionCheckpoint 'update-marker'
     } finally { Exit-RunnerLock $claimLock }
     $deadline = [DateTime]::UtcNow.AddSeconds($TimeoutSeconds)

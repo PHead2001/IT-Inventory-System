@@ -2,14 +2,38 @@
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'Common.ps1')
-$root = Join-Path $env:TEMP ('ITIR-paths-' + [guid]::NewGuid().ToString('N'))
+# Resolve the existing TEMP provider location once, then create and resolve the
+# root before constructing state. Windows may expose long/8.3 aliases differently
+# before and after creation; the fixture must not manufacture identity drift.
+$fixtureTemporary = [IO.Path]::GetFullPath((Resolve-Path -LiteralPath ([IO.Path]::GetTempPath())).ProviderPath).TrimEnd('\')
+$root = Join-Path $fixtureTemporary ('ITIR-paths-' + [guid]::NewGuid().ToString('N'))
+if (Test-Path -LiteralPath $root) { throw 'Fixture root already exists; retain files.' }
+[void][IO.Directory]::CreateDirectory($root)
+$root = [IO.Path]::GetFullPath((Resolve-Path -LiteralPath $root).ProviderPath)
+$fixtureCanonicalRoot = [IO.Path]::GetFullPath($root)
+$fixtureCanonicalTemporary = [IO.Path]::GetFullPath((Resolve-Path -LiteralPath ([IO.Path]::GetTempPath())).ProviderPath).TrimEnd('\')
+$fixtureFailure = $null; $fixtureCleanupFailure = $null
 $script:RunnerRoot = $root; $script:checks = 0
 function Check([bool] $Value) { $script:checks++; if (-not $Value) { throw 'Session layout assertion failed.' } }
 function Refuse([scriptblock] $Work) { $refused=$false; try { & $Work | Out-Null } catch { $refused=$true }; Check $refused }
 function Copy-State($State) { $State | ConvertTo-Json -Depth 10 -Compress | ConvertFrom-Json }
+function Assert-FixtureCleanupIdentity([string] $Candidate, [string] $Resolved, [IO.FileAttributes] $Attributes) {
+    if ([IO.Path]::GetFullPath($Candidate) -cne $fixtureCanonicalRoot -or [IO.Path]::GetFullPath($Resolved) -cne $fixtureCanonicalRoot -or
+        [IO.Path]::GetDirectoryName($fixtureCanonicalRoot) -cne $fixtureCanonicalTemporary -or
+        [IO.Path]::GetFileName($fixtureCanonicalRoot) -cnotmatch '^ITIR-paths-[0-9a-f]{32}$' -or
+        ($Attributes -band [IO.FileAttributes]::ReparsePoint)) { throw 'Fixture cleanup identity differs; retain files.' }
+}
 $name='ITIR-'+('a'*32)
 $state=[pscustomobject]@{tag=$script:RunnerTag;vmName=$name;instancePath=(Join-Path (Join-Path $root 'instances') $name);layoutVersion=2}
 try {
+    Check ([IO.Path]::GetDirectoryName($root) -ieq $fixtureTemporary)
+    Check ([IO.Path]::GetFullPath((Resolve-Path -LiteralPath $root).ProviderPath) -ceq $root)
+    Assert-FixtureCleanupIdentity $root $root ([IO.FileAttributes]::Directory); Check $true
+    $foreignFixture = Join-Path $fixtureCanonicalTemporary ('ITIR-paths-' + ('b' * 32))
+    Refuse { Assert-FixtureCleanupIdentity $foreignFixture $foreignFixture ([IO.FileAttributes]::Directory) }
+    Refuse { Assert-FixtureCleanupIdentity $root $foreignFixture ([IO.FileAttributes]::Directory) }
+    Refuse { Assert-FixtureCleanupIdentity (Join-Path $fixtureCanonicalTemporary 'foreign\ITIR-paths-other') $root ([IO.FileAttributes]::Directory) }
+    Refuse { Assert-FixtureCleanupIdentity $root $root ([IO.FileAttributes]::ReparsePoint) }
     [void][IO.Directory]::CreateDirectory($state.instancePath)
     foreach($purpose in @('job','prepare','verify-image')) {
         $fresh=Copy-State $state; $fresh|Add-Member purpose $purpose
@@ -72,7 +96,20 @@ try {
     Refuse {Get-RunnerRecoveryClaimHash $legacy}
     Check ((Get-RunnerRecoveryClaimHash $state) -cmatch '^[A-Fa-f0-9]{64}$')
     Write-Host ('Session paths passed: '+$script:checks+' canonical layout, strict root/key ACL, reparse descriptor, malformed-version and legacy-denial assertions.')
-} finally {
-    if([IO.Path]::GetDirectoryName($root) -ine [IO.Path]::GetFullPath($env:TEMP) -or [IO.Path]::GetFileName($root) -cnotmatch '^ITIR-paths-[0-9a-f]{32}$'){throw 'Fixture cleanup location differs.'}
-    if(Test-Path -LiteralPath $root){Remove-Item -LiteralPath $root -Recurse -Force}
+} catch { $fixtureFailure = $_ }
+finally {
+    try {
+        $fixtureCurrent = (Microsoft.PowerShell.Management\Resolve-Path -LiteralPath $root -ErrorAction Stop).ProviderPath
+        $fixtureAttributes = (Microsoft.PowerShell.Management\Get-Item -LiteralPath $root -Force -ErrorAction Stop).Attributes
+        Assert-FixtureCleanupIdentity $root $fixtureCurrent $fixtureAttributes
+        Remove-Item -LiteralPath $fixtureCanonicalRoot -Recurse -Force -ErrorAction Stop
+    } catch { $fixtureCleanupFailure = $_ }
 }
+if ($null -ne $fixtureFailure) {
+    if ($null -ne $fixtureCleanupFailure) {
+        $fixtureFailure.Exception.Data['fixtureCleanupRefused'] = $true
+        Write-Warning 'Fixture cleanup refused; initiating failure preserved and fixture retained.'
+    }
+    throw $fixtureFailure
+}
+if ($null -ne $fixtureCleanupFailure) { throw $fixtureCleanupFailure }

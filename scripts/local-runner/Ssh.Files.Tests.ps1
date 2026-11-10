@@ -7,6 +7,20 @@ $script:checks=0
 function Check([bool]$Value){$script:checks++;if(-not $Value){throw "SSH_FILE_CHECK_$script:checks"}}
 function Refuse([scriptblock]$Work){$rejected=$false;try{& $Work|Out-Null}catch{$rejected=$true};Check $rejected}
 $base=Join-Path $env:TEMP ('ITIR-ssh-files-'+[guid]::NewGuid().ToString('N'))
+# Resolve only after creating this one owned root, before deriving any instance
+# or key path. TEMP's long/8.3 provider aliases must not create a false escape.
+if(Test-Path -LiteralPath $base){throw 'SSH fixture root already exists; retain files.'}
+[void][IO.Directory]::CreateDirectory($base)
+$base=[IO.Path]::GetFullPath((Resolve-Path -LiteralPath $base).ProviderPath)
+$sshCanonicalRoot=[IO.Path]::GetFullPath($base)
+$sshCanonicalTemp=[IO.Path]::GetFullPath((Resolve-Path -LiteralPath ([IO.Path]::GetTempPath())).ProviderPath).TrimEnd('\')
+$sshFixtureFailure=$null;$sshCleanupFailure=$null
+function Assert-SshFixtureCleanupIdentity([string]$Candidate,[string]$Resolved,[IO.FileAttributes]$Attributes){
+    if([IO.Path]::GetFullPath($Candidate) -cne $sshCanonicalRoot -or [IO.Path]::GetFullPath($Resolved) -cne $sshCanonicalRoot -or
+        [IO.Path]::GetDirectoryName($sshCanonicalRoot) -cne $sshCanonicalTemp -or
+        [IO.Path]::GetFileName($sshCanonicalRoot) -cnotmatch '^ITIR-ssh-files-[a-f0-9]{32}$' -or
+        ($Attributes -band [IO.FileAttributes]::ReparsePoint)){throw 'SSH fixture cleanup identity differs; retain files.'}
+}
 $script:RunnerRoot=$base
 $instance=Join-Path (Join-Path $base 'instances') ('ITIR-'+('a'*32))
 [void][IO.Directory]::CreateDirectory($instance)
@@ -18,6 +32,12 @@ function New-FixtureAcl([string]$Owner=$script:creator,[string]$Extra='', [switc
     return $acl
 }
 try{
+    Check ([IO.Path]::GetFullPath((Resolve-Path -LiteralPath $base).ProviderPath) -ceq $base)
+    Assert-SshFixtureCleanupIdentity $base $base ([IO.FileAttributes]::Directory);Check $true
+    $foreignBase=Join-Path $sshCanonicalTemp ('ITIR-ssh-files-'+('b'*32))
+    Refuse {Assert-SshFixtureCleanupIdentity $foreignBase $foreignBase ([IO.FileAttributes]::Directory)}
+    Refuse {Assert-SshFixtureCleanupIdentity $base $foreignBase ([IO.FileAttributes]::Directory)}
+    Refuse {Assert-SshFixtureCleanupIdentity $base $base ([IO.FileAttributes]::ReparsePoint)}
     Initialize-RunnerSshFileSecurity
     $directory=Open-RunnerSshFile $instance -Directory
     try{
@@ -146,6 +166,17 @@ try{
     Check ($sshArgs.Contains('Assert-RunnerSessionTrustedPaths $State -RequireKnownHosts'))
     Check ([IO.File]::ReadAllText((Join-Path $PSScriptRoot 'Network.Recovery.Probe.ps1')).Contains('}) -RequireKnownHosts'))
     Write-Output ('SSH_FILES_PASS '+$script:checks+' NATIVE_IDENTITY_SHARE=PASS HARDLINK_REPARSE=SEPARATE_NATIVE_SUITE NORMALIZATION_NATIVE=OWNER_INTEGRATION_REQUIRED')
-}finally{
-    if([IO.Path]::GetFullPath($base).StartsWith([IO.Path]::GetFullPath($env:TEMP)+[IO.Path]::DirectorySeparatorChar,[StringComparison]::OrdinalIgnoreCase) -and (Split-Path $base -Leaf) -match '^ITIR-ssh-files-[a-f0-9]{32}$'){Remove-Item -LiteralPath $base -Recurse -Force}
+}catch{$sshFixtureFailure=$_}
+finally{
+    try{
+        $sshCurrent=(Microsoft.PowerShell.Management\Resolve-Path -LiteralPath $base -ErrorAction Stop).ProviderPath
+        $sshAttributes=(Microsoft.PowerShell.Management\Get-Item -LiteralPath $base -Force -ErrorAction Stop).Attributes
+        Assert-SshFixtureCleanupIdentity $base $sshCurrent $sshAttributes
+        Remove-Item -LiteralPath $sshCanonicalRoot -Recurse -Force -ErrorAction Stop
+    }catch{$sshCleanupFailure=$_}
 }
+if($null -ne $sshFixtureFailure){
+    if($null -ne $sshCleanupFailure){$sshFixtureFailure.Exception.Data['fixtureCleanupRefused']=$true;Write-Warning 'SSH fixture cleanup refused; initiating failure preserved and fixture retained.'}
+    throw $sshFixtureFailure
+}
+if($null -ne $sshCleanupFailure){throw $sshCleanupFailure}
