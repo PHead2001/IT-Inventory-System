@@ -177,7 +177,7 @@ export function DashboardSnapshotView({
             <Link
               href="/inventory?lowStock=true"
 
-              className="inline-flex min-h-11 items-center gap-1 hover:text-white"
+              className="inline-flex min-h-11 items-center gap-1 hover:text-[var(--foreground)]"
             >
               View filtered inventory{' '}
               <ArrowRight size={14} aria-hidden="true" />
@@ -186,7 +186,7 @@ export function DashboardSnapshotView({
             <ExportLink
               href="/api/exports/inventory?export=low_stock"
 
-              className="inline-flex min-h-11 items-center gap-1 hover:text-white"
+              className="inline-flex min-h-11 items-center gap-1 hover:text-[var(--foreground)]"
             >
               <Download size={14} aria-hidden="true" /> Download low-stock CSV
             </ExportLink>

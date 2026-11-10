@@ -36,7 +36,7 @@ export default async function DashboardPage({
               </p>
               <Link
                 href="/room"
-                className="mt-4 inline-flex min-h-11 items-center gap-2 text-sm font-semibold text-cyan-200 hover:text-white"
+                className="mt-4 inline-flex min-h-11 items-center gap-2 text-sm font-semibold text-cyan-200 hover:text-[var(--foreground)]"
               >
                 <Map size={16} aria-hidden="true" /> Explore Spaces &amp; maps{' '}
                 <ArrowRight size={15} aria-hidden="true" />

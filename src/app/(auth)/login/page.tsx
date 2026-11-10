@@ -67,7 +67,7 @@ export default async function LoginPage({
       <h1 className="mt-2 text-3xl font-semibold tracking-tight">
         Welcome back
       </h1>
-      <p className="mb-7 mt-2 text-sm text-[#9cafc4]">
+      <p className="mb-7 mt-2 text-sm experience-muted">
         Sign in with your invited IT Inventory account.
       </p>
       {params.password === 'updated' && (
@@ -85,7 +85,7 @@ export default async function LoginPage({
       >
         Forgot password?
       </Link>
-      <p className="mt-3 text-xs leading-5 text-[#9cafc4]">
+      <p className="mt-3 text-xs leading-5 experience-muted">
         Access is invitation-only. Contact the application owner if you need an
         account.
       </p>

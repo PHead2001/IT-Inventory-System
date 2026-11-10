@@ -1,3 +1,4 @@
+import { expectTouchTarget } from './touch-target-controls';
 import { fits } from './viewport-controls';
 import { expectPrivateTitleExcluded } from '../helpers/private-title';
 import { interfaceTest, interfaceLogin } from './interface-fixtures';
@@ -1048,6 +1049,21 @@ test('mixed queue retains copies across navigation, decodes quantity QR, and pri
   await search.getByRole('textbox').fill(quantityName);
   await search.getByRole('button', { name: 'Search' }).click();
   await expect(page.getByRole('link', { name: quantityName })).toBeVisible();
+  const touchViewport = page.viewportSize();
+  for (const width of [1280, 390]) {
+    await page.setViewportSize({ width, height: 844 });
+    await expectTouchTarget(
+      page.getByRole('link', { name: quantityName, exact: true }),
+    );
+    await expectTouchTarget(
+      page
+        .getByRole('checkbox', {
+          name: new RegExp('^Select ' + quantityName + ','),
+        })
+        .locator('..'),
+    );
+  }
+  if (touchViewport) await page.setViewportSize(touchViewport);
   await expect(
     page.getByText('Holdings: IT Closet / Left Storage / Shelf 1 / 1A: 3'),
   ).toBeVisible();
