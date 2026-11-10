@@ -679,7 +679,7 @@ function Assert-RunnerControlDiagnostic($Diagnostic) {
 }
 
 function New-RunnerLockBusyFailure([string] $Purpose, [long] $WaitMs) {
-    $failure = [TimeoutException]::new('Runner state lock acquisition timed out.')
+    $failure = [TimeoutException]::new('Runner state is busy: lock acquisition timed out.')
     $failure.Data['runnerLockBusy'] = 'validated-mutex-wait-v1'
     $failure.Data['runnerControlDiagnostic'] = [pscustomobject]@{ purpose = $Purpose; waitMs = [long][Math]::Min(30000, [Math]::Max(0, $WaitMs)); preflightStage = '' }
     return $failure

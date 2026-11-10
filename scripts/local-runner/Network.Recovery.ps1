@@ -446,7 +446,13 @@ function Test-RunnerIsolatedStaleAdmission($Failure, $Recovery) {
 function Assert-RunnerRecoveryDispatch($State, $Recovery, $Vm, $Adapter) {
     # Called AFTER slow provider identity/ACL reads, immediately before the
     # reconnect/resume command. A stale observation never grants live access.
+    $current = Get-RunnerState
+    $generationMatches = Test-RunnerRecoveryGeneration $current $Recovery.binding $Recovery.generation $Recovery.operation
+    $stop = Test-RunnerSessionStopRequested $State
+    # State/Stop reads can block too. The lease is evaluated only after the
+    # final reads, immediately before authorizing the provider command.
     $now = Get-RunnerRecoveryNow
+    if (-not $generationMatches -or $stop) { throw 'Recovery dispatch cancelled.' }
     Set-RunnerRecoveryDiagnostic $Recovery 'admissionOperation' $Recovery.operation
     $age = ($now - [DateTime]::Parse($Recovery.observationUtc).ToUniversalTime()).TotalSeconds
     Set-RunnerRecoveryDiagnostic $Recovery 'observationAgeMs' ($age * 1000)
@@ -460,9 +466,11 @@ function Assert-RunnerRecoveryDispatch($State, $Recovery, $Vm, $Adapter) {
         $switch = Get-VMSwitch -Id ([guid]$Recovery.binding.switchId) -ErrorAction Stop
         [void](Assert-RunnerNetworkBinding $State $Recovery.binding $readback @(Get-VMNetworkAdapter -VM $readback -ErrorAction Stop) $switch -RequireDisconnected)
         $current = Get-RunnerState
+        $generationMatches = Test-RunnerRecoveryGeneration $current $Recovery.binding $Recovery.generation $Recovery.operation
+        $stop = Test-RunnerSessionStopRequested $State
         $isolatedUtc = Get-RunnerRecoveryNow
-        if (-not (Test-RunnerRecoveryGeneration $current $Recovery.binding $Recovery.generation $Recovery.operation) -or
-            (Test-RunnerSessionStopRequested $State) -or (Get-RunnerRecoveryExpiry $Recovery $isolatedUtc) -or
+        if (-not $generationMatches -or
+            $stop -or (Get-RunnerRecoveryExpiry $Recovery $isolatedUtc) -or
             $isolatedUtc -ge [DateTime]::Parse($State.deadlineUtc).ToUniversalTime() -or
             $isolatedUtc -lt [DateTime]::Parse($Recovery.progressUtc).ToUniversalTime()) { throw 'Isolated stale recovery lost its lifetime.' }
         # Only this post-isolation branch may retain already-live-read policy.
@@ -471,9 +479,6 @@ function Assert-RunnerRecoveryDispatch($State, $Recovery, $Vm, $Adapter) {
         $failure.Data['runnerIsolatedStaleAdmission'] = Get-RunnerRecoveryAdmissionKey $Recovery
         throw $failure
     }
-    $current = Get-RunnerState
-    if (-not (Test-RunnerRecoveryGeneration $current $Recovery.binding $Recovery.generation $Recovery.operation) -or
-        (Test-RunnerSessionStopRequested $State)) { throw 'Recovery dispatch cancelled.' }
 }
 
 function Invoke-RunnerRecoveryAdapterEffect($State, $Recovery, [ValidateSet('quarantine', 'apply', 'connect', 'resume')][string] $Action) {
@@ -726,14 +731,6 @@ function Invoke-RunnerNetworkRecoveryTick([string] $SessionName, $Config, $Outco
     # outside the mutex; provider mutations retain the existing serialization.
     $probeOutcome = Get-RunnerRecoveryProbeOutcome
     if ($null -ne $probeOutcome) { $Outcome = $probeOutcome }
-    $observation = $null
-    $initial = Get-RunnerState
-    $observationStartedUtc = Get-RunnerRecoveryNow
-    if ($null -eq $initial -or $initial.PSObject.Properties.Name -notcontains 'phase' -or $initial.phase -cne 'sealed-off') {
-        try { $observation = Get-RunnerNetworkObservation } catch { $observation = $null }
-    }
-    $observationElapsedMs = ((Get-RunnerRecoveryNow) - $observationStartedUtc).TotalMilliseconds
-    $observedUtc = if ($null -ne $observation) { [DateTime]::Parse($observation.observedUtc).ToUniversalTime() } else { Get-RunnerRecoveryNow }
     $probe = $false; $probeState = $null; $result = $null; $reconnect = $null
     $mutex = Enter-RunnerLock
     try {
@@ -773,9 +770,75 @@ function Invoke-RunnerNetworkRecoveryTick([string] $SessionName, $Config, $Outco
         if ($null -eq $state -or $state.vmName -cne $SessionName) { return [pscustomobject]@{ continue = $false; outcome = $null } }
         Assert-StateIdentity $state
         if ((Get-RunnerRecoveryClaimHash $state) -cne (Get-RunnerRecoveryClaimHash $captured) -or
-            $state.guardianPid -ne $PID -or -not (Test-RunnerProcessIdentity $state.guardianPid $state.guardianStartUtc) -or
-            (Get-RunnerRecoveryHash ($state.networkRecovery | ConvertTo-Json -Depth 30 -Compress)) -cne $recoveryKey) { throw 'Recovery preflight ownership or generation changed.' }
+            $state.guardianPid -ne $PID -or -not (Test-RunnerProcessIdentity $state.guardianPid $state.guardianStartUtc)) { throw 'Recovery preflight ownership or generation changed.' }
         $recovery = $state.networkRecovery
+        if (($state.PSObject.Properties.Name -contains 'phase' -and $state.phase -ceq 'sealed-off') -or $recovery.phase -ceq 'sealed-preparation') {
+            if ($recovery.generation -ne ($captured.networkRecovery.generation + 1)) { throw 'Recovery preparation seal generation changed.' }
+            $now = Get-RunnerRecoveryNow
+            Assert-RunnerSealedPreparation $state $now
+            $recovery.progressUtc = $now.ToUniversalTime().ToString('o')
+            $state.guardianReady = $true
+            Write-RunnerJson $script:RunnerStatePath $state
+            return [pscustomobject]@{ continue = $true; outcome = $null }
+        }
+        if ((Get-RunnerRecoveryHash ($recovery | ConvertTo-Json -Depth 30 -Compress)) -cne $recoveryKey) { throw 'Recovery preflight ownership or generation changed.' }
+        if ($null -ne $preflightFailure) {
+            try { $preflightFailure.Exception.Data['runnerControlDiagnostic'] = [pscustomobject]@{ purpose = 'recovery-preflight'; waitMs = [long][Math]::Min(30000, [Math]::Max(0, $preflightElapsedMs)); preflightStage = $preflightStage } } catch { }
+            throw $preflightFailure
+        }
+        $validBinding = $true
+        try { [void](Assert-RunnerNetworkBinding $state $recovery.binding $vm $adapters $switch) } catch { $validBinding = $false }
+        $isolated = $false
+        if ($validBinding -and [string]$vm.State -cin @('Paused', 'Off')) {
+            try { [void](Assert-RunnerNetworkBinding $state $recovery.binding $vm $adapters $switch -RequireDisconnected); $isolated = $true } catch { }
+        }
+        $stop = Test-RunnerSessionStopRequested $state
+        $ownerAlive = Test-RunnerProcessIdentity $state.supervisorPid $state.supervisorStartUtc
+        $checkpointEligible = $isolated -and $recovery.operation -is [string] -and $recovery.operation -ceq '' -and
+            $recovery.phase -cin @('isolated', 'verified') -and $state.PSObject.Properties.Name -contains 'guardianReady' -and
+            $state.guardianReady -is [bool] -and $state.guardianReady -eq $false
+        $now = Get-RunnerRecoveryNow
+        $checkpointLifetime = -not ($stop -or -not $ownerAlive -or (Get-RunnerRecoveryExpiry $recovery $now) -or
+            $now -ge [DateTime]::Parse($state.deadlineUtc).ToUniversalTime() -or
+            $now -lt [DateTime]::Parse($recovery.progressUtc).ToUniversalTime())
+        # Only positively isolated, unready idle recovery can record this
+        # completed identity work. Healthy/connected or pending work never lends
+        # owner/JIT/boot admission more time while network capture is stalled.
+        # This does not verify the network or extend outage/hard deadlines.
+        if ($checkpointLifetime -and $validBinding -and $checkpointEligible) {
+            $recovery.progressUtc = $now.ToUniversalTime().ToString('o')
+            Write-RunnerJson $script:RunnerStatePath $state
+            $recoveryKey = Get-RunnerRecoveryHash ($recovery | ConvertTo-Json -Depth 30 -Compress)
+        }
+    } finally { Exit-RunnerLock $mutex }
+    # Capture AFTER the unlocked provider inspection. The timestamp remains the
+    # genuine start of the retained second capture, never the end of this IO.
+    $observation = $null
+    $observationStartedUtc = Get-RunnerRecoveryNow
+    try { $observation = Get-RunnerNetworkObservation } catch { $observation = $null }
+    $observationElapsedMs = ((Get-RunnerRecoveryNow) - $observationStartedUtc).TotalMilliseconds
+    $observedUtc = if ($null -ne $observation) { [DateTime]::Parse($observation.observedUtc).ToUniversalTime() } else { Get-RunnerRecoveryNow }
+    $mutex = Enter-RunnerLock
+    try {
+        $state = Get-RunnerState
+        if ($null -eq $state -or $state.vmName -cne $SessionName) { return [pscustomobject]@{ continue = $false; outcome = $null } }
+        Assert-StateIdentity $state
+        if ((Get-RunnerRecoveryClaimHash $state) -cne (Get-RunnerRecoveryClaimHash $captured) -or
+            $state.guardianPid -ne $PID -or -not (Test-RunnerProcessIdentity $state.guardianPid $state.guardianStartUtc)) { throw 'Recovery preflight ownership or generation changed.' }
+        $recovery = $state.networkRecovery
+        if (($state.PSObject.Properties.Name -contains 'phase' -and $state.phase -ceq 'sealed-off') -or $recovery.phase -ceq 'sealed-preparation') {
+            # The builder can remove its VM and commit the sole next seal while
+            # inspection is unlocked. Only that complete, same-owner transition
+            # supersedes an obsolete preflight result (including Get-VM failure).
+            if ($recovery.generation -ne ($captured.networkRecovery.generation + 1)) { throw 'Recovery preparation seal generation changed.' }
+            $now = Get-RunnerRecoveryNow
+            Assert-RunnerSealedPreparation $state $now
+            $recovery.progressUtc = $now.ToUniversalTime().ToString('o')
+            $state.guardianReady = $true
+            Write-RunnerJson $script:RunnerStatePath $state
+            return [pscustomobject]@{ continue = $true; outcome = $null }
+        }
+        if ((Get-RunnerRecoveryHash ($recovery | ConvertTo-Json -Depth 30 -Compress)) -cne $recoveryKey) { throw 'Recovery preflight ownership or generation changed.' }
         if ($null -ne $preflightFailure) {
             try { $preflightFailure.Exception.Data['runnerControlDiagnostic'] = [pscustomobject]@{ purpose = 'recovery-preflight'; waitMs = [long][Math]::Min(30000, [Math]::Max(0, $preflightElapsedMs)); preflightStage = $preflightStage } } catch { }
             throw $preflightFailure

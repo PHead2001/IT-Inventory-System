@@ -594,11 +594,40 @@ retains its existing bounds. Historical journals without this field remain reada
 budget using only an ordinary-user GUID mutex. Its provider and guest receipt
 operations are fixtures; it does not certify production ACLs, Hyper-V containment
 or same-job network continuity. Slow-preflight/expiry regressions use a simulated
-clock. The timing-separation fixture retains a one-second initial preflight so its
-capture remains within the unchanged two-second admission lease; separate slow
-preflight cases explicitly require stale-observation containment.
+clock. Each tick captures immutable ownership and recovery fences under the mutex,
+performs read-only VM preflight outside it, then obtains a new two-capture network
+observation before reacquiring and revalidating those fences. The admission timestamp
+remains the start of the retained second capture. A 1328 ms preflight followed by
+explicit 2052 ms and 1419 ms captures therefore retains a 1419 ms lease; a retained
+capture exceeding two seconds still requires containment. Final connect/resume
+admission samples its clock after the final protected-state and Stop reads, so
+blocking reads cannot authorize an expired observation or deadline. Reconnect and
+resume still obtain their own independent fresh capture pair and live ACL proof.
 
 After the credential-free builder shuts down gracefully and its exact Off VM registration is authoritatively removed, the owner commits a sealed preparation state with the scrub proof, image binding and fenced recovery generation. The guardian remains active while bulk disk copying runs outside the state mutex. Its sealed supervision path checks the exact preparation identity, owner/guardian processes, Stop, deadlines, progress, committed proof, authoritative VM absence and remaining disk/configuration references before refreshing progress. It never treats a missing ordinary job or verifier VM as a preparation seal, resumes a removed VM or accepts old network/probe outcomes. Watchdog and session liveness retain the same guards. Session liveness samples evaluation time after heartbeat and the fresh protected-state read, then rechecks Stop and the current deadline; guardian progress that advanced during the mutex wait is evaluated against that later time, while true future progress still refuses continuation. Candidate retention still requires fresh post-copy proof and unchanged image selection. Provider uncertainty, reappearing registration, cancellation or invalid proof fails closed through canonical cleanup.
+
+If that seal commits during unlocked preflight, the guardian first revalidates
+the immutable claim and its current process identity. Either seal indicator then
+requires both indicators, the sole next committed generation and the complete
+sealed-preparation proof before old provider success or failure is discarded.
+Partial seals, unrelated generations or changed ownership remain refusals. The
+ordinary nonsealed branch still requires the full unchanged recovery fence.
+Owner-control lock refusal remains a `TimeoutException` with the compatible
+`Runner state is busy` message prefix and its bounded structured busy diagnostic.
+
+Only positively isolated recovery can publish a completed preflight checkpoint
+before network capture: the owned VM must be Paused or Off, its exact adapter must
+be disconnected, the journal must be isolated or verified with no pending operation,
+and guardian readiness must be false. Ownership, the full recovery fence, Stop and
+all deadlines are rechecked against the actual current clock. Only `progressUtc`
+changes; phase, readiness, network evidence, authority and the original outage/hard
+deadlines remain unchanged. Already expired progress cannot be revived, and a
+subsequent capture hang still expires the lease. Healthy, connected, running or
+pending work cannot renew this checkpoint, even with an old successful outcome.
+The healthy network-admission boundary remains 30 seconds: a genuinely slow healthy
+26-second preflight plus six-second capture still fails closed. This limit is
+separate from the evidenced 1328 ms preflight/3471 ms capture ordering defect and
+does not promise unconditional provider liveness or live network continuity.
 
 While the exact owned adapter is disconnected and its VM is Off or Paused, policy replacement queries its existing ACL objects and removes each with the supported [InputObject parameter set](https://learn.microsoft.com/en-us/powershell/module/hyper-v/remove-vmnetworkadapterextendedacl?view=windowsserver2025-ps). A fresh adapter with no ACLs skips removal. A second query must prove the old policy empty before any replacement rule is added; query/removal failures or surviving rules fail closed through canonical cleanup. Exact post-add readback remains required before reconnect or resume.
 
