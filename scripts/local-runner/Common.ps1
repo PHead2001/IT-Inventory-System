@@ -15,6 +15,7 @@ $script:RunnerSessionName = $null
 $script:RunnerPreparationAuthorized = $false
 $script:RunnerMonitorLockBudget = $null
 $script:RunnerMonitorContentionActive = $false
+$script:RunnerOwnerOperationContext = $null
 
 function Initialize-RunnerDpapi {
     # Fresh Windows PowerShell 5.1 sessions do not preload ProtectedData.
@@ -1079,6 +1080,24 @@ namespace ITInventory {
         public static RunnerSshFile CreateEmpty(string path, FileSecurity security) {
             return new RunnerSshFile(new FileStream(path,FileMode.CreateNew,FileSystemRights.FullControl,FileShare.Read,4096,FileOptions.None,security),false);
         }
+        public static RunnerSshFile OpenPause(string path, bool deleteAccess) {
+            SafeFileHandle handle=CreateFile(path,0x80020000u | (deleteAccess ? 0x10000u : 0u),1u,IntPtr.Zero,3,0x200000u,IntPtr.Zero);
+            if (handle.IsInvalid) { int code=Marshal.GetLastWin32Error();handle.Dispose();throw new Win32Exception(code); }
+            try { return new RunnerSshFile(new FileStream(handle,FileAccess.Read),false); }
+            catch { handle.Dispose();throw; }
+        }
+        static string Utc(System.Runtime.InteropServices.ComTypes.FILETIME value) {
+            return DateTime.FromFileTimeUtc(((long)(uint)value.dwHighDateTime<<32)|(uint)value.dwLowDateTime).ToString("o");
+        }
+        public string CreatedUtc { get { return Utc(ReadInformation().Creation); } }
+        public string LastWriteUtc { get { return Utc(ReadInformation().Write); } }
+        public byte[] ReadBoundedBytes(int maximum) {
+            long length=Length;
+            if (directory || length<0 || length>maximum) throw new InvalidOperationException("File exceeds its bounded read.");
+            byte[] bytes=new byte[(int)length];stream.Position=0;
+            int offset=0;while(offset<bytes.Length) { int read=stream.Read(bytes,offset,bytes.Length-offset);if(read==0)throw new EndOfStreamException();offset+=read; }
+            return bytes;
+        }
         public string Identity { get { return identity; } }
         public long Length { get { Information info=ReadInformation();return ((long)info.SizeHigh<<32)|info.SizeLow; } }
         public FileSecurity ReadSecurity() { return stream.GetAccessControl(); }
@@ -1414,6 +1433,163 @@ function Get-RunnerFileEvidence([string] $Path) {
     if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) { return [pscustomobject]@{ exists = $false; hash = ''; content = '' } }
     $bytes = [IO.File]::ReadAllBytes($Path)
     return Get-RunnerBytesEvidence $bytes
+}
+
+function New-RunnerOwnerRefusal([string] $Code) {
+    if ($Code -cnotin @('admission-refused','execution-mismatch','installed-mismatch','pause-required','pause-invalid','pause-changed','receipt-invalid','receipt-publication','config-changed','image-invalid','prepare-failed','final-admission-refused','start-uncertain','interrupted')) { $Code = 'admission-refused' }
+    $failure = [InvalidOperationException]::new('Runner owner operation refused: ' + $Code + '.')
+    $failure.Data['runnerOwnerRefusal'] = $Code
+    return $failure
+}
+
+function Assert-RunnerPauseEvidence($Evidence) {
+    $fields = @('present','hash','length','identity','createdUtc','lastWriteUtc')
+    if ($null -eq $Evidence -or @($Evidence.PSObject.Properties.Name).Count -ne $fields.Count -or
+        @($fields | Where-Object { $Evidence.PSObject.Properties.Name -cnotcontains $_ }).Count -ne 0 -or
+        $Evidence.present -isnot [bool] -or -not $Evidence.present -or
+        ($Evidence.length -isnot [int] -and $Evidence.length -isnot [long]) -or $Evidence.length -ne 4 -or
+        $Evidence.hash -cne (Get-RunnerBytesHash ([Text.Encoding]::UTF8.GetBytes('stop'))) -or
+        $Evidence.identity -isnot [string] -or $Evidence.identity -cnotmatch '^[0-9A-F]{8}:[0-9A-F]{16}$') { throw (New-RunnerOwnerRefusal 'pause-invalid') }
+    foreach ($field in @('createdUtc','lastWriteUtc')) {
+        if ($Evidence.$field -isnot [string] -or $Evidence.$field -cnotmatch '^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{7}Z$') { throw (New-RunnerOwnerRefusal 'pause-invalid') }
+        [void][DateTime]::Parse($Evidence.$field, [Globalization.CultureInfo]::InvariantCulture, [Globalization.DateTimeStyles]::RoundtripKind)
+    }
+}
+
+function Get-RunnerPauseEvidence([switch] $KeepLease, [switch] $DeleteAccess, [switch] $AllowAbsent) {
+    Assert-SecureRoot
+    $path = Assert-OwnedPath (Join-Path $script:RunnerRoot 'stop.requested')
+    if (-not (Test-Path -LiteralPath $path)) {
+        if ($AllowAbsent) { return $null }; throw (New-RunnerOwnerRefusal 'pause-required')
+    }
+    if(-not (Test-Path -LiteralPath $path -PathType Leaf)){throw (New-RunnerOwnerRefusal 'pause-invalid')}
+    Assert-RunnerProtectedPath $path
+    Initialize-RunnerSshFileSecurity
+    $lease = [ITInventory.RunnerSshFile]::OpenPause($path, $DeleteAccess.IsPresent)
+    try {
+        $lease.AssertPath($path)
+        $evidence = [pscustomobject][ordered]@{ present=$true; hash=Get-RunnerBytesHash ($lease.ReadBoundedBytes(4)); length=$lease.Length; identity=$lease.Identity; createdUtc=$lease.CreatedUtc; lastWriteUtc=$lease.LastWriteUtc }
+        Assert-RunnerPauseEvidence $evidence
+        $lease.AssertPath($path)
+        if ($KeepLease) { $held = [pscustomobject]@{ evidence=$evidence; lease=$lease }; $lease=$null; return $held }
+        return $evidence
+    } finally { if ($null -ne $lease) { $lease.Dispose() } }
+}
+
+function Assert-RunnerPauseUnchanged($Expected, [switch] $KeepLease, [switch] $DeleteAccess) {
+    Assert-RunnerPauseEvidence $Expected
+    $held = Get-RunnerPauseEvidence -KeepLease -DeleteAccess:$DeleteAccess
+    try {
+        if (($held.evidence | ConvertTo-Json -Compress) -cne ($Expected | ConvertTo-Json -Compress)) { throw (New-RunnerOwnerRefusal 'pause-changed') }
+        if ($KeepLease) { $result=$held; $held=$null; return $result }
+    } finally { if ($null -ne $held) { $held.lease.Dispose() } }
+}
+
+function Assert-RunnerOwnerOperation($Record) {
+    $fields = @('schema','tag','id','action','bundleSha256','ownerPid','ownerStartUtc','startedUtc','completedUtc','stage','outcome','expectedPause','pauseWriteDispatched','prepareDispatched','pauseClearAttempted','pauseCleared','startDispatched','imageVerified','firstRefusal','latestSecondary','resumeAuthorized','startOutcomeUncertain','failureObservation')
+    if ($null -eq $Record -or @($Record.PSObject.Properties.Name).Count -ne $fields.Count -or
+        @($fields | Where-Object { $Record.PSObject.Properties.Name -cnotcontains $_ }).Count -ne 0 -or
+        $Record.schema -isnot [int] -or $Record.schema -ne 1 -or $Record.tag -cne $script:RunnerTag -or
+        $Record.id -isnot [string] -or $Record.id -cnotmatch '^[0-9a-f]{32}$' -or $Record.action -cne 'ResumeAfterValidation' -or
+        $Record.bundleSha256 -isnot [string] -or $Record.bundleSha256 -cnotmatch '^[0-9A-F]{64}$' -or
+        ($Record.ownerPid -isnot [int] -and $Record.ownerPid -isnot [long]) -or $Record.ownerPid -le 0 -or
+        $Record.stage -isnot [string] -or $Record.stage -cnotin @('intent','pause-write-dispatching','paused','image-validation','prepare-dispatching','image-verified','start-dispatching','running','failed','interrupted') -or
+        $Record.outcome -isnot [string] -or $Record.outcome -cnotin @('in-progress','completed','failed','interrupted')) { throw (New-RunnerOwnerRefusal 'receipt-invalid') }
+    foreach ($field in @('pauseWriteDispatched','prepareDispatched','pauseClearAttempted','pauseCleared','startDispatched','imageVerified','resumeAuthorized','startOutcomeUncertain')) {
+        if ($Record.$field -isnot [bool]) { throw (New-RunnerOwnerRefusal 'receipt-invalid') }
+    }
+    $interruptedIntent=$Record.outcome -ceq 'interrupted' -and $Record.stage -ceq 'start-dispatching'
+    if (-not $Record.resumeAuthorized -or ($Record.pauseClearAttempted -and -not $Record.imageVerified) -or
+        ($Record.pauseCleared -and -not $Record.pauseClearAttempted) -or ($Record.startDispatched -and -not $Record.pauseCleared) -or
+        ($Record.startOutcomeUncertain -and -not ($Record.pauseClearAttempted -or $Record.startDispatched -or $interruptedIntent)) -or
+        ($Record.outcome -ceq 'failed' -and ($Record.pauseClearAttempted -or $Record.startDispatched) -and -not $Record.startOutcomeUncertain) -or
+        ($Record.outcome -ceq 'completed' -and ($Record.stage -cne 'running' -or -not $Record.pauseCleared -or -not $Record.startDispatched -or $Record.startOutcomeUncertain))) { throw (New-RunnerOwnerRefusal 'receipt-invalid') }
+    foreach ($field in @('ownerStartUtc','startedUtc','completedUtc')) {
+        if ($field -ceq 'completedUtc' -and $Record.outcome -ceq 'in-progress' -and $Record.$field -ceq '') { continue }
+        if ($Record.$field -isnot [string] -or $Record.$field -cnotmatch '^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{7}Z$') { throw (New-RunnerOwnerRefusal 'receipt-invalid') }
+        [void][DateTime]::Parse($Record.$field, [Globalization.CultureInfo]::InvariantCulture, [Globalization.DateTimeStyles]::RoundtripKind)
+    }
+    foreach ($field in @('firstRefusal','latestSecondary')) {
+        if ($Record.$field -isnot [string] -or $Record.$field -cnotin @('none','admission-refused','execution-mismatch','installed-mismatch','pause-required','pause-invalid','pause-changed','receipt-invalid','receipt-publication','config-changed','image-invalid','prepare-failed','final-admission-refused','start-uncertain','interrupted')) { throw (New-RunnerOwnerRefusal 'receipt-invalid') }
+    }
+    if ([DateTime]::Parse($Record.ownerStartUtc) -gt [DateTime]::Parse($Record.startedUtc) -or
+        ($Record.completedUtc -and [DateTime]::Parse($Record.completedUtc) -lt [DateTime]::Parse($Record.startedUtc))) { throw (New-RunnerOwnerRefusal 'receipt-invalid') }
+    Assert-RunnerPauseEvidence $Record.expectedPause
+    Assert-RunnerFailureRecord $Record.failureObservation
+    $observationUtc=[DateTime]::Parse($Record.failureObservation.atUtc).ToUniversalTime()
+    $end=if($Record.outcome -ceq 'in-progress'){[DateTime]::UtcNow}else{[DateTime]::Parse($Record.completedUtc).ToUniversalTime()}
+    if($observationUtc -lt [DateTime]::Parse($Record.startedUtc).ToUniversalTime() -or $observationUtc -gt $end -or
+        [Text.Encoding]::UTF8.GetByteCount(($Record.failureObservation|ConvertTo-Json -Depth 4 -Compress)) -gt 2048){throw (New-RunnerOwnerRefusal 'receipt-invalid')}
+    $bytes = [Text.UTF8Encoding]::new($false,$true).GetBytes(($Record | ConvertTo-Json -Depth 5 -Compress))
+    if ($bytes.Length -gt 16384) { throw (New-RunnerOwnerRefusal 'receipt-invalid') }
+}
+
+function New-RunnerOwnerFailureObservation($Failure,[string]$StartedUtc) {
+    $now=[DateTime]::UtcNow
+    $unavailable=[pscustomobject][ordered]@{schema=1;capture='unavailable';atUtc=$now.ToString('o')}
+    try{
+        $attached=$Failure.Exception.Data['runnerFailureObservation']
+        if($null -eq $attached){return $unavailable}
+        $json=$attached|ConvertTo-Json -Depth 4 -Compress
+        if([Text.Encoding]::UTF8.GetByteCount($json) -gt 2048){return $unavailable}
+        $inputRecord=$json|ConvertFrom-Json
+        Assert-RunnerFailureRecord $inputRecord
+        $at=[DateTime]::Parse($inputRecord.atUtc).ToUniversalTime()
+        if($inputRecord.capture -cne 'complete' -or $at -lt [DateTime]::Parse($StartedUtc).ToUniversalTime() -or $at -gt $now){return $unavailable}
+        $projection=[ordered]@{}
+        foreach($name in @('schema','capture','atUtc','origin','reason','stopReason','expiry','statePresent','checks','purpose','phase','recoveryPhase','recoveryFailure','failureSet','deadlineRemainingMs','progressAgeMs','recoveryDiagnostic')){
+            if($inputRecord.PSObject.Properties.Name -ccontains $name){$projection[$name]=$inputRecord.$name}
+        }
+        $result=$projection|ConvertTo-Json -Depth 4 -Compress|ConvertFrom-Json
+        Assert-RunnerFailureRecord $result
+        return $result
+    }catch{return $unavailable}
+}
+
+function Get-RunnerOwnerOperation {
+    $mutex=Enter-RunnerLock
+    try {
+    $path = Assert-OwnedPath (Join-Path $script:RunnerRoot 'owner-operation.json')
+    if (-not (Test-Path -LiteralPath $path)) { return $null }
+    Assert-RunnerProtectedPath $path
+    $lease = Open-RunnerSshFile $path
+    try {
+        $lease.AssertPath($path)
+        $record = [Text.UTF8Encoding]::new($false,$true).GetString($lease.ReadBoundedBytes(16384)) | ConvertFrom-Json
+        Assert-RunnerOwnerOperation $record
+        $lease.AssertPath($path)
+        return $record
+    } finally { $lease.Dispose() }
+    } finally { Exit-RunnerLock $mutex }
+}
+
+function Write-RunnerOwnerOperation($Record) {
+    Assert-RunnerOwnerOperation $Record
+    $mutex=Enter-RunnerLock
+    try {
+    $path = Assert-OwnedPath (Join-Path $script:RunnerRoot 'owner-operation.json')
+    if (Test-Path -LiteralPath $path) { Assert-RunnerProtectedPath $path }
+    try { Write-RunnerJson $path $Record } catch { throw (New-RunnerOwnerRefusal 'receipt-publication') }
+    Assert-RunnerProtectedPath $path
+    if (((Get-RunnerOwnerOperation) | ConvertTo-Json -Depth 5 -Compress) -cne ($Record | ConvertTo-Json -Depth 5 -Compress)) { throw (New-RunnerOwnerRefusal 'receipt-publication') }
+    } finally { Exit-RunnerLock $mutex }
+}
+
+function Set-RunnerOwnerOperationStage([string] $Stage) {
+    $context = $script:RunnerOwnerOperationContext
+    if ($null -eq $context -or $context.record.ownerPid -ne $PID -or
+        -not (Test-RunnerProcessIdentity $PID $context.record.ownerStartUtc)) { throw (New-RunnerOwnerRefusal 'admission-refused') }
+    $context.record.stage=$Stage
+    try{Write-RunnerOwnerOperation $context.record}catch{throw (New-RunnerOwnerRefusal 'receipt-publication')}
+}
+
+function Get-RunnerOwnerOperationProjection($Record) {
+    if ($null -eq $Record) { return [pscustomobject]@{ stage='none';outcome='none';startedUtc='';completedUtc='';imageVerified=$false;prepareDispatched=$false;pauseClearAttempted=$false;pauseCleared=$false;startDispatched=$false;possiblePrepareDispatch=$false;possiblePauseWrite=$false;possiblePauseClear=$false;possibleStartDispatch=$false;possiblePickup=$false;startOutcomeUncertain=$false;firstRefusal='none';latestSecondary='none';failureObservation=[pscustomobject]@{schema=1;capture='unavailable';atUtc=[DateTime]::UtcNow.ToString('o')} } }
+    Assert-RunnerOwnerOperation $Record
+    $interrupted=$Record.outcome -cin @('in-progress','interrupted')
+    $possibleStart=$Record.startDispatched -or ($interrupted -and $Record.stage -ceq 'start-dispatching')
+    $possibleClear=$Record.pauseClearAttempted -or ($interrupted -and $Record.stage -ceq 'start-dispatching')
+    return [pscustomobject][ordered]@{ stage=$Record.stage;outcome=$Record.outcome;startedUtc=$Record.startedUtc;completedUtc=$Record.completedUtc;imageVerified=$Record.imageVerified;prepareDispatched=$Record.prepareDispatched;pauseClearAttempted=$Record.pauseClearAttempted;pauseCleared=$Record.pauseCleared;startDispatched=$Record.startDispatched;possiblePrepareDispatch=($Record.prepareDispatched -or ($interrupted -and $Record.stage -ceq 'prepare-dispatching'));possiblePauseWrite=($Record.pauseWriteDispatched -or ($interrupted -and $Record.stage -ceq 'pause-write-dispatching'));possiblePauseClear=$possibleClear;possibleStartDispatch=$possibleStart;possiblePickup=($possibleClear -or $possibleStart);startOutcomeUncertain=($Record.startOutcomeUncertain -or ($interrupted -and ($possibleClear -or $possibleStart)));firstRefusal=$Record.firstRefusal;latestSecondary=$Record.latestSecondary;failureObservation=$Record.failureObservation }
 }
 
 function Get-RunnerBytesEvidence([byte[]] $Bytes) {

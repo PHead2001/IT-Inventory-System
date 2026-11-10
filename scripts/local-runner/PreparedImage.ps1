@@ -268,7 +268,7 @@ function Assert-RunnerPreparationAuthorized {
         -not (Test-Path -LiteralPath (Join-Path $script:RunnerRoot 'stop.requested'))) { throw 'Preparation requires the explicit idle owner control with suspended pickup.' }
 }
 
-function Invoke-RunnerPrepareImageCore {
+function Invoke-RunnerPrepareImageCore([switch] $DeferResume) {
     Assert-Administrator
     Assert-SecureRoot
     Assert-RunnerTransitionClear
@@ -316,10 +316,10 @@ function Invoke-RunnerPrepareImageCore {
             finally { Close-RunnerImageLeases; $script:RunnerPreparationAuthorized = $false }
         }
     } finally { Exit-RunnerLock $lifetime }
-    if ($resumeActive) {
+    if ($resumeActive -and -not $DeferResume) {
         Start-RunnerSupervisorCore
         Write-Host 'Prepared image published; active pickup resumed.'
-    } else { Write-Host 'Prepared image published. Previous suspended/inactive pickup remains suspended.' }
+    } else { Write-Host 'Prepared image published. Pickup remains suspended.' }
 }
 
 function Assert-RunnerImageDiskUnreferenced([string] $Path) {

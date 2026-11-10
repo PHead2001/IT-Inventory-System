@@ -1,15 +1,15 @@
 {
   "schema": 1,
   "tag": "it-inventory-local-runner-v1",
-  "version": "2026-11-09.2",
+  "version": "2026-11-09.3",
   "files": [
     {
       "name": "Common.ps1",
-      "hash": "BDFC5C6F657E883A6A39B4C7728F6E856D2D89EDEA7519E2A7DE18AC124817FC"
+      "hash": "CF48F5B457FF8372419AC36D19A6D5FB4A4C4CB1B7A2AEE1F2EC1FE7E586628A"
     },
     {
       "name": "Runner.ps1",
-      "hash": "631A97CEEF32533D1C7C3A171CC54D8AC953FABA6FB8316BC2EE15A086D360A6"
+      "hash": "7CB4A4C233A20CD2BE75C662FB2414B0A48408A4E2EAE1921043FF081800E28D"
     },
     {
       "name": "Guest.Network.ps1",
@@ -29,7 +29,7 @@
     },
     {
       "name": "PreparedImage.ps1",
-      "hash": "E26EAACE6490DC9094317AADB1D32797E37DCA62CA94C9BA5FD5D8F731F6E189"
+      "hash": "6D33EA19A7BD6CDBA04C25BA56C8EA02646961C00FF32A1D4541BC088A4B260A"
     },
     {
       "name": "Image.Prepare.sh",
@@ -65,7 +65,7 @@
     },
     {
       "name": "Update.ps1",
-      "hash": "2A906B885C74BDE4C59A2564ED87E689AED18C0C6BCD92F5B67AE2E49AC95F75"
+      "hash": "175E0A03AE1499C0F3F7260B8839E2CAEB578EB3735376D2AA9B315BB90238BF"
     },
     {
       "name": "Setup.cmd",

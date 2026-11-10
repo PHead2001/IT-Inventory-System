@@ -15,6 +15,78 @@ The design runs one repository-scoped, just-in-time GitHub runner in one fresh U
 
 ## Unattended recovery and capacity status
 
+### Owner validation and explicit resume
+
+After a reviewed bundle update, invoke the **installed** `bin/Runner.ps1` in a
+fresh administrator process with `-Action OwnerStatus`, or with
+`-Action ResumeAfterValidation -ExpectedBundleSha256 <reviewed-manifest-SHA256>`.
+These actions refuse checkout execution, including a byte-identical checkout.
+They do not install a bundle. Pending updates still require the existing Update
+resume control; an owner-operation receipt cannot resume or replay an update.
+
+Both actions emit one JSON result, bounded to 4096 UTF-8 bytes, with ancillary
+PowerShell streams suppressed. Resume exits zero only for completed dispatch
+and running-supervisor readback; refusal or uncertainty exits 3. Status projects
+independent installed/configuration/task/transition/JIT/pause/session findings,
+using `unknown` when evidence is unavailable. It reads image metadata only:
+`imageNeedsValidation` remains true, even if a historical owner receipt reports
+`imageVerified`. Status does not read credentials, hash the image disk, probe
+the network, or change files.
+`tasks: valid` certifies task definitions, not that pickup is running.
+`supervisorState` and `watchdogState` independently report
+`running`, `ready`, `queued`, `disabled` or `unknown` from those same validated
+task objects. These known states survive an unavailable state mutex; invalid
+task identities produce `unknown` rather than projecting their operational state.
+
+Resume captures the current protected canonical pause marker under owner
+control. Its same-handle hash, byte length, lossless volume/file identity and
+creation/write timestamps establish continuity. Old creation times are valid;
+no historical installer time window grants authority. Resume requires active
+configuration, exact coherent installed bytes, valid task identities, clear
+lifecycle/JIT barriers and authoritative idle inventory. Full image binding,
+hash and two successive MTU-validated clone proofs are required. An absent or
+intact stale image permits one canonical preparation with automatic resume
+deferred; corruption refuses. Configuration and installation remain unchanged.
+The canonical pause writer records each owned replacement before proceeding.
+
+Before its sole Start, resume repeats admission and pause continuity, retains
+identity-bound read leases on the verified image disk, selected receipt,
+selector and configuration, and publishes Start intent under the state
+mutex. It then releases the supervisor lifetime mutex while retaining owner
+control and the state mutex through canonical Start. The new supervisor can
+acquire its lifetime and wait for the state handoff. Readback permits immediate
+legitimate job pickup; it does not require the runner to remain idle. A failed
+or uncertain Start is neither retried nor followed by compensating Stop.
+Metadata leases begin only after canonical preparation/publication completes.
+Their bounded same-handle snapshots must match the full validated image proof,
+and both metadata identities remain protected through running readback.
+
+Protected `owner-operation.json` is strict schema 1, at most 16 KiB, atomically
+published and validated on readback. It is evidence, never a replay journal or
+authority to remove Stop. `*-dispatching` records intent before the call;
+`prepareDispatched` and `startDispatched` report actual attempts. Interrupted
+intent projects possible dispatch and pause clearing, even when the last
+persisted attempt flags are false. `pauseClearAttempted` begins at the native
+delete call; `pauseCleared` means that call succeeded. Scheduler dispatch remains
+separate: a failure after successful pause deletion can report `pauseCleared`
+true and `startDispatched` false. Any attempted deletion or interrupted Start
+intent projects `possiblePauseClear` and `possiblePickup`; an unsuccessful
+resume then reports `startOutcomeUncertain`, because system recovery may pick
+up after Stop is gone. A throwing deletion never claims successful clearing.
+Completed resume requires actual clearing, scheduler attempt and running
+readback. Known publication or lifetime release failures before deletion retain
+both actual attempt flags false and no pickup uncertainty. A fresh explicit
+owner admission may replace an interrupted receipt; it never replays it.
+
+`failureObservation` retains only the first valid attached canonical observation
+from the current operation, bounded to 2048 UTF-8 bytes: fixed classifications,
+Boolean checks, UTC time and validated timing/counters. Stale, future, malformed,
+oversized or absent attachments become explicit `unavailable`. Secondary receipt
+publication errors do not replace the initiating observation. No raw exception,
+provider output, credentials, paths or cleanup-journal inference are exposed.
+These classifications describe observations, not a proven underlying cause.
+Offline composition tests do not certify a live preparation or continuous pickup.
+
 Both SYSTEM tasks explicitly allow starting on battery power and keep running
 when AC power disconnects. Their own CPU/RAM admission, hard session deadline,
 network guard, cleanup and explicit Stop controls remain in force. Windows
