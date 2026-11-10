@@ -131,8 +131,8 @@ function New-RunnerFailureObservation([string] $Origin, [string] $Reason, $State
     [string] $StopReason = '', [string] $Expiry = '', [hashtable] $Checks = @{}) {
     $record = [ordered]@{ schema = 1; capture = 'complete' }
     try {
-        $origins = @('session-initial', 'session-current', 'session-guardian', 'guardian-catch', 'watchdog', 'recovery-plan', 'recovery-dispatch')
-        $reasons = @('deadline', 'stop', 'guardian-identity', 'guardian-failed', 'recovery-expiry', 'guard-exception', 'watchdog-condition', 'recovery-cleanup', 'dispatch-deadline', 'provider-uncertain')
+        $origins = @('session-initial', 'session-current', 'session-guardian', 'guardian-catch', 'watchdog', 'recovery-plan', 'recovery-dispatch', 'image-preparation')
+        $reasons = @('deadline', 'stop', 'guardian-identity', 'guardian-failed', 'recovery-expiry', 'guard-exception', 'watchdog-condition', 'recovery-cleanup', 'dispatch-deadline', 'provider-uncertain', 'image-command')
         $stops = @('', 'none', 'instance-marker', 'state-absent', 'claim-mismatch', 'purpose-ineligible', 'unavailable')
         $expiries = @('', 'hard-deadline', 'outage-deadline', 'guardian-progress-expired')
         $record.origin = if ($Origin -cin $origins) { $Origin } else { 'other' }
@@ -173,6 +173,60 @@ function New-RunnerFailureObservation([string] $Origin, [string] $Reason, $State
     }
 }
 
+function Get-RunnerImageCommandFailureObservation($State) {
+    # Metadata only. A failed SSH command must not wait for a provider/recovery
+    # operation before retaining the state actually available at capture time.
+    $mutex = $null
+    try {
+        $mutex = Enter-RunnerLock -FailFast
+        Assert-SecureRoot
+        $path = Assert-OwnedPath $script:RunnerStatePath
+        Assert-RunnerProtectedPath $path
+        $item = Get-Item -LiteralPath $path -Force -ErrorAction Stop
+        if ($item.PSIsContainer -or ($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -or $item.Length -gt 65536) { throw 'Invalid diagnostic state file.' }
+        # Get-RunnerState takes this same reentrant mutex across File.Replace's
+        # existence/read window. Do not replace it with an unlocked JSON read.
+        $current = Get-RunnerState
+        if ($State -is [Collections.IDictionary]) { $State = [pscustomobject]$State }
+        Assert-StateIdentity $State
+        Assert-StateIdentity $current
+        if ($State.purpose -cne 'prepare' -or $current.purpose -cne 'prepare' -or
+            [guid]$State.vmId -ne [guid]$current.vmId -or $current.layoutVersion -ne 2) { throw 'Image diagnostic session differs.' }
+        foreach ($name in @('tag', 'vmName', 'instancePath', 'createdUtc', 'deadlineUtc', 'supervisorStartUtc', 'resourceLabel', 'guestMac')) {
+            if ($State.$name -isnot [string] -or $current.$name -isnot [string] -or $State.$name -cne $current.$name) { throw 'Image diagnostic owner differs.' }
+        }
+        foreach ($name in @('claimMode', 'pilotClaim', 'runnerLaunch', 'runnerId', 'imageCandidate')) {
+            if ($current.PSObject.Properties.Name -contains $name) { throw 'Image diagnostic carries job authorization.' }
+        }
+        foreach ($owner in @($State, $current)) {
+            if (($owner.supervisorPid -isnot [int] -and $owner.supervisorPid -isnot [long]) -or $owner.supervisorPid -lt 1 -or $owner.supervisorPid -gt [int]::MaxValue -or
+                [DateTime]::Parse($owner.supervisorStartUtc).ToUniversalTime().ToString('o') -cne $owner.supervisorStartUtc) { throw 'Image diagnostic process identity is invalid.' }
+        }
+        if ($State.supervisorPid -ne $current.supervisorPid -or
+            ($current.guardianPid -isnot [int] -and $current.guardianPid -isnot [long]) -or $current.guardianPid -lt 1 -or $current.guardianPid -gt [int]::MaxValue -or
+            $current.guardianStartUtc -isnot [string] -or [DateTime]::Parse($current.guardianStartUtc).ToUniversalTime().ToString('o') -cne $current.guardianStartUtc) { throw 'Image diagnostic process owner changed.' }
+        $recovery = $current.networkRecovery
+        $binding = $recovery.binding
+        if ($recovery.schema -isnot [int] -or $recovery.schema -ne 1 -or $binding -isnot [pscustomobject] -or
+            (@($binding.PSObject.Properties.Name | Sort-Object) -join ',') -cne 'adapterId,claimHash,mac,switchId,switchName,vmId,vmName' -or
+            $binding.claimHash -isnot [string] -or $binding.claimHash -cnotmatch '^[0-9a-f]{64}$' -or
+            $binding.claimHash -cne (Get-RunnerRecoveryClaimHash $current) -or [guid]$binding.vmId -ne [guid]$current.vmId -or $binding.vmName -cne $current.vmName -or
+            $binding.mac -isnot [string] -or $binding.mac -cnotmatch '^02[0-9A-F]{10}$' -or $binding.mac -ine $current.guestMac -or
+            $binding.adapterId -isnot [string] -or [string]::IsNullOrEmpty($binding.adapterId) -or $binding.adapterId.Length -gt 256 -or
+            [guid]$binding.switchId -eq [guid]::Empty -or $binding.switchName -cne $script:RunnerSwitch -or
+            $recovery.phase -isnot [string] -or $recovery.phase -cnotin @('healthy', 'quarantining', 'isolated', 'applying', 'verified', 'connecting', 'resuming', 'probing', 'failed', 'sealed-preparation') -or
+            $recovery.hardDeadlineUtc -cne $current.deadlineUtc) { throw 'Image diagnostic recovery binding differs.' }
+        $record = New-RunnerFailureObservation 'image-preparation' 'image-command' $current (Get-RunnerRecoveryNow)
+        $projected = ConvertTo-Json -InputObject $record -Depth 4 -Compress | ConvertFrom-Json
+        Assert-RunnerFailureRecord $projected
+        return $record
+    } catch {
+        return [ordered]@{ schema = 1; capture = 'unavailable'; atUtc = (Get-RunnerRecoveryNow).ToUniversalTime().ToString('o') }
+    } finally {
+        if ($null -ne $mutex) { try { Exit-RunnerLock $mutex } catch {} }
+    }
+}
+
 function New-RunnerObservedFailure([string] $Message, $Observation) {
     $failure = [Management.Automation.RuntimeException]::new($Message)
     try { $failure.Data['runnerFailureObservation'] = $Observation }
@@ -183,8 +237,8 @@ function New-RunnerObservedFailure([string] $Message, $Observation) {
 function Assert-RunnerFailureRecord($Record) {
     $enums = @{
         capture = @('complete', 'unavailable')
-        origin = @('session-initial', 'session-current', 'session-guardian', 'guardian-catch', 'watchdog', 'recovery-plan', 'recovery-dispatch', 'other')
-        reason = @('deadline', 'stop', 'guardian-identity', 'guardian-failed', 'recovery-expiry', 'guard-exception', 'watchdog-condition', 'recovery-cleanup', 'dispatch-deadline', 'provider-uncertain', 'other')
+        origin = @('session-initial', 'session-current', 'session-guardian', 'guardian-catch', 'watchdog', 'recovery-plan', 'recovery-dispatch', 'image-preparation', 'other')
+        reason = @('deadline', 'stop', 'guardian-identity', 'guardian-failed', 'recovery-expiry', 'guard-exception', 'watchdog-condition', 'recovery-cleanup', 'dispatch-deadline', 'provider-uncertain', 'image-command', 'other')
         stopReason = @('', 'none', 'instance-marker', 'state-absent', 'claim-mismatch', 'purpose-ineligible', 'unavailable', 'other')
         expiry = @('', 'hard-deadline', 'outage-deadline', 'guardian-progress-expired', 'other')
         purpose = @('job', 'prepare', 'verify-image', 'other')

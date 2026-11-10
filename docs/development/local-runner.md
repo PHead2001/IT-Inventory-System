@@ -681,6 +681,17 @@ fixed stage marker (or `unknown`), exit code, receipt length, and bounded,
 sanitized stderr; that detail remains local and is not copied to generic
 failure records or public output.
 
+An image-command failure can carry the existing bounded failure observation
+with `origin=image-preparation` and `reason=image-command`. Its first capture is
+metadata-only and fail-fast: it validates the matching current preparation
+session, VM, instance, owner processes, and recovery binding before the existing
+private artifact writer's liveness wait. If that capture is unavailable, one
+later metadata-only recapture may retain recovery counters completed meanwhile;
+`atUtc` then marks the capture time, not necessarily the SSH exit time. The
+validated enum and numeric bounds remain in force. Capture failure cannot replace
+the original SSH exception or interrupt normal cleanup. This diagnostic does
+not establish a physical network cause.
+
 This is diagnostic instrumentation. The Boolean success policy, generation/nonce
 checks, native commands, timeouts, isolation rules and outage deadline are unchanged.
 Offline worker, recovery and failure-observation contracts prove mocked behavior;

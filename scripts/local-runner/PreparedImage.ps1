@@ -401,8 +401,18 @@ function Invoke-RunnerImageBuild($State, $Config) {
         $diagnostics = ConvertTo-RunnerDiagnosticText $result.ErrorOutput
         $diagnostics = $diagnostics.Substring(0, [Math]::Min(4096, $diagnostics.Length))
         $failure = [InvalidOperationException]::new('IMAGE_PREPARATION_COMMAND_FAILED')
+        try { $failure.Data['runnerFailureObservation'] = Get-RunnerImageCommandFailureObservation $State }
+        catch { $failure.Data['runnerFailureObservation'] = [ordered]@{ schema = 1; capture = 'unavailable'; atUtc = [DateTime]::UtcNow.ToString('o') } }
         $failure.Data['runnerImagePreparation'] = [ordered]@{ exitCode = $result.ExitCode; stderr = $diagnostics; receiptBytes = [Text.Encoding]::UTF8.GetByteCount($result.Output) }
-        Write-RunnerImagePreparationFailure $State $binding.bundleHash $failure.Data['runnerImagePreparation']
+        try { Write-RunnerImagePreparationFailure $State $binding.bundleHash $failure.Data['runnerImagePreparation'] } catch {}
+        # The artifact writer already waited for liveness. A single later
+        # metadata read may retain completed recovery counters; its own atUtc
+        # honestly marks that later capture, not the SSH failure/trigger time.
+        try {
+            if ($failure.Data['runnerFailureObservation'].capture -ceq 'unavailable') {
+                $failure.Data['runnerFailureObservation'] = Get-RunnerImageCommandFailureObservation $State
+            }
+        } catch {}
         throw $failure
     }
     $guest = $result.Output | ConvertFrom-Json

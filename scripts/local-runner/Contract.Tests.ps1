@@ -132,6 +132,8 @@ if ($LASTEXITCODE -ne 0) { throw 'Network.Integration.Tests.ps1 failed.' }
 if ($LASTEXITCODE -ne 0) { throw 'Runner.Contention.Tests.ps1 failed.' }
 & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'Failure.Observation.Tests.ps1')
 if ($LASTEXITCODE -ne 0) { throw 'Failure.Observation.Tests.ps1 failed.' }
+& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'Image.Command.Observation.Tests.ps1')
+if ($LASTEXITCODE -ne 0) { throw 'Image.Command.Observation.Tests.ps1 failed.' }
 & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'Session.Failure.Tests.ps1')
 if ($LASTEXITCODE -ne 0) { throw 'Session.Failure.Tests.ps1 failed.' }
 & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'Prepared.Failure.Tests.ps1')

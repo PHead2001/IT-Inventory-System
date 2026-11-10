@@ -1,11 +1,11 @@
 {
   "schema": 1,
   "tag": "it-inventory-local-runner-v1",
-  "version": "2026-11-06.1",
+  "version": "2026-11-09.1",
   "files": [
     {
       "name": "Common.ps1",
-      "hash": "51280E1FA21A752E27C9FA451AC7CD90105A4B8192B0FA0510BBFFD452ADCDAC"
+      "hash": "AAB996D3EEF77D426BA82F14ACD5DCB9C438B5F32C9A84B04F6648CB638C388B"
     },
     {
       "name": "Runner.ps1",
@@ -29,7 +29,7 @@
     },
     {
       "name": "PreparedImage.ps1",
-      "hash": "7A580B8D58AD102097C08C087E14A59BF786571EB64D9C273BD6E60F4E855E0C"
+      "hash": "E26EAACE6490DC9094317AADB1D32797E37DCA62CA94C9BA5FD5D8F731F6E189"
     },
     {
       "name": "Image.Prepare.sh",
