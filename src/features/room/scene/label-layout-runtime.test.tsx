@@ -1482,7 +1482,11 @@ describe('unified room label registry', () => {
         [dimension]:
           (dimension === 'width' ? 40 : 32) + (++reads % 2 ? delta : 0),
       }));
-      const registry = createRoomLabelRegistry(vi.fn()),
+      // This matrix proves dimension tolerance and the four-pass cap. Elapsed
+      // time has separate budget/continuation tests and must not stop it early.
+      const registry = createRoomLabelRegistry(vi.fn(), undefined, undefined, {
+          clock: () => 0,
+        }),
         cleanup = registry.connect(canvas);
       registry.register('fractional', item.element, item.leader, {
         priority: 4,

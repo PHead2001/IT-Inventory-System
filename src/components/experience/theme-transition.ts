@@ -405,7 +405,9 @@ export function revealTheme({
                 },
               ];
           const animation = root.animate(keyframes, {
-            duration: automatic ? 180 : 500,
+            // Leave native capture/play readiness and completion-delivery margin
+            // inside the unchanged 650ms total lease (Audit W12: 450–600ms).
+            duration: automatic ? 180 : 450,
             easing:
               getComputedStyle(root)
                 .getPropertyValue('--ease-workspace')

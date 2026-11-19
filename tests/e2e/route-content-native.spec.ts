@@ -59,7 +59,7 @@ const fixtures = {
 async function fixtureScript(
   initial: FixturePage | null,
   baseline = false,
-  forcedIncoming = false,
+  forcedIncomingScale: 0.5 | 1 | null = null,
 ) {
   const result = await build({
     stdin: {
@@ -98,11 +98,12 @@ async function fixtureScript(
             } else {
               cleanup = routeContentMotion(instance, valid, () => state.proof.errors.push('Body fallback'));
               if (cleanup) cleanups.push(cleanup);
-              if (${forcedIncoming}) {
-                // Negative control recreates the prior incoming size override.
+              if (${forcedIncomingScale !== null}) {
+                // Scale 1 recreates the prior incoming size override; scale 0.5
+                // deliberately distorts even a bitmap retaining its capture size.
                 // Opacity/translation and the corrected group/old path stay real.
                 const captured = getComputedStyle(document.documentElement, '::view-transition-group('+instance.name+')');
-                const box = {width:captured.width, height:captured.height};
+                const box = {width:captured.width, height:(Number.parseFloat(captured.height)*${forcedIncomingScale ?? 1})+'px'};
                 const forced = document.documentElement.animate([box,box], {duration:200,fill:'both',pseudoElement:'::view-transition-new('+instance.name+')'});
                 cleanups.push(()=>forced.cancel());
               }
@@ -172,7 +173,7 @@ async function mount(
   page: Page,
   initial: FixturePage | null,
   baseline = false,
-  forcedIncoming = false,
+  forcedIncomingScale: 0.5 | 1 | null = null,
 ) {
   const css = await readFile(resolve('src/app/globals.css'), 'utf8');
   const start = css.indexOf('@keyframes route-content-in');
@@ -187,14 +188,14 @@ async function mount(
   await page.setViewportSize({ width: 1280, height: 900 });
   await page.emulateMedia({ reducedMotion: 'no-preference' });
   await page.setContent(
-    `<style>:root{--motion-route:${token('--motion-route')};--ease-workspace:${token('--ease-workspace')}}html,body{margin:0;background:#000;overflow:hidden} ${css.slice(start, end)} ${forcedIncoming ? '::view-transition-new(.route-content){object-fit:fill;}' : ''}</style><div id="root"></div>`,
+    `<style>:root{--motion-route:${token('--motion-route')};--ease-workspace:${token('--ease-workspace')}}html,body{margin:0;background:#000;overflow:hidden} ${css.slice(start, end)} ${forcedIncomingScale !== null ? '::view-transition-new(.route-content){object-fit:fill;}' : ''}</style><div id="root"></div>`,
   );
   await page.locator('html').evaluate((element) => {
     element.dataset.motion = 'full';
     element.dataset.routeMotionPrivate = 'true';
   });
   await page.addScriptTag({
-    content: await fixtureScript(initial, baseline, forcedIncoming),
+    content: await fixtureScript(initial, baseline, forcedIncomingScale),
   });
   await page.waitForFunction(() => Boolean(window.routeGeometry?.begin));
   if (initial)
@@ -524,13 +525,17 @@ for (const direction of ['forward', 'back'] as const) {
   }
 }
 for (const change of ['shrink', 'grow'] as const) {
-  test(`forced incoming sizing negative control distorts fixed hero pixels after trailing content ${change}s`, async ({
-    page,
-  }, testInfo) => {
+  const title =
+    change === 'shrink'
+      ? 'forced incoming sizing negative control distorts fixed hero pixels after trailing content shrinks'
+      : 'half-height incoming oracle detects deliberately distorted hero pixels after trailing content grows';
+  test(title, async ({ page }, testInfo) => {
     const old = fixtures.forward.old;
     const next = { ...fixtures.forward.next, height: 7320 };
     const height = next.height + (change === 'shrink' ? -880 : 880);
-    await mount(page, old, false, true);
+    const forcedScale = change === 'shrink' ? 1 : 0.5;
+    const forcedHeight = next.height * forcedScale;
+    await mount(page, old, false, forcedScale);
     await begin(page, next);
     const before = await page.locator('[data-hero]').boundingBox();
     await page.evaluate(
@@ -550,7 +555,8 @@ for (const change of ['shrink', 'grow'] as const) {
     const incoming = styles.find(
       (style) => style.pseudo === '::view-transition-new(geometry-body)',
     )!;
-    expect(Number.parseFloat(incoming.height)).toBe(next.height);
+    expect(Number.parseFloat(incoming.height)).toBe(forcedHeight);
+    expect(Number.parseFloat(incoming.width)).toBe(next.width);
     expect(incoming.objectFit).toBe('fill');
     const matrix = incoming.transform
       .slice(incoming.transform.indexOf('(') + 1, -1)
@@ -562,8 +568,32 @@ for (const change of ['shrink', 'grow'] as const) {
         { x: next.x + 90, y: 790 + matrix[5], width: 32, height: 24 },
         'blue',
       ),
-      'The old forced height must fail the natural fixed-hero landmark requirement',
+      'The forced height must fail the natural fixed-hero landmark requirement',
     ).toBeLessThan(100);
+    if (change === 'grow') {
+      expect(forcedHeight).not.toBe(next.height);
+      expect(forcedHeight).not.toBe(height);
+      // A growing native bitmap can retain its captured extent. Require actual
+      // displaced pixels within the band bounded by captured and live extents,
+      // rather than assuming that computed CSS proves bitmap distortion.
+      const minScale = forcedHeight / Math.max(next.height, height);
+      const maxScale = forcedHeight / Math.min(next.height, height);
+      const minY = next.y + (790 - next.y) * minScale + matrix[5];
+      const maxY = next.y + (790 - next.y + 24) * maxScale + matrix[5];
+      expect(
+        pixels(
+          png,
+          {
+            x: next.x + 90,
+            y: Math.floor(minY) - 1,
+            width: 32,
+            height: Math.ceil(maxY) - Math.floor(minY) + 2,
+          },
+          'blue',
+        ),
+        'The deliberately compressed third landmark remains visibly displaced',
+      ).toBeGreaterThan(32 * 24 * minScale * 0.8);
+    }
     await page.evaluate(() => window.routeGeometry.release());
     await page.waitForFunction(
       () => window.routeGeometry.proof.finished,
