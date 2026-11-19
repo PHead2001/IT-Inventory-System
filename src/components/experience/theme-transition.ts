@@ -392,6 +392,11 @@ export function revealTheme({
           stop();
           return;
         }
+        const epoch = document.timeline?.currentTime;
+        if (typeof epoch !== 'number' || !Number.isFinite(epoch)) {
+          stop();
+          return;
+        }
         for (const { name, rect } of captured) {
           const pseudo = `::view-transition-new(${name})`;
           const keyframes = automatic
@@ -405,8 +410,7 @@ export function revealTheme({
                 },
               ];
           const animation = root.animate(keyframes, {
-            // Leave native capture/play readiness and completion-delivery margin
-            // inside the unchanged 650ms total lease (Audit W12: 450–600ms).
+            // Keep the nominal reveal inside the original 650ms total lease.
             duration: automatic ? 180 : 450,
             easing:
               getComputedStyle(root)
@@ -416,13 +420,20 @@ export function revealTheme({
             pseudoElement: pseudo,
           });
           animations.push(animation);
+          if (!lease.current() || cleaned) {
+            animation.cancel();
+            return;
+          }
           if (
             (animation.effect as KeyframeEffect | null)?.pseudoElement !==
-            pseudo
+              pseudo ||
+            animation.playState === 'idle'
           ) {
             stop();
             return;
           }
+          // Anchor every effect before native play readiness can defer its clock.
+          animation.startTime = epoch;
         }
       })
       .catch(stop);

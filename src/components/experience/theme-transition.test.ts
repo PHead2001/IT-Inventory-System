@@ -82,6 +82,8 @@ function native() {
     (_frames: Keyframe[], options: KeyframeAnimationOptions) =>
       ({
         effect: { pseudoElement: options.pseudoElement },
+        playState: 'running',
+        startTime: null,
         cancel: vi.fn(),
       }) as unknown as Animation,
   );
@@ -101,6 +103,10 @@ beforeEach(() => {
   Object.defineProperty(document, 'hidden', {
     value: false,
     configurable: true,
+  });
+  Object.defineProperty(document, 'timeline', {
+    configurable: true,
+    get: () => ({ currentTime: 100 }),
   });
   Object.defineProperty(document, 'startViewTransition', {
     value: () => {},
@@ -184,6 +190,93 @@ it('owns the actual native handle, animates only new disjoint snapshots for 450m
   expect(document.querySelector('canvas')).toBe(canvas);
   expect(frames.pending.size).toBe(0);
 });
+it.each([0, 123.5])(
+  'anchors every current effect to one document epoch %s before play readiness',
+  async (epoch) => {
+    const { jobs, animate } = native();
+    const clock = vi.fn(() => epoch);
+    vi.spyOn(document, 'timeline', 'get').mockReturnValue({
+      get currentTime() {
+        return clock();
+      },
+    } as DocumentTimeline);
+    revealTheme({ apply: () => {}, changed: true, automatic: false });
+    expect(clock).not.toHaveBeenCalled();
+    jobs[0].update();
+    jobs[0].updated.resolve();
+    jobs[0].ready.resolve();
+    await Promise.resolve();
+    expect(clock).toHaveBeenCalledOnce();
+    expect(animate.mock.results.length).toBeGreaterThan(1);
+    for (const result of animate.mock.results)
+      expect((result.value as Animation).startTime).toBe(epoch);
+    jobs[0].finished.resolve();
+    await Promise.resolve();
+    expect(jobs[0].skipTransition).not.toHaveBeenCalled();
+  },
+);
+it.each([null, undefined, NaN, Infinity, -Infinity, '100'])(
+  'applies intent and retires the lease when the document epoch is %s',
+  async (epoch) => {
+    const { jobs, animate } = native();
+    vi.spyOn(document, 'timeline', 'get').mockReturnValue({
+      currentTime: epoch,
+    } as DocumentTimeline);
+    const apply = vi.fn();
+    revealTheme({ apply, changed: true, automatic: false });
+    jobs[0].update();
+    jobs[0].updated.resolve();
+    jobs[0].ready.resolve();
+    await Promise.resolve();
+    expect(animate).not.toHaveBeenCalled();
+    expect(jobs[0].skipTransition).toHaveBeenCalledOnce();
+    expect(apply).toHaveBeenCalledTimes(2);
+    expect(frames.pending.size).toBe(0);
+    expect(
+      document.querySelector(
+        '[data-theme-region],.experience-theme-background',
+      ),
+    ).toBeNull();
+  },
+);
+it.each(['idle', 'setter failure'] as const)(
+  'cancels registered effects and retires the lease on %s',
+  async (reason) => {
+    const { jobs, animate } = native();
+    const ordinary = animate.getMockImplementation()!;
+    const assign = vi.fn(() => {
+      throw new Error('Unsupported animation clock');
+    });
+    animate
+      .mockImplementationOnce(ordinary)
+      .mockImplementationOnce((keyframes, options) => {
+        const animation = ordinary(keyframes, options);
+        Object.defineProperty(
+          animation,
+          reason === 'idle' ? 'playState' : 'startTime',
+          reason === 'idle' ? { value: 'idle' } : { set: assign },
+        );
+        return animation;
+      });
+    revealTheme({ apply: () => {}, changed: true, automatic: false });
+    jobs[0].update();
+    jobs[0].updated.resolve();
+    jobs[0].ready.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(animate).toHaveBeenCalledTimes(2);
+    expect(assign).toHaveBeenCalledTimes(reason === 'idle' ? 0 : 1);
+    for (const result of animate.mock.results)
+      expect((result.value as Animation).cancel).toHaveBeenCalledOnce();
+    expect(jobs[0].skipTransition).toHaveBeenCalledOnce();
+    expect(frames.pending.size).toBe(0);
+    expect(
+      document.querySelector(
+        '[data-theme-region],.experience-theme-background',
+      ),
+    ).toBeNull();
+  },
+);
 it.each([
   'media resize',
   'media position',
