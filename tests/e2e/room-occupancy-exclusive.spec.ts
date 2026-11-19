@@ -716,7 +716,7 @@ test('375px populated room shows every occupied target with passive badges and s
           // Measure the restored presentation, after the entrance spring ends.
           if (
             element.dataset.springState !== 'open' ||
-            element.inert ||
+            element.hasAttribute('inert') ||
             css.transform !== 'none' ||
             css.opacity !== '1' ||
             element
