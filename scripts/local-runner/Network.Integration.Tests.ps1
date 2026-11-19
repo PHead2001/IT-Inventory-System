@@ -1,6 +1,6 @@
 # Offline integration: TEMP state and fixed local subprocesses only. No VM,
 # credentials, GitHub or guest network operations are invoked.
-param([string] $CandidateRoot = $PSScriptRoot, [switch] $DispatchAdmissionOnly)
+param([string] $CandidateRoot = $PSScriptRoot, [switch] $DispatchAdmissionOnly, [string] $CasePattern = '*')
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'Test.FileHash.ps1')
@@ -14,9 +14,10 @@ $script:realLaunchDecision = (Get-Command Get-RunnerLaunchDecision).ScriptBlock
 $script:RunnerGuardOutcome = $null
 $root = Join-Path ([IO.Path]::GetTempPath()) ('ITIR-integration-' + [guid]::NewGuid().ToString('N'))
 [void][IO.Directory]::CreateDirectory($root)
+$root = [IO.Path]::GetFullPath($root)
 $script:RunnerRoot = $root; $script:RunnerStatePath = Join-Path $root 'state.json'
 $script:checks = 0; $script:locked = $false
-function Check([string] $Name, [scriptblock] $Work) { if ($DispatchAdmissionOnly -and $Name -cne 'locked dispatch rejects quarantine races before any decision or durable handoff') { return }; & $Work; if ($script:fixtureStateDepth -ne 0 -or $script:locked) { throw 'Integration case leaked state recursion.' }; $script:checks++; Write-Host "PASS $Name" }
+function Check([string] $Name, [scriptblock] $Work) { if ($Name -notlike $CasePattern -or ($DispatchAdmissionOnly -and $Name -cne 'locked dispatch rejects quarantine races before any decision or durable handoff')) { return }; & $Work; if ($script:fixtureStateDepth -ne 0 -or $script:locked) { throw 'Integration case leaked state recursion.' }; $script:checks++; Write-Host "PASS $Name" }
 function Refuse([scriptblock] $Work) { $failed = $false; try { & $Work | Out-Null } catch { $failed = $true }; if (-not $failed) { throw 'Unsafe integration accepted.' } }
 # Windows state mutex recursion must retain locked=true until the outer release.
 $script:fixtureStateDepth = 0
@@ -47,7 +48,9 @@ function Write-RunnerJson($Path, $Value) {
     }
 }
 function Get-RunnerLaunchDecision($Journal, $Event, $RunnerId, $LaunchId, $ExitCode) {
-    $script:decisions++; return & $script:realLaunchDecision $Journal $Event $RunnerId $LaunchId $ExitCode
+    $script:decisions++; $decision = & $script:realLaunchDecision $Journal $Event $RunnerId $LaunchId $ExitCode
+    if ($null -ne $script:afterLaunchDecision) { & $script:afterLaunchDecision }
+    return $decision
 }
 function Invoke-RunnerTransitionCheckpoint($Name) { $script:checkpoints += $Name }
 function Assert-RunnerProtectedPath($Path) { [void](Assert-OwnedPath $Path) }
@@ -56,6 +59,7 @@ function Get-RunnerRecoveryNow { $script:now }
 function Save-Heartbeat { if ($script:locked) { throw 'Wait held state mutex.' }; $script:heartbeats++ }
 function Start-Sleep {
     if ($script:locked) { throw 'Wait held state mutex.' }
+    if ($script:blockOwnerWait) { $script:blockedOwnerWaits++; throw 'Fixture owner remained blocked.' }
     $script:sleeps++
     # The fixture clock is deliberately frozen and waits are simulated. Bound
     # unexpected retries here, outside the receipt transport catch, so a missing
@@ -68,7 +72,8 @@ function New-Fixture {
     $registrationPath = Join-Path $root 'jit-registration.json'
     if (Test-Path -LiteralPath $registrationPath) { Remove-Item -LiteralPath $registrationPath }
     $script:now = [DateTime]::UtcNow; $script:alive = $true; $script:deadGuardian = $false; $script:sleeps = 0; $script:heartbeats = 0; $script:queries = 0; $script:badReceipt = $false
-    $script:nextLockMutation = $null; $script:stateWrites = 0; $script:registrationWrites = 0; $script:decisions = 0; $script:checkpoints = @()
+    $script:preflightDelayMs = 0; $script:duringObservation = $null; $script:blockOwnerWait = $false; $script:blockedOwnerWaits = 0
+    $script:nextLockMutation = $null; $script:stateWrites = 0; $script:registrationWrites = 0; $script:decisions = 0; $script:checkpoints = @(); $script:afterLaunchDecision = $null
     $script:state = [pscustomobject]@{ layoutVersion = 2; tag = $script:RunnerTag; purpose = 'job'; resourceLabel = 'it-inventory-heavy'; vmName = 'ITIR-' + ('a' * 32); vmId = '00000000-0000-0000-0000-000000000001'; instancePath = Join-Path (Join-Path $root 'instances') ('ITIR-' + ('a' * 32)); deadlineUtc = $script:now.AddMinutes(5).ToString('o'); guardianPid = 42; guardianStartUtc = $script:now.ToString('o'); guardianReady = $true
         supervisorPid = 43; supervisorStartUtc = $script:now.ToString('o')
         networkRecovery = [pscustomobject]@{ phase = 'healthy'; generation = 0; failure = ''; hardDeadlineUtc = $script:now.AddMinutes(5).ToString('o'); episodeDeadlineUtc = ''; progressUtc = $script:now.ToString('o') } }
@@ -84,11 +89,11 @@ function New-Fixture {
 }
 function Get-HostNetworkFingerprint { throw 'Supervisor attempted competing network observation/repair.' }
 function Get-RunnerConfig { [pscustomobject]@{ guestIp = '172.30.240.2'; gatewayIp = '172.30.240.1'; repo = 'example/fixture'; activation = 'active'; label = 'it-inventory-ephemeral'; runnerGroupId = 1 } }
-function Get-VM { $script:vm }
+function Get-VM { if (-not $script:locked) { $script:now = $script:now.AddMilliseconds($script:preflightDelayMs) }; $script:vm | ConvertTo-Json -Depth 8 -Compress | ConvertFrom-Json }
 function Get-VMSwitch { $script:switch }
 function Get-VMNetworkAdapter { $script:adapter }
 function Get-VMNetworkAdapterExtendedAcl { $script:state.networkRules }
-function Get-RunnerNetworkObservation { $script:observation }
+function Get-RunnerNetworkObservation { if ($null -ne $script:duringObservation) { & $script:duringObservation }; $script:observation }
 function Suspend-VM { $script:vm.State = 'Paused'; $script:effects += 'pause' }
 function Disconnect-VMNetworkAdapter { $script:adapter.SwitchName = ''; $script:adapter.SwitchId = [guid]::Empty; $script:effects += 'disconnect' }
 function Invoke-GitHub { throw 'Receipt reattachment obtained another JIT or GitHub result.' }
@@ -105,6 +110,112 @@ function Invoke-RunnerReceiptNative($Executable, $Arguments) {
     }
 }
 try {
+    Check 'actual guarded boot after detached Off preflight is paused with durable resume intent' {
+        function Start-VM($VM,[switch]$AsJob){if(-not $AsJob -or [guid]$VM.Id -ne [guid]$script:state.vmId -or $script:vm.State -cne 'Off'){throw 'Boot provider fixture identity differs.'};$script:effects+='boot';$script:vm.State='Running';[pscustomobject]@{State='Completed'}}
+        function Receive-Job {}
+        function Remove-Job {}
+        foreach($condition in @('drift','unavailable')){
+            New-Fixture
+            foreach($name in @('networkRecovery','guardianPid','guardianStartUtc','guardianReady')){$script:state.PSObject.Properties.Remove($name)}
+            $script:state|Add-Member guestMac '02AABBCCDDEE';$script:state|Add-Member networkFingerprint ('a'*64)
+            $rule=[pscustomobject]@{Action='Deny';Direction='Outbound';Weight=2;LocalIPAddress='';RemoteIPAddress='';LocalPort='';RemotePort='';Protocol='';Stateful=$false}
+            $script:state|Add-Member networkRules @($rule)
+            $script:vm=[pscustomobject]@{Id=[guid]$script:state.vmId;Name=$script:state.vmName;Notes=$script:RunnerTag;Path=(Get-RunnerSessionPaths $script:state).vmPath;State='Off';AutomaticStartAction='Nothing';AutomaticStopAction='TurnOff'}
+            $script:switch=[pscustomobject]@{Id=[guid]'00000000-0000-0000-0000-000000000002';Name=$script:RunnerSwitch;SwitchType='Internal'}
+            $script:adapter=[pscustomobject]@{Id='fixture-adapter';VMId=$script:vm.Id;VMName=$script:vm.Name;MacAddress=$script:state.guestMac;DynamicMacAddressEnabled=$false;SwitchId=$script:switch.Id;SwitchName=$script:switch.Name}
+            $script:observation=[pscustomobject]@{fingerprint=('a'*64);rules=@($rule);observedUtc=$script:now.ToString('o')};$script:effects=@()
+            if(-not(Invoke-GuardCheck $script:state.vmName)){throw 'Boot race initial guardian admission failed.'}
+            $script:bootCondition=$condition
+            $script:duringObservation={
+                if($script:locked){throw 'Boot race observation retained state lock.'}
+                Start-GuardedVm $script:state
+                $script:duringObservation=$null
+                if($script:bootCondition -ceq 'unavailable'){$script:observation=$null}else{$script:observation.fingerprint='b'*64}
+            }
+            $p=Invoke-RunnerNetworkRecoveryTick $script:state.vmName (Get-RunnerConfig)
+            if($p.outcome.operation -cne 'quarantine' -or -not $script:state.networkRecovery.resumeRequired -or $script:vm.State -cne 'Paused' -or ($script:effects -join ',') -cne 'boot,pause,disconnect'){throw 'Detached Off preflight lost actual guarded-boot pause intent.'}
+        }
+    }
+    Check 'stalled capture cannot extend healthy owner admission and isolated checkpoints remain unready' {
+        $cleanup = (Get-Command Remove-RunnerInstance).ScriptBlock
+        $lifecycle = (Get-Command Assert-RunnerVmLifecycle).ScriptBlock
+        function Assert-Administrator {}
+        function Assert-SecureRoot {}
+        function Invoke-RunnerSupervisorRecovery {}
+        function Assert-RunnerVmLifecycle { $script:bootAdmissionEscapes++; throw 'Fixture boot passed admission; no provider was called.' }
+        function Remove-RunnerInstance($State) {
+            if ($State.vmName -cne $script:state.vmName -or [guid]$State.vmId -ne [guid]$script:state.vmId) { throw 'Fixture cleanup escaped identity.' }
+            $script:ownerCleanups++; $script:state = $null
+        }
+        try {
+          foreach ($mode in @('healthy', 'isolated', 'unsafe-counterfactual')) {
+            foreach ($consumer in @('session', 'jit', 'intent', 'dispatch', 'boot', 'watchdog')) {
+                New-Fixture
+                foreach ($name in @('networkRecovery', 'guardianPid', 'guardianStartUtc', 'guardianReady')) { $script:state.PSObject.Properties.Remove($name) }
+                foreach ($pair in @{ supervisorPid=$PID;supervisorStartUtc=$script:now.ToString('o');guestMac='02AABBCCDDEE';networkFingerprint=('a'*64) }.GetEnumerator()) { $script:state | Add-Member $pair.Key $pair.Value -Force }
+                $rule = [pscustomobject]@{Action='Deny';Direction='Outbound';Weight=2;LocalIPAddress='';RemoteIPAddress='';LocalPort='';RemotePort='';Protocol='';Stateful=$false}
+                $script:state | Add-Member networkRules @($rule) -Force
+                $script:vm = [pscustomobject]@{Id=[guid]$script:state.vmId;Name=$script:state.vmName;Notes=$script:RunnerTag;Path=(Get-RunnerSessionPaths $script:state).vmPath;State='Off'}
+                $script:switch = [pscustomobject]@{Id=[guid]'00000000-0000-0000-0000-000000000002';Name=$script:RunnerSwitch;SwitchType='Internal'}
+                $script:adapter = [pscustomobject]@{Id='fixture-adapter';VMId=$script:vm.Id;VMName=$script:vm.Name;MacAddress=$script:state.guestMac;DynamicMacAddressEnabled=$false;SwitchId=$script:switch.Id;SwitchName=$script:switch.Name}
+                $script:observation = [pscustomobject]@{fingerprint=('a'*64);rules=@($rule);observedUtc=$script:now.ToString('o')}; $script:effects=@()
+                if (-not (Invoke-GuardCheck $script:state.vmName)) { throw 'Admission race guardian setup failed.' }
+                $script:earlyAdmission = Get-RunnerJitAdmission $script:state
+                if ($consumer -ceq 'dispatch') { [void](Save-RunnerLaunchEvent $script:state 'intent' 0 ('c'*32) -Admission $script:earlyAdmission); [void](Save-RunnerLaunchEvent $script:state 'registered' 123) }
+                $script:vm.State='Running'
+                if ($mode -ceq 'isolated') {
+                    $script:state.networkRecovery.phase='isolated'; $script:state.guardianReady=$false
+                    $script:state.networkRecovery.episodeStartedUtc=$script:now.ToString('o'); $script:state.networkRecovery.episodeDeadlineUtc=$script:now.AddSeconds(120).ToString('o')
+                    $script:vm.State='Paused';$script:adapter.SwitchName='';$script:adapter.SwitchId=[guid]::Empty
+                }
+                $script:ownerMode=$mode;$script:ownerConsumer=$consumer;$script:raceStart=$script:now;$script:oldProgress=$script:state.networkRecovery.progressUtc
+                $script:ownerReturned=$false;$script:ownerCleanups=0;$script:bootAdmissionEscapes=0;$script:blockOwnerWait=$true
+                $script:stateWrites=0;$script:registrationWrites=0;$script:decisions=0;$script:preflightDelayMs=26122
+                $script:duringObservation = {
+                    if ($script:locked) { throw 'Capture held owner mutex.' }
+                    # Explicit stalled-capture interleaving: host routes changed,
+                    # capture has not completed, and the owner runs at t=31 s.
+                    $script:observation.fingerprint='b'*64
+                    $script:now=$script:raceStart.AddSeconds(31)
+                    if ($script:ownerMode -ceq 'unsafe-counterfactual') {
+                        # Reviewed rejected POLICY counterfactual only. This is
+                        # not a byte-identical replay of the archived 29B source.
+                        $script:state.networkRecovery.progressUtc=$script:raceStart.AddMilliseconds(26122).ToString('o')
+                    }
+                    $script:progressAtOwner=$script:state.networkRecovery.progressUtc
+                    try {
+                        switch ($script:ownerConsumer) {
+                            'session' { Assert-SessionAlive $script:state }
+                            'jit' { [void](Get-RunnerJitAdmission $script:state) }
+                            'intent' { [void](Save-RunnerLaunchEvent $script:state 'intent' 0 ('c'*32) -Admission $script:earlyAdmission) }
+                            'dispatch' { [void](Save-RunnerLaunchEvent $script:state 'dispatch') }
+                            'boot' { Start-GuardedVm $script:state }
+                            'watchdog' { Invoke-Watchdog }
+                        }
+                        $script:ownerReturned=$true
+                    } catch { $script:ownerReturned=$false }
+                    $script:writesAtOwner=$script:stateWrites;$script:registrationsAtOwner=$script:registrationWrites;$script:decisionsAtOwner=$script:decisions
+                }
+                $result=$null;$failure=$null
+                try { $result=Invoke-RunnerNetworkRecoveryTick $script:state.vmName (Get-RunnerConfig) } catch { $failure=$_ }
+                if ($mode -ceq 'unsafe-counterfactual') {
+                    if ($consumer -ceq 'boot') { if ($script:bootAdmissionEscapes -ne 1) { throw 'Counterfactual did not demonstrate the unsafe boot admission.' } }
+                    elseif (-not $script:ownerReturned -or $script:ownerCleanups -ne 0) { throw 'Counterfactual failed to demonstrate healthy authority extension.' }
+                } else {
+                    $expectedProgress=if($mode -ceq 'healthy'){$script:oldProgress}else{$script:raceStart.AddMilliseconds(26122).ToString('o')}
+                    if ($script:progressAtOwner -cne $expectedProgress -or $script:bootAdmissionEscapes -ne 0) { throw 'Owner race received unauthorized progress or boot admission.' }
+                    if ($consumer -ceq 'watchdog') {
+                        if ($mode -ceq 'healthy' -and $script:ownerCleanups -ne 1) { throw 'Watchdog failed to expire the original healthy network lease.' }
+                        if ($mode -ceq 'isolated' -and $script:ownerCleanups -ne 0) { throw 'Watchdog rejected legitimate isolated progress.' }
+                    } elseif ($script:ownerReturned) { throw 'Stalled capture admitted session/JIT/intent/dispatch/boot.' }
+                    if ($consumer -cne 'watchdog' -and ($script:decisionsAtOwner -ne 0 -or $script:registrationsAtOwner -ne 0)) { throw 'Rejected owner wrote JIT intent or dispatch.' }
+                    if ($mode -ceq 'healthy' -and ($null -eq $result -or $result.continue)) { throw 'Expired healthy tick did not fail closed.' }
+                    if ($mode -ceq 'isolated' -and ($null -eq $result -or -not $result.continue -or $script:state.guardianReady -ne $false -or $script:vm.State -cne 'Paused' -or $script:adapter.SwitchName -cne '')) { throw 'Isolated checkpoint acquired healthy or connected authority.' }
+                }
+            }
+          }
+        } finally { Set-Item Function:Remove-RunnerInstance $cleanup; Set-Item Function:Assert-RunnerVmLifecycle $lifecycle }
+    }
     Check 'actual guardian wrapper initializes exact Off binding then quarantines drift' {
         New-Fixture
         foreach ($name in @('networkRecovery', 'guardianPid', 'guardianStartUtc', 'guardianReady')) { $script:state.PSObject.Properties.Remove($name) }
@@ -291,6 +402,43 @@ try {
         $journal = [pscustomobject]@{ launchId = 'c' * 32; runnerId = 123 }
         foreach ($text in @(('d' * 32) + '|123|running|-', ('c' * 32) + '|124|exited|0', ('c' * 32) + '|123|exited|256', ('c' * 32) + '|123|running|0', ('c' * 32) + '|123|exited|0|success')) { Refuse { ConvertFrom-RunnerGuestReceipt $text $journal } }
     }
+    Check 'committed dispatch supplies exact monitor admission and later journal replacement cannot receive its event' {
+        New-Fixture
+        [void](Save-RunnerLaunchEvent $script:state 'intent' 0 ('c' * 32) -Admission (Get-RunnerJitAdmission $script:state))
+        [void](Save-RunnerLaunchEvent $script:state 'registered' 123)
+        $admission = Save-RunnerLaunchEvent $script:state 'dispatch' -ForMonitor
+        if ($admission.launchId -cne ('c' * 32) -or $admission.runnerId -ne 123 -or $admission.generation -ne $script:state.networkRecovery.generation -or
+            $admission.claimHash -cne (Get-RunnerRecoveryClaimHash $script:state)) { throw 'Committed handoff did not bind the exact monitor.' }
+        $script:state.runnerLaunch.launchId = 'd' * 32
+        $before = $script:state.runnerLaunch | ConvertTo-Json -Compress
+        Refuse { Save-RunnerLaunchEvent $script:state 'transport-lost' -MonitorAdmission $admission }
+        if (($script:state.runnerLaunch | ConvertTo-Json -Compress) -cne $before) { throw 'Old monitor mutated a replacement launch.' }
+    }
+    Check 'contended receipt events refuse expiry inside the acquired lock and immediately before publication' {
+        foreach ($boundary in @('lock', 'stop-read', 'publication')) {
+            foreach ($event in @('receipt', 'runner-exited', 'transport-lost')) {
+                New-Fixture
+                [void](Save-RunnerLaunchEvent $script:state 'intent' 0 ('c' * 32) -Admission (Get-RunnerJitAdmission $script:state))
+                [void](Save-RunnerLaunchEvent $script:state 'registered' 123); [void](Save-RunnerLaunchEvent $script:state 'dispatch')
+                $admission = New-RunnerMonitorAdmission $script:state
+                $before = $script:state.runnerLaunch | ConvertTo-Json -Compress
+                $script:stateWrites = 0; $script:registrationWrites = 0; $script:monitorElapsed = 29900
+                $script:RunnerMonitorLockBudget = [Diagnostics.Stopwatch]::StartNew(); $script:RunnerMonitorContentionActive = $true
+                if ($boundary -ceq 'lock') { $script:nextLockMutation = { $script:monitorElapsed = 30000 } }
+                else { $script:afterLaunchDecision = { $script:monitorElapsed = 30000 } }
+                try {
+                    & {
+                        function Get-RunnerMonitorElapsedMs { return $script:monitorElapsed }
+                        if ($boundary -ceq 'stop-read') {
+                            function Test-RunnerSessionStopRequested { $script:monitorElapsed = 30000; return $false }
+                        }
+                        Refuse { Save-RunnerLaunchEvent $script:state $event 123 ('c' * 32) 0 -MonitorAdmission $admission -MonitorContended }
+                    }
+                    if ($script:stateWrites -ne 0 -or $script:registrationWrites -ne 0 -or ($script:state.runnerLaunch | ConvertTo-Json -Compress) -cne $before) { throw "Late $event crossed $boundary publication boundary." }
+                } finally { $script:RunnerMonitorLockBudget = $null; $script:RunnerMonitorContentionActive = $false; $script:afterLaunchDecision = $null }
+            }
+        }
+    }
     Check 'SSH loss reattaches only receipt monitor to same launch and preserves result meaning' {
         New-Fixture; $script:exitCode = 0
         [void](Save-RunnerLaunchEvent $script:state 'intent' 0 ('c' * 32) -Admission (Get-RunnerJitAdmission $script:state)); [void](Save-RunnerLaunchEvent $script:state 'registered' 123); [void](Save-RunnerLaunchEvent $script:state 'dispatch')
@@ -324,6 +472,24 @@ try {
         if ($result.ExitCode -ne 0 -or $result.Output -cne 'receipt') { throw 'Fixed native receipt capture changed output.' }
         Refuse { & $script:realReceiptNative $exe @('-NoProfile', '-NonInteractive', '-Command', '[Console]::Out.Write((''x'' * 5000))') 3 }
         Refuse { & $script:realReceiptNative $exe @('-NoProfile', '-NonInteractive', '-Command', 'Start-Sleep -Seconds 10') 1 }
+    }
+    Check 'native receipt millisecond cap preempts its normal twelve-second timeout and closes its owned process' {
+        $child = Join-Path $root 'receipt-timeout.ps1'; $pidPath = Join-Path $root 'receipt-timeout.pid'
+        [IO.File]::WriteAllText($child, 'param($Path); [IO.File]::WriteAllText($Path, [string]$PID); Start-Sleep -Seconds 5', [Text.UTF8Encoding]::new($false))
+        $watch = [Diagnostics.Stopwatch]::StartNew(); $failure = $null
+        try { & $script:realReceiptNative (Join-Path $PSHOME 'powershell.exe') @('-NoProfile', '-NonInteractive', '-File', $child, $pidPath) -TimeoutMilliseconds 900 }
+        catch { $failure = $_ }
+        if ($null -eq $failure -or $failure.Exception.Message -cne 'Receipt transport timed out.' -or $watch.ElapsedMilliseconds -gt 2500) { throw 'Native receipt ignored its remaining millisecond cap.' }
+        if (-not (Test-Path -LiteralPath $pidPath)) { throw 'Receipt timeout fixture did not establish its process identity.' }
+        $childPid = [int][IO.File]::ReadAllText($pidPath)
+        $limit = [DateTime]::UtcNow.AddSeconds(2)
+        do {
+            $childProcess = Get-Process -Id $childPid -ErrorAction SilentlyContinue
+            if ($null -eq $childProcess) { break }
+            $childProcess.Dispose()
+            Microsoft.PowerShell.Utility\Start-Sleep -Milliseconds 25
+        } while ([DateTime]::UtcNow -lt $limit)
+        if ($null -ne $childProcess) { throw 'Receipt timeout left its owned monitor process running.' }
     }
     Write-Host "Network integration offline regressions passed: $script:checks cases; no live continuity proof."
 } finally {

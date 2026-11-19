@@ -1,10 +1,11 @@
 [CmdletBinding()]
 param(
-    [Parameter(Mandatory)][ValidateSet('Preflight', 'StoreCredential', 'Start', 'Restart', 'Stop', 'Status', 'Watchdog', 'Guard', 'Supervise', 'EnablePilot', 'RetryPilot', 'EnableActive', 'PrepareImage')]
+    [Parameter(Mandatory)][ValidateSet('Preflight', 'StoreCredential', 'Start', 'Restart', 'Stop', 'Status', 'OwnerStatus', 'ResumeAfterValidation', 'Watchdog', 'Guard', 'Supervise', 'EnablePilot', 'RetryPilot', 'EnableActive', 'PrepareImage')]
     [string] $Action,
     [ValidatePattern('^ITIR-[0-9a-f]{32}$')][string] $SessionName,
     [ValidatePattern('^[0-9a-f]{40}$')][string] $ExpectedPilotSha,
-    [string] $RetryReason
+    [string] $RetryReason,
+    [ValidatePattern('^[0-9A-Fa-f]{64}$')][string] $ExpectedBundleSha256
 )
 
 . (Join-Path $PSScriptRoot 'Common.ps1')
@@ -208,10 +209,11 @@ function Save-Heartbeat($State) {
     } finally { Exit-RunnerLock $mutex }
 }
 
-function Assert-SessionAlive($State) {
+function Assert-SessionAlive($State, [switch] $Monitor) {
     $State = [pscustomobject]$State
     # This wait is never called under the state mutex. Only the guardian repairs.
     while ($true) {
+        if ($Monitor) { [void](Get-RunnerMonitorRemainingMs) }
         $now = Get-RunnerRecoveryNow
         $deadlineReached = $now -ge [DateTime]::Parse($State.deadlineUtc).ToUniversalTime()
         $stopReason = 'unavailable'
@@ -219,6 +221,7 @@ function Assert-SessionAlive($State) {
         # Stop inspection can wait for a publisher; never reuse the pre-wait clock.
         $now = Get-RunnerRecoveryNow
         $deadlineReached = $deadlineReached -or $now -ge [DateTime]::Parse($State.deadlineUtc).ToUniversalTime()
+        if ($Monitor) { [void](Get-RunnerMonitorRemainingMs) }
         if ($deadlineReached -or $stopRequested) {
             $reason = if ($deadlineReached) { 'deadline' } else { 'stop' }
             throw (New-RunnerObservedFailure 'Session deadline or Stop reached.' (New-RunnerFailureObservation 'session-initial' $reason $State $now $stopReason '' @{ deadlineReached = $deadlineReached }))
@@ -227,6 +230,7 @@ function Assert-SessionAlive($State) {
         $sealedState = $null
         $mutex = Enter-RunnerLock
         try {
+            if ($Monitor) { [void](Get-RunnerMonitorRemainingMs) }
             $current = Get-RunnerState
             if ($null -eq $current -or $current.vmName -cne $State.vmName -or
                 ($State.PSObject.Properties.Name -contains 'vmId' -and ($current.PSObject.Properties.Name -notcontains 'vmId' -or [guid]$current.vmId -ne [guid]$State.vmId))) { throw 'Runner state was removed or replaced.' }
@@ -238,6 +242,7 @@ function Assert-SessionAlive($State) {
             $stopRequested = -not $deadlineReached -and (Test-RunnerSessionStopRequested $current ([ref]$stopReason))
             $now = Get-RunnerRecoveryNow
             $deadlineReached = $deadlineReached -or $now -ge [DateTime]::Parse($current.deadlineUtc).ToUniversalTime()
+            if ($Monitor) { [void](Get-RunnerMonitorRemainingMs) }
             if ($deadlineReached -or $stopRequested) {
                 $reason = if ($deadlineReached) { 'deadline' } else { 'stop' }
                 throw (New-RunnerObservedFailure 'Session deadline or Stop reached.' (New-RunnerFailureObservation 'session-current' $reason $current $now $stopReason '' @{ deadlineReached = $deadlineReached }))
@@ -265,7 +270,8 @@ function Assert-SessionAlive($State) {
             Assert-RunnerSealedPreparation $sealedState (Get-RunnerRecoveryNow)
             return
         }
-        Start-Sleep -Milliseconds 250
+        $waitMs = if ($Monitor) { Get-RunnerMonitorRemainingMs 250 } else { 250 }
+        Start-Sleep -Milliseconds $waitMs
     }
 }
 
@@ -417,14 +423,17 @@ function Get-RunnerJitAdmission($State) {
     finally { Exit-RunnerLock $mutex }
 }
 
-function Save-RunnerLaunchEvent($State, [string] $Event, [long] $RunnerId = 0, [string] $LaunchId = '', [int] $ExitCode = 0, $Admission = $null, $Config = $null) {
+function Save-RunnerLaunchEvent($State, [string] $Event, [long] $RunnerId = 0, [string] $LaunchId = '', [int] $ExitCode = 0, $Admission = $null, $Config = $null, [switch] $ForMonitor, $MonitorAdmission = $null, [switch] $MonitorContended) {
+    if ($ForMonitor -and $Event -cne 'dispatch') { throw 'Only committed dispatch establishes monitor admission.' }
     $mutex = Enter-RunnerLock
     try {
         $current = Get-RunnerState
+        if ($null -ne $MonitorAdmission) { Assert-RunnerMonitorAdmission $current $MonitorAdmission -AfterContention:$MonitorContended }
         if ($null -eq $current -or $current.vmName -cne $State.vmName -or [guid]$current.vmId -ne [guid]$State.vmId -or
             ($current.PSObject.Properties.Name -contains 'purpose' -and $current.purpose -cne 'job') -or
             (Test-Path -LiteralPath (Join-Path $script:RunnerRoot 'stop.requested')) -or
             (Test-RunnerSessionStopRequested $current) -or (Get-RunnerRecoveryNow) -ge [DateTime]::Parse($current.deadlineUtc).ToUniversalTime()) { throw 'Runner launch session removed/stopped/expired.' }
+        if ($MonitorContended) { [void](Get-RunnerMonitorRemainingMs) }
         if ($Event -ceq 'intent') {
             if ($null -eq $Admission) { throw 'JIT intent requires admission captured before the demand lookup.' }
             [void](Assert-RunnerJitAdmission $State $current $Admission)
@@ -459,7 +468,12 @@ function Save-RunnerLaunchEvent($State, [string] $Event, [long] $RunnerId = 0, [
                 Invoke-RunnerTransitionCheckpoint 'jit-registration-registered'
             } elseif ($registration.phase -cne 'registered' -or $registration.runnerId -ne $next.runnerId) { throw 'Guest dispatch lacks its sole validated registration.' }
         }
+        # Stop/identity reads, decision work and the acquisition itself may have
+        # consumed the remaining contention budget. Check under this same mutex
+        # before changing the journal and immediately before its publication.
+        if ($MonitorContended) { [void](Get-RunnerMonitorRemainingMs) }
         $current | Add-Member runnerLaunch $next -Force
+        if ($MonitorContended) { [void](Get-RunnerMonitorRemainingMs) }
         Write-RunnerJson $script:RunnerStatePath $current
         if ($Event -ceq 'dispatch') {
             Invoke-RunnerTransitionCheckpoint 'jit-dispatch-state'
@@ -469,38 +483,117 @@ function Save-RunnerLaunchEvent($State, [string] $Event, [long] $RunnerId = 0, [
             Write-RunnerJitRegistration $registration
             Invoke-RunnerTransitionCheckpoint 'jit-handed-off'
         }
+        if ($ForMonitor) {
+            return New-RunnerMonitorAdmission $current
+        }
         return $next
     } finally { Exit-RunnerLock $mutex }
 }
 
-function Wait-DetachedRunner($State, $Config) {
-    # One dispatch already occurred. All retries below are read-only receipt
-    # monitor attachment; no registration or launch API/command belongs here.
-    while ($true) {
-        Assert-SessionAlive $State
-        $current = Get-RunnerState
-        $journal = $current.runnerLaunch
-        $receipt = $null
-        $result = $null
-        try {
-            $result = Invoke-RunnerReceiptNative 'ssh.exe' ((Get-SshArgs $State) + @("runner@$($Config.guestIp)", (Get-RunnerReceiptCommand $journal.launchId)))
-        } catch { $result = $null }
-        # A transport outage may be retried read-only. A successfully received
-        # malformed/different receipt is an integrity failure, never adopted.
-        if ($null -ne $result -and $result.ExitCode -eq 0) {
-            try { $receipt = ConvertFrom-RunnerGuestReceipt $result.Output $journal }
-            catch {
-                try { $_.Exception.Data['runnerFailureClass'] = 'receipt-invalid' } catch { }
-                throw
+function New-RunnerMonitorAdmission($State) {
+    if ($null -eq $State -or $State.runnerLaunch.phase -cnotin @('launch-intent', 'running', 'transport-uncertain') -or
+        $State.runnerLaunch.launchId -cnotmatch '^[0-9a-f]{32}$' -or $State.runnerLaunch.runnerId -le 0) { throw 'Monitor requires its sole committed dispatch.' }
+    return [pscustomobject]@{
+        claimHash = Get-RunnerRecoveryClaimHash $State
+        generation = $State.networkRecovery.generation
+        launchId = $State.runnerLaunch.launchId; runnerId = $State.runnerLaunch.runnerId
+    }
+}
+
+function Assert-RunnerMonitorAdmission($State, $Admission, [switch] $AfterContention) {
+    if ($null -eq $State -or $null -eq $Admission -or $State.PSObject.Properties.Name -notcontains 'runnerLaunch' -or
+        $State.runnerLaunch.phase -cnotin @('launch-intent', 'running', 'transport-uncertain') -or
+        $State.runnerLaunch.launchId -cne $Admission.launchId -or $State.runnerLaunch.runnerId -ne $Admission.runnerId -or
+        (Get-RunnerRecoveryClaimHash $State) -cne $Admission.claimHash -or
+        ($AfterContention -and $State.networkRecovery.generation -ne $Admission.generation)) { throw 'Dispatched runner monitor ownership changed.' }
+}
+
+function Invoke-RunnerMonitorTransaction($State, $Admission, [scriptblock] $Work) {
+    # Only Wait-DetachedRunner enters this scope AFTER the durable handoff. The
+    # single monotonic budget includes the first 20s acquisition; no retry resets
+    # it. Nested state reads use the remaining budget, never a second full wait.
+    if ($null -ne $script:RunnerMonitorLockBudget) { throw 'Monitor transactions may not nest.' }
+    $script:RunnerMonitorLockBudget = [Diagnostics.Stopwatch]::StartNew()
+    $script:RunnerMonitorContentionActive = $false
+    $contended = $false
+    try {
+        while ($true) {
+            if ((Get-RunnerRecoveryNow) -ge [DateTime]::Parse($State.deadlineUtc).ToUniversalTime() -or
+                ($contended -and (Get-RunnerMonitorElapsedMs) -ge 30000)) { throw 'Dispatched monitor contention or session deadline reached.' }
+            try {
+                $mutex = Enter-RunnerLock
+                try {
+                    $current = Get-RunnerState
+                    Assert-RunnerMonitorAdmission $current $Admission -AfterContention:$contended
+                    # No heartbeat or successful liveness result while state is
+                    # inaccessible. Assert-SessionAlive rechecks current Stop,
+                    # guardian and all lifetime limits after releasing this lock.
+                } finally { Exit-RunnerLock $mutex }
+                Assert-SessionAlive $State -Monitor
+                if ($contended -and (Get-RunnerMonitorElapsedMs) -ge 30000) { throw 'Dispatched monitor contention budget expired.' }
+                $mutex = Enter-RunnerLock
+                try { Assert-RunnerMonitorAdmission (Get-RunnerState) $Admission -AfterContention:$contended }
+                finally { Exit-RunnerLock $mutex }
+                $result = & $Work $contended
+                if ($contended -and (Get-RunnerMonitorElapsedMs) -ge 30000) { throw 'Dispatched monitor contention budget expired.' }
+                return $result
+            } catch {
+                if (-not (Test-RunnerStateLockBusy $_)) { throw }
+                $contended = $true
+                # Preserve the original transaction/acquisition clock, including
+                # the failed first 20s wait; activation never starts a new clock.
+                $script:RunnerMonitorContentionActive = $true
+                if ((Get-RunnerMonitorElapsedMs) -ge 30000) { throw }
+                Start-Sleep -Milliseconds 100
             }
         }
-        if ($null -eq $receipt) {
-            [void](Save-RunnerLaunchEvent $State 'transport-lost')
-        } elseif ($receipt.phase -ceq 'exited') {
-            [void](Save-RunnerLaunchEvent $State 'runner-exited' $journal.runnerId $journal.launchId $receipt.exitCode)
-            if ($receipt.exitCode -ne 0) { throw (New-RunnerExecutionFailure 'runner-exit' $receipt.exitCode) }
-            return
-        } else { [void](Save-RunnerLaunchEvent $State 'receipt' $journal.runnerId $journal.launchId) }
+    } finally { $script:RunnerMonitorLockBudget = $null; $script:RunnerMonitorContentionActive = $false }
+}
+
+function Wait-DetachedRunner($State, $Config, $Admission = $null) {
+    # One dispatch already occurred. All retries below are read-only receipt
+    # monitor attachment; no registration or launch API/command belongs here.
+    if ($null -eq $Admission) {
+        # Compatibility callers receive no contention retry before this initial
+        # protected proof of an already committed, exact dispatch.
+        $Admission = New-RunnerMonitorAdmission (Get-RunnerState)
+    }
+    while ($true) {
+        $step = Invoke-RunnerMonitorTransaction $State $Admission {
+            param([bool] $AfterContention)
+            $current = Get-RunnerState
+            Assert-RunnerMonitorAdmission $current $Admission -AfterContention:$AfterContention
+            $journal = $current.runnerLaunch
+            $receipt = $null
+            $result = $null
+            try {
+                $result = Invoke-RunnerReceiptNative 'ssh.exe' ((Get-SshArgs $State) + @("runner@$($Config.guestIp)", (Get-RunnerReceiptCommand $journal.launchId))) -TimeoutMilliseconds (Get-RunnerMonitorRemainingMs 12000)
+            } catch { $result = $null }
+            # A timed-out read cannot start journal publication or a new monitor
+            # iteration after consuming the same transaction's remaining budget.
+            [void](Get-RunnerMonitorRemainingMs)
+            # A transport outage may be retried read-only. A successfully received
+            # malformed/different receipt is an integrity failure, never adopted.
+            if ($null -ne $result -and $result.ExitCode -eq 0) {
+                try { $receipt = ConvertFrom-RunnerGuestReceipt $result.Output $journal }
+                catch {
+                    try { $_.Exception.Data['runnerFailureClass'] = 'receipt-invalid' } catch { }
+                    throw
+                }
+            }
+            if ($null -eq $receipt) {
+                [void](Save-RunnerLaunchEvent $State 'transport-lost' -MonitorAdmission $Admission -MonitorContended:$AfterContention)
+            } elseif ($receipt.phase -ceq 'exited') {
+                [void](Save-RunnerLaunchEvent $State 'runner-exited' $journal.runnerId $journal.launchId $receipt.exitCode -MonitorAdmission $Admission -MonitorContended:$AfterContention)
+                if ($receipt.exitCode -ne 0) { throw (New-RunnerExecutionFailure 'runner-exit' $receipt.exitCode) }
+                return [pscustomobject]@{ exited = $true; admission = $null }
+            } else { [void](Save-RunnerLaunchEvent $State 'receipt' $journal.runnerId $journal.launchId -MonitorAdmission $Admission -MonitorContended:$AfterContention) }
+            $latest = Get-RunnerState
+            Assert-RunnerMonitorAdmission $latest $Admission -AfterContention:$AfterContention
+            return [pscustomobject]@{ exited = $false; admission = New-RunnerMonitorAdmission $latest }
+        }
+        if ($step.exited) { return }
+        $Admission = $step.admission
         Start-Sleep -Seconds 1
     }
 }
@@ -1056,14 +1149,14 @@ function Invoke-RunnerSession($Config, $PilotAttempt = $null, [string] $ProfileL
             # The fixed JIT runner launches exactly once in a guest service. SSH is
             # only dispatch/monitor transport; its loss never reruns the command.
             $script:RunnerOperationStage = 'job-execution'
-            [void](Save-RunnerLaunchEvent $state 'dispatch')
+            $monitorAdmission = Save-RunnerLaunchEvent $state 'dispatch' -ForMonitor
             $command = Get-RunnerDetachedCommand $image.prepared $launchId $runnerId
             try {
                 $exitCode = Invoke-RunnerNative 'ssh.exe' ($sshArgs + @("runner@$($Config.guestIp)", $command)) $jit.encoded_jit_config -TimeoutSeconds 15
                 if ($exitCode -ne 0) { [void](Save-RunnerLaunchEvent $state 'transport-lost') }
             } catch { [void](Save-RunnerLaunchEvent $state 'transport-lost') }
             finally { $jit = $null }
-            Wait-DetachedRunner $state $Config
+            Wait-DetachedRunner $state $Config $monitorAdmission
             Write-Host 'Runner process ended; consult GitHub Actions for the actual job result.'
             return [pscustomobject]@{ name = $name; id = $runnerId; outcome = 'runner-exited' }
         } catch {
@@ -1817,7 +1910,237 @@ function Enable-RunnerPilot([string] $Sha, [string] $Reason = '', [switch] $Retr
 }
 function Enable-RunnerActive { Invoke-RunnerControl { Enable-RunnerActiveCore } }
 
-function Start-RunnerSupervisorCore {
+function Assert-RunnerOwnerInstalledExecution([string] $ExecutingPath) {
+    $installed = Assert-OwnedPath (Join-Path (Join-Path $script:RunnerRoot 'bin') 'Runner.ps1')
+    $actual = [IO.Path]::GetFullPath((Resolve-Path -LiteralPath $ExecutingPath -ErrorAction Stop).ProviderPath)
+    if ($actual -ine $installed) { throw (New-RunnerOwnerRefusal 'execution-mismatch') }
+    Assert-RunnerProtectedPath $installed
+}
+
+function Assert-RunnerOwnerInstalledBundle([string] $ExpectedBundleSha256) {
+    if ($ExpectedBundleSha256 -cnotmatch '^[0-9A-F]{64}$' -or (Get-CoherentInstalledRunnerBundle).hash -cne $ExpectedBundleSha256) { throw (New-RunnerOwnerRefusal 'installed-mismatch') }
+    [void]@(Get-OwnedRunnerScheduledTasks)
+}
+
+function Get-RunnerOwnerConfigEvidence {
+    Assert-RunnerProtectedPath $script:RunnerConfigPath
+    $lease = Open-RunnerSshFile $script:RunnerConfigPath
+    try { $lease.AssertPath($script:RunnerConfigPath); return Get-RunnerBytesHash ($lease.ReadBoundedBytes(65536)) }
+    finally { $lease.Dispose() }
+}
+
+function Assert-RunnerOwnerAdmission([string] $ExpectedBundleSha256, [string] $ConfigHash = '') {
+    Assert-Administrator; Assert-SecureRoot
+    Assert-RunnerOwnerInstalledBundle $ExpectedBundleSha256
+    Assert-RunnerTransitionClear
+    Assert-RunnerJitRegistrationClear
+    $config = Get-RunnerConfig
+    if ($config.activation -cne 'active') { throw (New-RunnerOwnerRefusal 'admission-refused') }
+    if ($ConfigHash -and (Get-RunnerOwnerConfigEvidence) -cne $ConfigHash) { throw (New-RunnerOwnerRefusal 'config-changed') }
+    Assert-RunnerControlIdle
+    return $config
+}
+
+function Get-RunnerOwnerImageState($Config, [switch] $RetainLease) {
+    $context = $script:RunnerOwnerOperationContext
+    if ($null -eq $context -or $context.record.ownerPid -ne $PID -or
+        -not (Test-RunnerProcessIdentity $PID $context.record.ownerStartUtc)) { throw (New-RunnerOwnerRefusal 'admission-refused') }
+    [void](Assert-RunnerOwnerAdmission $context.record.bundleSha256 $context.configHash)
+    Assert-RunnerPauseUnchanged $context.record.expectedPause
+    $priorFlag = Get-Variable RunnerPreparationAuthorized -Scope Script -ErrorAction SilentlyContinue
+    $priorPreflight = Get-Variable RunnerImagePreflight -Scope Script -ErrorAction SilentlyContinue
+    $priorFlagValue = if($null -ne $priorFlag){$priorFlag.Value}else{$null}
+    $priorPreflightValue = if($null -ne $priorPreflight){$priorPreflight.Value}else{$null}
+    if ($null -ne $priorFlag -and $priorFlag.Value -eq $true) { throw (New-RunnerOwnerRefusal 'admission-refused') }
+    $verified=$false
+    try {
+        $script:RunnerPreparationAuthorized=$true
+        Start-RunnerImagePreflight 'prepare'
+        Close-RunnerImageLeases
+        $selection=Get-RunnerImageSelection $Config
+        if (-not $selection.prepared) {
+            if ($selection.reason -cnotin @('absent','stale-inputs')) { throw (New-RunnerOwnerRefusal 'image-invalid') }
+            return [pscustomobject]@{ state=$selection.reason;proofHash='' }
+        }
+        $record=Get-RunnerImageRecord
+        $binding=Get-RunnerImageBinding $Config
+        if (-not $selection.differencing -or $record.receipt.bundleHash -cne $binding.bundleHash -or
+            $record.receipt.baseHash -cne $Config.baseSha256 -or $record.receipt.cloneVerification.PSObject.Properties.Name -notcontains 'successiveChild') { throw (New-RunnerOwnerRefusal 'image-invalid') }
+        Assert-RunnerImageCloneProof $record.receipt $record.receipt.cloneVerification -RequireGuestMtu
+        $verified=$true
+        return [pscustomobject]@{ state='current';proofHash=(Get-RunnerJsonEvidence ([ordered]@{selector=$record.selector;receipt=$record.receipt})).hash;selectorId=$record.selector.id;receiptHash=$record.selector.receiptHash;lease=$selection.lease }
+    } finally {
+        try { if(-not ($RetainLease -and $verified)){Close-RunnerImageLeases} }
+        finally {
+            if ($null -eq $priorFlag) { Remove-Variable RunnerPreparationAuthorized -Scope Script -ErrorAction SilentlyContinue } else { $script:RunnerPreparationAuthorized=$priorFlagValue }
+            if ($null -eq $priorPreflight) { Remove-Variable RunnerImagePreflight -Scope Script -ErrorAction SilentlyContinue } else { $script:RunnerImagePreflight=$priorPreflightValue }
+        }
+    }
+}
+
+function Assert-RunnerOwnerImageMetadataProof($Metadata, $Verified) {
+    $Metadata.selector.lease.AssertPath($Metadata.selector.path)
+    $Metadata.receipt.lease.AssertPath($Metadata.receipt.path)
+    $selectorBytes=$Metadata.selector.lease.ReadBoundedBytes(4096)
+    $receiptBytes=$Metadata.receipt.lease.ReadBoundedBytes(65536)
+    $utf8=[Text.UTF8Encoding]::new($false,$true)
+    $selector=$utf8.GetString($selectorBytes)|ConvertFrom-Json
+    $receipt=$utf8.GetString($receiptBytes)|ConvertFrom-Json
+    if($selector.id -cne $Verified.selectorId -or $selector.receiptHash -cne $Verified.receiptHash -or
+        (Get-RunnerBytesHash $receiptBytes) -cne $Verified.receiptHash -or
+        (Get-RunnerJsonEvidence ([ordered]@{selector=$selector;receipt=$receipt})).hash -cne $Verified.proofHash){throw (New-RunnerOwnerRefusal 'image-invalid')}
+}
+
+function Invoke-RunnerResumeAfterValidation([string] $ExpectedBundleSha256) {
+    Assert-Administrator; Assert-SecureRoot
+    if($ExpectedBundleSha256 -notmatch '^[0-9A-Fa-f]{64}$'){throw (New-RunnerOwnerRefusal 'installed-mismatch')}
+    $ExpectedBundleSha256=$ExpectedBundleSha256.ToUpperInvariant()
+    $control=Enter-RunnerLock 'Global\ITInventoryLocalRunner-Control-v1' -FailFast
+    $lifetime=$null; $installedLeases=@(); $record=$null; $retainedImageLease=$null
+    try {
+        $lifetime=Enter-RunnerLock 'Global\ITInventoryLocalRunner-Supervisor-v1' -FailFast
+        $mutex=Enter-RunnerLock
+        try {
+            $config=Assert-RunnerOwnerAdmission $ExpectedBundleSha256
+            $pause=Get-RunnerPauseEvidence
+            $old=Get-RunnerOwnerOperation
+            if ($null -ne $old -and $old.outcome -ceq 'in-progress') {
+                if (Test-RunnerProcessIdentity $old.ownerPid $old.ownerStartUtc) { throw (New-RunnerOwnerRefusal 'admission-refused') }
+                $old.startOutcomeUncertain=$old.pauseClearAttempted -or $old.startDispatched -or $old.stage -ceq 'start-dispatching'
+                $old.outcome='interrupted';$old.completedUtc=[DateTime]::UtcNow.ToString('o')
+                if ($old.firstRefusal -ceq 'none') { $old.firstRefusal='interrupted' }
+                Write-RunnerOwnerOperation $old
+            }
+            $bundle=Get-CoherentInstalledRunnerBundle
+            foreach ($file in @($bundle.manifest.files) + @([pscustomobject]@{name='Bundle.json';hash=$bundle.hash})) {
+                $path=Assert-OwnedPath (Join-Path (Join-Path $script:RunnerRoot 'bin') $file.name)
+                Assert-RunnerProtectedPath $path
+                $lease=Open-RunnerSshFile $path
+                $installedLeases+=@($lease)
+                $lease.AssertPath($path)
+                if ((Get-RunnerBytesHash ($lease.ReadBoundedBytes(8388608))) -cne $file.hash) { throw (New-RunnerOwnerRefusal 'installed-mismatch') }
+            }
+            $configHash=Get-RunnerOwnerConfigEvidence
+            $now=[DateTime]::UtcNow.ToString('o')
+            $record=[pscustomobject][ordered]@{schema=1;tag=$script:RunnerTag;id=[guid]::NewGuid().ToString('N');action='ResumeAfterValidation';bundleSha256=$ExpectedBundleSha256;ownerPid=$PID;ownerStartUtc=(Get-Process -Id $PID).StartTime.ToUniversalTime().ToString('o');startedUtc=$now;completedUtc='';stage='intent';outcome='in-progress';expectedPause=$pause;pauseWriteDispatched=$false;prepareDispatched=$false;pauseClearAttempted=$false;pauseCleared=$false;startDispatched=$false;imageVerified=$false;firstRefusal='none';latestSecondary='none';resumeAuthorized=$true;startOutcomeUncertain=$false;failureObservation=[pscustomobject]@{schema=1;capture='unavailable';atUtc=$now}}
+            Write-RunnerOwnerOperation $record
+            $script:RunnerOwnerOperationContext=[pscustomobject]@{record=$record;configHash=$configHash}
+        } finally { Exit-RunnerLock $mutex }
+        Set-RunnerOwnerOperationStage 'image-validation'
+        $image=Get-RunnerOwnerImageState $config
+        if ($image.state -cne 'current') {
+            [void](Assert-RunnerOwnerAdmission $ExpectedBundleSha256 $configHash)
+            Assert-RunnerPauseUnchanged $record.expectedPause
+            Set-RunnerOwnerOperationStage 'prepare-dispatching'
+            [void](Assert-RunnerOwnerAdmission $ExpectedBundleSha256 $configHash)
+            Assert-RunnerPauseUnchanged $record.expectedPause
+            $record.prepareDispatched=$true
+            [void](Invoke-RunnerPrepareImageCore -DeferResume)
+            $image=Get-RunnerOwnerImageState $config
+            if ($image.state -cne 'current') { throw (New-RunnerOwnerRefusal 'image-invalid') }
+        }
+        Assert-RunnerPauseUnchanged $record.expectedPause
+        $record.imageVerified=$true
+        Set-RunnerOwnerOperationStage 'image-verified'
+        [void](Assert-RunnerOwnerAdmission $ExpectedBundleSha256 $configHash)
+        $verified=Get-RunnerOwnerImageState $config -RetainLease
+        if($verified.state -ceq 'current'){$retainedImageLease=$verified.lease}
+        if ($verified.state -cne 'current' -or $verified.proofHash -cne $image.proofHash) { throw (New-RunnerOwnerRefusal 'image-invalid') }
+        $mutex=Enter-RunnerLock
+        try {
+            [void](Assert-RunnerOwnerAdmission $ExpectedBundleSha256 $configHash)
+            $configLease=Open-RunnerSshFile $script:RunnerConfigPath
+            $installedLeases+=@($configLease)
+            $configLease.AssertPath($script:RunnerConfigPath)
+            if((Get-RunnerBytesHash ($configLease.ReadBoundedBytes(65536))) -cne $configHash){throw (New-RunnerOwnerRefusal 'config-changed')}
+            Assert-RunnerPauseUnchanged $record.expectedPause
+            # Publication is complete. Hold these exact metadata identities
+            # alongside the verified disk through dispatch and running readback.
+            $metadata=[pscustomobject]@{selector=$null;receipt=$null}
+            foreach($entry in @(@('selector',(Join-Path $script:RunnerRoot 'prepared-image.json')),@('receipt',(Join-Path (Join-Path $script:RunnerRoot 'prepared-images') ($verified.selectorId+'.json'))))){
+                $path=Assert-OwnedPath $entry[1];Assert-RunnerProtectedPath $path
+                $lease=Open-RunnerSshFile $path;$installedLeases+=@($lease)
+                $metadata.($entry[0])=[pscustomobject]@{path=$path;lease=$lease}
+            }
+            Assert-RunnerOwnerImageMetadataProof $metadata $verified
+            Set-RunnerOwnerOperationStage 'start-dispatching'
+            Assert-RunnerOwnerImageMetadataProof $metadata $verified
+            # The new supervisor owns this lifetime after dispatch. It must be
+            # able to acquire it while waiting for this final state handoff.
+            Exit-RunnerLock $lifetime
+            $lifetime=$null
+            [void](Start-RunnerSupervisorCore -ExpectedPause $record.expectedPause)
+        }finally{Exit-RunnerLock $mutex}
+        Assert-RunnerOwnerInstalledBundle $ExpectedBundleSha256
+        Assert-RunnerOwnerImageMetadataProof $metadata $verified
+        if ((Get-RunnerOwnerConfigEvidence) -cne $configHash -or
+            (Test-Path -LiteralPath (Join-Path $script:RunnerRoot 'stop.requested')) -or
+            (Get-ScheduledTask -TaskName $script:RunnerSupervisorTask -ErrorAction Stop).State -cne 'Running') { throw (New-RunnerOwnerRefusal 'start-uncertain') }
+        $record.stage='running';$record.outcome='completed';$record.completedUtc=[DateTime]::UtcNow.ToString('o')
+        Write-RunnerOwnerOperation $record
+    } catch {
+        $initiatingFailure=$_
+        $code='admission-refused'
+        if ($null -ne $record) {
+            $code=if($record.pauseClearAttempted -or $record.startDispatched){'start-uncertain'}elseif($record.prepareDispatched){'prepare-failed'}elseif($record.stage -ceq 'image-validation'){'image-invalid'}else{'admission-refused'}
+        }
+        try { $specific=$_.Exception.Data['runnerOwnerRefusal']; if ($specific) { $code=(New-RunnerOwnerRefusal ([string]$specific)).Data['runnerOwnerRefusal'] } } catch { }
+        if ($null -eq $record) { throw (New-RunnerOwnerRefusal $code) }
+        $record.failureObservation=New-RunnerOwnerFailureObservation $initiatingFailure $record.startedUtc
+        if ($record.firstRefusal -ceq 'none') { $record.firstRefusal=$code }
+        $record.startOutcomeUncertain=$record.pauseClearAttempted -or $record.startDispatched
+        $record.stage='failed';$record.outcome='failed';$record.completedUtc=[DateTime]::UtcNow.ToString('o')
+        try { Write-RunnerOwnerOperation $record } catch { $record.latestSecondary='receipt-publication' }
+    } finally {
+        $script:RunnerOwnerOperationContext=$null
+        try{
+            # A newly started supervisor may already have its own session. Our
+            # validation lease belongs to this owner, not to that guest child.
+            if($null -ne $retainedImageLease){
+                $retainedImageLease.stream.Dispose()
+                $key=$retainedImageLease.path.ToUpperInvariant()
+                if((Get-Variable RunnerImageLeases -Scope Script -ErrorAction SilentlyContinue) -and $script:RunnerImageLeases.ContainsKey($key) -and [object]::ReferenceEquals($script:RunnerImageLeases[$key],$retainedImageLease)){ $script:RunnerImageLeases.Remove($key) }
+            }
+            Close-RunnerImageLeases
+        }finally{
+            try{foreach($lease in $installedLeases){try{$lease.Dispose()}catch{}}}
+            finally{try{if($null -ne $lifetime){Exit-RunnerLock $lifetime}}finally{Exit-RunnerLock $control}}
+        }
+    }
+    return Get-RunnerOwnerOperationProjection $record
+}
+
+function Get-RunnerOwnerStatus {
+    $status=[ordered]@{schema=1;execution='installed';installed='unknown';configuration='unknown';tasks='unknown';supervisorState='unknown';watchdogState='unknown';transitions='unknown';jit='unknown';pause='unknown';session='unknown';imageSelection='unknown';imageNeedsValidation=$true;ownerOperation=[pscustomobject]@{stage='unknown';outcome='unknown'}}
+    Assert-Administrator;Assert-SecureRoot
+    try{[void](Get-CoherentInstalledRunnerBundle);$status.installed='coherent'}catch{}
+    try{$config=Get-RunnerConfig;$status.configuration=if($config.activation -ceq 'active'){'active'}else{'inactive'}}catch{}
+    try{
+        $tasks=@(Get-OwnedRunnerScheduledTasks)
+        $status.tasks='valid'
+        foreach($task in $tasks){
+            $taskState=([string]$task.State).ToLowerInvariant()
+            if($taskState -cnotin @('running','ready','queued','disabled')){$taskState='unknown'}
+            $field=if($task.TaskName -ceq $script:RunnerSupervisorTask){'supervisorState'}else{'watchdogState'}
+            $status[$field]=$taskState
+        }
+    }catch{}
+    try{$mutex=Enter-RunnerLock -FailFast}catch{return [pscustomobject]$status}
+    try{
+        try{Assert-RunnerTransitionClear;$status.transitions='clear'}catch{$status.transitions='blocked'}
+        try{Assert-RunnerJitRegistrationClear;$status.jit='clear'}catch{$status.jit='blocked'}
+        try{$pause=Get-RunnerPauseEvidence -AllowAbsent;$status.pause=if($null -eq $pause){'absent'}else{'present'}}catch{}
+        try{$record=Get-RunnerOwnerOperation;$status.ownerOperation=Get-RunnerOwnerOperationProjection $record}catch{$status.ownerOperation=[pscustomobject]@{stage='unknown';outcome='unknown'}}
+        try{$state=Get-RunnerState;if($null -ne $state){Assert-StateIdentity $state -AllowLegacy;$status.session='busy'}else{$status.session='pending-inventory'}}catch{}
+        try{$record=Get-RunnerImageRecord;$status.imageSelection=if($null -eq $record){'absent'}else{'present'}}catch{}
+    }finally{Exit-RunnerLock $mutex}
+    if($status.session -ceq 'pending-inventory'){
+        try{$status.session=if(@(Get-RunnerVmInventory|Where-Object Name -Like "$($script:RunnerPrefix)*").Count -eq 0){'idle'}else{'busy'}}catch{$status.session='unknown'}
+    }
+    return [pscustomobject]$status
+}
+
+function Start-RunnerSupervisorCore($ExpectedPause = $null) {
     Assert-Administrator
     Assert-SecureRoot
     $mutex = Enter-RunnerLock
@@ -1827,8 +2150,18 @@ function Start-RunnerSupervisorCore {
         $config = Get-RunnerConfig
         if ($config.activation -eq 'disabled') { throw 'Job pickup is disabled. Open Setup and choose Enable one-job pilot after review.' }
         $marker = Assert-OwnedPath (Join-Path $script:RunnerRoot 'stop.requested')
-        if (Test-Path -LiteralPath $marker) { Remove-Item -LiteralPath $marker -Force }
+        if ($null -ne $ExpectedPause) {
+            $pause = Assert-RunnerPauseUnchanged $ExpectedPause -KeepLease -DeleteAccess
+            try {
+                if($null -ne $script:RunnerOwnerOperationContext){$script:RunnerOwnerOperationContext.record.pauseClearAttempted=$true}
+                $pause.lease.DeleteExact($marker)
+                if($null -ne $script:RunnerOwnerOperationContext){$script:RunnerOwnerOperationContext.record.pauseCleared=$true}
+            } finally { $pause.lease.Dispose() }
+        } elseif (Test-Path -LiteralPath $marker) { Remove-Item -LiteralPath $marker -Force }
         Assert-RunnerControllerOpen
+        if($null -ne $ExpectedPause -and $null -ne $script:RunnerOwnerOperationContext){
+            $script:RunnerOwnerOperationContext.record.startDispatched=$true
+        }
         Start-ScheduledTask -TaskName $script:RunnerSupervisorTask
     } finally { Exit-RunnerLock $mutex }
     Write-Host 'Persistent SYSTEM supervisor started; it waits for a matching queued job.'
@@ -1913,6 +2246,33 @@ if ($Action -in @('StoreCredential', 'Start', 'Restart', 'Stop', 'EnablePilot', 
     $actionControl = Enter-RunnerLock 'Global\ITInventoryLocalRunner-Control-v1' -FailFast
 }
 try { switch ($Action) {
+    'OwnerStatus' {
+        try {
+            Assert-RunnerOwnerInstalledExecution $PSCommandPath 2>$null 3>$null 4>$null 5>$null 6>$null
+            $status=Get-RunnerOwnerStatus 2>$null 3>$null 4>$null 5>$null 6>$null
+        }catch{
+            $status=[pscustomobject]@{schema=1;execution='unknown';installed='unknown';configuration='unknown';tasks='unknown';supervisorState='unknown';watchdogState='unknown';transitions='unknown';jit='unknown';pause='unknown';session='unknown';imageSelection='unknown';imageNeedsValidation=$true;ownerOperation=[pscustomobject]@{stage='unknown';outcome='unknown'}}
+            try{if($_.Exception.Data['runnerOwnerRefusal'] -ceq 'execution-mismatch'){$status.execution='mismatch'}}catch{}
+        }
+        $json=$status | ConvertTo-Json -Depth 5 -Compress
+        if([Text.Encoding]::UTF8.GetByteCount($json) -gt 4096){'{"schema":1,"execution":"unknown","imageNeedsValidation":true}';exit 3}
+        $json
+    }
+    'ResumeAfterValidation' {
+        try {
+            Assert-RunnerOwnerInstalledExecution $PSCommandPath 2>$null 3>$null 4>$null 5>$null 6>$null
+            $result=Invoke-RunnerResumeAfterValidation $ExpectedBundleSha256 2>$null 3>$null 4>$null 5>$null 6>$null
+        }catch{
+            $code='admission-refused'
+            try{if($_.Exception.Data['runnerOwnerRefusal']){$code=(New-RunnerOwnerRefusal ([string]$_.Exception.Data['runnerOwnerRefusal'])).Data['runnerOwnerRefusal']}}catch{}
+            $result=Get-RunnerOwnerOperationProjection $null
+            $result.stage='failed';$result.outcome='failed';$result.firstRefusal=$code;$result.completedUtc=[DateTime]::UtcNow.ToString('o')
+        }
+        $json=[pscustomobject]@{schema=1;success=($result.outcome -ceq 'completed');operation=$result}|ConvertTo-Json -Depth 5 -Compress
+        if([Text.Encoding]::UTF8.GetByteCount($json) -gt 4096){'{"schema":1,"success":false,"operation":{"stage":"failed","outcome":"failed","firstRefusal":"admission-refused"}}';exit 3}
+        $json
+        if($result.outcome -cne 'completed'){exit 3}
+    }
     'PrepareImage' { Invoke-RunnerPrepareImageCore }
     'Preflight' {
         Assert-HostPrerequisites

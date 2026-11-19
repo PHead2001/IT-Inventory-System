@@ -27,7 +27,7 @@ const openReadyPr =
 const closeoutNumbers =
   'contains(fromJSON(\'["62","64","65","66","67"]\'), toJSON(github.event.pull_request.number))';
 const isolatedRoomNumbers =
-  'contains(fromJSON(\'["62","64","65"]\'), toJSON(github.event.pull_request.number))';
+  'contains(fromJSON(\'["62","64","65","67"]\'), toJSON(github.event.pull_request.number))';
 const closeoutDeadline = `\${{ (${sameRepositoryPr} && ${closeoutNumbers} && ${openReadyPr}) && (${isolatedRoomNumbers} && 80 || 60) || 40 }}`;
 const roomFlag = 'E2E_ISOLATE_ROOM';
 const roomFlagExpression = `\${{ (${sameRepositoryPr} && ${isolatedRoomNumbers} && ${openReadyPr}) && '1' || '0' }}`;
@@ -277,7 +277,7 @@ describe('disposable local runner workflow contracts', () => {
         expect(evaluate(required['runs-on'], context)).toEqual([
           'ubuntu-24.04',
         ]);
-        const isolatesRoom = !draft && [62, 64, 65].includes(number);
+        const isolatesRoom = !draft && [62, 64, 65, 67].includes(number);
         expect(evaluate(required['timeout-minutes'], context)).toBe(
           draft ? 40 : isolatesRoom ? 80 : 60,
         );

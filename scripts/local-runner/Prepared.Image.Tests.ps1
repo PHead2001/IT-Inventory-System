@@ -12,6 +12,7 @@ foreach ($file in @('Runner.ps1', 'Update.ps1')) {
 }
 $base = Join-Path ([IO.Path]::GetTempPath()) ('ITIR-image-' + [guid]::NewGuid().ToString('N'))
 [void][IO.Directory]::CreateDirectory($base)
+$base = [IO.Path]::GetFullPath($base)
 $script:RunnerRoot = $base; $script:RunnerStatePath = Join-Path $base 'state.json'
 $script:realEnter = (Get-Command Enter-RunnerLock).ScriptBlock
 $script:realControlIdle = (Get-Command Assert-RunnerControlIdle).ScriptBlock

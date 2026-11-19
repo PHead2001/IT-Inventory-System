@@ -15,6 +15,78 @@ The design runs one repository-scoped, just-in-time GitHub runner in one fresh U
 
 ## Unattended recovery and capacity status
 
+### Owner validation and explicit resume
+
+After a reviewed bundle update, invoke the **installed** `bin/Runner.ps1` in a
+fresh administrator process with `-Action OwnerStatus`, or with
+`-Action ResumeAfterValidation -ExpectedBundleSha256 <reviewed-manifest-SHA256>`.
+These actions refuse checkout execution, including a byte-identical checkout.
+They do not install a bundle. Pending updates still require the existing Update
+resume control; an owner-operation receipt cannot resume or replay an update.
+
+Both actions emit one JSON result, bounded to 4096 UTF-8 bytes, with ancillary
+PowerShell streams suppressed. Resume exits zero only for completed dispatch
+and running-supervisor readback; refusal or uncertainty exits 3. Status projects
+independent installed/configuration/task/transition/JIT/pause/session findings,
+using `unknown` when evidence is unavailable. It reads image metadata only:
+`imageNeedsValidation` remains true, even if a historical owner receipt reports
+`imageVerified`. Status does not read credentials, hash the image disk, probe
+the network, or change files.
+`tasks: valid` certifies task definitions, not that pickup is running.
+`supervisorState` and `watchdogState` independently report
+`running`, `ready`, `queued`, `disabled` or `unknown` from those same validated
+task objects. These known states survive an unavailable state mutex; invalid
+task identities produce `unknown` rather than projecting their operational state.
+
+Resume captures the current protected canonical pause marker under owner
+control. Its same-handle hash, byte length, lossless volume/file identity and
+creation/write timestamps establish continuity. Old creation times are valid;
+no historical installer time window grants authority. Resume requires active
+configuration, exact coherent installed bytes, valid task identities, clear
+lifecycle/JIT barriers and authoritative idle inventory. Full image binding,
+hash and two successive MTU-validated clone proofs are required. An absent or
+intact stale image permits one canonical preparation with automatic resume
+deferred; corruption refuses. Configuration and installation remain unchanged.
+The canonical pause writer records each owned replacement before proceeding.
+
+Before its sole Start, resume repeats admission and pause continuity, retains
+identity-bound read leases on the verified image disk, selected receipt,
+selector and configuration, and publishes Start intent under the state
+mutex. It then releases the supervisor lifetime mutex while retaining owner
+control and the state mutex through canonical Start. The new supervisor can
+acquire its lifetime and wait for the state handoff. Readback permits immediate
+legitimate job pickup; it does not require the runner to remain idle. A failed
+or uncertain Start is neither retried nor followed by compensating Stop.
+Metadata leases begin only after canonical preparation/publication completes.
+Their bounded same-handle snapshots must match the full validated image proof,
+and both metadata identities remain protected through running readback.
+
+Protected `owner-operation.json` is strict schema 1, at most 16 KiB, atomically
+published and validated on readback. It is evidence, never a replay journal or
+authority to remove Stop. `*-dispatching` records intent before the call;
+`prepareDispatched` and `startDispatched` report actual attempts. Interrupted
+intent projects possible dispatch and pause clearing, even when the last
+persisted attempt flags are false. `pauseClearAttempted` begins at the native
+delete call; `pauseCleared` means that call succeeded. Scheduler dispatch remains
+separate: a failure after successful pause deletion can report `pauseCleared`
+true and `startDispatched` false. Any attempted deletion or interrupted Start
+intent projects `possiblePauseClear` and `possiblePickup`; an unsuccessful
+resume then reports `startOutcomeUncertain`, because system recovery may pick
+up after Stop is gone. A throwing deletion never claims successful clearing.
+Completed resume requires actual clearing, scheduler attempt and running
+readback. Known publication or lifetime release failures before deletion retain
+both actual attempt flags false and no pickup uncertainty. A fresh explicit
+owner admission may replace an interrupted receipt; it never replays it.
+
+`failureObservation` retains only the first valid attached canonical observation
+from the current operation, bounded to 2048 UTF-8 bytes: fixed classifications,
+Boolean checks, UTC time and validated timing/counters. Stale, future, malformed,
+oversized or absent attachments become explicit `unavailable`. Secondary receipt
+publication errors do not replace the initiating observation. No raw exception,
+provider output, credentials, paths or cleanup-journal inference are exposed.
+These classifications describe observations, not a proven underlying cause.
+Offline composition tests do not certify a live preparation or continuous pickup.
+
 Both SYSTEM tasks explicitly allow starting on battery power and keep running
 when AC power disconnects. Their own CPU/RAM admission, hard session deadline,
 network guard, cleanup and explicit Stop controls remain in force. Windows
@@ -451,6 +523,17 @@ After a consumed pilot fails, preserve `pilot-attempt.json` and the recorded fai
 
 A separate per-session Windows guardian starts and confirms readiness before VM boot. Its protected recovery journal retains the exact VM GUID, adapter ID, Internal switch GUID, static MAC, claim and process identities. It observes host IPv4/IPv6 addresses and routes, including destination, next hop and interface, between one-second loop waits. On drift or failed inspection, it pauses its running VM, disconnects the owned adapter and verifies isolation before changing ACLs. An Off VM stays Off. Fingerprint and policy consume one retained capture bracketed by matching complete captures; three spaced matching observations precede policy installation and three more precede reconnect. After reducer identity/connectivity reads, a new observation outside the state lock precedes serialized Connect/Resume admission with final live provider/ACL readbacks and deadline, generation, Stop and observation-age checks. The supervisor waits for this guardian rather than repairing independently or reusing startup ACL arrays. Flaps keep the original 120-second outage episode and unchanged hard deadline. Uncertain provider results, ownership changes, Stop, dead owners or expired guardian progress use canonical cleanup; refusal retains protected state/files.
 
+Resume intent belongs to the guardian's actual pause dispatch, not an unlocked
+provider snapshot. A new outage starts without resume authority. Under the
+current identity, generation, operation, Stop and lifetime fences, quarantine
+records resume intent before suspending a live Running VM. An actual Off read
+clears it; an already Paused VM retains only the guardian intent from that same
+outage. This intent write changes no progress or deadline and proves no completed
+containment: positive pause/disconnection readback is still required. Thus a
+legitimate guarded boot after an earlier Off snapshot can be paused and later
+resumed through the normal fresh-policy/probe gates, while an Off or unrelated
+paused VM never gains boot/resume authority from a cached Running prediction.
+
 Connect/Resume handoff does not repeat an early ACL inspection before that final
 observation. It retains the reducer's VM/switch/adapter identity and connectivity
 reads, then performs every final live VM, adapter, switch, isolation and exact ACL
@@ -552,7 +635,82 @@ Windows PowerShell 5.1 with disposable files and mocked host providers.
 
 Protected state readers share the writers' existing reentrant state mutex across existence and JSON reads. Session liveness evaluates its fresh state and Stop decision coherently under that mutex, samples time after lock waits, and releases the mutex before recovery waits. A captured session exception is persisted before that invocation's canonical cleanup removes ephemeral state, preserving its original observed decision rather than reconstructing it from later state. Missing state and invalid identity still fail closed. Canonical native publication stress reproduced a sharing exception with unlocked readers; the locked fixture completed 1000 writes and 10034 reads without errors or nulls. Only an earlier noncanonical null-backup stress returned null. Cleanup-order regressions establish attached-observation retention. These checks prove the repaired source contracts; a live `state-absent` observation alone does not identify who removed state or prove the initiating cause.
 
+Only the already-dispatched detached receipt monitor may retry a classified state
+mutex acquisition timeout. The classification is a fixed tag emitted after mutex
+security validation and an unsuccessful `WaitOne`; ACL, provider and unrelated
+timeout failures remain fatal. Each interrupted monitor transaction has one
+30-second monotonic contention budget including its first 20-second acquisition.
+The bound activates only after the first classified acquisition timeout; the
+original clock still includes that first wait and is never restarted on catch.
+Ordinary available-lock recovery through the detached monitor retains its
+configured recovery deadlines. Subsequent contended acquisitions consume the
+remaining budget. The monitor-scoped
+liveness loop also checks the remaining budget
+on every recovery iteration, even when the state mutex is available. Its receipt
+transport receives the remaining millisecond budget capped by the usual
+12-second transport timeout; an expired read cannot publish a journal event or
+start another iteration. Ordinary liveness outside this monitor scope retains
+the configured recovery deadlines. No inaccessible state is reported alive, and
+successful continuation requires fresh Stop, hard deadline,
+guardian/progress/outage checks plus the original claim, launch and runner
+identities. A generation change during contention refuses continuation. Registration,
+handoff and guest dispatch are never replayed. A completed transaction ends that
+contention scope; it does not extend any session or recovery deadline.
+
+The guardian captures the protected claim, guardian and recovery generation, then
+performs read-only VM/switch/adapter preflight outside the broad state mutex. It
+reacquires the mutex and rejects changed ownership or recovery state before
+publishing a plan. The reducer samples time and observation age after preflight
+and Stop inspection. A stale capture therefore requests containment rather than
+connection. Provider mutations and their fresh live admission/readback remain
+serialized. Successful containment/effects publish actual completion time only
+after renewed ownership, Stop, process and expiry checks; a completed call cannot
+revive an expired operation. Hung synchronous effects still cannot be cancelled
+or treated as progress, and may delay cleanup while holding the mutex.
+
+Optional `controlDiagnostic` failure evidence contains only fixed lock purpose,
+wait duration (0–30000 ms), and read-only preflight stage enums. Preflight duration
+in this small projection saturates at 30000 ms; existing recovery timing evidence
+retains its existing bounds. Historical journals without this field remain readable.
+`Runner.Contention.Tests.ps1 -NativeContention` proves real independent-process
+22-second contention survival and permanent-contention refusal at the fixed total
+budget using only an ordinary-user GUID mutex. Its provider and guest receipt
+operations are fixtures; it does not certify production ACLs, Hyper-V containment
+or same-job network continuity. Slow-preflight/expiry regressions use a simulated
+clock. Each tick captures immutable ownership and recovery fences under the mutex,
+performs read-only VM preflight outside it, then obtains a new two-capture network
+observation before reacquiring and revalidating those fences. The admission timestamp
+remains the start of the retained second capture. A 1328 ms preflight followed by
+explicit 2052 ms and 1419 ms captures therefore retains a 1419 ms lease; a retained
+capture exceeding two seconds still requires containment. Final connect/resume
+admission samples its clock after the final protected-state and Stop reads, so
+blocking reads cannot authorize an expired observation or deadline. Reconnect and
+resume still obtain their own independent fresh capture pair and live ACL proof.
+
 After the credential-free builder shuts down gracefully and its exact Off VM registration is authoritatively removed, the owner commits a sealed preparation state with the scrub proof, image binding and fenced recovery generation. The guardian remains active while bulk disk copying runs outside the state mutex. Its sealed supervision path checks the exact preparation identity, owner/guardian processes, Stop, deadlines, progress, committed proof, authoritative VM absence and remaining disk/configuration references before refreshing progress. It never treats a missing ordinary job or verifier VM as a preparation seal, resumes a removed VM or accepts old network/probe outcomes. Watchdog and session liveness retain the same guards. Session liveness samples evaluation time after heartbeat and the fresh protected-state read, then rechecks Stop and the current deadline; guardian progress that advanced during the mutex wait is evaluated against that later time, while true future progress still refuses continuation. Candidate retention still requires fresh post-copy proof and unchanged image selection. Provider uncertainty, reappearing registration, cancellation or invalid proof fails closed through canonical cleanup.
+
+If that seal commits during unlocked preflight, the guardian first revalidates
+the immutable claim and its current process identity. Either seal indicator then
+requires both indicators, the sole next committed generation and the complete
+sealed-preparation proof before old provider success or failure is discarded.
+Partial seals, unrelated generations or changed ownership remain refusals. The
+ordinary nonsealed branch still requires the full unchanged recovery fence.
+Owner-control lock refusal remains a `TimeoutException` with the compatible
+`Runner state is busy` message prefix and its bounded structured busy diagnostic.
+
+Only positively isolated recovery can publish a completed preflight checkpoint
+before network capture: the owned VM must be Paused or Off, its exact adapter must
+be disconnected, the journal must be isolated or verified with no pending operation,
+and guardian readiness must be false. Ownership, the full recovery fence, Stop and
+all deadlines are rechecked against the actual current clock. Only `progressUtc`
+changes; phase, readiness, network evidence, authority and the original outage/hard
+deadlines remain unchanged. Already expired progress cannot be revived, and a
+subsequent capture hang still expires the lease. Healthy, connected, running or
+pending work cannot renew this checkpoint, even with an old successful outcome.
+The healthy network-admission boundary remains 30 seconds: a genuinely slow healthy
+26-second preflight plus six-second capture still fails closed. This limit is
+separate from the evidenced 1328 ms preflight/3471 ms capture ordering defect and
+does not promise unconditional provider liveness or live network continuity.
 
 While the exact owned adapter is disconnected and its VM is Off or Paused, policy replacement queries its existing ACL objects and removes each with the supported [InputObject parameter set](https://learn.microsoft.com/en-us/powershell/module/hyper-v/remove-vmnetworkadapterextendedacl?view=windowsserver2025-ps). A fresh adapter with no ACLs skips removal. A second query must prove the old policy empty before any replacement rule is added; query/removal failures or surviving rules fail closed through canonical cleanup. Exact post-add readback remains required before reconnect or resume.
 
@@ -634,6 +792,17 @@ Image-preparation failures may also leave a protected local
 fixed stage marker (or `unknown`), exit code, receipt length, and bounded,
 sanitized stderr; that detail remains local and is not copied to generic
 failure records or public output.
+
+An image-command failure can carry the existing bounded failure observation
+with `origin=image-preparation` and `reason=image-command`. Its first capture is
+metadata-only and fail-fast: it validates the matching current preparation
+session, VM, instance, owner processes, and recovery binding before the existing
+private artifact writer's liveness wait. If that capture is unavailable, one
+later metadata-only recapture may retain recovery counters completed meanwhile;
+`atUtc` then marks the capture time, not necessarily the SSH exit time. The
+validated enum and numeric bounds remain in force. Capture failure cannot replace
+the original SSH exception or interrupt normal cleanup. This diagnostic does
+not establish a physical network cause.
 
 This is diagnostic instrumentation. The Boolean success policy, generation/nonce
 checks, native commands, timeouts, isolation rules and outage deadline are unchanged.

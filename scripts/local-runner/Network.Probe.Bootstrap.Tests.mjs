@@ -133,7 +133,9 @@ class FixtureAccessFailure : System.Collections.IEnumerable {
 if ($PSVersionTable.PSEdition -cne 'Desktop' -or $PSVersionTable.PSVersion.Major -ne 5) { throw 'PRIVATE_RUNTIME' }
 $script:mode=${literal(mode)}
 if ($script:mode -ceq 'common-import') { throw 'PRIVATE_IMPORT' }
-$script:RunnerRoot=${literal(runnerRoot)}
+# Node and PS5 can expose different long/8.3 aliases. The fixture root already
+# exists; canonicalize it with the same API as the containment predicate below.
+$script:RunnerRoot=[IO.Path]::GetFullPath(${literal(runnerRoot)})
 $script:ownedCalls=0; $script:nativeCalls=0; $script:stopCalls=0
 function Assert-OwnedPath([string] $Path) {
     $script:ownedCalls++

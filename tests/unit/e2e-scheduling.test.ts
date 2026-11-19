@@ -193,7 +193,8 @@ describe('browser scheduling', () => {
       (entry) => entry.file === 'experience-recordings.spec.ts',
     );
     expect(recordings).toHaveLength(2);
-    expect(baseline.length).toBeGreaterThan(0);
+    expect(baseline).toHaveLength(371);
+    expect(scheduled).toHaveLength(371);
     expect(new Set(scheduled.map((entry) => entry.key)).size).toBe(
       scheduled.length,
     );

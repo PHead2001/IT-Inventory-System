@@ -71,6 +71,8 @@ if ($LASTEXITCODE -ne 0) { throw 'Fresh Windows PowerShell pilot binding regress
 if ($LASTEXITCODE -ne 0) { throw 'Fresh Windows PowerShell lifecycle recovery regression failed.' }
 & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'Update.Controls.Tests.ps1')
 if ($LASTEXITCODE -ne 0) { throw 'Fresh Windows PowerShell update controls regression failed.' }
+& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'Owner.Operation.Tests.ps1')
+if ($LASTEXITCODE -ne 0) { throw 'Fresh Windows PowerShell owner operation regression failed.' }
 & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'Lifecycle.Atomicity.Tests.ps1')
 if ($LASTEXITCODE -ne 0) { throw 'Fresh Windows PowerShell lifecycle atomicity regression failed.' }
 & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'Session.Paths.Tests.ps1')
@@ -128,8 +130,12 @@ if ($LASTEXITCODE -ne 0) { throw 'Network.Probe.Bootstrap.Tests.mjs failed.' }
 if ($LASTEXITCODE -ne 0) { throw 'Network.Probe.Diagnostics.Tests.ps1 failed.' }
 & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'Network.Integration.Tests.ps1')
 if ($LASTEXITCODE -ne 0) { throw 'Network.Integration.Tests.ps1 failed.' }
+& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'Runner.Contention.Tests.ps1') -NativeContention
+if ($LASTEXITCODE -ne 0) { throw 'Runner.Contention.Tests.ps1 failed.' }
 & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'Failure.Observation.Tests.ps1')
 if ($LASTEXITCODE -ne 0) { throw 'Failure.Observation.Tests.ps1 failed.' }
+& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'Image.Command.Observation.Tests.ps1')
+if ($LASTEXITCODE -ne 0) { throw 'Image.Command.Observation.Tests.ps1 failed.' }
 & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'Session.Failure.Tests.ps1')
 if ($LASTEXITCODE -ne 0) { throw 'Session.Failure.Tests.ps1 failed.' }
 & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'Prepared.Failure.Tests.ps1')

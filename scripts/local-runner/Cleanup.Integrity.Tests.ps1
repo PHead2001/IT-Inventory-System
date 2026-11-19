@@ -8,6 +8,7 @@ if ([string]::IsNullOrEmpty($SourcePath)) { $SourcePath = Join-Path $PSScriptRoo
 . $SourcePath
 $fixtureRoot = Join-Path ([IO.Path]::GetTempPath()) ('ITIR-cleanup-tests-' + [guid]::NewGuid().ToString('N'))
 [void][IO.Directory]::CreateDirectory($fixtureRoot)
+$fixtureRoot = [IO.Path]::GetFullPath($fixtureRoot)
 $script:checks = 0
 function Assert-Check([bool] $Condition, [string] $Message) {
     if (-not $Condition) { throw $Message }

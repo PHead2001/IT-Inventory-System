@@ -84,10 +84,10 @@ the `required` job to GitHub-hosted `ubuntu-24.04` when the event is `pull_reque
 in `PHead2001/IT-Inventory-System` and the head repository matches. This includes
 drafts, whose existing uncertified decision still applies. Every other case uses
 the existing light/heavy routing. For open, ready PRs from the matching
-repository, the required job allows eighty minutes on 62, 64 and 65 and sixty
-minutes on 66 and 67. The broader limit gives the hosted runner time to finish
+repository, the required job allows eighty minutes on 62, 64, 65 and 67. PR 66
+has a sixty-minute deadline. The broader limit gives the hosted runner time to finish
 after a sixty-minute run reached the deadline during parallel browser testing.
-For 62, 64 and 65, the browser step runs the 29 cases in `00-room.spec.ts` in the
+For 62, 64, 65 and 67, the browser step runs the 29 cases in `00-room.spec.ts` in the
 single-worker exclusive phase alongside the five already-exclusive room cases.
 The other browser files follow the normal partition, with up to two workers in
 the parallel phase. Local, focused and other CI runs follow the default schedule.
@@ -127,10 +127,11 @@ the exclusive phase in every full-suite schedule.
 
 The desktop and phone drawer orbit journeys also run in that exclusive phase.
 The hosted desktop case failed both attempts before full-suite cancellation.
-The phone case passed. Both moved cases retain the original sixty-second
-test limits, native interactions and assertions. Collection confirms both
-viewport cases move together. The revised browser duration still requires
-hosted execution.
+The desktop retry reached a different orbit side before the same sixty-second
+test limit. The phone case passed. Both moved cases retain the original test
+limits, native interactions and assertions. Collection confirms both viewport
+cases move together. The revised browser duration still requires hosted
+execution.
 
 Both specs explicitly call `registerRoomTestSupport` from the non-spec
 `room-test-support.ts` module. Each invocation owns its fixture identities,
@@ -138,15 +139,16 @@ cleanup journals and failure-diagnostic maps, retains the local-target guard,
 and archives/clears its own stock through the audited RPC. Importing that module
 registers no hooks. The moved cases and their occupied-witness helpers preserve
 their assertions. Scheduling regressions require exactly those five titles in
-the exclusive file, matching focused/full discovery without duplicates or loss,
-and no spec-to-spec imports. Source and collection checks do not replace actual
-focused browser execution or final-candidate CI.
+the exclusive file, all 371 cases scheduled once in the combined suite, matching
+focused and full room discovery, and no spec-to-spec imports. Runtime
+certification requires focused browser execution and final-candidate CI.
 
 Failed attempts publish bounded source coordinates immediately, before final
 reporting, so process cancellation and unavailable artifact uploads still leave
-an assertion-site pointer. Only the fixed room spec/support files' source coordinates are
-retained from at most three errors per attempt and twenty attempts. Test titles,
-assertion messages, expected/actual values, requests and attachments are excluded.
+an assertion-site pointer. Only the two room specs and their shared support file
+contribute source coordinates from at most three errors per attempt and twenty
+attempts. Test titles, assertion messages, expected/actual values, requests and
+attachments are excluded.
 The final report retains its existing bounded summary and omission count.
 
 The spatial interruption journey controls time only around transient flight/reveal
