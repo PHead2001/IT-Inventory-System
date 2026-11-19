@@ -133,9 +133,21 @@ for (const role of ['staff', 'viewer'] as const) {
           );
         }
       }
-      expect(await main.innerText()).not.toMatch(
-        /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/,
-      );
+      // User-entered names can contain UUIDs. Check the actual projection IDs.
+      const projectionIds = new Set([
+        ...expected.stock.attention.map((row) => row.itemId),
+        ...expected.stock.unmonitored.map((row) => row.itemId),
+        ...expected.stockTrends.map((trend) => trend.itemId),
+        ...expected.atSites.rows.flatMap((row) => [row.siteId, row.entityId]),
+        ...expected.recentEvents.flatMap((event) => [
+          event.eventId,
+          event.entityId,
+        ]),
+      ]);
+      const mainText = (await main.innerText()).toLowerCase();
+      for (const id of projectionIds) {
+        expect(mainText).not.toContain(id.toLowerCase());
+      }
       await expect(page.getByText('Add item', { exact: true })).toHaveCount(
         role === 'staff' ? 1 : 0,
       );
