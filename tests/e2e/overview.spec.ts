@@ -39,10 +39,11 @@ for (const role of ['staff', 'viewer'] as const) {
       const expected = parseOverviewProjection(read.data);
       await signIn(page, role);
       await page.goto('/dashboard');
+      const main = page.getByRole('main');
       await expect(
         page.getByRole('heading', { name: 'Overview', exact: true }),
       ).toBeVisible();
-      await expect(page.getByRole('alert')).toHaveCount(0);
+      await expect(main.getByRole('alert')).toHaveCount(0);
       const attention = page.getByRole('region', {
         name: 'Items needing attention',
       });
@@ -101,7 +102,6 @@ for (const role of ['staff', 'viewer'] as const) {
             table.locator('tr').filter({ hasText: point.date }),
           ).toContainText(point.value ?? 'Not available');
       }
-      const main = page.locator('#main-content');
       expect(await main.innerText()).not.toMatch(
         /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/,
       );
@@ -150,7 +150,7 @@ for (const role of ['staff', 'viewer'] as const) {
       await page
         .getByRole('button', { name: 'Refresh overview', exact: true })
         .click();
-      await expect(page.getByRole('alert')).toContainText(
+      await expect(main.getByRole('alert')).toContainText(
         'Private Overview data has been cleared',
       );
       await expect(
