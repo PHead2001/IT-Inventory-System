@@ -1471,6 +1471,19 @@ test('375px populated room shows every occupied target with passive badges and s
     }
   }
   await expect(more).toHaveAttribute('aria-expanded', 'false');
+  // Full motion retains an inert exit panel until its spring presentation ends.
+  await expect(
+    page.getByRole('region', {
+      name: 'More map controls',
+      exact: true,
+      includeHidden: true,
+    }),
+  ).toHaveCount(0);
+  await expect
+    .poll(
+      async () => openMenuFlow.hostHeight - (await readMenuFlow()).hostHeight,
+    )
+    .toBeCloseTo(addedMenuFlow, 3);
   const dismissedMenuFlow = await readMenuFlow();
   expect(dismissedMenuFlow.placement).toBe('closed');
   expect(openMenuFlow.hostHeight - dismissedMenuFlow.hostHeight).toBeCloseTo(
