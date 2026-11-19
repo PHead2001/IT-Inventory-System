@@ -18,6 +18,8 @@ const pilotLabel =
   "${{ format('it-inventory-pilot-{0}', github.event.pull_request.head.sha || github.sha) }}";
 const reuseLabel =
   "${{ ((github.event_name == 'pull_request' && (toJSON(github.event.pull_request.draft) != 'false' || github.event.pull_request.state != 'open')) || (needs.reuse_evidence.result == 'success' && needs.reuse_evidence.outputs.reuse == 'true')) && 'it-inventory-light' || 'it-inventory-heavy' }}";
+const closeoutRouting =
+  "${{ fromJSON((github.event_name == 'pull_request' && github.repository == 'PHead2001/IT-Inventory-System' && github.event.pull_request.head.repo.full_name == github.repository && contains(fromJSON('[62,64,65,66,67]'), github.event.pull_request.number)) && '[\"ubuntu-24.04\"]' || (((github.event_name == 'pull_request' && (toJSON(github.event.pull_request.draft) != 'false' || github.event.pull_request.state != 'open')) || (needs.reuse_evidence.result == 'success' && needs.reuse_evidence.outputs.reuse == 'true')) && '[\"self-hosted\",\"it-inventory-light\"]' || '[\"self-hosted\",\"it-inventory-heavy\"]')) }}";
 const readyForFull =
   "(github.event_name != 'pull_request' || (toJSON(github.event.pull_request.draft) == 'false' && github.event.pull_request.state == 'open'))";
 const fullOnly =
@@ -87,6 +89,12 @@ function auditWorkflowRouting(name, source) {
       throw new Error(`${identity}: unexamined reusable workflow job`);
     const labels = job['runs-on'];
     if (
+      name === 'ci.yml' &&
+      jobName === 'required' &&
+      labels === closeoutRouting
+    )
+      continue;
+    if (
       !Array.isArray(labels) ||
       labels.length !== 2 ||
       labels[0] !== 'self-hosted' ||
@@ -106,7 +114,7 @@ function auditWorkflowRouting(name, source) {
 }
 
 describe('disposable local runner workflow contracts', () => {
-  it('keeps draft and malformed PRs light and uncertified without running full gate markers', () => {
+  it('keeps fallback draft and malformed PRs light and uncertified without running full gate markers', () => {
     const required = foundation.jobs.required;
     expect(foundation.on.pull_request.types).toEqual([
       'opened',
@@ -126,6 +134,8 @@ describe('disposable local runner workflow contracts', () => {
         'needs',
         'toJSON',
         'always',
+        'fromJSON',
+        'contains',
         `return (${body});`,
       )(
         github,
@@ -137,6 +147,8 @@ describe('disposable local runner workflow contracts', () => {
         },
         JSON.stringify,
         () => true,
+        JSON.parse,
+        (values, value) => values.includes(value),
       );
     };
     for (const pull_request of [
@@ -146,9 +158,10 @@ describe('disposable local runner workflow contracts', () => {
       { draft: false, state: 'closed' },
     ]) {
       const github = { event_name: 'pull_request', event: { pull_request } };
-      expect(evaluate(required['runs-on'][1], github)).toBe(
+      expect(evaluate(required['runs-on'], github)).toEqual([
+        'self-hosted',
         'it-inventory-light',
-      );
+      ]);
       for (const id of [
         'npm_setup',
         'install',
@@ -179,15 +192,22 @@ describe('disposable local runner workflow contracts', () => {
       event_name: 'pull_request',
       event: { pull_request: { draft: false, state: 'open' } },
     };
-    expect(evaluate(required['runs-on'][1], github)).toBe('it-inventory-heavy');
+    expect(evaluate(required['runs-on'], github)).toEqual([
+      'self-hosted',
+      'it-inventory-heavy',
+    ]);
     expect(
       evaluate(required.steps.find((step) => step.id === 'install').if, github),
     ).toBe(true);
     const main = { event_name: 'push', event: {} };
-    expect(evaluate(required['runs-on'][1], main)).toBe('it-inventory-heavy');
-    expect(evaluate(required['runs-on'][1], main, 'true')).toBe(
+    expect(evaluate(required['runs-on'], main)).toEqual([
+      'self-hosted',
+      'it-inventory-heavy',
+    ]);
+    expect(evaluate(required['runs-on'], main, 'true')).toEqual([
+      'self-hosted',
       'it-inventory-light',
-    );
+    ]);
     expect(
       evaluate(
         required.steps.find((step) => step.id === 'install').if,
@@ -195,6 +215,58 @@ describe('disposable local runner workflow contracts', () => {
         'true',
       ),
     ).toBe(false);
+    const repository = 'PHead2001/IT-Inventory-System';
+    const closeout = (number, draft = false) => ({
+      event_name: 'pull_request',
+      repository,
+      event: {
+        pull_request: {
+          number,
+          draft,
+          state: 'open',
+          head: { repo: { full_name: repository } },
+        },
+      },
+    });
+    for (const number of [62, 64, 65, 66, 67]) {
+      for (const draft of [true, false]) {
+        const context = closeout(number, draft);
+        expect(evaluate(required['runs-on'], context)).toEqual([
+          'ubuntu-24.04',
+        ]);
+        for (const id of ['install', 'e2e', 'db_stop', 'full_completion'])
+          expect(
+            evaluate(required.steps.find((step) => step.id === id).if, context),
+            `${number}/${draft}/${id}`,
+          ).toBe(!draft);
+      }
+    }
+    for (const number of [61, 63, 68]) {
+      for (const draft of [true, false])
+        expect(evaluate(required['runs-on'], closeout(number, draft))).toEqual([
+          'self-hosted',
+          draft ? 'it-inventory-light' : 'it-inventory-heavy',
+        ]);
+    }
+    for (const context of [
+      { ...closeout(62), event_name: 'pull_request_target' },
+      { ...closeout(62), event_name: 'workflow_dispatch' },
+      { ...closeout(62), event_name: 'push' },
+      { ...closeout(62), repository: 'other/IT-Inventory-System' },
+      {
+        ...closeout(62),
+        event: {
+          pull_request: {
+            ...closeout(62).event.pull_request,
+            head: { repo: { full_name: 'fork/IT-Inventory-System' } },
+          },
+        },
+      },
+    ])
+      expect(evaluate(required['runs-on'], context)).toEqual([
+        'self-hosted',
+        'it-inventory-heavy',
+      ]);
   });
 
   it('pins every application Node setup to the checked-out exact version', () => {
@@ -349,9 +421,41 @@ describe('disposable local runner workflow contracts', () => {
       'pilot expression outside reviewed job',
       `runs-on:\n      - self-hosted\n      - ${pilotLabel}`,
     ],
+    ['closeout expression outside reviewed job', `runs-on: ${closeoutRouting}`],
   ])('rejects a newly added workflow/job with %s', (_name, body) => {
     const futureWorkflow = `name: Newly added workflow\non: workflow_dispatch\njobs:\n  future_job:\n    ${body}\n`;
     expect(() => auditWorkflowRouting('future.yaml', futureWorkflow)).toThrow();
+  });
+
+  it('rejects broadened closeout expressions, hosted siblings and reusable required jobs', () => {
+    expect(auditWorkflowRouting('ci.yml', ci)).toBe(3);
+    for (const expression of [
+      closeoutRouting.replace('ubuntu-24.04', 'ubuntu-latest'),
+      closeoutRouting.replace('[62,64,65,66,67]', '[62,63,64,65,66,67]'),
+      closeoutRouting.replace(
+        'github.event.pull_request.head.repo.full_name == github.repository && ',
+        '',
+      ),
+      closeoutRouting.replace(
+        "github.repository == 'PHead2001/IT-Inventory-System' && ",
+        '',
+      ),
+    ])
+      expect(() =>
+        auditWorkflowRouting('ci.yml', ci.replace(closeoutRouting, expression)),
+      ).toThrow('ci.yml:required');
+    expect(() =>
+      auditWorkflowRouting(
+        'ci.yml',
+        `jobs:\n  required:\n    runs-on: ${closeoutRouting}\n  sibling:\n    runs-on: ${closeoutRouting}\n`,
+      ),
+    ).toThrow('ci.yml:sibling');
+    expect(() =>
+      auditWorkflowRouting(
+        'ci.yml',
+        `jobs:\n  required:\n    runs-on: ${closeoutRouting}\n    uses: owner/repo/.github/workflows/ci.yml@main\n`,
+      ),
+    ).toThrow('unexamined reusable workflow job');
   });
 
   it('accepts fixed normal profiles for a new workflow but rejects an added hosted sibling job', () => {
@@ -366,7 +470,7 @@ describe('disposable local runner workflow contracts', () => {
     ).toThrow('future.yaml:overlooked_job');
   });
 
-  it('routes validation/preview jobs to reviewed profiles without a hosted fallback or Actions cache', () => {
+  it('limits hosted closeout routing to the required job and retains reviewed sibling profiles without Actions cache', () => {
     const workflows = ['ci.yml', 'preview-access.yml'];
     const profiles = {
       required: 'dynamic',
@@ -388,10 +492,7 @@ describe('disposable local runner workflow contracts', () => {
       for (const [, job, body] of definitions) {
         expect(profiles[job], `${name}:${job}`).toBeDefined();
         if (job === 'required')
-          expect(load(workflow).jobs.required['runs-on']).toEqual([
-            'self-hosted',
-            reuseLabel,
-          ]);
+          expect(load(workflow).jobs.required['runs-on']).toBe(closeoutRouting);
         else
           expect(body.match(/^    runs-on:.*$/gm), `${name}:${job}`).toEqual([
             `    runs-on: [self-hosted, it-inventory-${profiles[job]}]`,
