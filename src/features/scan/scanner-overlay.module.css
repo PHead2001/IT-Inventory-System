@@ -1,0 +1,113 @@
+.viewport {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 4 / 3;
+  max-height: 330px;
+  overflow: hidden;
+  border: 1px solid var(--scan-preview-border);
+  border-radius: 10px;
+  background: var(--scan-preview-background);
+  --scan-feedback-intensity: 0.85;
+}
+.viewport[hidden] {
+  display: none;
+}
+.viewport video {
+  display: block;
+  width: 100%;
+  height: 100%;
+  max-height: none;
+  margin: 0;
+  border: 0;
+  object-fit: contain;
+  object-position: center;
+}
+.overlay {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  color: var(--accent);
+  opacity: var(--scan-feedback-intensity);
+}
+.overlay[data-current='false'] {
+  visibility: hidden;
+}
+.overlay svg {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+}
+.frame,
+.decoded {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  vector-effect: non-scaling-stroke;
+}
+.decoded > * {
+  vector-effect: non-scaling-stroke;
+}
+.overlay[data-state='locked'] .frame {
+  stroke-width: 4;
+}
+:global([data-motion='full'])
+  .overlay[data-current='true'][data-state='locked'][data-reduced='false'] {
+  animation: lock-flash 130ms var(--ease-workspace);
+}
+.overlay[data-state='error'] {
+  color: var(--warning);
+}
+.status {
+  position: absolute;
+  bottom: 0.5rem;
+  left: 0.5rem;
+  right: 0.5rem;
+  padding: 0.25rem 0.5rem;
+  background: var(--surface);
+  color: var(--foreground);
+  border-radius: 0.25rem;
+  font-size: 14px;
+}
+.laser {
+  position: absolute;
+  left: 25%;
+  right: 25%;
+  top: 49%;
+  height: 2px;
+  background: currentColor;
+}
+:global([data-motion='full'])
+  .overlay[data-current='true'][data-state='searching'][data-reduced='false']
+  .laser {
+  animation: sweep 1.8s ease-in-out infinite alternate;
+}
+@keyframes sweep {
+  from {
+    transform: translateY(-65px);
+  }
+  to {
+    transform: translateY(65px);
+  }
+}
+@keyframes lock-flash {
+  from {
+    opacity: 0.45;
+  }
+  to {
+    opacity: var(--scan-feedback-intensity);
+  }
+}
+.overlay[data-reduced='true'],
+.overlay[data-reduced='true'] .laser,
+.overlay[data-current='false'],
+.overlay[data-current='false'] .laser,
+:global([data-motion='reduced']) .overlay,
+:global([data-motion='reduced']) .laser {
+  animation: none;
+}
+@media (prefers-reduced-motion: reduce) {
+  .overlay,
+  .laser {
+    animation: none !important;
+  }
+}

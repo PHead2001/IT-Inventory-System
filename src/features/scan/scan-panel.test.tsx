@@ -1,3 +1,6 @@
+import { PrivacyReadinessContext } from '@/components/auth/privacy-readiness';
+import { readPrivacyRevocationRevision } from './assign-batch';
+import { PeekProvider } from '@/features/peek/peek-provider';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import {
   act,
@@ -17,12 +20,24 @@ import { PNG } from 'pngjs';
 import { holdTransitionCapture } from '../../../tests/helpers/transition-capture';
 import { ignoresShortcut } from '@/features/commands/registry';
 const mocks = vi.hoisted(() => ({
+  feedback: vi.fn(),
+  stopFeedback: vi.fn(),
   decode: vi.fn(),
   stop: vi.fn(),
   resolve: vi.fn(),
   resolveItemCode: vi.fn(),
   resolveSerial: vi.fn(),
   push: vi.fn(),
+}));
+vi.mock('@/components/experience/scan-feedback', () => ({
+  useScanFeedback: () =>
+    Object.assign(mocks.feedback, {
+      prime: vi.fn(),
+      stop: mocks.stopFeedback ?? vi.fn(),
+    }),
+  primeScanFeedback: vi.fn(),
+  stopScanFeedback: mocks.stopFeedback,
+  scanReducedMotionNow: () => false,
 }));
 vi.mock('@zxing/browser', async () => {
   const { NotFoundException } = await import('@zxing/library');
@@ -40,7 +55,11 @@ vi.mock('./resolve.server', () => ({
   resolveItemCode: mocks.resolveItemCode,
   resolveSerial: mocks.resolveSerial,
 }));
-vi.mock('next/navigation', () => ({ useRouter: () => ({ push: mocks.push }) }));
+vi.mock('next/navigation', () => ({
+  useRouter: () => ({ push: mocks.push }),
+  usePathname: () => '/scan',
+  useSearchParams: () => new URLSearchParams(),
+}));
 vi.mock('@/lib/supabase/browser', () => ({
   createSupabaseBrowserClient: () => ({
     auth: {
@@ -881,4 +900,106 @@ it('clears a cancelled lookup when camera retry fails, allowing manual input aga
   expect(mocks.push).not.toHaveBeenCalled();
   fireEvent.click(screen.getByRole('button', { name: 'Open' }));
   await waitFor(() => expect(mocks.resolve).toHaveBeenCalledTimes(2));
+});
+
+it('separates one camera decode from no-match feedback without claiming an assignment', async () => {
+  render(<ScanPanel />);
+  fireEvent.click(screen.getByRole('button', { name: 'Start camera' }));
+  await waitFor(() => expect(mocks.decode).toHaveBeenCalledOnce());
+  await act(async () => {
+    mocks.decode.mock.calls[0][2]({ getText: () => 'unmatched' });
+    mocks.decode.mock.calls[0][2]({ getText: () => 'unmatched' });
+  });
+  expect(mocks.feedback.mock.calls.map((call) => call[0])).toEqual([
+    'decode',
+    'no-match',
+  ]);
+  expect(mocks.resolve).toHaveBeenCalledOnce();
+});
+it('never cues an old lookup outcome after cancellation', async () => {
+  const result = deferred<unknown>();
+  mocks.resolve.mockReturnValue(result.promise);
+  render(<ScanPanel />);
+  fireEvent.change(screen.getByLabelText(/Paste a label URL/), {
+    target: { value: 'pending' },
+  });
+  fireEvent.click(screen.getByRole('button', { name: 'Open' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Cancel inspection' }));
+  await act(async () => result.resolve({ status: 'unknown', matches: [] }));
+  expect(mocks.feedback).not.toHaveBeenCalled();
+});
+it('opens an authenticated location peek from an ambiguous Scan result and keeps its native destination', async () => {
+  const actor = '00000000-0000-4000-8000-000000000001',
+    backend = 'https://peek-scan.test';
+  mocks.resolve.mockResolvedValue({
+    status: 'ambiguous',
+    matches: [
+      { ...found.matches[0], kind: 'location' },
+      {
+        kind: 'asset',
+        path: '/inventory/assets/' + actor,
+        state: 'active',
+        label: 'Laptop',
+      },
+    ],
+  });
+  vi.spyOn(HTMLElement.prototype, 'getClientRects').mockReturnValue([
+    new DOMRect(10, 20, 200, 30),
+  ] as unknown as DOMRectList);
+  const fetcher = vi.spyOn(globalThis, 'fetch').mockImplementation(async () =>
+    Response.json({
+      actor,
+      backend,
+      payload: {
+        target: { kind: 'location', code: 'ITC' },
+        name: 'Current IT Closet',
+        status: 'active',
+        assetTag: null,
+        stock: null,
+        locations: [
+          {
+            code: 'ITC',
+            name: 'IT Closet',
+            breadcrumb: 'IT Closet',
+            active: true,
+            canHold: false,
+            spaceRootCode: null,
+          },
+        ],
+        moreLocations: false,
+        siteName: null,
+        photo: null,
+      },
+    }),
+  );
+  render(
+    <PrivacyReadinessContext
+      value={{
+        ready: true,
+        visible: true,
+        generation: 'scan-peek',
+        verifiedEpoch: assignmentEpoch(),
+        revocationRevision: readPrivacyRevocationRevision(),
+      }}
+    >
+      <PeekProvider actor={actor} backend={backend}>
+        <ScanPanel />
+      </PeekProvider>
+    </PrivacyReadinessContext>,
+  );
+  fireEvent.change(screen.getByLabelText(/Paste a label URL/), {
+    target: { value: 'ITC' },
+  });
+  fireEvent.click(screen.getByRole('button', { name: 'Open' }));
+  const link = await screen.findByRole('link', { name: 'IT Closet' });
+  act(() => link.focus());
+  expect(await screen.findByRole('dialog')).toHaveTextContent(
+    'Current IT Closet',
+  );
+  expect(fetcher).toHaveBeenCalledWith(
+    '/api/peek?kind=location&code=ITC',
+    expect.objectContaining({ cache: 'no-store' }),
+  );
+  expect(link).toHaveAttribute('href', '/locations/ITC');
+  expect(mocks.push).not.toHaveBeenCalled();
 });

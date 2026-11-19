@@ -35,7 +35,7 @@ export function WebLinkValue({ value }: { value: unknown }) {
       {href ? (
         <div className="flex flex-wrap gap-3">
           <a
-            className="inline-flex min-h-10 items-center text-cyan-200 underline"
+            className="inline-flex min-h-11 min-w-11 max-w-full items-center [overflow-wrap:anywhere] text-cyan-200 underline"
             href={href}
             target="_blank"
             rel="noopener noreferrer"
@@ -45,7 +45,7 @@ export function WebLinkValue({ value }: { value: unknown }) {
           </a>
           <button
             type="button"
-            className="min-h-10 text-cyan-200 underline"
+            className="min-h-11 min-w-11 text-cyan-200 underline"
             aria-label={`Copy ${href}`}
             onClick={async () => {
               try {
@@ -82,7 +82,7 @@ export function WebLinkValue({ value }: { value: unknown }) {
           />
           <button
             type="button"
-            className="min-h-10 underline"
+            className="min-h-11 min-w-11 underline"
             onClick={() => {
               fallback.current?.focus();
               fallback.current?.select();

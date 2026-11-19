@@ -6,6 +6,7 @@ import {
   useEffect,
   useImperativeHandle,
   useMemo,
+  useState,
   type Ref,
   type ReactNode,
 } from 'react';
@@ -23,6 +24,7 @@ import { SceneSessionContext } from './scene-budget-provider';
 import type { RoomDefinition } from '../schema';
 import {
   readScenePalette,
+  useScenePalette,
   ScenePaletteProvider,
   SelectionEdges,
 } from './scene-palette';
@@ -366,4 +368,146 @@ it('fences saved and queued palette notifications at original-session retirement
   });
   expect(reads).toHaveBeenCalledOnce();
   vi.unstubAllGlobals();
+});
+
+function ContinuityProbe() {
+  const palette = useScenePalette();
+  const [camera] = useState(() => ({ x: 47 }));
+  const [selected] = useState('ITC-RED');
+  return (
+    <output data-testid="continuity">
+      {camera.x}:{selected}:{palette.background.getHexString()}:
+      {palette.fillLight.getHexString()}:{palette.selectedEdge.getHexString()}:
+      {palette.selectionEmissive.getHexString()}
+    </output>
+  );
+}
+it('rethemes the mounted room context on batched root appearance changes, requesting a demand frame without replacing camera or selection', async () => {
+  const { getByTestId } = render(
+    <ScenePaletteProvider>
+      <ContinuityProbe />
+    </ScenePaletteProvider>,
+  );
+  const output = getByTestId('continuity');
+  const reads = vi.spyOn(window, 'getComputedStyle');
+  canvas.style.setProperty('--room-canvas-background', '#ffffff');
+  canvas.style.setProperty('--room-fill-light', '#223344');
+  canvas.style.setProperty('--room-selected-edge', '#123456');
+  canvas.style.setProperty('--accent', '#654321');
+  invalidate.mockClear();
+  await act(async () => {
+    document.documentElement.dataset.theme = 'light';
+    document.documentElement.classList.add('test-light');
+  });
+  expect(output).toHaveTextContent('47:ITC-RED:ffffff:223344:123456:654321');
+  expect(getByTestId('continuity')).toBe(output);
+  expect(reads).toHaveBeenCalledTimes(1);
+  expect(invalidate).toHaveBeenCalledOnce();
+  document.documentElement.classList.remove('test-light');
+  delete document.documentElement.dataset.theme;
+});
+
+it('observes root style and OS appearance, retaining the scene child and removing subscriptions on unmount', async () => {
+  const listeners = new Set<() => void>();
+  vi.stubGlobal('matchMedia', () => ({
+    addEventListener: (_: string, fn: () => void) => listeners.add(fn),
+    removeEventListener: (_: string, fn: () => void) => listeners.delete(fn),
+  }));
+  const view = render(
+    <ScenePaletteProvider>
+      <ContinuityProbe />
+    </ScenePaletteProvider>,
+  );
+  const output = view.getByTestId('continuity');
+  const reads = vi.spyOn(window, 'getComputedStyle');
+  invalidate.mockClear();
+  canvas.style.setProperty('--room-canvas-background', '#eeeeee');
+  await act(async () => {
+    document.documentElement.style.setProperty('--test-appearance', 'light');
+  });
+  expect(output).toHaveTextContent('47:ITC-RED:eeeeee');
+  canvas.style.setProperty('--room-canvas-background', '#112233');
+  await act(async () => listeners.forEach((fn) => fn()));
+  expect(output).toHaveTextContent('47:ITC-RED:112233');
+  expect(view.getByTestId('continuity')).toBe(output);
+  expect(reads).toHaveBeenCalledTimes(2);
+  expect(invalidate).toHaveBeenCalledTimes(2);
+  view.unmount();
+  expect(listeners.size).toBe(0);
+  await act(async () => {
+    document.documentElement.style.removeProperty('--test-appearance');
+  });
+  expect(reads).toHaveBeenCalledTimes(2);
+  vi.unstubAllGlobals();
+});
+
+it('coalesces OS and root notifications and requests no frame for an unchanged palette', async () => {
+  const listeners = new Set<() => void>();
+  vi.stubGlobal('matchMedia', () => ({
+    addEventListener: (_: string, fn: () => void) => listeners.add(fn),
+    removeEventListener: (_: string, fn: () => void) => listeners.delete(fn),
+  }));
+  render(
+    <ScenePaletteProvider>
+      <ContinuityProbe />
+    </ScenePaletteProvider>,
+  );
+  const reads = vi.spyOn(window, 'getComputedStyle');
+  invalidate.mockClear();
+  await act(async () => {
+    document.documentElement.dataset.theme = 'dark';
+    listeners.forEach((fn) => {
+      fn();
+      fn();
+    });
+  });
+  expect(reads).toHaveBeenCalledOnce();
+  expect(invalidate).not.toHaveBeenCalled();
+});
+
+it('retains the last supported palette on invalid syntax and recovers on a later supported theme', async () => {
+  const view = render(
+    <ScenePaletteProvider>
+      <ContinuityProbe />
+    </ScenePaletteProvider>,
+  );
+  const output = view.getByTestId('continuity');
+  const original = output.textContent;
+  invalidate.mockClear();
+  canvas.style.setProperty('--room-canvas-background', 'oklch(0.8 0.1 180)');
+  await act(async () => {
+    document.documentElement.dataset.theme = 'light';
+  });
+  expect(output.textContent).toBe(original);
+  expect(canvas.dataset.paletteStatus).toBe('unsupported-token');
+  expect(invalidate).not.toHaveBeenCalled();
+  canvas.style.setProperty('--room-canvas-background', '#eeeeee');
+  await act(async () => {
+    document.documentElement.dataset.theme = 'dark';
+  });
+  expect(output).toHaveTextContent('47:ITC-RED:eeeeee');
+  expect(canvas.dataset.paletteStatus).toBe('current');
+  expect(invalidate).toHaveBeenCalledOnce();
+});
+
+it('retires a queued palette refresh before reading or invalidating after provider disposal', async () => {
+  const listeners = new Set<() => void>();
+  vi.stubGlobal('matchMedia', () => ({
+    addEventListener: (_: string, fn: () => void) => listeners.add(fn),
+    removeEventListener: (_: string, fn: () => void) => listeners.delete(fn),
+  }));
+  const view = render(
+    <ScenePaletteProvider>
+      <ContinuityProbe />
+    </ScenePaletteProvider>,
+  );
+  const reads = vi.spyOn(window, 'getComputedStyle');
+  invalidate.mockClear();
+  await act(async () => {
+    listeners.forEach((fn) => fn());
+    view.unmount();
+  });
+  expect(listeners.size).toBe(0);
+  expect(reads).not.toHaveBeenCalled();
+  expect(invalidate).not.toHaveBeenCalled();
 });

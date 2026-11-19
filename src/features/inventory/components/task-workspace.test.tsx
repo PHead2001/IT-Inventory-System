@@ -294,13 +294,64 @@ function Draft({
     </div>
   );
 }
-function Workspace({ tasks = choices }: { tasks?: typeof choices }) {
+function Workspace({
+  tasks = choices,
+  recordName,
+}: {
+  tasks?: typeof choices;
+  recordName?: string;
+}) {
   return (
-    <TaskWorkspace choices={tasks} context="Cable � Quantity item">
+    <TaskWorkspace
+      choices={tasks}
+      context="Cable � Quantity item"
+      recordName={recordName}
+    >
       {(id) => <Draft id={id} />}
     </TaskWorkspace>
   );
 }
+it.each(['close', 'switch'] as const)(
+  'names the affected record when confirming dirty task %s',
+  (exit) => {
+    const recordName =
+      'A very long equipment name '.repeat(8) + '— closet adapter';
+    render(<Workspace recordName={recordName} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Receive stock' }));
+    fireEvent.change(screen.getByLabelText('receive entry'), {
+      target: { value: 'Retained entry' },
+    });
+    fireEvent.click(
+      screen.getByRole('button', {
+        name: exit === 'close' ? 'Close task' : 'Move stock',
+      }),
+    );
+    const dialog = screen.getByRole('alertdialog', {
+      name: 'Discard task draft?',
+    });
+    expect(dialog).toHaveAccessibleDescription(
+      'Your current task for ' + recordName + ' has unsaved entries.',
+    );
+    expect(dialog).toHaveTextContent(recordName);
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Stay with this task' }),
+    );
+    expect(screen.getByLabelText('receive entry')).toHaveValue(
+      'Retained entry',
+    );
+  },
+);
+it('uses a truthful generic draft description when no record name exists', () => {
+  render(<Workspace />);
+  fireEvent.click(screen.getByRole('button', { name: 'Receive stock' }));
+  fireEvent.change(screen.getByLabelText('receive entry'), {
+    target: { value: 'Retained entry' },
+  });
+  fireEvent.click(screen.getByRole('button', { name: 'Close task' }));
+  expect(
+    screen.getByRole('alertdialog', { name: 'Discard task draft?' }),
+  ).toHaveAccessibleDescription('This draft has unsaved entries.');
+});
 it.each(['release', 'switch', 'unmount'])(
   'defers task heading focus through capture and cancels stale intent on %s',
   async (outcome) => {

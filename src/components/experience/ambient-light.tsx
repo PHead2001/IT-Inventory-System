@@ -3,7 +3,13 @@
 import { useEffect, useRef } from 'react';
 import { useEffectiveReducedMotion } from './motion-preference';
 
-export function AmbientLight({ className = '' }: { className?: string }) {
+export function AmbientLight({
+  className = '',
+  blueprint = false,
+}: {
+  className?: string;
+  blueprint?: boolean;
+}) {
   const reduced = useEffectiveReducedMotion();
   const host = useRef<HTMLSpanElement>(null);
 
@@ -37,6 +43,8 @@ export function AmbientLight({ className = '' }: { className?: string }) {
       ref={host}
       aria-hidden="true"
       className={`experience-ambient ${className}`}
-    />
+    >
+      {blueprint && <span className="experience-blueprint" />}
+    </span>
   );
 }

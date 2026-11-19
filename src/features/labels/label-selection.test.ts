@@ -153,3 +153,20 @@ describe('explicit label selection', () => {
     expect(() => projectLabelSelection([], [row(1)], [row(2)])).toThrow();
   });
 });
+
+it('separates supplementary outcomes without repeating added success or changing disambiguation', () => {
+  const result = projectLabelSelection(
+    [labelQueueEntry(row(2))],
+    [row(1), row(2), row(3)],
+    [row(1), row(2)],
+  );
+  const complete = labelSelectionSummary(result);
+  expect(labelSelectionSummary(result, { includeAdded: false })).toBe(
+    'Already present: Same name (Quantity item; selected record 2). Unavailable to this account: Same name (Quantity item; selected record 3).',
+  );
+  expect(labelSelectionSummary(result)).toBe(complete);
+  expect(labelSelectionSummary(result, { includeAdded: true })).toBe(complete);
+  const addedOnly = projectLabelSelection([], [row(1)], [row(1)]);
+  expect(labelSelectionSummary(addedOnly, { includeAdded: false })).toBe('');
+  expect(labelSelectionSummary(addedOnly)).toContain('Added: Same name');
+});

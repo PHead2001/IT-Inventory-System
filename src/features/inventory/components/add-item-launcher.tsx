@@ -1,7 +1,9 @@
 'use client';
+import { MagneticVisual } from '@/components/experience/magnetic-visual';
 import Link from '@/components/experience/route-link';
 import { useId } from 'react';
 import { Plus } from 'lucide-react';
+import { SpringDisclosure } from '@/components/experience/spring-disclosure';
 
 export function TrackingTypeChoices({
   query = '',
@@ -86,17 +88,23 @@ export function TrackingTypeChoices({
 /** Native disclosure keeps both creation paths available without displacing results. */
 export function AddItemLauncher({ query }: { query: string }) {
   return (
-    <details className="experience-add-item-launcher experience-surface relative my-2 max-w-xl p-3 sm:my-3">
-      <summary
-        aria-label="Add item"
-        className="flex min-h-11 cursor-pointer items-center gap-2 text-sm font-semibold"
-      >
-        <Plus size={17} aria-hidden="true" /> Add item
-        <span className="experience-muted ml-auto text-xs font-normal">
-          Choose tracking type
-        </span>
-      </summary>
+    <SpringDisclosure
+      className="experience-add-item-launcher experience-surface relative my-2 max-w-xl p-3 sm:my-3"
+      summaryProps={{
+        'aria-label': 'Add item',
+        className:
+          'experience-magnetic flex min-h-11 cursor-pointer items-center gap-2 text-sm font-semibold',
+      }}
+      summary={
+        <MagneticVisual className="w-full">
+          <Plus size={17} aria-hidden="true" /> Add item
+          <span className="experience-muted ml-auto text-xs font-normal">
+            Choose tracking type
+          </span>
+        </MagneticVisual>
+      }
+    >
       <TrackingTypeChoices query={query} />
-    </details>
+    </SpringDisclosure>
   );
 }

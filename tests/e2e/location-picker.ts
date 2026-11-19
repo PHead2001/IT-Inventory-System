@@ -6,12 +6,13 @@ export async function chooseLocation(
   label: string,
   code: string,
 ) {
-  await scope.getByLabel(label, { exact: true }).click();
+  const trigger = scope.getByRole('combobox', { name: label, exact: true });
+  await trigger.click();
   const search = scope.getByRole('combobox', { name: 'Search locations' });
   await expect(search).toBeFocused();
   await search.fill(code);
   const result = scope.getByRole('option').filter({ hasText: code }).first();
   await expect(result).toBeVisible();
   await result.click();
-  await expect(scope.getByLabel(label, { exact: true })).toContainText(code);
+  await expect(trigger).toContainText(code);
 }

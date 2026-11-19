@@ -147,9 +147,12 @@ for (const width of [1280, 390])
           new RegExp(`/inventory/assets/${one.entity_id}$`),
         );
         await lookup(page, `A4-UNKNOWN-${f.suffix}`);
-        await expect(page.getByRole('status')).toContainText(
-          'No matching location, asset, or quantity item',
-        );
+        await expect(
+          page.getByRole('status').filter({
+            hasText:
+              /^No matching location, asset, or quantity item was found\.$/,
+          }),
+        ).toBeVisible();
         await expect(
           page.getByRole('list', { name: 'Matching records' }),
         ).toHaveCount(0);
@@ -411,9 +414,12 @@ test('a serial at the lookup bound shows twenty choices and ordinary search guid
       );
     await acceptanceLogin(page);
     await lookup(page, serial);
-    await expect(page.getByRole('status')).toContainText(
-      'Additional matches exist. Showing up to 20 records; use an asset tag or record QR',
-    );
+    await expect(
+      page.getByRole('status').filter({
+        hasText:
+          /^Additional matches exist\. Showing up to 20 records; use an asset tag or record QR to identify the intended equipment\.$/,
+      }),
+    ).toBeVisible();
     await expect(
       page.getByRole('list', { name: 'Matching records' }).getByRole('link'),
     ).toHaveCount(20);

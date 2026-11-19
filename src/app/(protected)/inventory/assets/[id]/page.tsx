@@ -1,3 +1,4 @@
+import { SpringDisclosure } from '@/components/experience/spring-disclosure';
 import {
   InventoryCaptureGroup,
   InventoryCaptureRegion,
@@ -93,7 +94,7 @@ export default async function AssetPage({
               <InventoryBackLink
                 record={{ kind: 'asset', id: asset.id }}
                 href={returnTo}
-                className="text-sm text-cyan-200 underline"
+                className={`text-sm text-cyan-200 underline ${styles.textTarget}`}
               >
                 ←{' '}
                 {returnTo === '/inventory'
@@ -112,12 +113,13 @@ export default async function AssetPage({
                   <p className="experience-muted mt-2 text-sm capitalize">
                     <RecordStatus status={asset.status} />
                   </p>
-                  <details className="mt-2 text-xs text-slate-400">
-                    <summary className="min-h-11 cursor-pointer py-2">
-                      Technical record details
-                    </summary>
+                  <SpringDisclosure
+                    className="mt-2 text-xs text-slate-400"
+                    summaryProps={{ className: 'min-h-11 cursor-pointer py-2' }}
+                    summary={<>Technical record details</>}
+                  >
                     <p>Record version: {asset.version}</p>
-                  </details>
+                  </SpringDisclosure>
                 </div>
                 <div className={styles.detailActions}>
                   <Link href={'/labels?asset=' + encodeURIComponent(asset.id)}>
@@ -147,7 +149,7 @@ export default async function AssetPage({
                   <dd>
                     {site ? (
                       <Link
-                        className="text-cyan-300 underline"
+                        className={`text-cyan-300 underline ${styles.textTarget}`}
                         href={'/sites/' + encodeURIComponent(site.code)}
                       >
                         {site.name} ({site.code})
@@ -237,7 +239,7 @@ export default async function AssetPage({
                       {duplicateSerialMatches.map((match) => (
                         <li key={match.id}>
                           <Link
-                            className="underline"
+                            className={`underline ${styles.textTarget}`}
                             href={'/inventory/assets/' + match.id}
                           >
                             {match.name} (

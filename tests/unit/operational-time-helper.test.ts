@@ -61,12 +61,16 @@ function historyTime(relative: boolean) {
     evaluate: async () => opened,
     getAttribute: async () => (opened ? '' : null),
     textContent: exact.textContent,
-    locator: () => ({ first: () => exact }),
-    getByRole: () => ({
-      click: vi.fn(async () => {
-        clipboard = `Recorded instant: ${instant}`;
-      }),
-    }),
+    getByRole: (role: string, options?: { name: string; exact: boolean }) => {
+      if (role === 'paragraph') return exact;
+      expect(role).toBe('button');
+      expect(options).toEqual({ name: 'Copy technical details', exact: true });
+      return {
+        click: vi.fn(async () => {
+          clipboard = `Recorded instant: ${instant}`;
+        }),
+      };
+    },
   };
   const summary = {
     count: vi.fn(async () => (mounted && relative ? 1 : 0)),

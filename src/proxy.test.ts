@@ -16,6 +16,7 @@ vi.mock('./lib/supabase/config', () => ({
   supabaseConfig: sdk.config,
 }));
 import { proxy, config } from './proxy';
+import { themeScopeHeader } from './components/experience/theme-scope';
 afterEach(() => {
   vi.unstubAllEnvs();
   vi.restoreAllMocks();
@@ -60,6 +61,7 @@ it.each([
   '/_next/static/missing.js',
   '/_next/image?url=%2Fmissing.jpg&w=16&q=75',
   '/favicon.ico',
+  '/theme-bootstrap.v1.js',
 ])(
   'normalizes public %s fallback identity without Auth or cache-policy changes',
   async (path) => {
@@ -70,6 +72,7 @@ it.each([
       headers: {
         'x-inventory-document-path': '/inventory/quantity/missing.jpg',
         'x-inventory-return': '/inventory/assets/missing.jpg',
+        [themeScopeHeader]: '11111111-1111-4111-8111-111111111111',
         cookie: 'session.0=original',
       },
     });
@@ -83,6 +86,10 @@ it.each([
     ).toBe('');
     expect(sdk.config).not.toHaveBeenCalled();
     expect(sdk.createServerClient).not.toHaveBeenCalled();
+    expect(request.headers.has(themeScopeHeader)).toBe(false);
+    expect(
+      response.headers.has(`x-middleware-request-${themeScopeHeader}`),
+    ).toBe(false);
     expect(read).not.toHaveBeenCalled();
     expect(request.headers.get('cookie')).toBe('session.0=original');
     expect(response.headers.has('set-cookie')).toBe(false);
@@ -105,6 +112,7 @@ it.each([
             cookie: 'session.0=original',
             origin: 'https://evil.example',
             'sec-fetch-site': 'cross-site',
+            [themeScopeHeader]: '11111111-1111-4111-8111-111111111111',
           },
         },
       );
@@ -114,6 +122,9 @@ it.each([
       expect(sdk.createServerClient).not.toHaveBeenCalled();
       expect(read).not.toHaveBeenCalled();
       expect(response.headers.has('set-cookie')).toBe(false);
+      expect(
+        response.headers.has(`x-middleware-request-${themeScopeHeader}`),
+      ).toBe(false);
       expect(request.headers.get('cookie')).toBe('session.0=original');
       expect(response.headers.get('cache-control')).toBe('private, no-store');
     }
@@ -126,6 +137,9 @@ it.each([
   '/api/auth/privacy-reader',
   '/auth/confirm',
   '/api/room/contents',
+  '/inventory/quantity/theme-bootstrap.v1.js',
+  '/theme-bootstrap.v1.js/private',
+  '/theme-bootstrap.v2.js',
 ])('retains claims refresh for other routes including %s', async (path) => {
   const claims = vi.fn().mockResolvedValue({ data: null, error: null });
   sdk.createServerClient.mockReturnValue({ auth: { getClaims: claims } });
@@ -144,7 +158,13 @@ it('preserves refreshed cookie chunks and cache headers across writes', async ()
               {
                 name: 'session.0',
                 value: 'first',
-                options: { httpOnly: true },
+                options: {
+                  httpOnly: true,
+                  sameSite: 'strict',
+                  secure: true,
+                  path: '/',
+                  maxAge: 100,
+                },
               },
             ],
             { 'Cache-Control': 'private, no-store', Expires: '0' },
@@ -154,7 +174,13 @@ it('preserves refreshed cookie chunks and cache headers across writes', async ()
               {
                 name: 'session.1',
                 value: 'second',
-                options: { httpOnly: true },
+                options: {
+                  httpOnly: true,
+                  sameSite: 'lax',
+                  secure: true,
+                  path: '/',
+                  maxAge: 200,
+                },
               },
             ],
             {},
@@ -170,6 +196,20 @@ it('preserves refreshed cookie chunks and cache headers across writes', async ()
   const response = await proxy(request);
   expect(response.cookies.get('session.0')?.value).toBe('first');
   expect(response.cookies.get('session.1')?.value).toBe('second');
+  expect(response.cookies.get('session.0')).toMatchObject({
+    httpOnly: true,
+    sameSite: 'strict',
+    secure: true,
+    path: '/',
+    maxAge: 100,
+  });
+  expect(response.cookies.get('session.1')).toMatchObject({
+    httpOnly: true,
+    sameSite: 'lax',
+    secure: true,
+    path: '/',
+    maxAge: 200,
+  });
   expect(request.cookies.get('session.1')?.value).toBe('second');
   expect(response.headers.get('cache-control')).toContain('no-store');
   expect(response.headers.get('expires')).toBe('0');
@@ -239,3 +279,65 @@ it('times claims with a fixed stage while preserving results and original failur
     proxy(new NextRequest('http://localhost:3000/inventory')),
   ).rejects.toBe(original);
 });
+it('overwrites spoofed presentation actors only after verified claims and preserves late refresh cookies', async () => {
+  const actor = '11111111-1111-4111-8111-111111111111';
+  sdk.createServerClient.mockImplementation(
+    (_url, _key, options: { cookies: CookieMethodsServer }) => ({
+      auth: {
+        getClaims: async () => {
+          await options.cookies.setAll!(
+            [
+              {
+                name: 'session.1',
+                value: 'fresh',
+                options: { httpOnly: true, sameSite: 'lax' },
+              },
+            ],
+            { Expires: '0' },
+          );
+          return { data: { claims: { sub: actor } }, error: null };
+        },
+      },
+    }),
+  );
+  const request = new NextRequest('http://localhost:3000/settings', {
+    headers: { [themeScopeHeader]: '22222222-2222-4222-8222-222222222222' },
+  });
+  const response = await proxy(request);
+  expect(response.headers.get(`x-middleware-request-${themeScopeHeader}`)).toBe(
+    actor,
+  );
+  expect(response.cookies.get('session.1')).toMatchObject({
+    value: 'fresh',
+    httpOnly: true,
+    sameSite: 'lax',
+  });
+  expect(response.headers.get('x-middleware-request-cookie')).toContain(
+    'session.1=fresh',
+  );
+  expect(response.headers.get('cache-control')).toBe('private, no-store');
+  expect(response.headers.get('expires')).toBe('0');
+});
+it.each([
+  { data: null, error: null },
+  { data: { claims: { sub: 'not-a-canonical-actor' } }, error: null },
+  {
+    data: { claims: { sub: '11111111-1111-4111-8111-111111111111' } },
+    error: { message: 'Expired claims' },
+  },
+])(
+  'drops caller presentation headers for anonymous/invalid/errored claims',
+  async (result) => {
+    sdk.createServerClient.mockReturnValue({
+      auth: { getClaims: async () => result },
+    });
+    const request = new NextRequest('http://localhost:3000/login', {
+      headers: { [themeScopeHeader]: '11111111-1111-4111-8111-111111111111' },
+    });
+    const response = await proxy(request);
+    expect(request.headers.has(themeScopeHeader)).toBe(false);
+    expect(
+      response.headers.get(`x-middleware-request-${themeScopeHeader}`),
+    ).toBeNull();
+  },
+);

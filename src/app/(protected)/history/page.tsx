@@ -79,19 +79,25 @@ export default async function HistoryPage({
               provenance come from the recorded snapshot.
             </p>
             <p>
-              <Link className="text-cyan-300 underline" href="/history">
+              <Link
+                className={`text-cyan-300 underline ${styles.textTarget}`}
+                href="/history"
+              >
                 Back to history
               </Link>
             </p>
-            <nav className="my-4 flex gap-5" aria-label="Event snapshot side">
+            <nav
+              className="my-4 flex flex-wrap gap-5"
+              aria-label="Event snapshot side"
+            >
               <Link
-                className="text-cyan-300 underline"
+                className={`text-cyan-300 underline ${styles.textTarget}`}
                 href={link('before', custom.field_id)}
               >
                 Before event
               </Link>
               <Link
-                className="text-cyan-300 underline"
+                className={`text-cyan-300 underline ${styles.textTarget}`}
                 href={link('after', custom.field_id)}
               >
                 After event
@@ -142,7 +148,7 @@ export default async function HistoryPage({
                     </details>
                     {custom.option_offset && custom.option_offset > 0 && (
                       <Link
-                        className="mr-4 text-cyan-300 underline"
+                        className={`mr-4 text-cyan-300 underline ${styles.textTarget}`}
                         href={link(
                           side,
                           custom.field_id,
@@ -154,7 +160,7 @@ export default async function HistoryPage({
                     )}
                     {custom.next_option_offset !== null && (
                       <Link
-                        className="text-cyan-300 underline"
+                        className={`text-cyan-300 underline ${styles.textTarget}`}
                         href={link(
                           side,
                           custom.field_id,
@@ -171,7 +177,7 @@ export default async function HistoryPage({
                 {custom.next_field_id && (
                   <p className="mt-5">
                     <Link
-                      className="text-cyan-300 underline"
+                      className={`text-cyan-300 underline ${styles.textTarget}`}
                       href={link(side, custom.next_field_id)}
                     >
                       Next custom field
@@ -216,7 +222,7 @@ export default async function HistoryPage({
                 inaccessible, or the record filter may be invalid.
               </p>
               <Link
-                className="inline-flex min-h-11 items-center text-cyan-300 underline"
+                className={`inline-flex min-h-11 items-center text-cyan-300 underline ${styles.textTarget}`}
                 href={clearHref}
               >
                 Clear record filter
@@ -305,7 +311,7 @@ export default async function HistoryPage({
                 <p className="text-sm text-slate-400">
                   Record:{' '}
                   <Link
-                    className="text-cyan-300 underline"
+                    className={`text-cyan-300 underline ${styles.textTarget}`}
                     href={
                       '/inventory/' +
                       (record.kind === 'quantity' ? 'quantity' : 'assets') +
@@ -320,7 +326,10 @@ export default async function HistoryPage({
                     ? 'Quantity item'
                     : 'Individual asset'}
                   .{' '}
-                  <Link className="text-cyan-300 underline" href={clearHref}>
+                  <Link
+                    className={`text-cyan-300 underline ${styles.textTarget}`}
+                    href={clearHref}
+                  >
                     Clear record filter
                   </Link>
                 </p>
@@ -344,7 +353,7 @@ export default async function HistoryPage({
                 ?.breadcrumb ?? filter.location}{' '}
               ·{' '}
               <Link
-                className="text-cyan-300 underline"
+                className={`text-cyan-300 underline ${styles.textTarget}`}
                 href={
                   '/history?' +
                   new URLSearchParams(

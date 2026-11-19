@@ -1,4 +1,5 @@
 import { routeKey } from './route-key';
+import { cancelThemeSnapshot } from './native-transition-owner';
 import {
   recordDetailReturnPath,
   presentationUuid,
@@ -457,6 +458,7 @@ export function observeRouteSnapshotWithdrawal(withdraw: () => void) {
 
 export function cancelRouteSnapshots() {
   snapshotWithdrawals.forEach((withdraw) => withdraw());
+  cancelThemeSnapshot();
   // activeViewTransition is progressive. Cancel pseudo-element animations too
   // for browsers that implement snapshots without the active handle.
   (

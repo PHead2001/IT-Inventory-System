@@ -26,7 +26,10 @@ export function CustodyReceiptView({
         }
       : null;
   return (
-    <section aria-label="Committed custody receipt" className="space-y-3">
+    <section
+      aria-label="Committed custody receipt"
+      className="experience-spotlight space-y-3"
+    >
       <h3 className="text-lg font-semibold">
         {custodyEventLabel(
           receipt.operation,

@@ -74,6 +74,7 @@ export function projectLabelSelection(
 
 export function labelSelectionSummary(
   result: ReturnType<typeof projectLabelSelection>,
+  options: { includeAdded?: boolean } = {},
 ): string {
   const kindNames = {
     quantity: 'Quantity item',
@@ -110,5 +111,14 @@ export function labelSelectionSummary(
   };
   const names = (rows: SelectedLabel[]) =>
     rows.length ? rows.map(display).join(', ') : 'none';
+  if (options.includeAdded === false)
+    return [
+      result.already.length ? `Already present: ${names(result.already)}.` : '',
+      result.unavailable.length
+        ? `Unavailable to this account: ${names(result.unavailable)}.`
+        : '',
+    ]
+      .filter(Boolean)
+      .join(' ');
   return `Added: ${names(result.added)}. Already present: ${names(result.already)}. Unavailable to this account: ${names(result.unavailable)}.`;
 }

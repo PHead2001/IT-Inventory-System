@@ -13,7 +13,7 @@ export function BuildInfo({ provenance }: { provenance: BuildProvenance }) {
         {provenance.environment} · Version {provenance.version}
       </p>
       <details className="text-sm">
-        <summary className="cursor-pointer rounded focus-visible:outline-2 focus-visible:outline-cyan-300">
+        <summary className="list-item min-h-11 min-w-11 cursor-pointer rounded focus-visible:outline-2 focus-visible:outline-cyan-300">
           Build support details
         </summary>
         <dl className="mt-3 space-y-3">

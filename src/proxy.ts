@@ -4,6 +4,10 @@ import { supabaseConfig } from './lib/supabase/config';
 import { validReturnPath } from './features/scan/targets';
 import { documentPathHeader } from './lib/document-route';
 import {
+  themeActor,
+  themeScopeHeader,
+} from './components/experience/theme-scope';
+import {
   createAuthDiagnostic,
   observeAuthStage,
 } from './lib/auth/diagnostic.server';
@@ -30,6 +34,8 @@ function skipsClaimsRefresh(pathname: string) {
 }
 
 export async function proxy(request: NextRequest) {
+  // Presentation context comes only from the existing verified claim read.
+  request.headers.delete(themeScopeHeader);
   request.headers.set(documentPathHeader, request.nextUrl.pathname);
   // Replace any caller-supplied header with a value derived from the matched URL.
   request.headers.set(
@@ -39,7 +45,11 @@ export async function proxy(request: NextRequest) {
   let response = NextResponse.next({ request: { headers: request.headers } });
   // Public assets retain Next's cache policy and never read or refresh Auth.
   // Missing image-like public paths still need a canonical root-fallback selector.
-  if (skipsClaimsRefresh(request.nextUrl.pathname)) return response;
+  if (
+    request.nextUrl.pathname === '/theme-bootstrap.v1.js' ||
+    skipsClaimsRefresh(request.nextUrl.pathname)
+  )
+    return response;
   response.headers.set('Cache-Control', 'private, no-store');
   // These handlers own transport admission and caller-scoped logout/cookie reads.
   // Refreshing here would write cookies even before a rejected request, and turn
@@ -74,10 +84,22 @@ export async function proxy(request: NextRequest) {
     },
   });
   const diagnostic = createAuthDiagnostic();
-  await observeAuthStage(diagnostic, 'proxy.getClaims', () =>
+  const claims = await observeAuthStage(diagnostic, 'proxy.getClaims', () =>
     supabase.auth.getClaims(),
   );
-  return response;
+  const actor = !claims.error ? themeActor(claims.data?.claims?.sub) : null;
+  if (actor) request.headers.set(themeScopeHeader, actor);
+  const finalResponse = NextResponse.next({
+    request: { headers: request.headers },
+  });
+  response.headers.forEach((value, name) => {
+    if (!name.startsWith('x-middleware-') && name !== 'set-cookie')
+      finalResponse.headers.set(name, value);
+  });
+  response.cookies
+    .getAll()
+    .forEach((cookie) => finalResponse.cookies.set(cookie));
+  return finalResponse;
 }
 export const config = {
   matcher: '/:path*',

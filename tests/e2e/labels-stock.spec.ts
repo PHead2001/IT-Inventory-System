@@ -1,3 +1,4 @@
+import { expectTouchTarget } from './touch-target-controls';
 import { fits } from './viewport-controls';
 import { expectPrivateTitleExcluded } from '../helpers/private-title';
 import { interfaceTest, interfaceLogin } from './interface-fixtures';
@@ -781,6 +782,7 @@ test('explicit Stop and route navigation release a camera stream without a decod
     events.push(event);
   });
   await page.addInitScript(() => {
+    let streamId = 0;
     const record = (event: string) =>
       (
         window as typeof window & {
@@ -790,7 +792,8 @@ test('explicit Stop and route navigation release a camera stream without a decod
     Object.defineProperty(navigator.mediaDevices, 'getUserMedia', {
       configurable: true,
       value: async () => {
-        void record('requested');
+        const id = ++streamId;
+        void record(`requested:${id}`);
         const canvas = document.createElement('canvas');
         canvas.width = canvas.height = 640;
         const ctx = canvas.getContext('2d')!;
@@ -800,7 +803,7 @@ test('explicit Stop and route navigation release a camera stream without a decod
         const track = stream.getVideoTracks()[0];
         const originalStop = track.stop.bind(track);
         track.stop = () => {
-          void record('stopped');
+          void record(`stopped:${id}`);
           originalStop();
         };
         return stream;
@@ -808,43 +811,35 @@ test('explicit Stop and route navigation release a camera stream without a decod
     });
   });
   await page.goto('/scan');
+  const preview = page
+    .getByRole('region', { name: 'Camera scanner' })
+    .locator('video[aria-label="Camera preview"]:visible');
+  const hasLivePreview = () =>
+    preview.evaluate(
+      (video: HTMLVideoElement) =>
+        video.srcObject instanceof MediaStream &&
+        video.srcObject
+          .getVideoTracks()
+          .some((track) => track.readyState === 'live'),
+    );
   await page.getByRole('button', { name: 'Start camera' }).click();
   await expect(page.getByRole('button', { name: 'Stop camera' })).toBeVisible();
-  await expect
-    .poll(() => events.filter((event) => event === 'requested').length)
-    .toBe(1);
-  await expect
-    .poll(() =>
-      page
-        .getByLabel('Camera preview')
-        .evaluate(
-          (video: HTMLVideoElement) => video.srcObject instanceof MediaStream,
-        ),
-    )
-    .toBe(true);
+  await expect.poll(() => events).toContain('requested:1');
+  await expect.poll(hasLivePreview).toBe(true);
   await page.getByRole('button', { name: 'Stop camera' }).click();
-  await expect
-    .poll(() => events.filter((event) => event === 'stopped').length)
-    .toBeGreaterThanOrEqual(1);
+  await expect.poll(() => events).toContain('stopped:1');
   await page.getByRole('button', { name: 'Start camera' }).click();
   await expect(page.getByRole('button', { name: 'Stop camera' })).toBeVisible();
-  await expect
-    .poll(() => events.filter((event) => event === 'requested').length)
-    .toBe(2);
-  await expect
-    .poll(() =>
-      page
-        .getByLabel('Camera preview')
-        .evaluate(
-          (video: HTMLVideoElement) => video.srcObject instanceof MediaStream,
-        ),
-    )
-    .toBe(true);
+  await expect.poll(() => events).toContain('requested:2');
+  await expect.poll(hasLivePreview).toBe(true);
+  expect(events).not.toContain('stopped:2');
   await page.getByRole('link', { name: 'Inventory', exact: true }).click();
-  await expect
-    .poll(() => events.filter((event) => event === 'stopped').length)
-    .toBeGreaterThanOrEqual(2);
-  expect(events.filter((event) => event === 'requested')).toHaveLength(2);
+  await expect(page).toHaveURL(/\/inventory$/);
+  await expect.poll(() => events).toContain('stopped:2');
+  expect(events.filter((event) => event.startsWith('requested:'))).toEqual([
+    'requested:1',
+    'requested:2',
+  ]);
 });
 
 test('unavailable camera still permits exact manual lookup', async ({
@@ -1002,7 +997,12 @@ test('asset UUID label survives rename and move, while a bare colliding identifi
   );
   await input.fill('ITC');
   await page.getByRole('button', { name: 'Open', exact: true }).click();
-  await expect(page.getByRole('status')).toContainText('more than one record');
+  await expect(
+    page.getByRole('status').filter({
+      hasText:
+        'This identifier matches more than one record. Choose the intended record.',
+    }),
+  ).toBeVisible();
   await expect(
     page.getByRole('link', { name: /IT Closet.*ITC/ }),
   ).toBeVisible();
@@ -1048,10 +1048,35 @@ test('mixed queue retains copies across navigation, decodes quantity QR, and pri
   await search.getByRole('textbox').fill(quantityName);
   await search.getByRole('button', { name: 'Search' }).click();
   await expect(page.getByRole('link', { name: quantityName })).toBeVisible();
+  const touchViewport = page.viewportSize();
+  for (const width of [1280, 390]) {
+    await page.setViewportSize({ width, height: 844 });
+    await expectTouchTarget(
+      page.getByRole('link', { name: quantityName, exact: true }),
+    );
+    await expectTouchTarget(
+      page
+        .getByRole('checkbox', {
+          name: new RegExp('^Select ' + quantityName + ','),
+        })
+        .locator('..'),
+    );
+  }
+  if (touchViewport) await page.setViewportSize(touchViewport);
   await expect(
     page.getByText('Holdings: IT Closet / Left Storage / Shelf 1 / 1A: 3'),
   ).toBeVisible();
+  const additionToast = page.locator('[data-feedback-card]').filter({
+    has: page.getByRole('status').filter({
+      hasText: /^Added 1 label to the queue\.$/,
+    }),
+  });
   await addSearchRecord(page, quantityName);
+  await expect(additionToast).toBeVisible();
+  await additionToast
+    .getByRole('button', { name: 'Dismiss', exact: true })
+    .click();
+  await expect(additionToast).toHaveCount(0);
   const results = page.getByRole('region', { name: 'Label search results' });
   await expect(
     results.getByRole('button', { name: 'In queue', exact: true }),
@@ -1078,18 +1103,25 @@ test('mixed queue retains copies across navigation, decodes quantity QR, and pri
     results.getByText('2 selected records', { exact: true }),
   ).toBeVisible();
   await results.getByRole('button', { name: 'Add selected to queue' }).click();
-  await expect(results.getByRole('status')).toContainText(
-    'Added: ' + assetName,
-  );
-  await expect(results.getByRole('status')).toContainText(
-    'Already present: ' + quantityName,
-  );
+  await expect(additionToast).toBeVisible();
+  await expect(
+    results.getByText(
+      `Added: ${assetName} (Individual asset). Already present: ${quantityName} (Quantity item). Unavailable to this account: none.`,
+      { exact: true },
+    ),
+  ).toBeVisible();
+  await expect(
+    results.getByRole('status').filter({ hasText: 'Already present:' }),
+  ).toHaveText(`Already present: ${quantityName} (Quantity item).`);
   await expect(
     results.getByText('0 selected records', { exact: true }),
   ).toBeVisible();
   await expect(
     results.getByRole('button', { name: 'In queue', exact: true }),
   ).toHaveCount(2);
+  await expect(page.getByRole('region', { name: 'Label queue' })).toContainText(
+    '2 distinct records · 2 labels',
+  );
   await chooseLocation(
     page.locator('section').filter({ hasText: 'Add a location' }).first(),
     'Location',
@@ -1205,9 +1237,16 @@ test('staff threshold persists into dashboard, inventory filter, and real CSV do
   const id = page.url().split('/').at(-1)!;
   await expect(page.getByText(/Reorder threshold/).first()).toBeVisible();
   await page.goto('/dashboard');
-  await expect(page.getByRole('link', { name, exact: true })).toBeVisible();
+  const attention = page.getByRole('region', {
+    name: 'Items needing attention',
+  });
+  const stockRecord = attention.getByRole('link', { name, exact: true });
+  await expect(stockRecord).toHaveAttribute(
+    'href',
+    '/inventory/quantity/' + id,
+  );
   const lowStockDownload = page.waitForEvent('download');
-  await page.getByRole('link', { name: 'Download low-stock CSV' }).click();
+  await attention.getByRole('link', { name: 'Download low-stock CSV' }).click();
   const lowStockFile = await lowStockDownload;
   expect(lowStockFile.suggestedFilename()).toMatch(
     /^preview-low-stock-\d{8}T\d{6}Z\.csv$/,
@@ -1221,7 +1260,9 @@ test('staff threshold persists into dashboard, inventory filter, and real CSV do
     '"Recorded Total","Reorder Threshold","Stock State"',
   );
   expect(lowStockCsv).toContain(id);
-  await page.getByRole('link', { name: 'View filtered inventory' }).click();
+  await attention
+    .getByRole('link', { name: 'View all low-stock items' })
+    .click();
   await expect(page).toHaveURL(/lowStock=true/);
   await expect(page.getByRole('link', { name, exact: true })).toBeVisible();
   await page.locator('details.experience-export-menu > summary').click();
@@ -1244,6 +1285,11 @@ test('staff threshold persists into dashboard, inventory filter, and real CSV do
   expect(csv).toContain('\'=Stock,""quoted""');
   await page.getByRole('button', { name: 'Sign out' }).click();
   await signIn(page, 'viewer');
+  await page.goto('/dashboard');
+  await expect(stockRecord).toHaveAttribute(
+    'href',
+    '/inventory/quantity/' + id,
+  );
   await page.goto('/inventory/quantity/' + id);
   await expect(page.getByText(/Reorder threshold/).first()).toBeVisible();
   await expect(

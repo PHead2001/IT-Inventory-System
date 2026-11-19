@@ -4,6 +4,9 @@ import { useCallback, type ReactNode } from 'react';
 import { observeTransitionCapture } from './transition-capture';
 
 const captureInertOwners = new WeakSet<HTMLElement>();
+/** Read-only ownership witness; privacy or preexisting inert is never owned. */
+export const isCaptureInertOwner = (element: HTMLElement) =>
+  captureInertOwners.has(element);
 
 /** Only capture-owned interactivity may be ignored for snapshot geometry.
  * Privacy/hidden ancestors, including a previously inert fieldset, still block. */

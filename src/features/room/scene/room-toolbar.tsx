@@ -1,6 +1,9 @@
 'use client';
+
+import { SpringPresence } from '@/components/experience/spring-presence';
 import { afterTransitionCapture } from '@/components/forms/transition-capture';
 import {
+  useCallback,
   useEffect,
   useLayoutEffect,
   useId,
@@ -138,6 +141,13 @@ export function RoomToolbar({
 }) {
   const [open, setOpen] = useState(false);
   const [help, setHelp] = useState(false);
+  const pendingDismissal = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const cancelDismissal = useCallback(() => {
+    if (pendingDismissal.current !== null) {
+      clearTimeout(pendingDismissal.current);
+      pendingDismissal.current = null;
+    }
+  }, []);
   const host = useRef<HTMLDivElement>(null);
   const panel = useRef<HTMLDivElement>(null);
   const toolbar = useRef<HTMLDivElement>(null);
@@ -237,6 +247,7 @@ export function RoomToolbar({
     };
   }, [open, onOverlayChange]);
   const close = (restore = true) => {
+    cancelDismissal();
     setOpen(false);
     setHelp(false);
     if (restore) more.current?.focus({ preventScroll: true });
@@ -249,21 +260,29 @@ export function RoomToolbar({
         ?.querySelector<HTMLButtonElement>('button')
         ?.focus({ preventScroll: true }),
     );
-    const outside = (event: PointerEvent) => {
+    const outside = (event: MouseEvent) => {
       if (
         event.target instanceof Node &&
         !host.current?.contains(event.target)
       ) {
-        setOpen(false);
-        setHelp(false);
+        // An inline panel changes the canvas position when removed. Keep it
+        // mounted through down/up and every click handler, including native
+        // scene handlers that stop propagation. A microtask is too early.
+        cancelDismissal();
+        pendingDismissal.current = setTimeout(() => {
+          pendingDismissal.current = null;
+          setOpen(false);
+          setHelp(false);
+        }, 0);
       }
     };
-    document.addEventListener('pointerdown', outside, true);
+    document.addEventListener('click', outside, true);
     return () => {
       cancelFocus();
-      document.removeEventListener('pointerdown', outside, true);
+      cancelDismissal();
+      document.removeEventListener('click', outside, true);
     };
-  }, [open, onOverlayChange]);
+  }, [open, onOverlayChange, cancelDismissal]);
   useEffect(() => {
     const escape = (event: KeyboardEvent) => {
       if (
@@ -281,6 +300,7 @@ export function RoomToolbar({
       // default action. Toolbars inside that same dialog still handle their map.
       if (modal && host.current?.closest(ownerSelector) !== modal) return;
       event.preventDefault();
+      cancelDismissal();
       setOpen(false);
       setHelp(false);
       if (active) {
@@ -290,7 +310,7 @@ export function RoomToolbar({
     };
     document.addEventListener('keydown', escape);
     return () => document.removeEventListener('keydown', escape);
-  }, [active, open, onActiveChange, interact]);
+  }, [active, open, onActiveChange, interact, cancelDismissal]);
   const control = (kind: ViewCommandKind, label: string) => (
     <Button key={kind} variant="outline" onClick={() => onCommand(kind)}>
       {label}
@@ -375,6 +395,7 @@ export function RoomToolbar({
           aria-expanded={open}
           aria-controls={panelId}
           onClick={() => {
+            cancelDismissal();
             setOpen(!open);
             setHelp(false);
           }}
@@ -382,123 +403,125 @@ export function RoomToolbar({
           <MoreHorizontal aria-hidden="true" size={19} />
         </Button>
       </div>
-      {open && (
-        <div
-          ref={panel}
-          id={panelId}
-          role="region"
-          aria-label="More map controls"
-          data-room-obstruction="true"
-          className={styles.moreMenu}
+      <SpringPresence
+        open={open}
+        instanceKey={panelId}
+        kind="popover"
+        retainExit
+        surfaceRef={panel}
+        onPresentationChange={onOverlayChange}
+        id={panelId}
+        role="region"
+        aria-label="More map controls"
+        data-room-obstruction="true"
+        className={styles.moreMenu}
+      >
+        <Button
+          variant="outline"
+          onClick={() => {
+            close();
+            onCommand('recenter');
+          }}
         >
-          <Button
-            variant="outline"
-            onClick={() => {
-              close();
-              onCommand('recenter');
-            }}
-          >
-            Recenter
-          </Button>
-          <div
-            role="group"
-            aria-label="Orbit mode"
-            className={styles.controlGroup}
-          >
-            {(['guided', 'free'] as const).map((value) => (
-              <Button
-                key={value}
-                variant="outline"
-                aria-pressed={mode === value}
-                onClick={() => onModeChange(value)}
-              >
-                {value === 'guided' ? 'Guided' : 'Free Orbit'}
-              </Button>
-            ))}
-          </div>
-          <div role="group" aria-label="Pan" className={styles.panControls}>
-            <span />
-            {control('up', 'Pan up')}
-            <span />
-            {control('left', 'Pan left')}
-            <span aria-hidden="true">Pan</span>
-            {control('right', 'Pan right')}
-            <span />
-            {control('down', 'Pan down')}
-            <span />
-          </div>
-          <div
-            role="group"
-            aria-label="Rotate"
-            className={styles.secondaryControls}
-          >
-            {control('rotate-left', 'Rotate left')}
-            {control('rotate-right', 'Rotate right')}
-          </div>
-          <div
-            role="group"
-            aria-label="Tilt"
-            className={styles.secondaryControls}
-          >
-            {control('tilt-up', 'Tilt up')}
-            {control('tilt-down', 'Tilt down')}
-          </div>
-          <Button
-            variant="outline"
-            aria-pressed={showLabels}
-            onClick={onLabelsChange}
-          >
-            Show labels
-          </Button>
-          <Button
-            variant="outline"
-            aria-pressed={showCounts}
-            onClick={onCountsChange}
-          >
-            Show item counts
-          </Button>
-          <Button
-            variant="outline"
-            aria-expanded={help}
-            onClick={() => setHelp(!help)}
-          >
-            Controls
-          </Button>
-          {help && (
-            <div className={styles.controlsHelp}>
-              <p>
-                {selectionEnabled
-                  ? 'Click or tap a location to select it.'
-                  : 'This preview shows the recorded location.'}{' '}
-                Outside Interact mode, scroll and swipe move the page.
-              </p>
-              <p>
-                Choose Interact with map to rotate by dragging, or zoom with an
-                ordinary wheel or direct two-finger pinch. Ctrl/Command+wheel
-                and browser trackpad pinch remain browser zoom. Right-drag or
-                the Pan buttons move the view. Done, Escape or leaving the map
-                ends interaction.
-              </p>
-              <p>
-                Guided limits rotation; Free Orbit also views above and below.
-                Double-click exposed floor to recenter. Tab moves freely between
-                controls and the map; Enter or Space activates a button. The
-                location browser works without the map.
-              </p>
-              <p>
-                Counts mark occupied visible locations with read-only badges.
-                Select a location on the map or in the location browser to see
-                its distinct products, units and individual assets. Unknown
-                counts are omitted. Hidden locations remain in the location
-                browser.
-              </p>
-            </div>
-          )}
-          <Button variant="outline" onClick={() => close()}>
-            Close controls
-          </Button>
+          Recenter
+        </Button>
+        <div
+          role="group"
+          aria-label="Orbit mode"
+          className={styles.controlGroup}
+        >
+          {(['guided', 'free'] as const).map((value) => (
+            <Button
+              key={value}
+              variant="outline"
+              aria-pressed={mode === value}
+              onClick={() => onModeChange(value)}
+            >
+              {value === 'guided' ? 'Guided' : 'Free Orbit'}
+            </Button>
+          ))}
         </div>
-      )}
+        <div role="group" aria-label="Pan" className={styles.panControls}>
+          <span />
+          {control('up', 'Pan up')}
+          <span />
+          {control('left', 'Pan left')}
+          <span aria-hidden="true">Pan</span>
+          {control('right', 'Pan right')}
+          <span />
+          {control('down', 'Pan down')}
+          <span />
+        </div>
+        <div
+          role="group"
+          aria-label="Rotate"
+          className={styles.secondaryControls}
+        >
+          {control('rotate-left', 'Rotate left')}
+          {control('rotate-right', 'Rotate right')}
+        </div>
+        <div
+          role="group"
+          aria-label="Tilt"
+          className={styles.secondaryControls}
+        >
+          {control('tilt-up', 'Tilt up')}
+          {control('tilt-down', 'Tilt down')}
+        </div>
+        <Button
+          variant="outline"
+          aria-pressed={showLabels}
+          onClick={onLabelsChange}
+        >
+          Show labels
+        </Button>
+        <Button
+          variant="outline"
+          aria-pressed={showCounts}
+          onClick={onCountsChange}
+        >
+          Show item counts
+        </Button>
+        <Button
+          variant="outline"
+          aria-expanded={help}
+          onClick={() => setHelp(!help)}
+        >
+          Controls
+        </Button>
+        {help && (
+          <div className={styles.controlsHelp}>
+            <p>
+              {selectionEnabled
+                ? 'Click or tap a location to select it.'
+                : 'This preview shows the recorded location.'}{' '}
+              Outside Interact mode, scroll and swipe move the page.
+            </p>
+            <p>
+              Choose Interact with map to rotate by dragging, or zoom with an
+              ordinary wheel or direct two-finger pinch. Ctrl/Command+wheel and
+              browser trackpad pinch remain browser zoom. Right-drag or the Pan
+              buttons move the view. Done, Escape or leaving the map ends
+              interaction.
+            </p>
+            <p>
+              Guided limits rotation; Free Orbit also views above and below.
+              Double-click exposed floor to recenter. Tab moves freely between
+              controls and the map; Enter or Space activates a button. The
+              location browser works without the map.
+            </p>
+            <p>
+              Counts mark occupied visible locations with read-only badges.
+              Select a location on the map or in the location browser to see its
+              distinct products, units and individual assets. Unknown counts are
+              omitted. Hidden locations remain in the location browser.
+            </p>
+          </div>
+        )}
+        <Button variant="outline" onClick={() => close()}>
+          Close controls
+        </Button>
+      </SpringPresence>
     </div>
   );
 }
