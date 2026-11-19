@@ -1265,6 +1265,32 @@ test('375px populated room shows every occupied target with passive badges and s
   counts = snapshot.counts;
   await settledLabels(page);
   await assertCurrentGeneration();
+  // Committed counts can add controls above the room after the earlier scroll.
+  // Establish the actual viewport precondition before native hit-test witnesses.
+  await canvas.scrollIntoViewIfNeeded();
+  await settledLabels(page);
+  const visibleCanvas = await canvas.boundingBox();
+  const visibleViewport = page.viewportSize()!;
+  expect(
+    visibleCanvas,
+    'the populated canvas has a visible frame',
+  ).not.toBeNull();
+  expect(
+    visibleCanvas!.x,
+    'whole canvas is inside the viewport left edge',
+  ).toBeGreaterThanOrEqual(-1);
+  expect(
+    visibleCanvas!.y,
+    'whole canvas is inside the viewport top edge',
+  ).toBeGreaterThanOrEqual(-1);
+  expect(
+    visibleCanvas!.x + visibleCanvas!.width,
+    'whole canvas is inside the viewport right edge',
+  ).toBeLessThanOrEqual(visibleViewport.width + 1);
+  expect(
+    visibleCanvas!.y + visibleCanvas!.height,
+    'whole canvas is inside the viewport bottom edge',
+  ).toBeLessThanOrEqual(visibleViewport.height + 1);
   await assertCurrentRepresentations(
     await captureRoomWitness(page),
     'selected-red-before-resize',
@@ -1277,10 +1303,61 @@ test('375px populated room shows every occupied target with passive badges and s
   await settledLabels(page, beforeResize);
   await page.getByRole('button', { name: 'Fit room', exact: true }).click();
   await expect(more).toHaveAttribute('aria-expanded', 'false');
+  // Native page scrolling puts the trigger too high for an above popup. Opening
+  // here must add real inline flow, reproducing the original click-shift case.
+  const closedMoreFrame = await more.boundingBox();
+  expect(closedMoreFrame).not.toBeNull();
+  await page.mouse.move(15, 15);
+  await page.mouse.wheel(0, closedMoreFrame!.y - 50);
+  await expect
+    .poll(async () => (await more.boundingBox())!.y)
+    .toBeGreaterThanOrEqual(0);
+  await expect
+    .poll(async () => (await more.boundingBox())!.y)
+    .toBeLessThan(100);
+  const readMenuFlow = () =>
+    more.evaluate((button) => {
+      const toolbar = button.closest('[role="toolbar"]')!;
+      const host = toolbar.parentElement!;
+      const surface = host.closest('[data-room-surface]')!;
+      const canvas = surface.querySelector('canvas')!;
+      const panel = host.querySelector<HTMLElement>('[role="region"]');
+      const frame = canvas.getBoundingClientRect();
+      const css = panel ? getComputedStyle(panel) : null;
+      return {
+        hostHeight: host.getBoundingClientRect().height,
+        canvas: {
+          x: frame.x,
+          y: frame.y,
+          width: frame.width,
+          height: frame.height,
+        },
+        canvasDocumentTop: frame.top + scrollY,
+        scrollY,
+        placement: panel?.dataset.placement ?? 'closed',
+        position: css?.position ?? null,
+        panelHeight: panel?.getBoundingClientRect().height ?? 0,
+        marginTop: css ? parseFloat(css.marginTop) : 0,
+      };
+    });
+  const closedMenuFlow = await readMenuFlow();
   await more.click();
+  await expect(menu).toHaveAttribute('data-placement', 'inline');
+  const openMenuFlow = await readMenuFlow();
+  expect(openMenuFlow.position).toBe('relative');
+  const addedMenuFlow = openMenuFlow.panelHeight + openMenuFlow.marginTop;
+  expect(addedMenuFlow).toBeGreaterThan(0);
+  expect(openMenuFlow.hostHeight - closedMenuFlow.hostHeight).toBeCloseTo(
+    addedMenuFlow,
+    3,
+  );
+  expect(
+    openMenuFlow.canvasDocumentTop - closedMenuFlow.canvasDocumentTop,
+  ).toBeCloseTo(addedMenuFlow, 3);
   await canvas.scrollIntoViewIfNeeded();
   await page.mouse.move(15, 15);
   await settledLabels(page);
+  await expect(menu).toHaveAttribute('data-placement', 'inline');
   await assertMoreOutsideCanvas();
   await expect(viewer).toHaveAttribute('data-selected-code', 'ITC-RED');
   await expect(red).toHaveAttribute('aria-pressed', 'true');
@@ -1354,6 +1431,7 @@ test('375px populated room shows every occupied target with passive badges and s
   ).toBeDefined();
   await page.mouse.move(resizedClick!.client.x, resizedClick!.client.y);
   await expect(canvas).toHaveAttribute('data-hover-visible-code', resizedCode);
+  const frameBeforeClick = await canvas.boundingBox();
   const resizedObservation = await observeNativeRoomClick(page);
   try {
     // Exactly one native click. The panel remains open until application input
@@ -1379,7 +1457,37 @@ test('375px populated room shows every occupied target with passive badges and s
       body: diagnostic,
       contentType: 'application/json',
     });
+    expect(phases.phases.map(({ phase }) => phase)).toEqual([
+      'pointerdown',
+      'pointerup',
+      'click',
+    ]);
+    for (const phase of phases.phases) {
+      expect(phase.trusted).toBe(true);
+      expect(phase.target).toBe('canvas');
+      expect(phase.moreExpanded).toBe(true);
+      expect(phase.panel.placement).toBe('inline');
+      expect(phase.frame).toEqual(frameBeforeClick);
+    }
   }
+  await expect(more).toHaveAttribute('aria-expanded', 'false');
+  const dismissedMenuFlow = await readMenuFlow();
+  expect(dismissedMenuFlow.placement).toBe('closed');
+  expect(openMenuFlow.hostHeight - dismissedMenuFlow.hostHeight).toBeCloseTo(
+    addedMenuFlow,
+    3,
+  );
+  const inlineFlowEvidence = {
+    closed: closedMenuFlow,
+    open: openMenuFlow,
+    dismissed: dismissedMenuFlow,
+    addedMenuFlow,
+  };
+  console.log('ROOM_RESIZED_INLINE_FLOW', JSON.stringify(inlineFlowEvidence));
+  await testInfo.attach('390-resized-inline-menu-flow', {
+    body: JSON.stringify(inlineFlowEvidence),
+    contentType: 'application/json',
+  });
   await page.mouse.move(15, 15);
   await settledLabels(page);
   // A passive badge is also a valid start for a native canvas pan; it cannot

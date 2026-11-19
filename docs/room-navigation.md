@@ -488,3 +488,9 @@ It separately proves selected readability and conventional 44px keyboard/touch
 selection with exact counts, plus trusted canvas wheel/pan/mesh selection through
 passive presentation. Native screens and exact-candidate validation are still
 required; the historical capture and deterministic clock model do not replace them.
+
+Outside clicks dismiss More map controls in the next task, after the full native
+click dispatch. On narrow screens the inline panel therefore keeps the canvas in
+place through pointer down, up and selection. Dismissal does not move focus.
+An outside drag without a click leaves the panel open until the next outside
+click or Escape. Closing, reopening or unmounting cancels pending dismissal.
