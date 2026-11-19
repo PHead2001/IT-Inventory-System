@@ -3,7 +3,7 @@ import type { CSSProperties } from 'react';
 import styles from '../room-visual.module.css';
 import { act, render, screen } from '@testing-library/react';
 import { createRoot } from 'react-dom/client';
-import { useLayoutEffect, type ReactNode } from 'react';
+import { useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import { expect, it, vi } from 'vitest';
 import {
   LabelLayoutProvider,
@@ -11,6 +11,20 @@ import {
 } from './label-layout-runtime';
 import { RoomLabel } from './room-label';
 import { RoomLabelHtml } from './room-label-html';
+import {
+  PrivacyReadinessContext,
+  usePrivacyReadiness,
+} from '@/components/auth/privacy-readiness';
+import {
+  assignmentEpoch,
+  readPrivacyRevocationRevision,
+  revokePrivatePresentation,
+} from '@/features/scan/assign-batch';
+
+const finalCounts = (root: ParentNode) =>
+  [...root.querySelectorAll('[data-count-final]')]
+    .map((element) => element.textContent)
+    .join(' / ');
 
 const canvas = vi.hoisted(() => ({ width: 315 }));
 vi.mock('@react-three/fiber', () => ({
@@ -27,23 +41,30 @@ vi.mock('@react-three/drei', () => ({
     children: ReactNode;
     style?: CSSProperties;
   }) {
+    const [host] = useState(() => document.createElement('div'));
+    const root = useRef<ReturnType<typeof createRoot> | null>(null);
     useLayoutEffect(() => {
-      const host = document.createElement('div');
       host.dataset.htmlRoot = 'true';
+      document.body.append(host);
+      const owned = createRoot(host);
+      root.current = owned;
+      return () => {
+        root.current = null;
+        queueMicrotask(() => {
+          owned.unmount();
+          host.remove();
+        });
+      };
+    }, [host]);
+    // Installed Html keeps its independent root across children/style updates.
+    useLayoutEffect(() => {
+      host.style.cssText = '';
       for (const [name, value] of Object.entries(style ?? {})) {
         if (name.startsWith('--')) host.style.setProperty(name, String(value));
         else Object.assign(host.style, { [name]: value });
       }
-      document.body.append(host);
-      const root = createRoot(host);
-      root.render(children);
-      return () => {
-        queueMicrotask(() => {
-          root.unmount();
-          host.remove();
-        });
-      };
-    }, [children, style]);
+      root.current?.render(children);
+    }, [children, style, host]);
     return null;
   },
 }));
@@ -101,12 +122,144 @@ it('bridges decorative and interactive Html roots into their own room registry',
   const button = screen.getByRole('button', {
     name: /Select Drawer 1.*1 product.*31 units.*2 assets/,
   });
-  expect(button).toHaveTextContent('1 product / 31 units / 2 assets');
+  expect(finalCounts(button)).toBe('1 product / 31 units / 2 assets');
   act(() => button.click());
   expect(select).toHaveBeenCalledExactlyOnceWith('ITC-D01');
   view.unmount();
   await act(async () => {});
   expect(screen.queryByText('Door')).not.toBeInTheDocument();
+});
+
+function PrivacyProbe({
+  read,
+}: {
+  read: (value: ReturnType<typeof usePrivacyReadiness>) => void;
+}) {
+  const privacy = usePrivacyReadiness();
+  useLayoutEffect(() => read(privacy), [privacy, read]);
+  return null;
+}
+
+it('carries the exact existing privacy value into a persistent Html root and withdraws tickers before a root rerender', async () => {
+  const frames = new Map<number, FrameRequestCallback>();
+  let serial = 0;
+  const motion = document.documentElement.dataset.motion;
+  document.documentElement.dataset.motion = 'full';
+  vi.spyOn(performance, 'now').mockReturnValue(0);
+  vi.spyOn(Element.prototype, 'getClientRects').mockReturnValue([
+    new DOMRect(0, 0, 240, 44),
+  ] as unknown as DOMRectList);
+  vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => {
+    frames.set(++serial, callback);
+    return serial;
+  });
+  vi.stubGlobal('cancelAnimationFrame', (id: number) => frames.delete(id));
+  vi.stubGlobal('matchMedia', () => ({
+    matches: false,
+    addEventListener() {},
+    removeEventListener() {},
+  }));
+  const current = () => ({
+    ready: true,
+    visible: true,
+    generation: 'room-member-a',
+    verifiedEpoch: assignmentEpoch(),
+    revocationRevision: readPrivacyRevocationRevision(),
+  });
+  const grant = current(),
+    registry = createRoomLabelRegistry(vi.fn()),
+    read = vi.fn();
+  const tree = (
+    privacy: ReturnType<typeof usePrivacyReadiness>,
+    units: string,
+  ) => (
+    <PrivacyReadinessContext value={privacy}>
+      <LabelLayoutProvider registry={registry}>
+        <RoomLabelHtml selected>
+          <PrivacyProbe read={read} />
+          <RoomLabel
+            id="privacy-counts"
+            code="ITC-D07"
+            label="Drawer 7"
+            priority={3}
+            selected
+            occupancy={{
+              quantity_product_count: '1',
+              quantity_unit_count: units,
+              asset_count: '0',
+            }}
+            onSelect={() => {}}
+          />
+        </RoomLabelHtml>
+      </LabelLayoutProvider>
+    </PrivacyReadinessContext>
+  );
+  const view = render(tree(grant, '20'));
+  try {
+    await act(async () => {});
+    expect(read.mock.lastCall?.[0]).toBe(grant);
+    expect(frames.size).toBe(0);
+    const host = document.querySelector('[data-html-root]');
+    view.rerender(tree(grant, '60'));
+    await act(async () => {});
+    expect(document.querySelector('[data-html-root]')).toBe(host);
+    expect(frames.size).toBe(1);
+    const units = () =>
+      document.querySelectorAll('[data-count-visual]')[1]?.textContent;
+    const paint = async (time: number) => {
+      const callbacks = [...frames.values()];
+      frames.clear();
+      await act(async () => callbacks.forEach((callback) => callback(time)));
+    };
+    await paint(250);
+    expect(units()).not.toBe('60 units');
+    const stale = [...frames.values()];
+    // No outer or independent-root render occurs before this global withdrawal.
+    act(() => {
+      revokePrivatePresentation();
+      expect(frames.size).toBe(0);
+    });
+    expect(units()).toBe('60 units');
+    await act(async () => stale.forEach((callback) => callback(400)));
+    expect(units()).toBe('60 units');
+    view.rerender(tree(grant, '70')); // stale captured grant cannot readmit
+    await act(async () => {});
+    expect(frames.size).toBe(0);
+    const withheld = { ...current(), ready: false, visible: false };
+    view.rerender(tree(withheld, '80'));
+    await act(async () => {});
+    expect(read.mock.lastCall?.[0]).toBe(withheld);
+    expect(frames.size).toBe(0);
+    const replacement = { ...current(), generation: 'room-member-b' };
+    view.rerender(tree(replacement, '90'));
+    await act(async () => {});
+    expect(read.mock.lastCall?.[0]).toBe(replacement);
+    expect(units()).toBe('90 units');
+    expect(frames.size).toBe(0);
+    view.rerender(tree(replacement, '100'));
+    await act(async () => {});
+    expect(frames.size).toBe(1);
+    view.unmount();
+    await act(async () => {});
+    expect(frames.size).toBe(0);
+
+    const unmanaged = { ...current(), generation: 'unmanaged' };
+    const unmanagedView = render(tree(unmanaged, '110'));
+    unmanagedView.rerender(tree(unmanaged, '120'));
+    await act(async () => {});
+    expect(read.mock.lastCall?.[0]).toBe(unmanaged);
+    expect(units()).toBe('120 units');
+    expect(frames.size).toBe(0);
+    unmanagedView.unmount();
+    await act(async () => {});
+  } finally {
+    view.unmount();
+    await act(async () => {});
+    if (motion === undefined) delete document.documentElement.dataset.motion;
+    else document.documentElement.dataset.motion = motion;
+    vi.restoreAllMocks();
+    vi.unstubAllGlobals();
+  }
 });
 
 it('uses actual canvas CSS width for selected full text across the separate Html root, resizing and deselection', async () => {
@@ -225,7 +378,7 @@ it('uses actual canvas CSS width for selected full text across the separate Html
       expect(getComputedStyle(button).fontSize).toBe('13px');
       expect(getComputedStyle(button).lineHeight).toBe('18px');
       expect(button).toHaveTextContent(label);
-      expect(button).toHaveTextContent(counts);
+      expect(finalCounts(button)).toBe(counts);
     }
     canvas.width = 315;
     view.rerender(fixture(false));
@@ -254,7 +407,7 @@ it('uses actual canvas CSS width for selected full text across the separate Html
       'var(--room-selected-label-width)',
     );
     expect(preview).toHaveTextContent(label);
-    expect(preview).toHaveTextContent(counts);
+    expect(finalCounts(preview)).toBe(counts);
     expect(preview).not.toHaveAttribute('tabindex');
     // CameraFacingLabel supplies nowrap above the separate Html root. The
     // selected noninteractive path must explicitly restore text wrapping too.

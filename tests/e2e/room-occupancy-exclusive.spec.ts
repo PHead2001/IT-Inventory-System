@@ -715,6 +715,20 @@ test('375px populated room shows every occupied target with passive badges and s
           if (!bar || !frame) return false;
           const popup = element.getBoundingClientRect();
           const css = getComputedStyle(element);
+          // Measure the restored presentation, after the entrance spring ends.
+          if (
+            element.dataset.springState !== 'open' ||
+            element.hasAttribute('inert') ||
+            css.transform !== 'none' ||
+            css.opacity !== '1' ||
+            element
+              .getAnimations()
+              .some(
+                (animation) =>
+                  animation.pending || animation.playState === 'running',
+              )
+          )
+            return false;
           const outsideCanvas = popup.bottom <= frame.top;
           const scrollable =
             ['auto', 'scroll'].includes(css.overflowY) &&
@@ -786,6 +800,11 @@ test('375px populated room shows every occupied target with passive badges and s
   const menu = page.getByRole('region', {
     name: 'More map controls',
     exact: true,
+  });
+  const physicalMenu = page.getByRole('region', {
+    name: 'More map controls',
+    exact: true,
+    includeHidden: true,
   });
   await menu.hover();
   const controlsScroll = await menu.evaluate((element) => element.scrollTop);
@@ -1305,6 +1324,7 @@ test('375px populated room shows every occupied target with passive badges and s
   await settledLabels(page, beforeResize);
   await page.getByRole('button', { name: 'Fit room', exact: true }).click();
   await expect(more).toHaveAttribute('aria-expanded', 'false');
+  await expect(physicalMenu).toHaveCount(0);
   // Native page scrolling puts the trigger too high for an above popup. Opening
   // here must add real inline flow, reproducing the original click-shift case.
   const closedMoreFrame = await more.boundingBox();
@@ -1345,6 +1365,7 @@ test('375px populated room shows every occupied target with passive badges and s
   const closedMenuFlow = await readMenuFlow();
   await more.click();
   await expect(menu).toHaveAttribute('data-placement', 'inline');
+  await assertMoreOutsideCanvas();
   const openMenuFlow = await readMenuFlow();
   expect(openMenuFlow.position).toBe('relative');
   const addedMenuFlow = openMenuFlow.panelHeight + openMenuFlow.marginTop;
@@ -1473,6 +1494,13 @@ test('375px populated room shows every occupied target with passive badges and s
     }
   }
   await expect(more).toHaveAttribute('aria-expanded', 'false');
+  // Full motion retains an inert exit panel until its spring presentation ends.
+  await expect(physicalMenu).toHaveCount(0);
+  await expect
+    .poll(
+      async () => openMenuFlow.hostHeight - (await readMenuFlow()).hostHeight,
+    )
+    .toBeCloseTo(addedMenuFlow, 3);
   const dismissedMenuFlow = await readMenuFlow();
   expect(dismissedMenuFlow.placement).toBe('closed');
   expect(openMenuFlow.hostHeight - dismissedMenuFlow.hostHeight).toBeCloseTo(

@@ -3,6 +3,7 @@ import {
   acceptanceFixtures,
   acceptanceLogin,
 } from './audit-three-acceptance-fixtures';
+import { countFeedback } from './count-feedback-support';
 
 // Not parallel-allowlisted: the canonical scheduler runs this local topology
 // fixture exclusively. acceptanceFixtures rejects non-loopback backends.
@@ -511,9 +512,7 @@ test('actual location status, pagination, child and recovery links retain one va
       await all.click();
       await expect(page).toHaveURL(allURL.href);
       await expect(all).toHaveAttribute('aria-current', 'page');
-      await expect(
-        page.getByText('26 matching rows', { exact: true }),
-      ).toBeVisible();
+      await expect(countFeedback(page, '26 matching rows')).toBeVisible();
       const rows = page.getByRole('link', {
         name: new RegExp(`^Fictional pagination ${owned.suffix} \\d{2}$`),
       });

@@ -56,7 +56,11 @@
 }
 .name {
   scroll-margin-block: 12px;
-  display: inline-block;
+  display: inline-flex;
+  min-height: 44px;
+  min-width: 44px;
+  align-items: center;
+  vertical-align: middle;
   max-width: 100%;
   color: var(--foreground);
   font-size: 15px;
@@ -310,4 +314,17 @@
   .row {
     transition: none;
   }
+}
+
+/* Native record/location navigation keeps its type and line flow with a touch-sized hit box. */
+.textTarget {
+  display: inline-flex;
+  flex-wrap: wrap;
+  column-gap: 0.25em;
+  min-height: 44px;
+  min-width: 44px;
+  max-width: 100%;
+  align-items: center;
+  vertical-align: middle;
+  overflow-wrap: anywhere;
 }

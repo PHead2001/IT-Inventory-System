@@ -1,3 +1,5 @@
+import { ScanFeedbackToggle } from '@/components/experience/scan-feedback';
+import { ListEntrance } from '@/components/experience/list-feedback';
 import { RouteReady } from '@/components/experience/route-ready';
 import { routeReadyProps } from '@/components/experience/route-ready.server';
 import Link from '@/components/experience/route-link';
@@ -8,6 +10,7 @@ import { MotionToggle } from '@/components/experience/motion-preference';
 import { BuildInfo } from '@/features/build-info/build-info';
 import { readBuildProvenance } from '@/features/build-info/read.server';
 import { ShortcutPreference } from '@/features/commands/command-provider';
+import { ThemeControl } from '@/components/experience/theme-preference';
 
 const sections = [
   {
@@ -76,15 +79,20 @@ export default async function SettingsPage({
               system&apos;s reduced-motion preference always applies.
             </p>
             <MotionToggle />
+            <ThemeControl />
             <ShortcutPreference />
             <RoomEffectsPreference />
+            <ScanFeedbackToggle />
           </section>
-          <ul className="grid gap-3 md:grid-cols-2">
+          <ListEntrance
+            identities={sections.map((section) => section.href)}
+            className="grid gap-3 md:grid-cols-2"
+          >
             {sections.map((section) => (
               <li key={section.href}>
                 <Link
                   href={section.href}
-                  className="experience-surface block h-full min-w-0 p-5 transition-colors hover:border-cyan-400/60 hover:bg-slate-800/70 focus-visible:outline-2 focus-visible:outline-cyan-300"
+                  className="experience-spotlight experience-surface block h-full min-w-0 p-5 transition-colors hover:border-cyan-400/60 hover:bg-slate-800/70 focus-visible:outline-2 focus-visible:outline-cyan-300"
                 >
                   <span className="block text-lg font-semibold text-cyan-200">
                     {section.title}
@@ -95,7 +103,7 @@ export default async function SettingsPage({
                 </Link>
               </li>
             ))}
-          </ul>
+          </ListEntrance>
           <BuildInfo provenance={readBuildProvenance()} />
         </div>
       </RouteReady>

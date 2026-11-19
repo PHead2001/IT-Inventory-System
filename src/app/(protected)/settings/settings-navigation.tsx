@@ -20,7 +20,7 @@ export function SettingsNavigation() {
       <Link
         href="/settings"
         aria-current={pathname === '/settings' ? 'page' : undefined}
-        className="inline-flex min-h-11 items-center rounded-lg px-3 py-2 text-sm text-cyan-100 hover:bg-slate-800 aria-[current=page]:bg-cyan-900/40 aria-[current=page]:text-white"
+        className="inline-flex min-h-11 items-center rounded-lg px-3 py-2 text-sm text-cyan-100 hover:bg-slate-800 aria-[current=page]:bg-cyan-900/40 aria-[current=page]:text-[var(--foreground)]"
       >
         All settings
       </Link>
@@ -33,7 +33,7 @@ export function SettingsNavigation() {
               ? 'page'
               : undefined
           }
-          className="inline-flex min-h-11 items-center rounded-lg px-3 py-2 text-sm text-cyan-100 hover:bg-slate-800 aria-[current=page]:bg-cyan-900/40 aria-[current=page]:text-white"
+          className="inline-flex min-h-11 items-center rounded-lg px-3 py-2 text-sm text-cyan-100 hover:bg-slate-800 aria-[current=page]:bg-cyan-900/40 aria-[current=page]:text-[var(--foreground)]"
         >
           {label}
         </Link>

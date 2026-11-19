@@ -1,7 +1,12 @@
 import { defineConfig, devices } from '@playwright/test';
 import { e2eScheduling } from './scripts/e2e-scheduling';
 import { e2eDiagnostics } from './scripts/e2e-diagnostics';
-const scheduling = e2eScheduling(process.env.E2E_FULL_SUITE === '1');
+const scheduling = e2eScheduling(
+  process.env.E2E_FULL_SUITE === '1',
+  process.env.GITHUB_ACTIONS === 'true' &&
+    process.env.RUNNER_ENVIRONMENT === 'github-hosted' &&
+    process.env.E2E_ISOLATE_ROOM === '1',
+);
 export default defineConfig({
   testDir: './tests/e2e',
   // Keep database-type drift artifacts outside Playwright's cleaned directory.

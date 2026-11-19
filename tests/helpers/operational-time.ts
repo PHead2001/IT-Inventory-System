@@ -30,7 +30,7 @@ export async function exactOperationalTime(time: Locator) {
     )
       await summary.press('Enter');
     await expect(disclosure).toHaveAttribute('open', '');
-    const exact = disclosure.locator(':scope > p').first();
+    const exact = disclosure.getByRole('paragraph');
     await expect(exact).toBeVisible();
     const original = await time.getAttribute('datetime');
     expect(original).not.toBeNull();

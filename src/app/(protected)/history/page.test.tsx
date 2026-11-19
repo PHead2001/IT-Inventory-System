@@ -31,6 +31,7 @@ vi.mock('next/navigation', () => ({
   useRouter: () => ({ push: vi.fn() }),
 }));
 import Page from './page';
+import styles from '@/features/inventory/components/inventory-visual.module.css';
 import { OperationalTimeProvider } from '@/components/operational-time';
 import * as operationalTime from '@/lib/operational-time';
 const id = '00000000-0000-4000-8000-000000000001';
@@ -285,3 +286,67 @@ it.each([
     }
   },
 );
+
+it('keeps active record and location filter links touch-sized without changing their destinations', async () => {
+  render(
+    await Page({
+      searchParams: Promise.resolve({ entityId: id, location: 'ITC-BLACK' }),
+    }),
+  );
+  const destinations = [
+    ['Adapters', '/inventory/quantity/' + id],
+    ['Clear record filter', '/history?type=quantity&location=ITC-BLACK'],
+    ['Clear location filter', '/history?entityId=' + id + '&type=quantity'],
+  ];
+  for (const [name, href] of destinations) {
+    const link = screen.getByRole('link', { name });
+    expect(link).toHaveClass(styles.textTarget);
+    expect(link).toHaveAttribute('href', href);
+  }
+});
+it('uses wrapping touch targets for every custom snapshot navigation and option-page link', async () => {
+  const nextField = '00000000-0000-4000-8000-000000000002';
+  m.custom.mockResolvedValue({
+    field_id: id,
+    label: 'Recorded field',
+    legacy: false,
+    present: true,
+    field_type: 'short_text',
+    value: 'Recorded answer',
+    validated_revision_id: id,
+    owner_category_id: id,
+    option_paths: [],
+    option_offset: 16,
+    next_option_offset: 32,
+    next_field_id: nextField,
+  });
+  render(
+    await Page({
+      searchParams: Promise.resolve({
+        event: 'quantity:' + id,
+        field: id,
+        side: 'after',
+        optionOffset: '16',
+      }),
+    }),
+  );
+  const prefix = '/history?event=quantity:' + id;
+  for (const [name, href] of [
+    ['Back to history', '/history'],
+    ['Before event', prefix + '&side=before&field=' + id],
+    ['After event', prefix + '&side=after&field=' + id],
+    ['Previous option paths', prefix + '&side=after&field=' + id],
+    [
+      'Next option paths',
+      prefix + '&side=after&field=' + id + '&optionOffset=32',
+    ],
+    ['Next custom field', prefix + '&side=after&field=' + nextField],
+  ]) {
+    const link = screen.getByRole('link', { name });
+    expect(link).toHaveClass(styles.textTarget);
+    expect(link).toHaveAttribute('href', href);
+  }
+  expect(
+    screen.getByRole('navigation', { name: 'Event snapshot side' }),
+  ).toHaveClass('flex-wrap');
+});

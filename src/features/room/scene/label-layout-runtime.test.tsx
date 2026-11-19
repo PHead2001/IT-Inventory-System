@@ -1264,7 +1264,10 @@ describe('unified room label registry', () => {
     vi.spyOn(canvas, 'getBoundingClientRect').mockReturnValue(viewport);
     const a = label(host),
       b = label(host);
-    const registry = createRoomLabelRegistry(vi.fn());
+    // Keep wall-clock scheduling out of the committed-placement fixture.
+    const registry = createRoomLabelRegistry(vi.fn(), undefined, undefined, {
+      clock: () => 0,
+    });
     const cleanup = registry.connect(canvas);
     registry.register('a', a.element, a.leader, {
       priority: 3,
@@ -1280,6 +1283,9 @@ describe('unified room label registry', () => {
     };
     const unregister = registry.register('b', b.element, b.leader, options);
     flush();
+    expect(canvas.dataset.labelLayoutStatus).toBe('complete');
+    expect(canvas.dataset.labelLayoutRevision).toBe('1');
+    expect(b.element.dataset.labelSuppressed).toBe('false');
     const displaced = b.element.dataset.labelDx;
     expect(displaced).not.toBe('0');
     // Camera geometry changes leave the previous B placement valid while its
@@ -1300,6 +1306,8 @@ describe('unified room label registry', () => {
       inspection: 'focus',
     });
     flush();
+    expect(canvas.dataset.labelLayoutStatus).toBe('complete');
+    expect(canvas.dataset.labelLayoutRevision).toBe('2');
     expect(b.element.dataset.labelDx).toBe(displaced);
     expect(a.element.dataset.labelDx).toBe('0');
     expect(a.element.dataset.labelSuppressed).toBe('false');
@@ -1482,7 +1490,11 @@ describe('unified room label registry', () => {
         [dimension]:
           (dimension === 'width' ? 40 : 32) + (++reads % 2 ? delta : 0),
       }));
-      const registry = createRoomLabelRegistry(vi.fn()),
+      // This matrix proves dimension tolerance and the four-pass cap. Elapsed
+      // time has separate budget/continuation tests and must not stop it early.
+      const registry = createRoomLabelRegistry(vi.fn(), undefined, undefined, {
+          clock: () => 0,
+        }),
         cleanup = registry.connect(canvas);
       registry.register('fractional', item.element, item.leader, {
         priority: 4,
@@ -1698,3 +1710,87 @@ describe('unified room label registry', () => {
     cleanup();
   });
 });
+
+it('fails closed before reading an obstruction when its shared measurement budget is exhausted', () => {
+  const host = document.createElement('div');
+  const canvas = document.createElement('canvas');
+  const obstruction = document.createElement('div');
+  host.dataset.roomSurface = 'true';
+  obstruction.dataset.roomObstruction = 'true';
+  host.append(canvas, obstruction);
+  document.body.append(host);
+  vi.spyOn(canvas, 'getBoundingClientRect').mockReturnValue(viewport);
+  const client = vi.spyOn(obstruction, 'getClientRects');
+  const bounds = vi.spyOn(obstruction, 'getBoundingClientRect');
+  const item = label(host);
+  const solver = vi.spyOn(placement, 'layoutLabelsDetailed');
+  const registry = createRoomLabelRegistry(vi.fn(), undefined, undefined, {
+    clock: () => 0,
+    limits: { maxOperations: 0 },
+  });
+  const cleanup = registry.connect(canvas);
+  registry.register('budget-refusal', item.element, item.leader, {
+    priority: 4,
+    mandatory: true,
+  });
+  // Connecting the observer legitimately measures its initial overlay set.
+  // The refusal invariant starts with this packing attempt, after setup.
+  client.mockClear();
+  bounds.mockClear();
+  vi.mocked(item.element.getBoundingClientRect).mockClear();
+  flush();
+  expect(client).not.toHaveBeenCalled();
+  expect(bounds).not.toHaveBeenCalled();
+  expect(item.element.getBoundingClientRect).not.toHaveBeenCalled();
+  expect(solver).not.toHaveBeenCalled();
+  expect(canvas.dataset.labelLayoutStatus).toBe('budget-exhausted');
+  expect(item.element).toHaveAttribute('aria-hidden', 'true');
+  expect(item.element.style.visibility).toBe('hidden');
+  expect(item.element.tabIndex).toBe(-1);
+  expect(queue).toHaveLength(0);
+  cleanup();
+});
+
+it.each([
+  'window-resize',
+  'captured-scroll',
+  'visual-resize',
+  'visual-scroll',
+] as const)(
+  'owns exactly one invalidation for %s and none after runtime cleanup',
+  (event) => {
+    const surface = document.createElement('div');
+    const host = document.createElement('div');
+    const canvas = document.createElement('canvas');
+    surface.dataset.roomSurface = 'true';
+    host.append(canvas);
+    surface.append(host);
+    document.body.append(surface);
+    const visual = new EventTarget();
+    vi.stubGlobal('visualViewport', visual);
+    vi.spyOn(canvas, 'getBoundingClientRect').mockReturnValue(viewport);
+    const invalidate = vi.fn();
+    const registry = createRoomLabelRegistry(vi.fn(), undefined, undefined, {
+      clock: () => 0,
+    });
+    const cleanup = registry.connect(canvas, invalidate);
+    flush();
+    invalidate.mockClear();
+    const dispatch = () => {
+      if (event === 'window-resize') window.dispatchEvent(new Event('resize'));
+      else if (event === 'captured-scroll')
+        host.dispatchEvent(new Event('scroll', { bubbles: false }));
+      else
+        visual.dispatchEvent(
+          new Event(event === 'visual-resize' ? 'resize' : 'scroll'),
+        );
+    };
+    dispatch();
+    expect(invalidate).toHaveBeenCalledOnce();
+    flush();
+    cleanup();
+    invalidate.mockClear();
+    dispatch();
+    expect(invalidate).not.toHaveBeenCalled();
+  },
+);

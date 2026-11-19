@@ -3199,7 +3199,7 @@ for (const width of [1280, 390]) {
       // The shell remains usable while the destination's actual data is held.
       await (await navigationLink(page, 'Overview')).click();
       await expect(
-        page.getByRole('heading', { name: 'Low-stock overview', exact: true }),
+        page.getByRole('heading', { level: 1, name: 'Overview', exact: true }),
       ).toBeVisible();
       await expect(routeProgress(page)).toHaveAttribute(
         'data-visible',
@@ -3314,9 +3314,7 @@ for (const width of [1280, 390]) {
       await slow.delivery;
       // This positive UI signal proves the actual client action continuation.
       await expect(
-        page
-          .getByRole('status')
-          .filter({ hasText: 'Overview refreshed successfully.' }),
+        page.getByRole('status').filter({ hasText: /^Overview refreshed\.$/ }),
       ).toBeVisible();
       await expect(routeProgress(page)).toHaveAttribute(
         'data-visible',

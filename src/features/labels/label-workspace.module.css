@@ -186,6 +186,12 @@
   overflow-wrap: anywhere;
 }
 .resultLink {
+  display: inline-flex;
+  min-height: 44px;
+  min-width: 44px;
+  max-width: 100%;
+  align-items: center;
+  vertical-align: middle;
   color: var(--labels-result-link-text);
   font-size: 13px;
   font-weight: 700;
@@ -336,6 +342,13 @@
   font-size: 13px;
   line-height: 1.45;
   font-weight: 700;
+}
+.selectionLabel {
+  display: inline-flex;
+  min-height: 44px;
+  min-width: 44px;
+  align-items: center;
+  gap: 8px;
 }
 .settingSelect {
   min-height: 44px;

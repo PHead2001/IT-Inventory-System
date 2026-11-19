@@ -1,4 +1,7 @@
 'use client';
+import { PeekAnchor } from '@/features/peek/peek-link';
+import { peekTargetFromHref } from '@/features/peek/contracts';
+import { MagneticVisual } from '@/components/experience/magnetic-visual';
 import { useRouteRouter as useRouter } from '@/components/experience/route-pending';
 import { ScanMatchLabel, ScanMatchContext } from './scan-match-label';
 import { afterTransitionCapture } from '@/components/forms/transition-capture';
@@ -13,6 +16,14 @@ import {
 import Link from '@/components/experience/route-link';
 
 import styles from './scan-visual.module.css';
+import { useScanFeedback } from '@/components/experience/scan-feedback';
+import {
+  ScannerOverlay,
+  useDecodedLock,
+  type ScanVisualState,
+} from './scanner-overlay';
+import { readDecoderGeometry, type DecoderGeometry } from './decoder-geometry';
+import overlayStyles from './scanner-overlay.module.css';
 import { assignmentEpoch } from './assign-batch';
 import { createCameraSession } from './camera-session';
 import {
@@ -24,6 +35,12 @@ import {
 
 export function ScanPanel() {
   const router = useRouter();
+  const host = useRef<HTMLDivElement>(null);
+  const feedback = useScanFeedback(host, 'scan-open');
+  const { locked, begin: lockDecode, cancel: cancelLock } = useDecodedLock();
+  const [geometry, setGeometry] = useState<DecoderGeometry | null>(null);
+  const [visual, setVisual] = useState<ScanVisualState>('searching');
+  const [showFeedback, setShowFeedback] = useState(false);
   const video = useRef<HTMLVideoElement>(null);
   const session = useRef<ReturnType<typeof createCameraSession> | null>(null);
   const generation = useRef(0);
@@ -51,11 +68,15 @@ export function ScanPanel() {
     generation.current++;
     session.current?.stop();
     session.current = null;
+    feedback.stop();
     if (mounted.current) {
       setCamera('idle');
       setBusy(false);
+      cancelLock();
+      setShowFeedback(false);
+      setGeometry(null);
     }
-  }, []);
+  }, [cancelLock, feedback]);
   useEffect(() => {
     mounted.current = true;
     const invalidate = () => {
@@ -108,7 +129,12 @@ export function ScanPanel() {
         return;
       consumed.current = true;
       completionFocus.current = null;
-      stop();
+      // Stop capture immediately while keeping the decorative decoded state.
+      generation.current++;
+      session.current?.stop();
+      session.current = null;
+      setCamera('idle');
+      setVisual('inspecting');
       const token = generation.current;
       setBusy(true);
       setMessage('');
@@ -127,6 +153,16 @@ export function ScanPanel() {
         )
           return;
         setResult(resolution);
+        const failed =
+          resolution.status === 'unknown' || resolution.status === 'invalid';
+        setVisual(failed ? 'error' : 'resolved');
+        if (failed) feedback('no-match', `lookup:${token}`);
+        else if (
+          resolution.status !== 'found' ||
+          resolution.truncated ||
+          resolution.matches[0]?.state !== 'active'
+        )
+          feedback('blocked', `lookup:${token}`);
         if (
           resolution.status === 'found' &&
           !resolution.truncated &&
@@ -176,6 +212,8 @@ export function ScanPanel() {
           scopeEpoch.current === assignmentEpoch()
         ) {
           completionFocus.current = 'input';
+          setVisual('error');
+          feedback('blocked', `lookup:${token}`);
           setMessage('Lookup could not be completed. Please try again.');
         }
       } finally {
@@ -187,14 +225,17 @@ export function ScanPanel() {
           setBusy(false);
       }
     },
-    [router, stop],
+    [router, feedback],
   );
 
-  const start = async () => {
+  const start = async (trusted: boolean) => {
     if (scopeInvalidated.current || scopeEpoch.current !== assignmentEpoch())
       return;
     completionFocus.current = null;
     stop();
+    feedback.prime(trusted);
+    setVisual('searching');
+    setShowFeedback(true);
     setPreviewKey((key) => key + 1);
     setCameraIssue(false);
     consumed.current = false;
@@ -202,6 +243,8 @@ export function ScanPanel() {
     setMessage('');
     if (!navigator.mediaDevices?.getUserMedia) {
       setCameraIssue(true);
+      setVisual('error');
+      setShowFeedback(true);
       setMessage(
         'Camera access is unavailable in this browser. Enter the label text below.',
       );
@@ -221,12 +264,20 @@ export function ScanPanel() {
           decoded &&
           mounted.current &&
           token === generation.current &&
-          !consumed.current
-        )
+          !consumed.current &&
+          !scopeInvalidated.current &&
+          scopeEpoch.current === assignmentEpoch() &&
+          !document.hidden
+        ) {
+          if (feedback('decode', `decode:${token}`)) {
+            lockDecode();
+            setGeometry(readDecoderGeometry(decoded, video.current!));
+          }
           void open(
             decoded.getText(),
             mode === 'serial' ? 'serial' : 'identifier',
           );
+        }
       });
       session.current = current;
       const running = await current.start();
@@ -237,8 +288,14 @@ export function ScanPanel() {
       setCamera('running');
     } catch (error) {
       if (!mounted.current || token !== generation.current) return;
-      stop();
+      generation.current++;
+      session.current?.stop();
+      session.current = null;
+      setCamera('idle');
       setCameraIssue(true);
+      setShowFeedback(true);
+      setVisual('error');
+      feedback('blocked', `camera:${token}`);
       setMessage(
         error instanceof DOMException && error.name === 'NotAllowedError'
           ? 'Camera permission was denied. Allow it in your browser settings or enter a label below.'
@@ -249,12 +306,14 @@ export function ScanPanel() {
   const submit = (event: FormEvent) => {
     event.preventDefault();
     if (!busy) {
+      feedback.prime(event.nativeEvent.isTrusted);
       consumed.current = false;
       void open(input, mode);
     }
   };
   return (
     <div
+      ref={host}
       className={styles.workspace}
       data-scanner-active={camera !== 'idle' || busy ? 'true' : undefined}
     >
@@ -273,29 +332,43 @@ export function ScanPanel() {
             Point your camera at an inventory QR or Code 128 label. Scanning
             opens information only.
           </p>
-          <video
-            key={previewKey}
-            ref={video}
-            muted
-            playsInline
-            aria-label="Camera preview"
-            hidden={camera === 'idle'}
-            className={styles.preview}
-          />
+          <div className={overlayStyles.viewport} hidden={!showFeedback}>
+            <video
+              key={previewKey}
+              ref={video}
+              muted
+              playsInline
+              aria-label="Camera preview"
+              hidden={!showFeedback}
+              className={styles.preview}
+            />
+            <ScannerOverlay
+              key={previewKey}
+              video={video}
+              announce={false}
+              geometry={geometry}
+              state={visual === 'error' ? 'error' : locked ? 'locked' : visual}
+            />
+          </div>
           <div className={styles.cameraActions}>
             {camera === 'idle' ? (
               <button
                 type="button"
                 disabled={scopeBlocked}
-                onClick={() => void start()}
-                className={styles.primaryButton}
+                onClick={(event) => void start(event.nativeEvent.isTrusted)}
+                className={`experience-magnetic ${styles.primaryButton}`}
+                data-magnetic-face="scan"
               >
-                {cameraIssue ? 'Retry camera' : 'Start camera'}
+                <MagneticVisual>
+                  {cameraIssue ? 'Retry camera' : 'Start camera'}
+                </MagneticVisual>
               </button>
             ) : (
               <button
                 type="button"
-                onClick={stop}
+                onClick={() => {
+                  stop();
+                }}
                 className={styles.secondaryButton}
               >
                 Stop camera
@@ -434,7 +507,13 @@ export function ScanPanel() {
         </button>
       )}
       {result?.truncated && (
-        <Link href="/inventory" onClick={stop} className="underline">
+        <Link
+          href="/inventory"
+          onClick={() => {
+            stop();
+          }}
+          className="underline"
+        >
           Search inventory
         </Link>
       )}
@@ -443,17 +522,19 @@ export function ScanPanel() {
           {result.matches.map((match, index) => (
             <li key={match.path} className={styles.result}>
               <div className="min-w-0 break-words">
-                <Link
-                  ref={index === 0 ? firstMatch : undefined}
-                  href={match.path}
-                  aria-describedby={
-                    match.context ? `scan-match-context-${index}` : undefined
-                  }
-                  onClick={stop}
-                  className="underline"
-                >
-                  <ScanMatchLabel match={match} />
-                </Link>
+                <PeekAnchor target={peekTargetFromHref(match.path)}>
+                  <Link
+                    ref={index === 0 ? firstMatch : undefined}
+                    href={match.path}
+                    aria-describedby={
+                      match.context ? `scan-match-context-${index}` : undefined
+                    }
+                    onClick={stop}
+                    className="underline"
+                  >
+                    <ScanMatchLabel match={match} />
+                  </Link>
+                </PeekAnchor>
                 {match.context && (
                   <p id={`scan-match-context-${index}`} className={styles.hint}>
                     <ScanMatchContext match={match} />

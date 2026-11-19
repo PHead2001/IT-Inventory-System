@@ -55,7 +55,6 @@ import {
 } from './contents-contract';
 import type { Space } from './spaces';
 import { useEffectiveReducedMotion } from '@/components/experience/motion-preference';
-import { AmbientLight } from '@/components/experience/ambient-light';
 import styles from './room-visual.module.css';
 import {
   availableSpaces,
@@ -574,7 +573,6 @@ export function SpacesWorkspace({
     : 1;
   return (
     <div className={styles.workspace}>
-      <AmbientLight className="experience-ambient-spaces" />
       {notice && (
         <p
           role="status"

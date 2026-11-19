@@ -8,7 +8,7 @@ export default function ForgotPasswordPage() {
       <h1 className="mt-2 text-3xl font-semibold tracking-tight">
         Reset your password
       </h1>
-      <p className="mb-7 mt-2 text-sm text-[#9cafc4]">
+      <p className="mb-7 mt-2 text-sm experience-muted">
         Enter the email address used for your invitation.
       </p>
       <AuthForm mode="recover" />

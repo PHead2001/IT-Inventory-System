@@ -60,6 +60,7 @@ function discover(
   fullSuite: boolean,
   args: string[] = [],
   captureEvidence = false,
+  roomIsolation?: 'github-hosted' | 'self-hosted' | 'local',
 ) {
   const npmCli = process.env.npm_execpath;
   if (!npmCli) throw new Error('Run scheduling checks through npm run test.');
@@ -70,8 +71,13 @@ function discover(
       encoding: 'utf8',
       env: {
         ...process.env,
+        ...(roomIsolation && {
+          GITHUB_ACTIONS: roomIsolation === 'local' ? 'false' : 'true',
+          RUNNER_ENVIRONMENT: roomIsolation,
+        }),
         E2E_FULL_SUITE: fullSuite ? '1' : '0',
         E2E_CAPTURE_EVIDENCE: captureEvidence ? '1' : '0',
+        E2E_ISOLATE_ROOM: roomIsolation ? '1' : '0',
       },
       timeout: 30_000,
       maxBuffer: 4 * 1024 * 1024,
@@ -112,6 +118,7 @@ function discover(
         JSON.stringify({
           fullSuite,
           captureEvidence,
+          roomIsolation,
           args,
           status: result.status,
           signal: result.signal,
@@ -186,8 +193,8 @@ describe('browser scheduling', () => {
       (entry) => entry.file === 'experience-recordings.spec.ts',
     );
     expect(recordings).toHaveLength(2);
-    expect(baseline).toHaveLength(358);
-    expect(scheduled).toHaveLength(358);
+    expect(baseline).toHaveLength(371);
+    expect(scheduled).toHaveLength(371);
     expect(new Set(scheduled.map((entry) => entry.key)).size).toBe(
       scheduled.length,
     );
@@ -281,6 +288,72 @@ describe('browser scheduling', () => {
     const [exclusiveProject, parallelProject] = e2eScheduling(true).projects;
     expect(parallelProject.dependencies).toContain(exclusiveProject.name);
   }, 60_000);
+
+  it('moves only the 29 room cases into the one-worker hosted phase', () => {
+    const scheduled = discover(true);
+    const hosted = discover(true, [], false, 'github-hosted');
+    expect(hosted.map((entry) => entry.key).sort()).toEqual(
+      scheduled.map((entry) => entry.key).sort(),
+    );
+    expect(new Set(hosted.map((entry) => entry.key)).size).toBe(hosted.length);
+    const baselineProject = new Map(
+      scheduled.map((entry) => [entry.key, entry.project]),
+    );
+    for (const entry of hosted) {
+      expect(entry.project, entry.key).toBe(
+        entry.file === '00-room.spec.ts'
+          ? 'chromium-exclusive'
+          : baselineProject.get(entry.key),
+      );
+    }
+    for (const [file, count] of [
+      ['00-room.spec.ts', 29],
+      ['room-occupancy-exclusive.spec.ts', 5],
+    ] as const) {
+      const cases = hosted.filter((entry) => entry.file === file);
+      expect(cases, file).toHaveLength(count);
+      expect(
+        cases.every((entry) => entry.project === 'chromium-exclusive'),
+      ).toBe(true);
+    }
+    const [exclusive, parallel] = e2eScheduling(true, true).projects;
+    expect(exclusive.workers).toBe(1);
+    expect(parallel.workers).toBe(2);
+    expect(parallel.dependencies).toEqual([exclusive.name]);
+
+    const focused = discover(
+      false,
+      ['tests/e2e/00-room.spec.ts'],
+      false,
+      'github-hosted',
+    );
+    expect(focused.map((entry) => entry.key).sort()).toEqual(
+      hosted
+        .filter((entry) => entry.file === '00-room.spec.ts')
+        .map((entry) => entry.key)
+        .sort(),
+    );
+    expect(new Set(focused.map((entry) => entry.project))).toEqual(
+      new Set(['chromium']),
+    );
+  }, 60_000);
+
+  it.each(['local', 'self-hosted'] as const)(
+    'keeps the room file parallel with the flag set on a %s runner',
+    (runner) => {
+      const room = discover(
+        true,
+        ['tests/e2e/00-room.spec.ts'],
+        false,
+        runner,
+      ).filter((entry) => entry.file === '00-room.spec.ts');
+      expect(room).toHaveLength(29);
+      expect(new Set(room.map((entry) => entry.project))).toEqual(
+        new Set(['chromium-parallel']),
+      );
+    },
+    30_000,
+  );
 
   it('registers room hooks explicitly with invocation-local fixture state and no spec imports', () => {
     const support = ts.createSourceFile(

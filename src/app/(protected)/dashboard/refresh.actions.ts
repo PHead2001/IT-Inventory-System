@@ -5,6 +5,7 @@ import type { DashboardSnapshot } from './snapshot.server';
 
 export async function refreshDashboard(
   page: number,
+  view?: 'low-stock',
 ): Promise<{ ok: true; snapshot: DashboardSnapshot } | { ok: false }> {
   let snapshot: DashboardSnapshot;
   try {
@@ -17,6 +18,10 @@ export async function refreshDashboard(
     snapshot.result.page >
     Math.max(1, Math.ceil(snapshot.result.total / snapshot.result.pageSize))
   )
-    redirect('/dashboard?page=1');
+    redirect(
+      view === 'low-stock'
+        ? '/dashboard?view=low-stock&page=1'
+        : '/dashboard?page=1',
+    );
   return { ok: true, snapshot };
 }
