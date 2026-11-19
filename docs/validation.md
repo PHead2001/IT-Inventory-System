@@ -1,5 +1,26 @@
 # Validation
 
+## A403 selective Overview integration
+
+The additive migration `20261019193000_overview_snapshot_v1.sql`, Overview SQL
+tests (including boundary and equal-time ordering cases), and registered
+`tests/integration/overview.ts` require clean local replay, forward-upgrade proof,
+canonical generated types, the complete database gate and query-cost evidence.
+Only that migration is imported; the held donor's older duplicate is excluded.
+Existing low-stock reports and their private reads, Peek links, CountTicker and
+motion owners remain intact. Overview uses those current shared components.
+
+[Overview](overview.md) records the single-statement, decimal-string, bounded
+projection and the donor's historical evidence. Those results do not certify
+this integration. Real authenticated timeout/concurrency proof, populated
+desktop/390px Dark/Light/System Full/Reduced inspection, exact-final-SHA CI,
+fresh review and hosted acceptance remain required. No A403 acceptance is claimed
+from source integration or unit tests. The current local checkpoint in
+[Overview](overview.md#selective-release-checkpoint--november-5-2026) records clean
+replay, generated types, focused UI/contract tests and composed database retry
+coverage, including the actual REST timeout. It does not claim an uninterrupted
+full database command or final application/hosted certification.
+
 ## Deferred-hydration browser probes
 
 The first-styled-paint and initial motion Settings probes share
@@ -50,10 +71,11 @@ failure is intentional uncertified feedback, not a defect to repair with a push.
 
 Foundation CI handles opened, reopened,
 synchronize, ready_for_review and converted_to_draft events, cancelling superseded
-runs for that PR. A draft uses a light runner and ends the stable `required` check
-with an explicit uncertified failure before dependency installation. Missing or
-malformed PR state is also rejected. Drafts emit no full-completion or executed
-workflow-source marker and cannot supply reusable success evidence. Marking ready
+runs for that PR. By default a draft uses a light runner and ends the stable
+`required` check with an explicit uncertified failure before dependency
+installation. Missing or malformed PR state is also rejected. Drafts emit no
+full-completion or executed workflow-source marker and cannot supply reusable
+success evidence. Marking ready
 for review runs the full heavy gate for the current SHA; converting back to draft
 invalidates certification even when the head SHA is unchanged.
 
@@ -61,15 +83,23 @@ For the temporary closeout of PRs 62, 64, 65, 66 and 67, Foundation CI routes on
 the `required` job to GitHub-hosted `ubuntu-24.04` when the event is `pull_request`
 in `PHead2001/IT-Inventory-System` and the head repository matches. This includes
 drafts, whose existing uncertified decision still applies. Every other case uses
-the existing light/heavy routing. The forty-minute deadline, validation steps,
-permissions, cleanup, main delivery and sibling jobs retain their existing gates.
+the existing light/heavy routing. For open, ready PRs from the matching
+repository, the required job allows eighty minutes on 62, 64 and 65 and sixty
+minutes on 66 and 67. The broader limit gives the hosted runner time to finish
+after a sixty-minute run reached the deadline during parallel browser testing.
+For 62, 64 and 65, the browser step runs the 29 cases in `00-room.spec.ts` in the
+single-worker exclusive phase alongside the five already-exclusive room cases.
+The other browser files follow the normal partition, with up to two workers in
+the parallel phase. Local, focused and other CI runs follow the default schedule.
+Other required jobs retain forty minutes. The full validation chain still
+includes database cleanup and bounds failure artifact upload to two minutes.
 
 Ready PRs retain fresh locked installation, the offline application build, clean
 database start/reset/tests/type comparison, browser preparation, backend-specific
 E2E build/browser execution and cleanup. Both builds are intentional: the offline
 build proves database independence, and the E2E build binds runtime public backend
-values. The required-job deadline is forty minutes. This source deadline does not
-establish the installed runner's separate job deadline or measured job duration.
+values. The installed runner's deadline and measured job duration require separate
+evidence.
 
 Main retains its conservative exact-tree, latest-attempt reuse proof and immediate
 reverification of all mandatory evidence steps and the workflow-source marker. Missing or invalid evidence
@@ -81,31 +111,33 @@ clean worktree, local/remote parity or applicable preview/visual acceptance.
 
 ## Browser scheduling and interruption diagnostics
 
-The room spec is named `00-room.spec.ts` to start its remaining sequential file
-journeys early in the existing two-worker parallel phase. Pinned Playwright's
-collector sorts files lexically and dispatches those file groups in order. Shared
-fixtures retain the exclusive phase; focused runs retain one worker. Discovery
-regressions require identical test coverage in both modes and room-first ordering.
-This targets the observed late single-worker tail; it does not establish a measured
-end-to-end saving or a pass within the existing job deadline.
+The default schedule starts `00-room.spec.ts` early in the two-worker
+parallel phase. Pinned Playwright sorts file groups lexically and dispatches them
+in that order. The hosted closeout schedule above puts that file first in the
+exclusive phase. Discovery regressions compare the collected case identities
+across all schedules and check room-first ordering in the default parallel phase.
 
 The three global occupancy snapshot journeys live in
 `room-occupancy-exclusive.spec.ts`: multi-pose reveal/picking, optional counts
 reconciliation, and the populated 375 px label/action journey. Their expected
 snapshots and later rendered labels or contents require a stable global inventory
 between observations. Unique records owned by another parallel spec can still
-legitimately change those shared physical-location totals. The new file remains
-outside the parallel allowlist and completes in the existing exclusive phase;
-all remaining `00-room.spec.ts` journeys retain room-first parallel scheduling.
-This isolates the fixture contract; it does not prove temporal overlap caused a
-historical CI mismatch.
+legitimately change those shared physical-location totals. This file completes in
+the exclusive phase in every full-suite schedule.
+
+The desktop and phone drawer orbit journeys also run in that exclusive phase.
+The hosted desktop case failed both attempts before full-suite cancellation.
+The phone case passed. Both moved cases retain the original sixty-second
+test limits, native interactions and assertions. Collection confirms both
+viewport cases move together. The revised browser duration still requires
+hosted execution.
 
 Both specs explicitly call `registerRoomTestSupport` from the non-spec
 `room-test-support.ts` module. Each invocation owns its fixture identities,
 cleanup journals and failure-diagnostic maps, retains the local-target guard,
 and archives/clears its own stock through the audited RPC. Importing that module
 registers no hooks. The moved cases and their occupied-witness helpers preserve
-their assertions. Scheduling regressions require exactly those three titles in
+their assertions. Scheduling regressions require exactly those five titles in
 the exclusive file, matching focused/full discovery without duplicates or loss,
 and no spec-to-spec imports. Source and collection checks do not replace actual
 focused browser execution or final-candidate CI.
@@ -1086,7 +1118,7 @@ Playwright uses real local Supabase and the production Next server for login/log
 
 Run affected tests first and reuse dependencies until dependency inputs change. No Supabase reset for isolated visuals. Schema, seed, RLS, function or persisted-contract changes require the clean DB gate. Preserve regressions; do not skip tests to achieve green checks.
 
-Foundation CI retains the stable `required` check. Ready, open PRs run the complete application, database, types and browser gates on `self-hosted, it-inventory-heavy`, with one fresh dependency install and a forty-minute required-job deadline. Draft or malformed PR state routes to `it-inventory-light` and explicitly fails certification before installation, without full-completion or workflow-source markers. PR lifecycle triggers include ready_for_review and converted_to_draft, and newer PR runs cancel superseded runs. Main first runs a read-only `reuse_evidence` job on `it-inventory-light`. Only verified evidence selects a light `required` job; ordinary evidence misses select the complete heavy gate. Its application step builds with unreachable placeholder Supabase configuration; E2E then rebuilds with the actual disposable local backend. The placeholders are scoped to the application step. A final full completion check rejects every missing, skipped, cancelled or failed mandatory step, including database cleanup. The final decision check also rejects failed evidence jobs and incomplete reuse verification. Production database delivery and trusted preview provisioning remain separate fresh `it-inventory-light` VMs. Preview access uses one direct-target provisioning job for opened, reopened, ready_for_review or manual events; ordinary pushes create no discovery or provisioning job. The separate diagnostic `Local runner pilot` remains restricted to the exact reviewed SHA using `it-inventory-pilot-<headSha>`. Repository labels express routing intent; they do not prove live host activation or runtime certification. The [local runner runbook](development/local-runner.md) defines host provisioning and disposal. Linux Bash/Git, the pinned Node/npm toolchain, Docker, writable installation directories, outbound dependency/image access and Chromium system libraries must be available. `playwright install --with-deps` requires compatible Linux package management and permission to install its system dependencies. Separate VMs/daemons prevent collisions between fixed Supabase names/ports and isolate production credentials from test code.
+Foundation CI retains the stable `required` check. By default, ready, open PRs run the complete application, database, types and browser gates on `self-hosted, it-inventory-heavy`, with one fresh dependency install and a forty-minute required-job deadline. Draft or malformed PR state routes to `it-inventory-light` and explicitly fails certification before installation, without full-completion or workflow-source markers. PR lifecycle triggers include ready_for_review and converted_to_draft, and newer PR runs cancel superseded runs. Main first runs a read-only `reuse_evidence` job on `it-inventory-light`. Only verified evidence selects a light `required` job; ordinary evidence misses select the complete heavy gate. Its application step builds with unreachable placeholder Supabase configuration; E2E then rebuilds with the actual disposable local backend. The placeholders are scoped to the application step. A final full completion check rejects every missing, skipped, cancelled or failed mandatory step, including database cleanup. The final decision check also rejects failed evidence jobs and incomplete reuse verification. Production database delivery and trusted preview provisioning remain separate fresh `it-inventory-light` VMs. Preview access uses one direct-target provisioning job for opened, reopened, ready_for_review or manual events; ordinary pushes create no discovery or provisioning job. The separate diagnostic `Local runner pilot` remains restricted to the exact reviewed SHA using `it-inventory-pilot-<headSha>`. Repository labels express routing intent; they do not prove live host activation or runtime certification. The [local runner runbook](development/local-runner.md) defines host provisioning and disposal. Linux Bash/Git, the pinned Node/npm toolchain, Docker, writable installation directories, outbound dependency/image access and Chromium system libraries must be available. `playwright install --with-deps` requires compatible Linux package management and permission to install its system dependencies. Separate VMs/daemons prevent collisions between fixed Supabase names/ports and isolate production credentials from test code.
 
 Main reuse requires a uniquely associated merged same-repository PR into `main`, whose merge SHA is exactly the pushed target and whose head has the identical whole Git tree. This covers application code, tests, workflows, scripts, configuration and dependency inputs. GitHub's canonical workflow ID/path, PR event, repository/head identity, latest matching run and latest attempt must agree. The completed successful run must have started within seven days; its attempt-specific `required` job must show every uniquely named full gate, workflow-source check, cleanup and terminal checks as completed successfully. Missing, skipped, duplicate or partial evidence is a miss. The API may return an empty run `pull_requests` array after merge; the authoritative commit-to-merged-PR-to-head association remains required, and any populated run association must agree. The inspector never trusts run names, artifacts, or an older green run behind a newer failed/running run. Read-only requests have a shared 45-second deadline, 45-request ceiling, two-MiB response bound and five-page ceiling; unavailable, incomplete or ambiguous API evidence falls back to full validation.
 
@@ -1971,3 +2003,19 @@ Historical performance and acceptance captures retain their original ports.
 The command-palette timeout proof admits only the same canonical API 45321 and
 database 45322 targets; its unit regressions reject the retired 54321/54322 ports
 as well as URL host overrides before integration clients are constructed.
+
+## W11 current-host source integration
+
+Spring popovers, disclosures and retained task panels reuse the reviewed W11
+artifact over the current protected provider tree. Existing task eligibility,
+draft/pending/uncertain guards, route readiness and accepted writes remain the
+authority; outgoing task instances receive only a presentation retirement veto.
+Transient generic confirmations supplement committed inline receipts. Label
+additions preserve one success announcement, and canvas obstruction collection
+uses its actual Document while retaining physical picks and packing budgets.
+See [spring feedback](spring-feedback.md). Source integration does not establish
+runtime acceptance or promote any audit disposition. Focused tests, fresh review,
+populated desktop/390px Full/Reduced both-theme proof and canonical exact-SHA
+certification remain pending. Current Overview hero/stat tilt uses the same stationary owner and decorative
+inner wrapper; native visual acceptance remains pending. Future A403 replacement
+hosts must retain these adapters.

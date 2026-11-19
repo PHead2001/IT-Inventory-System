@@ -261,9 +261,11 @@ test('generated labels inspect and explicitly assign a repeat quantity and an as
     expect(await eventCount()).toBe(1);
     await page.reload();
     await expect(receipt).toContainText(quantityName);
-    await expect(
-      page.getByRole('region', { name: 'Batch checklist' }),
-    ).toContainText('1 quantity assignment (1 unit) confirmed');
+    const checklist = page.getByRole('region', { name: 'Batch checklist' });
+    // The status exposes final counts without the tickers' decorative copies.
+    await expect(checklist.getByRole('status')).toMatchAriaSnapshot(
+      '- status: / · 1 quantity assignment \\(\\s*1 unit\\s*\\) confirmed · /',
+    );
     expect(await eventCount()).toBe(1);
 
     // The same identifier is a new, explicit keyboard-scanner intent, then a new confirmation.
@@ -323,8 +325,8 @@ test('generated labels inspect and explicitly assign a repeat quantity and an as
       .getByRole('button', { name: 'Finish batch', exact: true })
       .click();
     const summary = page.getByRole('region', { name: 'Batch summary' });
-    await expect(summary).toContainText(
-      '1 asset assignment · 2 quantity assignments (2 units) confirmed',
+    await expect(summary.getByRole('status')).toMatchAriaSnapshot(
+      '- status: /^1 asset assignment · 2 quantity assignments \\(\\s*2 units\\s*\\) confirmed · /',
     );
     await expect(
       summary.getByRole('link', { name: /View committed history/ }),
@@ -490,6 +492,8 @@ test('real scan batch cancels late reads, refreshes stale stock, reconciles lost
   };
   try {
     await page.goto(`/scan?mode=assign&site=${siteId}`);
+    const checklist = page.getByRole('region', { name: 'Batch checklist' });
+    const totals = checklist.getByRole('status');
     await page
       .getByLabel('Ticket number reference (optional)')
       .fill(`PRIVATE-${suffix}`);
@@ -582,12 +586,8 @@ test('real scan batch cancels late reads, refreshes stale stock, reconciles lost
         }),
       ).toEqual({ status: 'pending', requestId: null, historical: null });
       await page.goBack();
-      await expect(
-        page.getByRole('region', { name: 'Batch checklist' }),
-      ).toContainText('0 pending');
-      await expect(
-        page.getByRole('region', { name: 'Batch checklist' }),
-      ).toContainText(
+      await expect(totals).toMatchAriaSnapshot('- status: / · 0 pending · /');
+      await expect(checklist).toContainText(
         'Inspection interrupted before confirmation. Nothing was submitted.',
       );
       await expect(
@@ -599,9 +599,7 @@ test('real scan batch cancels late reads, refreshes stale stock, reconciles lost
         page.getByRole('region', { name: 'Review assignment' }),
       ).toHaveCount(0);
       await page.reload();
-      await expect(
-        page.getByRole('region', { name: 'Batch checklist' }),
-      ).toContainText('0 pending');
+      await expect(totals).toMatchAriaSnapshot('- status: / · 0 pending · /');
       expect(await count()).toBe(0);
     } finally {
       releaseInterrupted();
@@ -815,9 +813,9 @@ test('real scan batch cancels late reads, refreshes stale stock, reconciles lost
           await expect(
             page.getByRole('region', { name: 'Review assignment' }),
           ).toBeFocused();
-          await expect(
-            page.getByRole('region', { name: 'Batch checklist' }),
-          ).toContainText('1 pending');
+          await expect(totals).toMatchAriaSnapshot(
+            '- status: / · 1 pending · /',
+          );
           expect(await count()).toBe(0);
           await cancel.click(); // Settle deliberately after proving aborted focus transfer.
         }
@@ -827,12 +825,8 @@ test('real scan batch cancels late reads, refreshes stale stock, reconciles lost
         await expect(
           page.getByRole('region', { name: 'Review assignment' }),
         ).toHaveCount(0);
-        await expect(
-          page.getByRole('region', { name: 'Batch checklist' }),
-        ).toContainText('0 pending');
-        await expect(
-          page.getByRole('region', { name: 'Batch checklist' }),
-        ).toContainText('Skipped before confirmation.');
+        await expect(totals).toMatchAriaSnapshot('- status: / · 0 pending · /');
+        await expect(checklist).toContainText('Skipped before confirmation.');
         expect(await count()).toBe(0);
       } catch (error) {
         fixtureFailed = true;
@@ -895,9 +889,7 @@ test('real scan batch cancels late reads, refreshes stale stock, reconciles lost
     await expect(
       page.getByRole('button', { name: 'Inspect current state' }),
     ).toBeVisible();
-    await expect(
-      page.getByRole('region', { name: 'Batch checklist' }),
-    ).toContainText('Failed');
+    await expect(checklist).toContainText('Failed');
     expect(await count()).toBe(1);
     await page.getByRole('button', { name: 'Inspect current state' }).click();
     await expect(
@@ -962,9 +954,7 @@ test('real scan batch cancels late reads, refreshes stale stock, reconciles lost
     ).toBeVisible();
     expect(await count()).toBe(2);
     await expect(
-      page
-        .getByRole('region', { name: 'Batch checklist' })
-        .getByRole('link', { name: /View committed history/ }),
+      checklist.getByRole('link', { name: /View committed history/ }),
     ).toHaveCount(1);
     await inspect(page);
     await page.evaluate(() => {

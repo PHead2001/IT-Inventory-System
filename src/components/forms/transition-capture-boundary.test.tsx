@@ -2,6 +2,7 @@ import { act, fireEvent, render, screen } from '@testing-library/react';
 import { expect, it, vi } from 'vitest';
 import {
   hasBlockingPresentationAncestor,
+  isCaptureInertOwner,
   TransitionCaptureBoundary,
 } from './transition-capture-boundary';
 import { holdTransitionCapture } from '../../../tests/helpers/transition-capture';
@@ -17,11 +18,14 @@ it.each(['release', 'unmount'])(
     );
     const title = screen.getByText('Title geometry');
     const fieldset = title.closest('fieldset')!;
+    expect(isCaptureInertOwner(fieldset)).toBe(false);
     capture.begin();
+    expect(isCaptureInertOwner(fieldset)).toBe(true);
     expect(hasBlockingPresentationAncestor(title)).toBe(false);
     try {
       if (ending === 'release') await act(capture.release);
       else page.unmount();
+      expect(isCaptureInertOwner(fieldset)).toBe(false);
       fieldset.inert = true;
       expect(hasBlockingPresentationAncestor(title)).toBe(true);
     } finally {

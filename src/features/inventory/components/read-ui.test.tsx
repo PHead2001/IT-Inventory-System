@@ -88,7 +88,9 @@ it('identifies one local unit separately from overall available and assigned sto
     />,
   );
   expect(screen.getByText('At this location')).toBeVisible();
-  expect(screen.getByText('1 unit')).toBeVisible();
+  expect(
+    screen.getByText('1 unit', { selector: '[data-count-final]' }),
+  ).toBeVisible();
   expect(screen.getByText(/Across all storage: 2 available/)).toBeVisible();
   expect(
     screen.getByText(/Overall totals: 1 assigned · 3 recorded/),
@@ -215,7 +217,9 @@ it('labels holding and distinct definition counts as page-local, with full match
       }}
     />,
   );
-  expect(screen.getByText('52 matching rows')).toBeVisible();
+  expect(
+    screen.getByText('52 matching rows', { selector: '[data-count-final]' }),
+  ).toBeVisible();
   expect(
     screen.getByText(/On this page: 2 quantity rows with stock/),
   ).toBeVisible();
@@ -244,7 +248,9 @@ it('exposes stable location links on search results with independent conventiona
   expect(
     screen.getByRole('link', { name: /IT Closet.*ITC-S4B/ }),
   ).toHaveAttribute('href', '/locations/ITC-S4B');
-  expect(screen.getByText('4 units')).toBeVisible();
+  expect(
+    screen.getByText('4 units', { selector: '[data-count-final]' }),
+  ).toBeVisible();
   expect(
     screen.getByRole('link', { name: 'Show ITC-S4B in room' }),
   ).toHaveAttribute('href', '/room?location=ITC-S4B');
@@ -264,19 +270,101 @@ it('labels item-wide low stock while retaining the location holding quantity', (
           assetTag: null,
           serialNumber: null,
           recordedTotal: 3,
+          availableQuantity: '3',
           reorderThreshold: 4,
           stockState: 'needs_restocking',
         },
       ]}
     />,
   );
-  expect(screen.getByText('2 units')).toBeVisible();
+  expect(
+    screen.getByText('2 units', { selector: '[data-count-final]' }),
+  ).toBeVisible();
   expect(
     screen.getByText(
-      /Needs restocking · Available in storage 3 \/ threshold 4/,
+      /Needs restocking · Available in storage 3 \/ threshold 4 · 1 below threshold/,
     ),
   ).toBeVisible();
 });
+it.each([
+  ['25', 30, 'needs_restocking', 2, '5 below threshold'],
+  ['30', 30, 'needs_restocking', 2, 'At threshold'],
+  ['0', 0, 'out_of_stock', 0, 'At threshold'],
+] as const)(
+  'uses current item-wide availability %s for shortfall without changing the holding count',
+  (availableQuantity, reorderThreshold, stockState, quantity, expected) => {
+    render(
+      <InventoryRows
+        rows={[
+          {
+            kind: 'quantity',
+            id: 'item',
+            name: 'Cable',
+            categoryName: 'Cables',
+            status: 'active',
+            location: quantity ? location : null,
+            quantity,
+            assetTag: null,
+            serialNumber: null,
+            recordedTotal: null,
+            availableQuantity,
+            assignedQuantity: '0',
+            ownedQuantity: availableQuantity,
+            reorderThreshold,
+            stockState,
+          },
+        ]}
+      />,
+    );
+    expect(
+      screen.getByText(`${quantity} units`, { selector: '[data-count-final]' }),
+    ).toBeInTheDocument();
+    expect(screen.getByText(new RegExp(expected))).toBeVisible();
+  },
+);
+it.each([undefined, null])(
+  'does not invent availability %s from recorded totals or show active restock attention on archived rows',
+  (availableQuantity) => {
+    const row: InventoryResult = {
+      kind: 'quantity',
+      id: 'item',
+      name: 'Cable',
+      categoryName: 'Cables',
+      status: 'active',
+      location,
+      quantity: 2,
+      assetTag: null,
+      serialNumber: null,
+      recordedTotal: 100,
+      availableQuantity,
+      reorderThreshold: 30,
+      stockState: 'needs_restocking',
+    };
+    const view = render(<InventoryRows rows={[row]} />);
+    expect(
+      screen.getByText(/Available in storage unavailable \/ threshold 30/),
+    ).toBeVisible();
+    expect(view.container).not.toHaveTextContent(
+      /below threshold|At threshold|Above threshold/,
+    );
+    view.rerender(
+      <InventoryRows
+        rows={[
+          {
+            ...row,
+            status: 'archived',
+            quantity: 0,
+            location: null,
+            availableQuantity: '0',
+          },
+        ]}
+      />,
+    );
+    expect(view.container).not.toHaveTextContent(
+      /Needs restocking|Out of stock|below threshold|At threshold/,
+    );
+  },
+);
 it('shows per-definition photo and PDF counts without inventing file counts for other rows', () => {
   const base = {
     categoryName: 'Equipment',
@@ -367,8 +455,12 @@ it('keeps separate holding quantities and provides a detail path for long custom
       }))}
     />,
   );
-  expect(screen.getByText('2 units')).toBeVisible();
-  expect(screen.getByText('3 units')).toBeVisible();
+  expect(
+    screen.getByText('2 units', { selector: '[data-count-final]' }),
+  ).toBeVisible();
+  expect(
+    screen.getByText('3 units', { selector: '[data-count-final]' }),
+  ).toBeVisible();
   expect(
     screen.queryByText(/Internal revision decoration/),
   ).not.toBeInTheDocument();
@@ -761,7 +853,9 @@ it('omits only the current location from scoped rows while retaining child locat
   expect(
     within(rows[0]).queryByRole('link', { name: /ITC-S4B/ }),
   ).not.toBeInTheDocument();
-  expect(within(rows[0]).getByText('3 units')).toBeVisible();
+  expect(
+    within(rows[0]).getByText('3 units', { selector: '[data-count-final]' }),
+  ).toBeVisible();
   expect(
     within(rows[0]).getByText('Overall totals: 2 assigned · 9 recorded'),
   ).toBeVisible();
@@ -781,7 +875,9 @@ it('keeps informative aggregate counts while suppressing redundant one-row locat
       result={{ rows: [scopedRow], total: 1, page: 1, pageSize: 25 }}
     />,
   );
-  expect(screen.getByText('1 matching row')).toBeVisible();
+  expect(
+    screen.getByText('1 matching row', { selector: '[data-count-final]' }),
+  ).toBeVisible();
   expect(
     screen.queryByText(/On this page|Distinct quantity products/),
   ).not.toBeInTheDocument();
@@ -828,7 +924,9 @@ it('keeps page-local counts when a location has more results beyond a single-row
       result={{ rows: [scopedRow], total: 26, page: 2, pageSize: 25 }}
     />,
   );
-  expect(screen.getByText('26 matching rows')).toBeVisible();
+  expect(
+    screen.getByText('26 matching rows', { selector: '[data-count-final]' }),
+  ).toBeVisible();
   expect(
     screen.getByText(/On this page: 1 quantity row with stock/),
   ).toBeVisible();

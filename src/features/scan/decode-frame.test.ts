@@ -1,3 +1,4 @@
+import jsQR from 'jsqr';
 // @vitest-environment node
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
@@ -15,6 +16,7 @@ import {
 } from '@zxing/library';
 import { decodeInventoryFrame } from './decode-frame';
 import { InventoryCodeReader } from './inventory-code-reader';
+import { readDecoderGeometry } from './decoder-geometry';
 
 const ciUrl =
   'http://127.0.0.1:3000/inventory/assets/9fee7834-40a4-4983-94a1-6eee3ecad3ee';
@@ -66,6 +68,22 @@ it('decodes the exact PR13 rendered QR screenshot missed by the primary reader',
   const decoded = decodeInventoryFrame(canvas, primary);
   expect(decoded.getText()).toBe(ciUrl);
   expect(decoded.getBarcodeFormat()).toBe(BarcodeFormat.QR_CODE);
+  const geometry = readDecoderGeometry(decoded, {} as HTMLVideoElement);
+  expect(geometry).toMatchObject({
+    width: canvas.width,
+    height: canvas.height,
+    corners: true,
+  });
+  expect(geometry.points).toHaveLength(4);
+  expect(
+    geometry.points.every(
+      (point) =>
+        point.x >= 0 &&
+        point.x <= canvas.width &&
+        point.y >= 0 &&
+        point.y <= canvas.height,
+    ),
+  ).toBe(true);
   // This is the same override invoked by the camera scan loop.
   expect(new InventoryCodeReader().decodeFromCanvas(canvas).getText()).toBe(
     ciUrl,
@@ -118,6 +136,14 @@ it('decodes an actual rendered Code 128 label through the production reader', ()
   const decoded = new InventoryCodeReader().decodeFromCanvas(canvas);
   expect(decoded.getBarcodeFormat()).toBe(BarcodeFormat.CODE_128);
   expect(decoded.getText()).toBe('LOC:ITC');
+  expect(readDecoderGeometry(decoded, {} as HTMLVideoElement)).toEqual({
+    width: canvas.width,
+    height: canvas.height,
+    corners: false,
+    points: decoded
+      .getResultPoints()
+      .map((point) => ({ x: point.getX(), y: point.getY() })),
+  });
 });
 
 it('keeps the primary miss for noise and never invents a destination', () => {
@@ -168,4 +194,50 @@ it('bounds fallback canvas dimensions for large camera frames', () => {
   expect(resized.width * resized.height).toBeLessThanOrEqual(1920 * 1080);
   expect(Math.max(resized.width, resized.height)).toBeLessThanOrEqual(1920);
   expect(drawImage).toHaveBeenCalledOnce();
+});
+
+it('scales actual jsQR corners from a bounded fallback canvas back to the original frame', async () => {
+  const png = PNG.sync.read(
+    await QRCode.toBuffer(ciUrl, {
+      width: 1440,
+      margin: 4,
+      errorCorrectionLevel: 'M',
+    }),
+  );
+  const pixels = new Uint8ClampedArray(png.data);
+  const actual = jsQR(pixels, png.width, png.height, {
+    inversionAttempts: 'dontInvert',
+  })!;
+  const drawImage = vi.fn(),
+    resized = {
+      width: 0,
+      height: 0,
+      getContext: () => ({
+        drawImage,
+        getImageData: () => ({ data: pixels, width: 1440, height: 1440 }),
+      }),
+    };
+  vi.stubGlobal('document', { createElement: () => resized });
+  const canvas = { width: 3840, height: 3840 } as HTMLCanvasElement;
+  const decoded = decodeInventoryFrame(canvas, () => {
+    throw new NotFoundException();
+  });
+  const geometry = readDecoderGeometry(decoded, {} as HTMLVideoElement);
+  expect(decoded.getText()).toBe(ciUrl);
+  expect(resized).toMatchObject({ width: 1440, height: 1440 });
+  expect(drawImage).toHaveBeenCalledWith(canvas, 0, 0, 1440, 1440);
+  expect(geometry).toEqual({
+    width: 3840,
+    height: 3840,
+    corners: true,
+    points: [
+      actual.location.topLeftCorner,
+      actual.location.topRightCorner,
+      actual.location.bottomRightCorner,
+      actual.location.bottomLeftCorner,
+    ].map((point) => ({
+      x: (point.x * 3840) / 1440,
+      y: (point.y * 3840) / 1440,
+    })),
+  });
 });

@@ -6,6 +6,7 @@ import fixture from '../fixtures/auth.json' with { type: 'json' };
 import { setLocalReducedMotion } from './motion-settings';
 import { writeFileSync } from 'node:fs';
 import { withFailureGeometry } from './failure-geometry';
+import { countFeedback } from './count-feedback-support';
 
 async function signIn(page: Page) {
   await page.goto('/login');
@@ -348,7 +349,13 @@ test('representative shell and auth surfaces render at desktop and phone sizes w
     companion = await auditCreateRecord(page, 'asset', 'Tools', companionName);
     await page.goto('/dashboard');
     await expect(
-      page.getByRole('heading', { name: 'Low-stock overview' }),
+      page.getByRole('heading', { name: 'Overview', level: 1, exact: true }),
+    ).toBeVisible();
+    await expect(
+      page.getByRole('region', {
+        name: 'Items needing attention',
+        exact: true,
+      }),
     ).toBeVisible();
     await expect(
       page
@@ -413,6 +420,15 @@ test('representative shell and auth surfaces render at desktop and phone sizes w
     await page.setViewportSize({ width: 390, height: 844 });
     await page.emulateMedia({ reducedMotion: 'reduce' });
     await page.goto('/dashboard');
+    await expect(
+      page.getByRole('heading', { name: 'Overview', level: 1, exact: true }),
+    ).toBeVisible();
+    await expect(
+      page.getByRole('region', {
+        name: 'Items needing attention',
+        exact: true,
+      }),
+    ).toBeVisible();
     await noHorizontalOverflow(page);
     await headerControlsFit(page);
     await page.screenshot({
@@ -425,9 +441,6 @@ test('representative shell and auth surfaces render at desktop and phone sizes w
     await expect(
       page.getByRole('switch', { name: 'Reduce motion in this browser' }),
     ).toHaveCount(0);
-    await expect(
-      page.getByRole('heading', { name: 'Low-stock overview' }),
-    ).toBeVisible();
     const menu = page.getByRole('button', { name: 'Menu', exact: true });
     await menu.focus();
     await page.keyboard.press('Enter');
@@ -479,9 +492,7 @@ test('representative shell and auth surfaces render at desktop and phone sizes w
       (url) =>
         url.pathname === '/inventory' && url.searchParams.get('q') === query,
     );
-    await expect(
-      page.getByText('2 matching rows', { exact: true }),
-    ).toBeVisible();
+    await expect(countFeedback(page, '2 matching rows')).toBeVisible();
     const activeFilters = page.getByRole('navigation', {
       name: 'Active inventory filters',
     });
@@ -741,7 +752,7 @@ test('the first styled paint is reduced before hydration and the saved preferenc
       expect(before.scheme).toBe(savedTheme);
       release();
       await expect(
-        probe.getByRole('heading', { name: 'Low-stock overview' }),
+        probe.getByRole('heading', { name: 'Overview', level: 1, exact: true }),
       ).toBeVisible();
       await expect(probe.locator('html')).toHaveAttribute(
         'data-motion',

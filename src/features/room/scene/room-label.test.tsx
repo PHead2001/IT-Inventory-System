@@ -7,6 +7,11 @@ import {
   createRoomLabelRegistry,
 } from './label-layout-runtime';
 
+const finalCounts = (root: ParentNode = document) =>
+  [...root.querySelectorAll('[data-count-final]')]
+    .map((element) => element.textContent)
+    .join(' / ');
+
 describe('room counts', () => {
   it('registers the stable current physical-anchor callback separately from visibility', () => {
     const registry = createRoomLabelRegistry(vi.fn()),
@@ -61,7 +66,7 @@ describe('room counts', () => {
     expect(
       document.querySelector('[data-room-decorative-label]'),
     ).not.toHaveAttribute('tabindex');
-    expect(document.body).toHaveTextContent('1 product / 2 units / 0 assets');
+    expect(finalCounts()).toBe('1 product / 2 units / 0 assets');
   });
   it.each([
     ['0', '0 products / 0 units / 0 assets'],
@@ -87,11 +92,10 @@ describe('room counts', () => {
           />
         </LabelLayoutProvider>,
       );
-      expect(
-        screen.getByRole('button', {
-          name: `Select Drawer 1 (ITC-D01); ${expected} at this location`,
-        }),
-      ).toHaveTextContent(expected);
+      const button = screen.getByRole('button', {
+        name: `Select Drawer 1 (ITC-D01); ${expected} at this location`,
+      });
+      expect(finalCounts(button)).toBe(expected);
       view.rerender(
         <LabelLayoutProvider registry={registry}>
           <RoomLabel
@@ -176,11 +180,10 @@ describe('room counts', () => {
         />
       </LabelLayoutProvider>,
     );
-    expect(
-      screen.getByRole('button', {
-        name: /Select Drawer 1.*1 product \/ 31 units \/ 2 assets/,
-      }),
-    ).toHaveTextContent('1 product / 31 units / 2 assets');
+    const button = screen.getByRole('button', {
+      name: /Select Drawer 1.*1 product \/ 31 units \/ 2 assets/,
+    });
+    expect(finalCounts(button)).toBe('1 product / 31 units / 2 assets');
     expect(register).toHaveBeenCalledWith(
       'drawer',
       expect.any(HTMLButtonElement),

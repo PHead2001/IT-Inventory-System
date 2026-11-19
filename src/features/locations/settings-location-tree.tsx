@@ -1,4 +1,5 @@
 'use client';
+import { ListEntrance } from '@/components/experience/list-feedback';
 
 import Link from '@/components/experience/route-link';
 import { useId, useMemo, useState } from 'react';
@@ -139,7 +140,8 @@ export function SettingsLocationTree({
           ? `${matches.length} matching locations`
           : `${locations.length} locations`}
       </p>
-      <ul
+      <ListEntrance
+        identities={rows.map((row) => row.location.id)}
         role="tree"
         aria-label="Locations"
         className="divide-y divide-slate-700/70"
@@ -248,7 +250,7 @@ export function SettingsLocationTree({
             </Link>
           </li>
         ))}
-      </ul>
+      </ListEntrance>
       {!rows.length && (
         <p className="text-sm">No locations match this search.</p>
       )}

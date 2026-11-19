@@ -11,6 +11,9 @@ export const TaskStateContext = createContext<
   ((state: TaskState) => void) | null
 >(null);
 export const TaskEligibilityContext = createContext(true);
+/** Presentation veto for an original task instance; grants no business permission. */
+export const TaskInteractionContext = createContext<() => boolean>(() => true);
+export const useTaskInteraction = () => useContext(TaskInteractionContext);
 export const useTaskEligibility = () => useContext(TaskEligibilityContext);
 export const TaskResetContext = createContext<(() => void) | null>(null);
 export const TaskWarningContext = createContext<

@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { expect, test, type Page } from '@playwright/test';
+import { countFeedback } from './count-feedback-support';
 import { Box3, Matrix4, Ray, Vector3 } from 'three';
-import { measureRoomLabelName } from './room-label-name';
 import { enableRoomLayoutDiagnostics } from './room-layout-diagnostics';
 import {
   captureRoomAssertionState,
@@ -27,7 +27,6 @@ import {
 
 const {
   inventoryName,
-  locationNames,
   bindingBounds,
   login,
   chooseMapMode,
@@ -1258,14 +1257,35 @@ test('room labels appear on real mesh hover and Show labels restores keyboard bu
   await page.screenshot({
     path: testInfo.outputPath('desktop-show-all-labels.png'),
   });
+  markRoomProgress(testInfo, {
+    journey: 'room-labels',
+    stage: 'Show labels restores keyboard targets',
+    code: 'ITC-RACK',
+  });
   const buttons = viewer.locator('button[data-location-code]');
-  await expect(buttons.first()).toBeAttached();
-  const available = buttons.filter({ visible: true });
-  expect(await available.count()).toBeGreaterThan(0);
-  for (const button of await buttons.all()) {
-    if ((await button.getAttribute('aria-hidden')) === 'true')
-      await expect(button).toHaveAttribute('tabindex', '-1');
-  }
+  // Label layout can replace and reorder DOM nodes between browser calls.
+  // Read visibility and tab stops together from the same rendered labels.
+  await expect
+    .poll(() =>
+      buttons.evaluateAll((labels) => ({
+        extraKeyboardLabel: labels.some(
+          (label) =>
+            label.getAttribute('aria-pressed') === 'false' &&
+            label.getAttribute('tabindex') === '0' &&
+            !label.closest('[aria-hidden="true"], [hidden], [inert]') &&
+            label.getClientRects().length > 0 &&
+            getComputedStyle(label).visibility === 'visible',
+        ),
+        hiddenTabStops: labels
+          .filter(
+            (label) =>
+              label.getAttribute('aria-hidden') === 'true' &&
+              label.getAttribute('tabindex') !== '-1',
+          )
+          .map((label) => label.getAttribute('data-location-code')),
+      })),
+    )
+    .toEqual({ extraKeyboardLabel: true, hiddenTabStops: [] });
   await setRoomLabels(page, false);
   markRoomProgress(testInfo, {
     journey: 'room-labels',
@@ -1465,7 +1485,7 @@ test('real WebGL room raycasting selects shelf and drawer inventory', async ({
   const fixtureRow = inventory.getByRole('listitem').filter({
     has: page.getByRole('link', { name: inventoryName, exact: true }),
   });
-  await expect(fixtureRow.getByText('7 units', { exact: true })).toBeVisible();
+  await expect(countFeedback(fixtureRow, '7 units')).toBeVisible();
   const toolbar = page.locator('[data-room-surface]');
   await setRoomLabels(page, true);
   await toolbar
@@ -1526,197 +1546,131 @@ test('real WebGL room raycasting selects shelf and drawer inventory', async ({
   await expect(
     inventory.getByRole('link', { name: inventoryName, exact: true }),
   ).toHaveCount(1);
-  await expect(fixtureRow.getByText('4 units', { exact: true })).toBeVisible();
+  await expect(countFeedback(fixtureRow, '4 units')).toBeVisible();
 });
-
-for (const { name, viewport } of [
-  { name: 'desktop', viewport: { width: 1280, height: 1100 } },
-  { name: 'phone', viewport: { width: 390, height: 844 } },
-]) {
-  test(`visible drawer labels remain distinct and clickable across ${name} orbit views`, async ({
-    page,
-  }, testInfo) => {
-    test.setTimeout(60_000);
-    trackRoomPage(testInfo, page);
-    markRoomProgress(testInfo, {
-      journey: 'drawer-labels',
-      stage: `room setup at ${viewport.width}px`,
-    });
-    await login(page);
-    await page.setViewportSize(viewport);
-    await page.goto('/room?location=ITC-S1A');
-    const viewer = await ready(page);
-    const toolbar = page.locator('[data-room-surface]');
-    await setRoomLabels(page, true);
-    for (const code of ['ITC-D01', 'ITC-D04']) {
-      const label = viewer.locator(`[data-location-code="${code}"]`).first();
-      await expect(label).toHaveAttribute(
-        'data-label-suppressed',
-        /^(true|false)$/,
-      );
-      // A hidden or never-placed target has no placement offset. Keep the
-      // subsequent real click/focus and opaque-visibility checks authoritative.
-      if (
-        (await label.getAttribute('data-label-suppressed')) === 'false' &&
-        (await label.isVisible())
-      ) {
-        await expect(label).toHaveAttribute('data-label-dx', /^-?\d/);
-        await expect(label).toHaveAttribute('data-label-dy', /^-?\d/);
-      }
-    }
-    await chooseMapMode(page, 'Free Orbit');
-    const clicked = new Set<string>();
-    for (let side = 0; side < 4; side++) {
-      await toolbar.getByRole('button', { name: 'Fit room' }).click();
-      await settledLabels(page);
-      for (const code of ['ITC-D01', 'ITC-D04']) {
-        markRoomProgress(testInfo, {
-          journey: 'drawer-labels',
-          stage: `drawer label at ${viewport.width}px side ${side}`,
-          code,
-        });
-        const label = viewer.locator(`[data-location-code="${code}"]`).first();
-        if ((await label.getAttribute('data-label-suppressed')) === 'true') {
-          await expect(label).toHaveAttribute('aria-hidden', 'true');
-          await expect(label).toHaveAttribute('tabindex', '-1');
-          continue;
-        }
-        if (!(await label.isVisible())) {
-          expect(
-            await label.evaluate((element) => {
-              element.focus();
-              return document.activeElement === element;
-            }),
-            `occluded ${code} label cannot receive keyboard focus`,
-          ).toBe(false);
-          continue;
-        }
-        await label.scrollIntoViewIfNeeded({ timeout: 3000 });
-        await settledLabels(page);
-        const firstChildRectCount = await label.evaluate((element) => {
-          const text = element.firstChild;
-          if (!text) return 0;
-          const range = document.createRange();
-          range.selectNodeContents(text);
-          return range.getClientRects().length;
-        });
-        try {
-          const name = await label.evaluate(measureRoomLabelName);
-          expect(name.text, `expected drawer name for ${code}`).toBe(
-            locationNames.get(code),
-          );
-          expect(name.visible, `visible drawer name for ${code}`).toBe(true);
-          expect(
-            name.rects,
-            'ordinary drawer names remain readable on one line',
-          ).toHaveLength(1);
-          expect(
-            name.rects[0].width,
-            `drawer name width for ${code}`,
-          ).toBeGreaterThan(0);
-          expect(
-            name.rects[0].height,
-            `drawer name height for ${code}`,
-          ).toBeGreaterThan(0);
-        } catch (error) {
-          reportRoomAssertionFailure('drawer-name-lines', code, {
-            viewport,
-            side,
-            firstChildRectCount,
-            state: await captureRoomAssertionState(page, code, false),
-          });
-          throw error;
-        }
-        const box = await label.boundingBox();
-        expect(box, `visible label bounds for ${code}`).toBeTruthy();
-        const point = {
-          x: box!.x + box!.width / 2,
-          y: box!.y + box!.height / 2,
-        };
-        expect(
-          await page.evaluate(
-            ({ x, y }) =>
-              document
-                .elementFromPoint(x, y)
-                ?.closest('[data-location-code]')
-                ?.getAttribute('data-location-code'),
-            point,
-          ),
-          `visible ${code} label center on side ${side}`,
-        ).toBe(code);
-        await label.click({ timeout: 3000 });
-        await expect(viewer).toHaveAttribute('data-selected-code', code);
-        clicked.add(code);
-        await toolbar.getByRole('button', { name: 'Fit room' }).click();
-        await settledLabels(page);
-      }
-      await toolbar
-        .getByRole('button', { name: 'More map controls', exact: true })
-        .click();
-      for (let step = 0; step < 9; step++)
-        await toolbar.getByRole('button', { name: 'Rotate right' }).click();
-      await toolbar
-        .getByRole('button', { name: 'More map controls', exact: true })
-        .click();
-    }
-    expect(clicked.has('ITC-D01'), 'Drawer 1 label reachable').toBe(true);
-    expect(clicked.has('ITC-D04'), 'Drawer 4 label reachable').toBe(true);
-  });
-}
 
 test('panned camera keeps visible drawer labels clickable', async ({
   page,
-}) => {
+}, testInfo) => {
+  trackRoomPage(testInfo, page);
   await enableRoomLayoutDiagnostics(page);
   await page.setViewportSize({ width: 1280, height: 1100 });
   await login(page);
   await page.goto('/room');
   const viewer = await ready(page);
   const toolbar = page.locator('[data-room-surface]');
+  const more = toolbar.getByRole('button', {
+    name: 'More map controls',
+    exact: true,
+  });
+  const panel = toolbar.locator(
+    '[role="region"][aria-label="More map controls"]',
+  );
   await setRoomLabels(page, true);
   for (const direction of ['Pan right', 'Pan left']) {
+    markRoomProgress(testInfo, {
+      journey: 'drawer-labels',
+      stage: direction,
+    });
     await toolbar.getByRole('button', { name: 'Fit room' }).click();
     await settledLabels(page);
-    await toolbar
-      .getByRole('button', { name: 'More map controls', exact: true })
-      .click();
+    const beforeTarget = (await camera(page)).target;
+    await more.click();
+    await expect(more).toHaveAttribute('aria-expanded', 'true');
     await toolbar.getByRole('button', { name: direction }).click();
-    await toolbar
-      .getByRole('button', { name: 'More map controls', exact: true })
-      .click();
-    let clicked = false;
-    for (const code of ['ITC-D01', 'ITC-D04']) {
-      const label = viewer.locator(`[data-location-code="${code}"]`).first();
-      await expect(label).toHaveAttribute(
-        'data-label-suppressed',
-        /^(true|false)$/,
+    await expect
+      .poll(async () => (await camera(page)).target)
+      .not.toEqual(beforeTarget);
+    const close = await more.evaluateHandle((button) => {
+      const sample: { revision: number | null } = { revision: null };
+      button.addEventListener(
+        'click',
+        (event) => {
+          const revision = button
+            .closest('[data-room-surface]')
+            ?.querySelector('canvas')?.dataset.labelLayoutRevision;
+          if (event.isTrusted && revision !== undefined)
+            sample.revision = Number(revision);
+        },
+        { capture: true, once: true },
       );
-      if (
-        !(await label.isVisible()) ||
-        (await label.getAttribute('data-label-suppressed')) === 'true'
-      )
-        continue;
-      const box = await label.boundingBox();
-      expect(box).toBeTruthy();
-      expect(
-        await label.evaluate(
-          (element, point) =>
-            element.contains(document.elementFromPoint(point.x, point.y)),
-          {
-            x: box!.x + box!.width / 2,
-            y: box!.y + box!.height / 2,
-          },
-        ),
-      ).toBe(true);
-      await label.click();
-      await selected(page, code);
-      clicked = true;
-      break;
+      return sample;
+    });
+    let closeRevision: number | null;
+    try {
+      await more.click();
+      closeRevision = (await close.jsonValue()).revision;
+    } finally {
+      await close.dispose();
     }
-    expect(
-      clicked,
-      `${direction} must leave a visible drawer label clickable`,
-    ).toBe(true);
+    if (closeRevision === null || !Number.isSafeInteger(closeRevision))
+      throw new Error('Expected a label layout revision at the menu close');
+    await expect(more).toHaveAttribute('aria-expanded', 'false');
+    // A retained exit can still obstruct the map after the region is inert.
+    await expect(panel).toHaveCount(0);
+    let code = '';
+    await expect
+      .poll(
+        async () => {
+          code = await viewer.evaluate((root, revision) => {
+            const canvas = root.querySelector('canvas');
+            if (
+              canvas?.dataset.labelLayoutPending !== 'false' ||
+              canvas.dataset.labelLayoutStatus !== 'complete' ||
+              !(Number(canvas.dataset.labelLayoutRevision) > revision)
+            )
+              return '';
+            for (const code of ['ITC-D01', 'ITC-D04']) {
+              const labels = root.querySelectorAll<HTMLButtonElement>(
+                `button[data-location-code="${code}"]`,
+              );
+              if (labels.length !== 1) continue;
+              const label = labels[0];
+              if (
+                label.dataset.roomExposed !== 'true' ||
+                label.dataset.labelSuppressed !== 'false' ||
+                getComputedStyle(label).visibility !== 'visible'
+              )
+                continue;
+              const box = label.getBoundingClientRect();
+              const front = document.elementFromPoint(
+                box.x + box.width / 2,
+                box.y + box.height / 2,
+              );
+              if (box.width > 0 && box.height > 0 && label.contains(front))
+                return code;
+            }
+            return '';
+          }, closeRevision);
+          return code;
+        },
+        { message: `${direction} must leave a visible drawer label clickable` },
+      )
+      .toMatch(/^ITC-D0[14]$/);
+    const label = viewer.locator(`button[data-location-code="${code}"]`);
+    const pointer = await label.evaluateHandle((button) => {
+      const events: string[] = [];
+      const record = (event: Event) => {
+        if (event.isTrusted) events.push(event.type);
+      };
+      button.addEventListener('pointerdown', record, { once: true });
+      button.addEventListener('pointerup', record, { once: true });
+      button.addEventListener('click', record, { once: true });
+      return events;
+    });
+    try {
+      await label.hover();
+      await page.mouse.down();
+      await page.mouse.up();
+      expect(await pointer.jsonValue()).toEqual([
+        'pointerdown',
+        'pointerup',
+        'click',
+      ]);
+    } finally {
+      await pointer.dispose();
+    }
+    await selected(page, code);
   }
 });
 

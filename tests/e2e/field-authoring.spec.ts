@@ -14,6 +14,7 @@ import { createClient } from '@supabase/supabase-js';
 import fixture from '../fixtures/auth.json' with { type: 'json' };
 import { chooseLocation } from './location-picker';
 import { instantMicros } from '../../src/features/metadata/field-value-validation';
+import { countFeedback } from './count-feedback-support';
 
 test.use({
   actionTimeout: 15_000,
@@ -1151,9 +1152,7 @@ test('whole-form Cancel preserves inventory filters, dirty drafts and focus at n
     await page.goto(
       '/inventory?q=' + encodeURIComponent(query) + '&type=quantity&page=2',
     );
-    await expect(
-      page.getByText('26 matching rows', { exact: true }),
-    ).toBeVisible();
+    await expect(countFeedback(page, '26 matching rows')).toBeVisible();
     await expect(
       page.getByRole('navigation', { name: 'Pagination' }),
     ).toContainText('Page 2 of 2');

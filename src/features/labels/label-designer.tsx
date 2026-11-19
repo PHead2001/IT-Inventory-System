@@ -1,4 +1,13 @@
 'use client';
+import { PeekLink } from '@/features/peek/peek-link';
+import { MagneticVisual } from '@/components/experience/magnetic-visual';
+import { ListEntrance } from '@/components/experience/list-feedback';
+import { useTransientFeedbackOwner } from '@/components/experience/transient-feedback';
+import {
+  AddedBump,
+  ConfirmedSuccess,
+  useFeedbackOwner,
+} from '@/components/experience/confirmed-success';
 import {
   LoadingAnnouncement,
   LoadingReveal,
@@ -19,7 +28,6 @@ import {
   type FormEvent,
   type SetStateAction,
 } from 'react';
-import Link from '@/components/experience/route-link';
 import {
   PrivateRestorationGate,
   usePrivacyReadiness,
@@ -261,9 +269,22 @@ function LabelDesignerWorkspace({
   const [filters, setFilters] = useState<LabelSearchFilters>(defaultFilters);
   const [draft, setDraftState] = useState<LabelSearchFilters>(defaultFilters);
   const [selected, setSelected] = useState<SelectedLabel[]>([]);
-  const [queueFeedback, setQueueFeedback] = useState('');
+  const [queueFeedback, setQueueFeedbackText] = useState('');
+  const [queueFeedbackAnnounced, setQueueFeedbackAnnounced] = useState(false);
+  const [queueFeedbackRemaining, setQueueFeedbackRemaining] = useState('');
+  const setQueueFeedback = useCallback((text: string) => {
+    setQueueFeedbackText(text);
+    setQueueFeedbackAnnounced(false);
+    setQueueFeedbackRemaining('');
+  }, []);
   const selectionEpoch = useRef(0);
   const manualAddPending = useRef(false);
+  const successOwner = useFeedbackOwner(storageKey);
+  const sheetSuccessOwner = useFeedbackOwner(storageKey);
+  const feedbackHost = useRef<HTMLDivElement>(null);
+  const transient = useTransientFeedbackOwner(feedbackHost);
+  const additionSerial = useRef(0);
+  const [additionId, setAdditionId] = useState<string | null>(null);
   const setDraft = (next: LabelSearchFilters) => {
     selectionEpoch.current++;
     setSelected([]);
@@ -300,6 +321,7 @@ function LabelDesignerWorkspace({
   const [refreshPending, setRefreshPending] = useState(false);
   const [refreshFailed, setRefreshFailed] = useState(false);
   const [readySheetKey, setReadySheetKey] = useState('');
+  const [restoredSheet, setRestoredSheet] = useState(false);
   const [retry, setRetry] = useState(0);
   const [pendingChanges, setPendingChanges] = useState<LiveLabel[]>([]);
   const [reviewed, setReviewed] = useState<Record<string, ItemReview>>({});
@@ -308,6 +330,10 @@ function LabelDesignerWorkspace({
   const [formatAcknowledged, setFormatAcknowledged] = useState(false);
   const [unavailable, setUnavailable] = useState<string[]>([]);
   const [message, setMessage] = useState('');
+  const [messageAnnouncement, setMessageAnnouncement] = useState<{
+    message: string;
+    remaining: string;
+  } | null>(null);
   const [busy, setBusy] = useState(false);
   const [hydrated, setHydrated] = useState(false);
   const [storageUnavailable, setStorageUnavailable] = useState(false);
@@ -316,6 +342,7 @@ function LabelDesignerWorkspace({
   const clearPrintAuthorization = useRef<(() => void) | null>(null);
   const activePrintAbort = useRef<AbortController | null>(null);
   const cancelCopyPrint = () => {
+    setRestoredSheet(false);
     copiesEpoch.current++;
     setCopyGeneration(copiesEpoch.current);
     activePrintAbort.current?.abort();
@@ -329,6 +356,7 @@ function LabelDesignerWorkspace({
     valid = true,
     rawDraft: LayoutDraft | null = mediaDraft,
   ) => {
+    setRestoredSheet(false);
     geometryEpoch.current++;
     setMediaGeneration(geometryEpoch.current);
     activePrintAbort.current?.abort();
@@ -384,6 +412,7 @@ function LabelDesignerWorkspace({
     setFilters(defaultFilters);
     setDraftState(defaultFilters);
     setJob(defaultJob);
+    setRestoredSheet(false);
     setPrintRows(null);
     setPrepared(null);
     setPendingChanges([]);
@@ -397,6 +426,7 @@ function LabelDesignerWorkspace({
   }, [
     revocationRevision,
     privacy.cleanupRevision,
+    setQueueFeedback,
     storageKey,
     setEntries,
     setLive,
@@ -438,6 +468,7 @@ function LabelDesignerWorkspace({
         setStorageUnavailable(true);
       }
       if (stored) {
+        setRestoredSheet(true);
         const merged = [...stored.entries];
         for (const record of initialHydration.current.initial) {
           if (
@@ -636,6 +667,10 @@ function LabelDesignerWorkspace({
         );
       }
     });
+    // One bounded presentation identity for this existing request attempt;
+    // queue size and private record identities never become a toast ticket.
+    const feedbackRetry = 'labels:intent:' + crypto.randomUUID();
+    const feedbackTicket = transient.begin(feedbackRetry);
     void getQueueRecords(requested)
       .then((rows) => {
         if (!current) return;
@@ -675,8 +710,18 @@ function LabelDesignerWorkspace({
           }
           handledIntent.current.add(id);
         }
+        const remainingNotice = notices.join(' ');
+        let announced = false;
         if (added.length) {
           setEntries(next);
+          const addedId = String(++additionSerial.current);
+          setAdditionId(addedId);
+          announced = transient.confirm(feedbackTicket, feedbackRetry, {
+            kind: 'label-added',
+            additionId: addedId,
+            count: String(added.length),
+          });
+          setRestoredSheet(false);
           setLive((list) => [
             ...list.filter(
               (record) =>
@@ -691,7 +736,14 @@ function LabelDesignerWorkspace({
             `${added.map((record) => record.name).join(', ')} added. Names and context refresh before printing.`,
           );
         }
-        if (notices.length) setMessage(notices.join(' '));
+        if (notices.length) {
+          const message = notices.join(' ');
+          setMessage(message);
+          // The toast owns only success; mixed errors/limits remain announced.
+          setMessageAnnouncement(
+            announced ? { message, remaining: remainingNotice } : null,
+          );
+        }
         setIntentOutstanding(false);
         setPendingIntentKeys([]);
         consumeIntent();
@@ -711,6 +763,7 @@ function LabelDesignerWorkspace({
   }, [
     hydrated,
     intentSignature,
+    transient,
     intentRetry,
     observeRows,
     consumeIntent,
@@ -719,6 +772,12 @@ function LabelDesignerWorkspace({
     setLive,
   ]);
   const removeEntries = (ids: Set<string>, clear = false) => {
+    if (
+      currentEntries.current.some(
+        (entry) => clear || ids.has(queueIdentity(entry)),
+      )
+    )
+      setRestoredSheet(false);
     setCopyDrafts(
       Object.fromEntries(
         Object.entries(currentCopyDrafts.current).filter(
@@ -785,6 +844,8 @@ function LabelDesignerWorkspace({
       );
       return;
     }
+    const operationId = 'labels:add:' + crypto.randomUUID();
+    const feedbackTicket = transient.begin(operationId);
     const epoch = selectionEpoch.current;
     const clearEpoch = manualClearEpoch.current;
     for (const row of unique)
@@ -834,8 +895,17 @@ function LabelDesignerWorkspace({
       }
       // Preserve any review debt latched by observing existing queue records.
       const final = projectLabelSelection(currentEntries.current, unique, rows);
+      let announced = false;
       if (final.added.length) {
         setEntries(final.next!);
+        const addedId = String(++additionSerial.current);
+        setAdditionId(addedId);
+        announced = transient.confirm(feedbackTicket, operationId, {
+          kind: 'label-added',
+          additionId: addedId,
+          count: String(final.added.length),
+        });
+        setRestoredSheet(false);
         setLive((current) => [
           ...current.filter(
             (row) =>
@@ -849,6 +919,10 @@ function LabelDesignerWorkspace({
       }
       if (batch) setSelected([]);
       setQueueFeedback(labelSelectionSummary(final));
+      setQueueFeedbackAnnounced(announced);
+      setQueueFeedbackRemaining(
+        announced ? labelSelectionSummary(final, { includeAdded: false }) : '',
+      );
     } catch {
       if (
         epoch === selectionEpoch.current &&
@@ -1032,6 +1106,7 @@ function LabelDesignerWorkspace({
         prepareFrom(rows, selectionKey);
         return;
       }
+      setRestoredSheet(false);
       setEntries((list) =>
         latchObservedChanges(list, rows).map((entry) =>
           queueIdentity(entry) === id
@@ -1082,6 +1157,7 @@ function LabelDesignerWorkspace({
       pendingChanges.length
     )
       return;
+    setRestoredSheet(false);
     const epoch = ++queueEpoch.current;
     const printGeometryEpoch = geometryEpoch.current;
     const printCopiesEpoch = copiesEpoch.current;
@@ -1343,7 +1419,7 @@ function LabelDesignerWorkspace({
   }, [sheetKey, formatAcknowledged, layoutValid, copiesValid]);
 
   return (
-    <div className={styles.workspace}>
+    <div ref={feedbackHost} className={styles.workspace}>
       {preview && (
         <p className={styles.previewWarning}>
           Preview labels for {origin}. These are for this isolated environment
@@ -1500,15 +1576,31 @@ function LabelDesignerWorkspace({
                 {countLabel(totalCopies(entries), 'label')}
               </a>
             </div>
-            <p role="status" aria-live="polite" className={styles.notice}>
+            <p
+              role={queueFeedbackAnnounced ? undefined : 'status'}
+              aria-live={queueFeedbackAnnounced ? undefined : 'polite'}
+              className={styles.notice}
+            >
               {queueFeedback}
             </p>
+            {queueFeedbackAnnounced && queueFeedbackRemaining && (
+              <span role="status" aria-live="polite" className="sr-only">
+                {queueFeedbackRemaining}
+              </span>
+            )}
             <LoadingReveal
               busy={searchPending}
               reveal={!!search}
               motionReady={admitted}
             >
-              <div
+              <ListEntrance
+                as="div"
+                identities={
+                  search?.rows.map(
+                    (record) => record.kind + ':' + record.key,
+                  ) ?? []
+                }
+                pending={searchPending}
                 className={styles.results}
                 role="region"
                 aria-label="Search result records"
@@ -1546,7 +1638,8 @@ function LabelDesignerWorkspace({
                         />
                         Select record
                       </label>
-                      <Link
+                      <PeekLink
+                        peekTarget={{ kind: record.kind, id: record.key }}
                         href={
                           record.kind === 'quantity'
                             ? '/inventory/quantity/' + record.key
@@ -1555,7 +1648,7 @@ function LabelDesignerWorkspace({
                         className={styles.resultLink}
                       >
                         {record.name}
-                      </Link>
+                      </PeekLink>
                       <p className={styles.resultMeta}>
                         {recordKind(record.kind)} · {record.categoryName} ·{' '}
                         <RecordStatus status={record.status} />
@@ -1616,7 +1709,8 @@ function LabelDesignerWorkspace({
                                 ),
                               )}
                             </dl>
-                            <Link
+                            <PeekLink
+                              peekTarget={{ kind: record.kind, id: record.key }}
                               href={
                                 record.kind === 'quantity'
                                   ? '/inventory/quantity/' + record.key
@@ -1627,7 +1721,7 @@ function LabelDesignerWorkspace({
                               {record.customPreview.truncated
                                 ? 'View all details'
                                 : 'Full details'}
-                            </Link>
+                            </PeekLink>
                           </div>
                         )}
                     </div>
@@ -1671,7 +1765,7 @@ function LabelDesignerWorkspace({
                     No records match these filters.
                   </p>
                 )}
-              </div>
+              </ListEntrance>
             </LoadingReveal>
             {search && search.total > 0 && (
               <div className={styles.pagination}>
@@ -1734,8 +1828,10 @@ function LabelDesignerWorkspace({
             <div className={styles.queueHeader}>
               <h2 className={styles.title}>Label queue</h2>
               <p className={styles.count}>
-                {countLabel(entries.length, 'distinct record')} ·{' '}
-                {countLabel(totalCopies(entries), 'label')}
+                <AddedBump owner={successOwner} additionId={additionId}>
+                  {countLabel(entries.length, 'distinct record')} ·{' '}
+                  {countLabel(totalCopies(entries), 'label')}
+                </AddedBump>
               </p>
               <button
                 type="button"
@@ -1867,9 +1963,17 @@ function LabelDesignerWorkspace({
                                   : ''}
                               . {row.holdingContext}
                             </p>
-                            <Link href={row.path} className={styles.resultLink}>
+                            <PeekLink
+                              peekTarget={
+                                row.kind === 'location'
+                                  ? { kind: 'location', code: row.key }
+                                  : { kind: row.kind, id: row.key }
+                              }
+                              href={row.path}
+                              className={styles.resultLink}
+                            >
                               View item details
-                            </Link>
+                            </PeekLink>
                             {row.state !== 'active' && (
                               <label className={styles.settingLabel}>
                                 <input
@@ -2207,6 +2311,7 @@ function LabelDesignerWorkspace({
                 disabled={busy}
                 onClick={() => {
                   setFormatAcknowledged(true);
+                  setRestoredSheet(false);
                   setFallbackPending(false);
                   setMessage(
                     'QR fallback acknowledged. Print again to run the final inventory check.',
@@ -2220,9 +2325,22 @@ function LabelDesignerWorkspace({
           </div>
         )}
         {message && (
-          <p role="status" className={styles.notice}>
-            {message}
-          </p>
+          <>
+            <p
+              role={
+                messageAnnouncement?.message === message ? undefined : 'status'
+              }
+              className={styles.notice}
+            >
+              {message}
+            </p>
+            {messageAnnouncement?.message === message &&
+              messageAnnouncement.remaining && (
+                <span role="status" aria-live="polite" className="sr-only">
+                  {messageAnnouncement.remaining}
+                </span>
+              )}
+          </>
         )}
         {intentPending && (
           <p role="status" className={styles.notice}>
@@ -2276,9 +2394,10 @@ function LabelDesignerWorkspace({
                 !formatAcknowledged)
             }
             onClick={() => void print()}
-            className={styles.primaryButton}
+            className={`experience-magnetic ${styles.primaryButton}`}
+            data-magnetic-face="labels"
           >
-            Print selected labels / Save as PDF
+            <MagneticVisual>Print selected labels / Save as PDF</MagneticVisual>
           </button>
         </div>
         {entries.length > 0 &&
@@ -2305,6 +2424,29 @@ function LabelDesignerWorkspace({
                 }
               />
               <span className={styles.statusText}>
+                <ConfirmedSuccess
+                  owner={sheetSuccessOwner}
+                  restored={restoredSheet}
+                  eventId={
+                    copiesValid &&
+                    layoutValid &&
+                    !!prepared &&
+                    !busy &&
+                    !refreshPending &&
+                    !refreshFailed &&
+                    validatedKey === selectionKey &&
+                    readySheetKey === sheetKey &&
+                    !unavailable.length &&
+                    !pendingChanges.length &&
+                    !(
+                      job.format === 'code128' &&
+                      fallbackPending &&
+                      !formatAcknowledged
+                    )
+                      ? sheetKey
+                      : undefined
+                  }
+                />
                 {!copiesValid
                   ? 'Correct or revert Copies — printing paused'
                   : refreshFailed

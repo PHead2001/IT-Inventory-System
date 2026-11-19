@@ -1,7 +1,6 @@
 'use client';
 import { useId, useMemo, useRef, useState } from 'react';
-import { motion } from 'motion/react';
-import { useEffectiveReducedMotion } from '@/components/experience/motion-preference';
+import { ListEntrance } from '@/components/experience/list-feedback';
 import type { LocationRef } from '../inventory/contracts-ui';
 import { LocationCode } from '../inventory/components/read-ui';
 import {
@@ -123,7 +122,6 @@ export function LocationBrowser({
   const query = browserState?.query ?? localQuery;
   const navigationRef = useRef<HTMLElement>(null);
   const statusId = useId();
-  const reducedMotion = useEffectiveReducedMotion();
   const [localExpanded, setExpanded] = useState<Set<string>>(new Set());
   const expanded = browserState
     ? new Set(
@@ -218,13 +216,12 @@ export function LocationBrowser({
           Selected path: {selected.breadcrumb}
         </p>
       )}
-      <ul className="mt-2 max-h-[28rem] space-y-1 overflow-auto md:hidden">
+      <ListEntrance
+        identities={mobileRows.map((row) => row.location.id)}
+        className="mt-2 max-h-[28rem] space-y-1 overflow-auto md:hidden"
+      >
         {mobileRows.map((row) => (
-          <motion.li
-            key={row.location.id}
-            layout={!reducedMotion}
-            className="flex min-w-0 items-center gap-1"
-          >
+          <li key={row.location.id} className="flex min-w-0 items-center gap-1">
             <BrowserLocation
               location={row.location}
               selected={selectedCode === row.location.code}
@@ -245,19 +242,15 @@ export function LocationBrowser({
                 ›
               </button>
             )}
-          </motion.li>
+          </li>
         ))}
-      </ul>
-      <ul className="mt-2 hidden max-h-[28rem] space-y-1 overflow-auto md:block">
+      </ListEntrance>
+      <ListEntrance
+        identities={matched.map((row) => row.location.id)}
+        className="mt-2 hidden max-h-[28rem] space-y-1 overflow-auto md:block"
+      >
         {matched.map((row) => (
-          <motion.li
-            key={row.location.id}
-            layout={!reducedMotion}
-            initial={reducedMotion ? false : { opacity: 0, y: 5 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.18 }}
-            className="flex min-w-0 items-center gap-1"
-          >
+          <li key={row.location.id} className="flex min-w-0 items-center gap-1">
             {!search && row.hasChildren && (
               <button
                 aria-label={
@@ -294,9 +287,9 @@ export function LocationBrowser({
                 !search && !row.hasChildren ? row.depth * 12 + 40 : undefined
               }
             />
-          </motion.li>
+          </li>
         ))}
-      </ul>
+      </ListEntrance>
       {!matched.length && (
         <p className="p-3 text-sm text-slate-400">No matching locations.</p>
       )}
