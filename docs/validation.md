@@ -44,10 +44,10 @@ For the temporary closeout of PRs 62, 64, 65, 66 and 67, Foundation CI routes on
 the `required` job to GitHub-hosted `ubuntu-24.04` when the event is `pull_request`
 in `PHead2001/IT-Inventory-System` and the head repository matches. This includes
 drafts, whose existing uncertified decision still applies. Every other case uses
-the existing light/heavy routing. Only the open, ready PR 67 from the matching
-repository receives a fifty-minute hosted job deadline. Its preceding hosted run
-reached the forty-minute job limit while Chromium was still running. Other
-required jobs retain forty minutes. Validation steps, permissions, cleanup,
+the existing light/heavy routing. The required job allows sixty minutes for the
+five listed PRs while open and ready from the matching repository. One hosted
+closeout run reached the forty-minute limit while Chromium was still running.
+Other required jobs retain forty minutes. Validation steps, permissions, cleanup,
 the two-minute failure artifact limit, main delivery and sibling jobs retain
 their existing gates.
 

@@ -21,7 +21,7 @@ const reuseLabel =
 const closeoutRouting =
   "${{ fromJSON((github.event_name == 'pull_request' && github.repository == 'PHead2001/IT-Inventory-System' && github.event.pull_request.head.repo.full_name == github.repository && contains(fromJSON('[62,64,65,66,67]'), github.event.pull_request.number)) && '[\"ubuntu-24.04\"]' || (((github.event_name == 'pull_request' && (toJSON(github.event.pull_request.draft) != 'false' || github.event.pull_request.state != 'open')) || (needs.reuse_evidence.result == 'success' && needs.reuse_evidence.outputs.reuse == 'true')) && '[\"self-hosted\",\"it-inventory-light\"]' || '[\"self-hosted\",\"it-inventory-heavy\"]')) }}";
 const closeoutDeadline =
-  "${{ (github.event_name == 'pull_request' && github.repository == 'PHead2001/IT-Inventory-System' && toJSON(github.event.pull_request.number) == '67' && github.event.pull_request.head.repo.full_name == github.repository && toJSON(github.event.pull_request.draft) == 'false' && github.event.pull_request.state == 'open') && 50 || 40 }}";
+  '${{ (github.event_name == \'pull_request\' && github.repository == \'PHead2001/IT-Inventory-System\' && github.event.pull_request.head.repo.full_name == github.repository && contains(fromJSON(\'["62","64","65","66","67"]\'), toJSON(github.event.pull_request.number)) && toJSON(github.event.pull_request.draft) == \'false\' && github.event.pull_request.state == \'open\') && 60 || 40 }}';
 const readyForFull =
   "(github.event_name != 'pull_request' || (toJSON(github.event.pull_request.draft) == 'false' && github.event.pull_request.state == 'open'))";
 const fullOnly =
@@ -246,8 +246,14 @@ describe('disposable local runner workflow contracts', () => {
           'ubuntu-24.04',
         ]);
         expect(evaluate(required['timeout-minutes'], context)).toBe(
-          number === 67 && !draft ? 50 : 40,
+          draft ? 40 : 60,
         );
+        expect(
+          evaluate(
+            required['timeout-minutes'],
+            closeout(String(number), draft),
+          ),
+        ).toBe(40);
         for (const id of ['install', 'e2e', 'db_stop', 'full_completion'])
           expect(
             evaluate(required.steps.find((step) => step.id === id).if, context),
@@ -290,7 +296,8 @@ describe('disposable local runner workflow contracts', () => {
       withPullRequest({ state: undefined }),
       withPullRequest({ draft: undefined }),
       withPullRequest({ draft: 'false' }),
-      withPullRequest({ number: '67' }),
+      withPullRequest({ number: undefined }),
+      withPullRequest({ number: null }),
       withPullRequest({ head: { repo: {} } }),
     ])
       expect(evaluate(required['timeout-minutes'], context)).toBe(40);
@@ -487,10 +494,16 @@ describe('disposable local runner workflow contracts', () => {
 
   it('rejects a broadened hosted deadline or that deadline on another job', () => {
     for (const deadline of [
-      '50',
+      '60',
+      closeoutDeadline.replace("github.event_name == 'pull_request' && ", ''),
       closeoutDeadline.replace(
-        "toJSON(github.event.pull_request.number) == '67' && ",
+        `contains(fromJSON('["62","64","65","66","67"]'), toJSON(github.event.pull_request.number)) && `,
         '',
+      ),
+      closeoutDeadline.replace('"62","64"', '"62","63","64"'),
+      closeoutDeadline.replace(
+        'toJSON(github.event.pull_request.number)',
+        'github.event.pull_request.number',
       ),
       closeoutDeadline.replace(
         "github.repository == 'PHead2001/IT-Inventory-System' && ",
@@ -501,10 +514,15 @@ describe('disposable local runner workflow contracts', () => {
         '',
       ),
       closeoutDeadline.replace(
-        " && toJSON(github.event.pull_request.draft) == 'false' && github.event.pull_request.state == 'open'",
+        "toJSON(github.event.pull_request.draft) == 'false' && ",
         '',
       ),
-      closeoutDeadline.replace('|| 40', '|| 50'),
+      closeoutDeadline.replace(
+        " && github.event.pull_request.state == 'open'",
+        '',
+      ),
+      closeoutDeadline.replace('&& 60', '&& 61'),
+      closeoutDeadline.replace('|| 40', '|| 60'),
     ])
       expect(() =>
         auditWorkflowRouting('ci.yml', ci.replace(closeoutDeadline, deadline)),
