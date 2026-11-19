@@ -146,9 +146,9 @@ test('quantity label identity survives receipt, move, issue and return while pri
   await page.goto(detail);
   const receive = await openRecordTask(page, 'Receive stock');
   await openRecordTask(page, 'Receive stock');
-  await expect(receive.getByLabel('Receive at', { exact: true })).toContainText(
-    'ITC-S1A',
-  );
+  await expect(
+    receive.getByRole('combobox', { name: 'Receive at', exact: true }),
+  ).toContainText('ITC-S1A');
   await chooseLocation(receive, 'Receive at', 'ITC-S1B');
   await receive.getByLabel('Quantity to receive').fill('5');
   await receive.getByLabel('Reason (required)').fill('Label stability receipt');
@@ -176,7 +176,7 @@ test('quantity label identity survives receipt, move, issue and return while pri
   await issue
     .getByLabel('Destination site')
     .selectOption({ label: `Label site ${suffix} (${siteCode})` });
-  await issue.getByLabel('Units').fill('3');
+  await issue.getByRole('spinbutton', { name: 'Units', exact: true }).fill('3');
   await issue.getByRole('button', { name: 'Review issue' }).click();
   await issue.getByRole('button', { name: 'Issue to site' }).click();
   await expect(
@@ -195,7 +195,9 @@ test('quantity label identity survives receipt, move, issue and return while pri
     .getByLabel('Source site')
     .selectOption({ label: `Label site ${suffix} (${siteCode})` });
   await chooseLocation(returned, 'Storage location', 'ITC-S1B');
-  await returned.getByLabel('Units').fill('1');
+  await returned
+    .getByRole('spinbutton', { name: 'Units', exact: true })
+    .fill('1');
   await returned.getByRole('button', { name: 'Review return' }).click();
   await returned.getByRole('button', { name: 'Return to storage' }).click();
   await expect(

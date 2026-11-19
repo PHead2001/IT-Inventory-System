@@ -103,11 +103,13 @@ for (const width of [1280, 390])
         await expect(
           page.getByRole('heading', { name: 'Return to storage', exact: true }),
         ).toHaveCount(1);
-        const destination = returned.getByLabel('Storage location', {
+        const destination = returned.getByRole('combobox', {
+          name: 'Storage location',
           exact: true,
         });
         await expect(destination).toContainText('ITC-RED');
         await chooseLocation(returned, 'Storage location', 'ITC-BLACK');
+        await expect(destination).toHaveAttribute('aria-expanded', 'false');
         await expect(destination).toContainText('ITC-BLACK');
         await expect(destination).not.toContainText('ITC-RED');
         await expect(returned).not.toContainText('consumed quantity');

@@ -585,10 +585,9 @@ test('creation clears every linked required-field error during correction and bo
       name: 'Search result records',
       exact: true,
     });
-    // Scope to the existing resultMain container through its real record link.
     const result = labels
-      .getByRole('link', { name, exact: true })
-      .locator('..');
+      .locator(':scope > div')
+      .filter({ has: page.getByRole('link', { name, exact: true }) });
     // User-facing label results must carry the same bounded human answers.
     await expect(result).toHaveCount(1);
     await expect(result).toContainText('Owner reference: ' + uuidLookingAnswer);

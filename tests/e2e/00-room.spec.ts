@@ -1257,14 +1257,35 @@ test('room labels appear on real mesh hover and Show labels restores keyboard bu
   await page.screenshot({
     path: testInfo.outputPath('desktop-show-all-labels.png'),
   });
+  markRoomProgress(testInfo, {
+    journey: 'room-labels',
+    stage: 'Show labels restores keyboard targets',
+    code: 'ITC-RACK',
+  });
   const buttons = viewer.locator('button[data-location-code]');
-  await expect(buttons.first()).toBeAttached();
-  const available = buttons.filter({ visible: true });
-  expect(await available.count()).toBeGreaterThan(0);
-  for (const button of await buttons.all()) {
-    if ((await button.getAttribute('aria-hidden')) === 'true')
-      await expect(button).toHaveAttribute('tabindex', '-1');
-  }
+  // Label layout can replace and reorder DOM nodes between browser calls.
+  // Read visibility and tab stops together from the same rendered labels.
+  await expect
+    .poll(() =>
+      buttons.evaluateAll((labels) => ({
+        extraKeyboardLabel: labels.some(
+          (label) =>
+            label.getAttribute('aria-pressed') === 'false' &&
+            label.getAttribute('tabindex') === '0' &&
+            !label.closest('[aria-hidden="true"], [hidden], [inert]') &&
+            label.getClientRects().length > 0 &&
+            getComputedStyle(label).visibility === 'visible',
+        ),
+        hiddenTabStops: labels
+          .filter(
+            (label) =>
+              label.getAttribute('aria-hidden') === 'true' &&
+              label.getAttribute('tabindex') !== '-1',
+          )
+          .map((label) => label.getAttribute('data-location-code')),
+      })),
+    )
+    .toEqual({ extraKeyboardLabel: true, hiddenTabStops: [] });
   await setRoomLabels(page, false);
   markRoomProgress(testInfo, {
     journey: 'room-labels',
