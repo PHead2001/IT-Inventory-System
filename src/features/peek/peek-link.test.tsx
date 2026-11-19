@@ -1016,8 +1016,11 @@ it.each(['backend', 'verification'])(
     );
     const view = rawRender(app());
     const draft = screen.getByLabelText('Owned draft');
-    act(() => screen.getByRole('link', { name: 'Owned link' }).focus());
+    const link = screen.getByRole('link', { name: 'Owned link' });
+    act(() => link.focus());
     await settle();
+    const oldCard = screen.getByRole('dialog');
+    expect(link).toHaveAttribute('aria-controls', oldCard.id);
     const oldAuth = mocks.auth.mock.calls.at(-1)![0];
     const nextBackend =
       change === 'backend' ? 'https://same-actor-new-backend.test' : backend;
@@ -1025,6 +1028,11 @@ it.each(['backend', 'verification'])(
       app(nextBackend, change === 'verification' ? 'second' : 'first'),
     );
     expect(screen.getByLabelText('Owned draft')).toBe(draft);
+    expect(screen.getByRole('link', { name: 'Owned link' })).toBe(link);
+    expect(link).toHaveFocus();
+    expect(link).toHaveAttribute('aria-expanded', 'false');
+    expect(link).not.toHaveAttribute('aria-controls');
+    expect(oldCard).not.toBeInTheDocument();
     vi.mocked(fetch).mockResolvedValueOnce(
       Response.json({
         actor,
@@ -1036,8 +1044,7 @@ it.each(['backend', 'verification'])(
         },
       }),
     );
-    act(() => draft.focus());
-    act(() => screen.getByRole('link', { name: 'Owned link' }).focus());
+    fireEvent.keyDown(link, { key: 'ArrowDown' });
     await settle();
     expect(screen.getByRole('dialog')).toHaveTextContent('Successor record');
     expect(screen.getByRole('img')).toHaveAttribute('alt', 'Successor photo');
@@ -1067,6 +1074,7 @@ it('replaces admission on navigation, query and Back while preserving the mounte
   );
   const view = render(app());
   const draft = screen.getByRole('textbox');
+  const link = screen.getByRole('link', { name: 'Route device' });
   fireEvent.change(draft, { target: { value: 'unsaved' } });
   for (const [path, query] of [
     ['/history', ''],
@@ -1077,7 +1085,8 @@ it('replaces admission on navigation, query and Back while preserving the mounte
     mocks.path = path;
     mocks.query = query;
     view.rerender(app());
-    act(() => screen.getByRole('link', { name: 'Route device' }).focus());
+    expect(screen.getByRole('link', { name: 'Route device' })).toBe(link);
+    fireEvent.keyDown(link, { key: 'ArrowDown' });
     await settle();
     expect(screen.getByRole('dialog')).toHaveTextContent('Laptop');
     fireEvent.keyDown(document, { key: 'Escape' });
@@ -1086,6 +1095,91 @@ it('replaces admission on navigation, query and Back while preserving the mounte
   }
   expect(fetch).toHaveBeenCalledTimes(4);
 });
+
+it.each(['primary', 'alternate'])(
+  'preserves the focused %s shared-title source and retires its pending peek before the successor opens',
+  async (source) => {
+    let finish!: (response: Response) => void;
+    vi.mocked(fetch).mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finish = resolve;
+        }),
+    );
+    const workspace = () => (
+      <PeekProvider actor={actor} backend={backend}>
+        {['primary', 'alternate'].map((variant) => (
+          <div key={variant} hidden={variant !== source}>
+            <PeekAnchor target={target}>
+              {(trigger) => (
+                <a {...trigger} href={peekHrefForTest}>
+                  Shared record
+                </a>
+              )}
+            </PeekAnchor>
+          </div>
+        ))}
+      </PeekProvider>
+    );
+    const view = render(workspace());
+    const link = screen.getByRole('link', { name: 'Shared record' });
+    try {
+      act(() => link.focus());
+      await settle();
+      const oldCard = screen.getByRole('dialog');
+      expect(link).toHaveAttribute('aria-controls', oldCard.id);
+      expect(fetch).toHaveBeenCalledTimes(1);
+
+      mocks.path = '/inventory';
+      mocks.query = 'page=2';
+      view.rerender(workspace());
+      expect(screen.getByRole('link', { name: 'Shared record' })).toBe(link);
+      expect(link).toHaveFocus();
+      expect(link).toHaveAttribute('aria-expanded', 'false');
+      expect(link).not.toHaveAttribute('aria-controls');
+      expect(oldCard).not.toBeInTheDocument();
+
+      vi.mocked(fetch).mockResolvedValueOnce(
+        envelope({ ...record, name: 'Successor record' }),
+      );
+      fireEvent.keyDown(link, { key: 'ArrowDown' });
+      await settle();
+      const currentCard = screen.getByRole('dialog');
+      expect(link).toHaveAttribute('aria-controls', currentCard.id);
+      expect(currentCard).toHaveTextContent('Successor record');
+
+      finish(Response.json({ code: 'forbidden' }, { status: 403 }));
+      await settle();
+      expect(screen.getByRole('dialog')).toBe(currentCard);
+      expect(link).toHaveAttribute('aria-controls', currentCard.id);
+      expect(fetch).toHaveBeenCalledTimes(2);
+    } finally {
+      finish?.(envelope());
+      await settle();
+    }
+  },
+);
+
+it('drops the old hover timer on query change and accepts fresh hover on the same link', async () => {
+  const view = await mount();
+  const link = screen.getByRole('link', { name: 'View laptop' });
+  fireEvent.pointerEnter(link, { pointerType: 'mouse' });
+  await act(async () => vi.advanceTimersByTimeAsync(399));
+
+  mocks.query = 'page=2';
+  view.rerender(fixture());
+  expect(screen.getByRole('link', { name: 'View laptop' })).toBe(link);
+  await act(async () => vi.advanceTimersByTimeAsync(1));
+  expect(fetch).not.toHaveBeenCalled();
+  expect(screen.queryByRole('dialog')).toBeNull();
+
+  fireEvent.pointerLeave(link, { pointerType: 'mouse' });
+  fireEvent.pointerEnter(link, { pointerType: 'mouse' });
+  await act(async () => vi.advanceTimersByTimeAsync(400));
+  expect(screen.getByRole('dialog')).toHaveTextContent('Laptop');
+  expect(fetch).toHaveBeenCalledOnce();
+});
+
 it('replaces target admission for A to B to A and rejects the retired A result', async () => {
   const other = {
     kind: 'asset' as const,
@@ -1107,14 +1201,17 @@ it('replaces target admission for A to B to A and rejects the retired A result',
       </PeekProvider>
     );
     const view = render(app());
-    act(() => screen.getByRole('link').focus());
+    const link = screen.getByRole('link');
+    act(() => link.focus());
     await settle();
     await act(async () => vi.advanceTimersByTimeAsync(0));
     vi.mocked(fetch).mockResolvedValueOnce(
       envelope({ ...record, target: other, name: 'Other record' }),
     );
     view.rerender(app(other));
-    act(() => screen.getByRole('link').focus());
+    expect(screen.getByRole('link')).toBe(link);
+    expect(screen.queryByRole('dialog')).toBeNull();
+    fireEvent.keyDown(link, { key: 'ArrowDown' });
     await settle();
     await act(async () => vi.advanceTimersByTimeAsync(0));
     expect(screen.getByRole('dialog')).toHaveTextContent('Other record');
@@ -1122,7 +1219,9 @@ it('replaces target admission for A to B to A and rejects the retired A result',
       envelope({ ...record, name: 'Current A' }),
     );
     view.rerender(app());
-    act(() => screen.getByRole('link').focus());
+    expect(screen.getByRole('link')).toBe(link);
+    expect(screen.queryByRole('dialog')).toBeNull();
+    fireEvent.keyDown(link, { key: 'ArrowDown' });
     await settle();
     await act(async () => vi.advanceTimersByTimeAsync(0));
     finish(envelope({ ...record, name: 'Retired A' }));
