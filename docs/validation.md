@@ -39,6 +39,13 @@ workflow-source marker and cannot supply reusable success evidence. Marking read
 for review runs the full heavy gate for the current SHA; converting back to draft
 invalidates certification even when the head SHA is unchanged.
 
+For the temporary closeout of PRs 62, 64, 65, 66 and 67, Foundation CI routes only
+the `required` job to GitHub-hosted `ubuntu-24.04` when the event is `pull_request`
+in `PHead2001/IT-Inventory-System` and the head repository matches. This includes
+drafts, whose existing uncertified decision still applies. Every other case uses
+the existing light/heavy routing. The forty-minute deadline, validation steps,
+permissions, cleanup, main delivery and sibling jobs retain their existing gates.
+
 Ready PRs retain fresh locked installation, the offline application build, clean
 database start/reset/tests/type comparison, browser preparation, backend-specific
 E2E build/browser execution and cleanup. Both builds are intentional: the offline
