@@ -1,3 +1,4 @@
+import { SpringDisclosure } from '@/components/experience/spring-disclosure';
 import {
   InventoryCaptureGroup,
   InventoryCaptureRegion,
@@ -112,12 +113,13 @@ export default async function AssetPage({
                   <p className="experience-muted mt-2 text-sm capitalize">
                     <RecordStatus status={asset.status} />
                   </p>
-                  <details className="mt-2 text-xs text-slate-400">
-                    <summary className="min-h-11 cursor-pointer py-2">
-                      Technical record details
-                    </summary>
+                  <SpringDisclosure
+                    className="mt-2 text-xs text-slate-400"
+                    summaryProps={{ className: 'min-h-11 cursor-pointer py-2' }}
+                    summary={<>Technical record details</>}
+                  >
                     <p>Record version: {asset.version}</p>
-                  </details>
+                  </SpringDisclosure>
                 </div>
                 <div className={styles.detailActions}>
                   <Link href={'/labels?asset=' + encodeURIComponent(asset.id)}>

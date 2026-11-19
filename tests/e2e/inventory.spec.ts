@@ -17,6 +17,7 @@ import {
 } from './record-task-controls';
 import { metadataReviewButton, metadataSaveButton } from './metadata-controls';
 import { expect, test, type Page, type Locator } from '@playwright/test';
+import { countFeedback } from './count-feedback-support';
 import fixture from '../fixtures/auth.json' with { type: 'json' };
 import { chooseLocation } from './location-picker';
 import { createClient } from '@supabase/supabase-js';
@@ -979,8 +980,8 @@ test('quantity core persists multi-location receives, partial and all transfers,
       name: 'Current stock — 15 available in storage',
     }),
   });
-  await expect(stock.getByText('8 units', { exact: true })).toBeVisible();
-  await expect(stock.getByText('7 units', { exact: true })).toBeVisible();
+  await expect(countFeedback(stock, '8 units')).toBeVisible();
+  await expect(countFeedback(stock, '7 units')).toBeVisible();
   await expect(stock.getByRole('link', { name: /ITC-S1A/ })).toHaveCount(0);
   form = await openForm(page, 'Correct physical count');
   await choose(form, 'Counted location', 'ITC-S1B');
@@ -1386,7 +1387,8 @@ test('inventory search location picker exposes keyboard paths and stays framed o
     exact: true,
   });
   await form.getByRole('button', { name: 'More filters', exact: true }).click();
-  const trigger = form.getByLabel('Location', { exact: true });
+  // The closing tree can retain the same accessible label during its exit.
+  const trigger = form.locator('button#inventory-location');
   await trigger.click();
   const search = form.getByRole('combobox', { name: 'Search locations' });
   await expect(search).toBeFocused();
@@ -1414,6 +1416,7 @@ test('inventory search location picker exposes keyboard paths and stays framed o
   await withinViewport(option);
   await search.press('Enter');
   await expect(trigger).toBeFocused();
+  await expect(trigger).toHaveAttribute('aria-expanded', 'false');
   await expect(trigger).toContainText('ITC-D07');
   await expect(page).toHaveURL(
     (url) => url.searchParams.get('location') === 'ITC-D07',
@@ -1422,6 +1425,7 @@ test('inventory search location picker exposes keyboard paths and stays framed o
   await expect(search).toBeFocused();
   await search.press('Escape');
   await expect(trigger).toBeFocused();
+  await expect(trigger).toHaveAttribute('aria-expanded', 'false');
   await expect(search).toHaveCount(0);
   expect(
     await page.evaluate(

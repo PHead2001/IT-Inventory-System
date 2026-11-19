@@ -40,7 +40,7 @@ jobs:
     needs: [reuse_evidence]
     if: ${{ always() && !cancelled() }}
     runs-on: ${{ fromJSON((github.event_name == 'pull_request' && github.repository == 'PHead2001/IT-Inventory-System' && github.event.pull_request.head.repo.full_name == github.repository && contains(fromJSON('[62,64,65,66,67]'), github.event.pull_request.number)) && '["ubuntu-24.04"]' || (((github.event_name == 'pull_request' && (toJSON(github.event.pull_request.draft) != 'false' || github.event.pull_request.state != 'open')) || (needs.reuse_evidence.result == 'success' && needs.reuse_evidence.outputs.reuse == 'true')) && '["self-hosted","it-inventory-light"]' || '["self-hosted","it-inventory-heavy"]')) }}
-    timeout-minutes: 40
+    timeout-minutes: ${{ (github.event_name == 'pull_request' && github.repository == 'PHead2001/IT-Inventory-System' && github.event.pull_request.head.repo.full_name == github.repository && contains(fromJSON('["62","64","65","66","67"]'), toJSON(github.event.pull_request.number)) && toJSON(github.event.pull_request.draft) == 'false' && github.event.pull_request.state == 'open') && (contains(fromJSON('["62","64","65"]'), toJSON(github.event.pull_request.number)) && 80 || 60) || 40 }}
     permissions:
       contents: read
       actions: read
@@ -124,6 +124,8 @@ jobs:
         id: e2e
         if: (github.event_name != 'pull_request' || (toJSON(github.event.pull_request.draft) == 'false' && github.event.pull_request.state == 'open')) && needs.reuse_evidence.outputs.reuse != 'true'
         run: npm run test:e2e
+        env:
+          E2E_ISOLATE_ROOM: ${{ (github.event_name == 'pull_request' && github.repository == 'PHead2001/IT-Inventory-System' && github.event.pull_request.head.repo.full_name == github.repository && contains(fromJSON('["62","64","65"]'), toJSON(github.event.pull_request.number)) && toJSON(github.event.pull_request.draft) == 'false' && github.event.pull_request.state == 'open') && '1' || '0' }}
       - name: Stop disposable database
         id: db_stop
         if: ${{ always() && (github.event_name != 'pull_request' || (toJSON(github.event.pull_request.draft) == 'false' && github.event.pull_request.state == 'open')) && needs.reuse_evidence.outputs.reuse != 'true' }}

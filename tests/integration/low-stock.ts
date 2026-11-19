@@ -4,6 +4,7 @@ import { readFileSync } from 'node:fs';
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import { Client } from 'pg';
 import authFixture from '../fixtures/auth.json' with { type: 'json' };
+import { cleanupLowStockCapFixtures } from '../helpers/low-stock-cap-fixture';
 
 function local(value: string | undefined, port: number) {
   assert.ok(value, 'local test configuration required');
@@ -24,6 +25,8 @@ const admin = createClient(
 );
 const owner = new Client({ connectionString: dbUrl });
 const prefix = 'LowStock-' + randomUUID();
+const capPrefix = prefix + ' cap-';
+const capIds: string[] = [];
 const actors: SupabaseClient[] = [];
 let checks = 0;
 
@@ -79,7 +82,7 @@ async function denied(
   const result = await account.rpc(name, parameters);
   assert.ok(
     (Array.isArray(code) ? code : [code]).includes(result.error?.code ?? ''),
-    name + ': ' + result.error?.message,
+    name + ': ' + result.error?.code + ': ' + result.error?.message,
   );
   checks++;
 }
@@ -490,11 +493,15 @@ async function main() {
     name: literalName,
     category_id: category,
   });
+  await mutation(staff.client, 'quantity_create', {
+    name: prefix + ' xx literal',
+    category_id: category,
+  });
   const literalSearch = await search(viewer.client, {
-    p_query: '%_\\ literal',
+    p_query: literalName,
   });
   const literalExport = await exportRows(viewer.client, {
-    p_query: '%_\\ literal',
+    p_query: literalName,
   });
   assert.equal(literalSearch.total, 1);
   assert.equal(literalExport.total, literalSearch.total);
@@ -567,18 +574,25 @@ async function main() {
   assert.equal((await search(viewer.client, { p_query: prefix })).total, 0);
   assert.equal((await exportRows(viewer.client, { p_query: prefix })).total, 0);
 
-  const capPrefix = prefix + ' cap-';
-  await owner.query(
+  const capRows = await owner.query<{ id: string }>(
     `insert into public.quantity_items(name,category_id)
-   select $1 || lpad(n::text,5,'0'),$2 from generate_series(1,10001) n`,
+   select $1 || lpad(n::text,5,'0'),$2 from generate_series(1,10001) n returning id::text`,
     [capPrefix, category],
   );
-  await denied(
-    staff.client,
-    'inventory_export_snapshot',
-    { p_query: capPrefix },
-    ['P1013', 'P1025'],
-  );
+  capIds.push(...capRows.rows.map((row) => row.id));
+  const capStarted = performance.now();
+  try {
+    await denied(
+      staff.client,
+      'inventory_export_snapshot',
+      { p_query: capPrefix },
+      ['P1013', 'P1025'],
+    );
+  } finally {
+    console.log(
+      JSON.stringify({ exportCapElapsedMs: performance.now() - capStarted }),
+    );
+  }
   console.log(
     `Low-stock metadata, stock state, dashboard, export snapshot, RLS, concurrency and cap passed (${checks} RPC checks).`,
   );
@@ -590,6 +604,21 @@ main()
     process.exitCode = 1;
   })
   .finally(async () => {
+    try {
+      const removed = await cleanupLowStockCapFixtures(
+        owner,
+        capIds,
+        capPrefix,
+      );
+      assert.equal(
+        removed.length,
+        capIds.length,
+        'every owned raw cap row must be cleaned',
+      );
+    } catch (error) {
+      console.error(error);
+      process.exitCode = 1;
+    }
     await Promise.allSettled(
       actors.map((account) => account.auth.signOut({ scope: 'local' })),
     );

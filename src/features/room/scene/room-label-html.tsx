@@ -2,6 +2,10 @@
 import { Html } from '@react-three/drei';
 import { useThree } from '@react-three/fiber';
 import type { ComponentProps, CSSProperties } from 'react';
+import {
+  PrivacyReadinessContext,
+  usePrivacyReadiness,
+} from '@/components/auth/privacy-readiness';
 import styles from '../room-visual.module.css';
 import {
   LabelLayoutProvider,
@@ -9,7 +13,8 @@ import {
 } from './label-layout-runtime';
 
 /** Drei Html renders children in an independent React DOM root. Capture the
- * scene registry before that boundary and explicitly provide it inside it.
+ * scene registry and unchanged privacy value before that boundary and provide
+ * them inside it; this bridge grants no readiness of its own.
  */
 export function RoomLabelHtml({
   children,
@@ -18,6 +23,7 @@ export function RoomLabelHtml({
   ...props
 }: ComponentProps<typeof Html> & { selected?: boolean }) {
   const registry = useRoomLabelRegistry();
+  const privacy = usePrivacyReadiness();
   const canvasWidth = useThree((state) => state.size.width);
   // R3F size is the actual canvas CSS box, independent of device pixel ratio.
   // Keep 15px per side where possible and the original 44px action minimum.
@@ -51,7 +57,11 @@ export function RoomLabelHtml({
       eps={-1}
       style={labelStyle}
     >
-      <LabelLayoutProvider registry={registry}>{children}</LabelLayoutProvider>
+      <PrivacyReadinessContext value={privacy}>
+        <LabelLayoutProvider registry={registry}>
+          {children}
+        </LabelLayoutProvider>
+      </PrivacyReadinessContext>
     </Html>
   );
 }

@@ -166,7 +166,7 @@ export default async function LocationPage({
                   {children.map((child) => (
                     <li
                       key={child.id}
-                      className="min-w-0 rounded-md border border-slate-700 p-3"
+                      className="experience-spotlight min-w-0 rounded-md border border-slate-700 p-3"
                     >
                       <Link
                         className="break-words text-cyan-300 underline"

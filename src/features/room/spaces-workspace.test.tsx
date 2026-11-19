@@ -3,6 +3,7 @@ import {
   render as renderTree,
   screen,
   waitFor,
+  within,
 } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
@@ -286,7 +287,21 @@ it('shows an empty destination with one count and no empty pager', async () => {
     />,
   );
   await screen.findByText('No active inventory here.');
-  expect(screen.getByText('0 matching rows')).toBeVisible();
+  const inventory = within(
+    screen.getByRole('region', { name: 'Location inventory' }),
+  );
+  const accessibleCount = inventory.getByText('0 matching rows', {
+    selector: '[data-count-final]',
+  });
+  expect(accessibleCount).toHaveAttribute('aria-live', 'polite');
+  expect(
+    accessibleCount.closest('[aria-hidden="true"], [hidden], [inert]'),
+  ).toBeNull();
+  const visibleCount = inventory.getByText('0 matching rows', {
+    selector: '[data-count-visual]',
+  });
+  expect(visibleCount).toBeVisible();
+  expect(visibleCount).toHaveAttribute('aria-hidden', 'true');
   expect(
     screen.queryByRole('navigation', { name: 'Pagination' }),
   ).not.toBeInTheDocument();

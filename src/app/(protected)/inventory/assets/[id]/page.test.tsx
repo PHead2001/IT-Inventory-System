@@ -106,6 +106,11 @@ it('renders one authoritative asset timeline without duplicating custody or merg
     within(timeline).getAllByText('Original storage → Original site'),
   ).toHaveLength(2);
   expect(
+    within(timeline).queryByRole('link', { name: 'Open recorded event' }),
+  ).toBeNull();
+  for (const summary of within(timeline).getAllByText('View event details'))
+    fireEvent.click(summary);
+  expect(
     within(timeline)
       .getAllByRole('link', { name: 'Open recorded event' })
       .map((link) => link.getAttribute('href')),
@@ -113,7 +118,6 @@ it('renders one authoritative asset timeline without duplicating custody or merg
     '/history/events/asset/issued-first',
     '/history/events/asset/issued-second',
   ]);
-  fireEvent.click(within(timeline).getAllByText('View event details')[0]);
   expect(
     within(timeline).getAllByText('Ticket number reference: TICKET-1')[0],
   ).toBeVisible();

@@ -1,3 +1,4 @@
+import { restockShortfall } from './restock-shortfall';
 import { recordStatusLabel } from '@/lib/record-status';
 import { z } from 'zod';
 import {
@@ -47,7 +48,7 @@ const lowStockRow = z.object({
   stock_state: z.enum(['needs_restocking', 'out_of_stock']),
   holding_context: z.string(),
   item_code: text.optional(),
-  available_quantity: safeDecimal.optional(),
+  available_quantity: safeDecimal.nullable().optional(),
   assigned_quantity: safeDecimal.optional(),
   custom_fields: z.record(z.string(), z.unknown()).optional(),
 });
@@ -249,6 +250,7 @@ export function exportCsv(
     'Exported at (display zone)',
     'Type label',
     'Status label',
+    'Shortfall',
   ];
   function* lines() {
     yield headers.map(csvText).join(',');
@@ -282,6 +284,9 @@ export function exportCsv(
         csvText(displayExportedAt),
         csvText('Quantity item'),
         csvText(recordStatusLabel(row.status)),
+        csvNumber(
+          restockShortfall(row.reorder_threshold, row.available_quantity),
+        ),
       );
       yield cells.join(',');
     }

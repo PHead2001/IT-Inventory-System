@@ -10,6 +10,7 @@ import { openRecordTask } from './record-task-controls';
 import { metadataReviewButton, metadataSaveButton } from './metadata-controls';
 import { randomUUID } from 'node:crypto';
 import { expect, test, type Locator, type Page } from '@playwright/test';
+import { countFeedback } from './count-feedback-support';
 import { createClient } from '@supabase/supabase-js';
 import { PNG } from 'pngjs';
 import {
@@ -602,9 +603,13 @@ test('site movements distinguish available, assigned and recorded; dated activit
   await page.goto('/locations/ITO-GENERAL');
   await expect(page.getByText('Inventory destination')).toBeVisible();
   await page.goto('/dashboard');
+  await page
+    .getByRole('link', { name: 'Detailed stock overview', exact: true })
+    .click();
+  await expect(page).toHaveURL('/dashboard?view=low-stock');
   const row = page
     .locator('li')
-    .filter({ has: page.getByRole('link', { name }) });
+    .filter({ has: page.getByRole('link', { name, exact: true }) });
   await expect(row).toContainText('Available 7 · Assigned 3');
   await expect(row).toContainText('Total 10 · Threshold 7');
   await page.goto('/inventory/quantity/' + id);
@@ -695,9 +700,7 @@ test('site movements distinguish available, assigned and recorded; dated activit
     await expect(
       siteHolding.getByText('At this site', { exact: true }),
     ).toBeVisible();
-    await expect(
-      siteHolding.getByText('1 unit', { exact: true }),
-    ).toBeVisible();
+    await expect(countFeedback(siteHolding, '1 unit')).toBeVisible();
   }
   const storageHolding = holdings.filter({
     has: page.getByRole('link', { name: /IT Office.*ITO-GENERAL/ }),
@@ -705,9 +708,7 @@ test('site movements distinguish available, assigned and recorded; dated activit
   await expect(
     storageHolding.getByText('At this location', { exact: true }),
   ).toBeVisible();
-  await expect(
-    storageHolding.getByText('8 units', { exact: true }),
-  ).toBeVisible();
+  await expect(countFeedback(storageHolding, '8 units')).toBeVisible();
   await page.goto('/sites/' + aCode + '/open/quantity');
   await expect(
     page.getByRole('heading', { name: /Record existing quantity item/ }),

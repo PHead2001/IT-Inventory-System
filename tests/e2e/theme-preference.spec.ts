@@ -46,6 +46,18 @@ test.beforeEach(async ({ baseURL }) => {
   expect(origin.port).toBe('3000');
 });
 
+test.afterEach(async ({ page }, info) => {
+  if (info.status === info.expectedStatus) return;
+  const observation = await page
+    .evaluate(() => window.themeAcceptanceProof ?? null)
+    .catch(() => null);
+  if (observation)
+    await info.attach('failed-native-theme-observation.json', {
+      body: JSON.stringify(observation),
+      contentType: 'application/json',
+    });
+});
+
 async function signIn(page: Page) {
   await page.goto('/login');
   await page.getByLabel('Email', { exact: true }).fill(fixture.emails.viewer);
@@ -81,6 +93,15 @@ async function observeAppearance(page: Page, unsupported = false) {
         events: [],
       };
       window.themeAcceptanceProof = proof;
+      for (const kind of ['scroll', 'resize', 'visibilitychange'])
+        addEventListener(
+          kind,
+          () => {
+            if (proof.events.length < 100)
+              proof.events.push({ at: performance.now(), kind });
+          },
+          true,
+        );
       const timeout = window.setTimeout.bind(window);
       window.setTimeout = ((
         handler: TimerHandler,

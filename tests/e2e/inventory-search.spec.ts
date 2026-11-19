@@ -1,5 +1,6 @@
 import { expect, test, type Page } from '@playwright/test';
 import { readFile } from 'node:fs/promises';
+import { countFeedback } from './count-feedback-support';
 import fixture from '../fixtures/auth.json' with { type: 'json' };
 import {
   discoveryFixture,
@@ -50,9 +51,7 @@ test('live inventory typing keeps applied rows, chips and CSV coherent through d
     await input.fill(alpha);
     await expect.poll(delayed.isHeld).toBe(true);
     await expect(input).toHaveValue(alpha);
-    await expect(
-      page.getByText('26 matching rows', { exact: true }),
-    ).toBeVisible();
+    await expect(countFeedback(page, '26 matching rows')).toBeVisible();
     await expect(
       page.getByRole('navigation', { name: 'Active inventory filters' }),
     ).toContainText(`Search: ${setup.prefix}`);
@@ -77,9 +76,7 @@ test('live inventory typing keeps applied rows, chips and CSV coherent through d
     await input.fill(beta);
     expect(delayed.requests).not.toContain(beta);
     await expect(input).toHaveValue(beta);
-    await expect(
-      page.getByText('24 matching rows', { exact: true }),
-    ).toBeVisible();
+    await expect(countFeedback(page, '24 matching rows')).toBeVisible();
     await exportScope(page, alpha);
     await input.dispatchEvent('compositionend');
     await appliedSearch(page, beta, 2);

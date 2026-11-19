@@ -20,6 +20,17 @@ const reuseLabel =
   "${{ ((github.event_name == 'pull_request' && (toJSON(github.event.pull_request.draft) != 'false' || github.event.pull_request.state != 'open')) || (needs.reuse_evidence.result == 'success' && needs.reuse_evidence.outputs.reuse == 'true')) && 'it-inventory-light' || 'it-inventory-heavy' }}";
 const closeoutRouting =
   "${{ fromJSON((github.event_name == 'pull_request' && github.repository == 'PHead2001/IT-Inventory-System' && github.event.pull_request.head.repo.full_name == github.repository && contains(fromJSON('[62,64,65,66,67]'), github.event.pull_request.number)) && '[\"ubuntu-24.04\"]' || (((github.event_name == 'pull_request' && (toJSON(github.event.pull_request.draft) != 'false' || github.event.pull_request.state != 'open')) || (needs.reuse_evidence.result == 'success' && needs.reuse_evidence.outputs.reuse == 'true')) && '[\"self-hosted\",\"it-inventory-light\"]' || '[\"self-hosted\",\"it-inventory-heavy\"]')) }}";
+const sameRepositoryPr =
+  "github.event_name == 'pull_request' && github.repository == 'PHead2001/IT-Inventory-System' && github.event.pull_request.head.repo.full_name == github.repository";
+const openReadyPr =
+  "toJSON(github.event.pull_request.draft) == 'false' && github.event.pull_request.state == 'open'";
+const closeoutNumbers =
+  'contains(fromJSON(\'["62","64","65","66","67"]\'), toJSON(github.event.pull_request.number))';
+const isolatedRoomNumbers =
+  'contains(fromJSON(\'["62","64","65"]\'), toJSON(github.event.pull_request.number))';
+const closeoutDeadline = `\${{ (${sameRepositoryPr} && ${closeoutNumbers} && ${openReadyPr}) && (${isolatedRoomNumbers} && 80 || 60) || 40 }}`;
+const roomFlag = 'E2E_ISOLATE_ROOM';
+const roomFlagExpression = `\${{ (${sameRepositoryPr} && ${isolatedRoomNumbers} && ${openReadyPr}) && '1' || '0' }}`;
 const readyForFull =
   "(github.event_name != 'pull_request' || (toJSON(github.event.pull_request.draft) == 'false' && github.event.pull_request.state == 'open'))";
 const fullOnly =
@@ -81,19 +92,39 @@ function auditWorkflowRouting(name, source) {
     Object.keys(workflow.jobs).length === 0
   )
     throw new Error(`${name}: missing job inventory`);
+  if (Object.hasOwn(workflow.env ?? {}, roomFlag))
+    throw new Error(`${name}: room isolation outside reviewed step`);
   for (const [jobName, job] of Object.entries(workflow.jobs)) {
     const identity = `${name}:${jobName}`;
     // A job-level reusable workflow hides its routing behind another workflow.
     // None are approved; step-level uses remains an ordinary action.
     if (!job || typeof job !== 'object' || Object.hasOwn(job, 'uses'))
       throw new Error(`${identity}: unexamined reusable workflow job`);
+    if (Object.hasOwn(job.env ?? {}, roomFlag))
+      throw new Error(`${identity}: room isolation outside reviewed step`);
+    const roomFlagSteps = (job.steps ?? []).filter((step) =>
+      Object.hasOwn(step.env ?? {}, roomFlag),
+    );
     const labels = job['runs-on'];
     if (
       name === 'ci.yml' &&
       jobName === 'required' &&
       labels === closeoutRouting
-    )
+    ) {
+      if (job['timeout-minutes'] !== closeoutDeadline)
+        throw new Error(`${identity}: unapproved hosted deadline`);
+      if (
+        roomFlagSteps.length !== 1 ||
+        roomFlagSteps[0].id !== 'e2e' ||
+        roomFlagSteps[0].env[roomFlag] !== roomFlagExpression
+      )
+        throw new Error(`${identity}: unapproved browser room isolation`);
       continue;
+    }
+    if (roomFlagSteps.length)
+      throw new Error(`${identity}: room isolation outside reviewed step`);
+    if (job['timeout-minutes'] === closeoutDeadline)
+      throw new Error(`${identity}: hosted deadline outside reviewed job`);
     if (
       !Array.isArray(labels) ||
       labels.length !== 2 ||
@@ -126,7 +157,11 @@ describe('disposable local runner workflow contracts', () => {
     expect(foundation.concurrency['cancel-in-progress']).toBe(
       "${{ github.event_name == 'pull_request' }}",
     );
-    expect(required['timeout-minutes']).toBe(40);
+    const browserFlag = required.steps.find((step) => step.id === 'e2e').env[
+      roomFlag
+    ];
+    expect(required['timeout-minutes']).toBe(closeoutDeadline);
+    expect(browserFlag).toBe(roomFlagExpression);
     const evaluate = (expression, github, reuse = '') => {
       const body = expression.replace(/^\$\{\{\s*|\s*\}\}$/g, '');
       return new Function(
@@ -162,6 +197,8 @@ describe('disposable local runner workflow contracts', () => {
         'self-hosted',
         'it-inventory-light',
       ]);
+      expect(evaluate(required['timeout-minutes'], github)).toBe(40);
+      expect(evaluate(browserFlag, github)).toBe('0');
       for (const id of [
         'npm_setup',
         'install',
@@ -196,6 +233,8 @@ describe('disposable local runner workflow contracts', () => {
       'self-hosted',
       'it-inventory-heavy',
     ]);
+    expect(evaluate(required['timeout-minutes'], github)).toBe(40);
+    expect(evaluate(browserFlag, github)).toBe('0');
     expect(
       evaluate(required.steps.find((step) => step.id === 'install').if, github),
     ).toBe(true);
@@ -208,6 +247,10 @@ describe('disposable local runner workflow contracts', () => {
       'self-hosted',
       'it-inventory-light',
     ]);
+    expect(evaluate(required['timeout-minutes'], main)).toBe(40);
+    expect(evaluate(required['timeout-minutes'], main, 'true')).toBe(40);
+    expect(evaluate(browserFlag, main)).toBe('0');
+    expect(evaluate(browserFlag, main, 'true')).toBe('0');
     expect(
       evaluate(
         required.steps.find((step) => step.id === 'install').if,
@@ -234,6 +277,20 @@ describe('disposable local runner workflow contracts', () => {
         expect(evaluate(required['runs-on'], context)).toEqual([
           'ubuntu-24.04',
         ]);
+        const isolatesRoom = !draft && [62, 64, 65].includes(number);
+        expect(evaluate(required['timeout-minutes'], context)).toBe(
+          draft ? 40 : isolatesRoom ? 80 : 60,
+        );
+        expect(evaluate(browserFlag, context)).toBe(isolatesRoom ? '1' : '0');
+        expect(
+          evaluate(
+            required['timeout-minutes'],
+            closeout(String(number), draft),
+          ),
+        ).toBe(40);
+        expect(evaluate(browserFlag, closeout(String(number), draft))).toBe(
+          '0',
+        );
         for (const id of ['install', 'e2e', 'db_stop', 'full_completion'])
           expect(
             evaluate(required.steps.find((step) => step.id === id).if, context),
@@ -242,31 +299,49 @@ describe('disposable local runner workflow contracts', () => {
       }
     }
     for (const number of [61, 63, 68]) {
-      for (const draft of [true, false])
-        expect(evaluate(required['runs-on'], closeout(number, draft))).toEqual([
+      for (const draft of [true, false]) {
+        const context = closeout(number, draft);
+        expect(evaluate(required['runs-on'], context)).toEqual([
           'self-hosted',
           draft ? 'it-inventory-light' : 'it-inventory-heavy',
         ]);
+        expect(evaluate(required['timeout-minutes'], context)).toBe(40);
+        expect(evaluate(browserFlag, context)).toBe('0');
+      }
     }
+    const pr62 = closeout(62);
+    const withPullRequest = (overrides) => ({
+      ...pr62,
+      event: { pull_request: { ...pr62.event.pull_request, ...overrides } },
+    });
     for (const context of [
-      { ...closeout(62), event_name: 'pull_request_target' },
-      { ...closeout(62), event_name: 'workflow_dispatch' },
-      { ...closeout(62), event_name: 'push' },
-      { ...closeout(62), repository: 'other/IT-Inventory-System' },
-      {
-        ...closeout(62),
-        event: {
-          pull_request: {
-            ...closeout(62).event.pull_request,
-            head: { repo: { full_name: 'fork/IT-Inventory-System' } },
-          },
-        },
-      },
-    ])
+      { ...pr62, event_name: 'pull_request_target' },
+      { ...pr62, event_name: 'workflow_dispatch' },
+      { ...pr62, event_name: 'push' },
+      { ...pr62, repository: 'other/IT-Inventory-System' },
+      withPullRequest({
+        head: { repo: { full_name: 'fork/IT-Inventory-System' } },
+      }),
+    ]) {
       expect(evaluate(required['runs-on'], context)).toEqual([
         'self-hosted',
         'it-inventory-heavy',
       ]);
+      expect(evaluate(required['timeout-minutes'], context)).toBe(40);
+      expect(evaluate(browserFlag, context)).toBe('0');
+    }
+    for (const context of [
+      withPullRequest({ state: 'closed' }),
+      withPullRequest({ state: undefined }),
+      withPullRequest({ draft: undefined }),
+      withPullRequest({ draft: 'false' }),
+      withPullRequest({ number: undefined }),
+      withPullRequest({ number: null }),
+      withPullRequest({ head: { repo: {} } }),
+    ]) {
+      expect(evaluate(required['timeout-minutes'], context)).toBe(40);
+      expect(evaluate(browserFlag, context)).toBe('0');
+    }
   });
 
   it('pins every application Node setup to the checked-out exact version', () => {
@@ -447,7 +522,7 @@ describe('disposable local runner workflow contracts', () => {
     expect(() =>
       auditWorkflowRouting(
         'ci.yml',
-        `jobs:\n  required:\n    runs-on: ${closeoutRouting}\n  sibling:\n    runs-on: ${closeoutRouting}\n`,
+        `${ci}  sibling:\n    runs-on: ${closeoutRouting}\n`,
       ),
     ).toThrow('ci.yml:sibling');
     expect(() =>
@@ -456,6 +531,74 @@ describe('disposable local runner workflow contracts', () => {
         `jobs:\n  required:\n    runs-on: ${closeoutRouting}\n    uses: owner/repo/.github/workflows/ci.yml@main\n`,
       ),
     ).toThrow('unexamined reusable workflow job');
+  });
+
+  it('rejects a broadened hosted deadline or that deadline on another job', () => {
+    for (const deadline of [
+      '60',
+      closeoutDeadline.replace("github.event_name == 'pull_request' && ", ''),
+      closeoutDeadline.replace(
+        `contains(fromJSON('["62","64","65","66","67"]'), toJSON(github.event.pull_request.number)) && `,
+        '',
+      ),
+      closeoutDeadline.replace('"62","64"', '"62","63","64"'),
+      closeoutDeadline.replace(
+        'toJSON(github.event.pull_request.number)',
+        'github.event.pull_request.number',
+      ),
+      closeoutDeadline.replace(
+        "github.repository == 'PHead2001/IT-Inventory-System' && ",
+        '',
+      ),
+      closeoutDeadline.replace(
+        'github.event.pull_request.head.repo.full_name == github.repository && ',
+        '',
+      ),
+      closeoutDeadline.replace(
+        "toJSON(github.event.pull_request.draft) == 'false' && ",
+        '',
+      ),
+      closeoutDeadline.replace(
+        " && github.event.pull_request.state == 'open'",
+        '',
+      ),
+      closeoutDeadline.replace(isolatedRoomNumbers, closeoutNumbers),
+      closeoutDeadline.replace('&& 80', '&& 81'),
+      closeoutDeadline.replace('|| 60', '|| 61'),
+      closeoutDeadline.replace('|| 40', '|| 60'),
+    ])
+      expect(() =>
+        auditWorkflowRouting('ci.yml', ci.replace(closeoutDeadline, deadline)),
+      ).toThrow('ci.yml:required: unapproved hosted deadline');
+    expect(() =>
+      auditWorkflowRouting(
+        'ci.yml',
+        `${ci}  sibling:\n    runs-on: [self-hosted, it-inventory-light]\n    timeout-minutes: ${closeoutDeadline}\n`,
+      ),
+    ).toThrow('ci.yml:sibling: hosted deadline outside reviewed job');
+  });
+
+  it('rejects a broadened room-isolation flag or a flag outside the browser step', () => {
+    for (const expression of [
+      '1',
+      roomFlagExpression.replace(isolatedRoomNumbers, closeoutNumbers),
+      roomFlagExpression.replace(` && ${openReadyPr}`, ''),
+    ])
+      expect(() =>
+        auditWorkflowRouting(
+          'ci.yml',
+          ci.replace(roomFlagExpression, expression),
+        ),
+      ).toThrow('ci.yml:required: unapproved browser room isolation');
+    expect(() =>
+      auditWorkflowRouting('ci.yml', ci.replace('id: e2e', 'id: other')),
+    ).toThrow('ci.yml:required: unapproved browser room isolation');
+    expect(() =>
+      auditWorkflowRouting(
+        'ci.yml',
+        ci.replace('  TESTED_SHA:', `  ${roomFlag}: '1'\n  TESTED_SHA:`),
+      ),
+    ).toThrow('ci.yml: room isolation outside reviewed step');
   });
 
   it('accepts fixed normal profiles for a new workflow but rejects an added hosted sibling job', () => {
@@ -650,7 +793,9 @@ describe('disposable local runner workflow contracts', () => {
       NEXT_PUBLIC_SUPABASE_URL: 'http://127.0.0.1:1',
       APP_ENV: 'ci',
     });
-    expect(steps.find((step) => step.id === 'e2e').env).toBeUndefined();
+    expect(steps.find((step) => step.id === 'e2e').env).toEqual({
+      [roomFlag]: roomFlagExpression,
+    });
     expect(workflow.jobs.required.environment).toBeUndefined();
     expect(JSON.stringify(workflow.jobs.required)).not.toContain('secrets.');
     expect(workflow.jobs.required.needs).toEqual(['reuse_evidence']);

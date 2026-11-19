@@ -11,7 +11,7 @@ vi.mock('@/lib/auth/session.server', () => ({
   }),
 }));
 vi.mock('@/features/inventory/queries.server', () => ({
-  getQuantityDetail: async (): Promise<QuantityDetail> => ({
+  getQuantityDetail: vi.fn(async (): Promise<QuantityDetail> => ({
     item: {
       id: 'item',
       name: 'Cable',
@@ -34,7 +34,7 @@ vi.mock('@/features/inventory/queries.server', () => ({
       reorderThreshold: null,
       stockState: 'disabled',
     },
-  }),
+  })),
   getCategories: async () => [],
   getLocations: async () => [],
   getQuantityArchiveReview: vi.fn(),
@@ -144,3 +144,53 @@ it('passes typed server file state while keeping core detail usable on unavailab
     Page({ params: Promise.resolve({ id: parentId }) }),
   ).rejects.toThrow('Membership denied');
 });
+
+it.each([
+  [false, '25', 30, 'needs_restocking', '5 below threshold'],
+  [false, '30', 30, 'needs_restocking', 'At threshold'],
+  [false, '0', 0, 'out_of_stock', 'At threshold'],
+  [false, '31', 30, 'in_stock', null],
+  [false, '0', null, 'disabled', null],
+  [true, '0', 30, 'needs_restocking', null],
+] as const)(
+  'shows current shortfall only for eligible active detail (archived %s, available %s, threshold %s)',
+  async (
+    archived,
+    availableQuantity,
+    reorderThreshold,
+    stockState,
+    expected,
+  ) => {
+    const { getQuantityDetail } =
+      await import('@/features/inventory/queries.server');
+    const baseline = (await getQuantityDetail('item'))!;
+    vi.mocked(getQuantityDetail).mockResolvedValueOnce({
+      ...baseline,
+      item: { ...baseline.item, archived, reorderThreshold },
+      stockSummary: {
+        ...baseline.stockSummary,
+        availableQuantity,
+        assignedQuantity: '0',
+        ownedQuantity: availableQuantity,
+        reorderThreshold,
+        stockState,
+      },
+    });
+    const view = render(
+      await QuantityPage({ params: Promise.resolve({ id: 'item' }) }),
+    );
+    if (expected === null)
+      expect(view.container).not.toHaveTextContent(
+        /below threshold|At threshold/,
+      );
+    else expect(screen.getByText(new RegExp(expected))).toBeVisible();
+    if (stockState === 'in_stock')
+      expect(screen.getByText(/Above threshold/)).toBeVisible();
+    if (archived)
+      expect(view.container).not.toHaveTextContent(
+        /Needs restocking|Out of stock/,
+      );
+    if (reorderThreshold === null)
+      expect(screen.getByText('Monitoring disabled')).toBeVisible();
+  },
+);

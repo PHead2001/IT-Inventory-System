@@ -144,6 +144,7 @@ export function DetailTasks(props: {
       onRefresh={() => router.refresh()}
       taskIntent={taskIntent}
       recordIdentity={(quantity ? 'quantity:' : 'asset:') + entity.id}
+      recordName={entity.name}
       context={
         <div className="text-sm">
           <p className="font-semibold break-words">

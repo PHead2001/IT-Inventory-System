@@ -215,6 +215,51 @@ it.each([0, 123.5])(
     expect(jobs[0].skipTransition).not.toHaveBeenCalled();
   },
 );
+it('gives every System crossfade its full duration when native ready follows a stale paint timestamp', async () => {
+  const { jobs, animate } = native();
+  const lastFrame = 1126;
+  const readyAt = 1240;
+  vi.spyOn(document, 'timeline', 'get').mockReturnValue({
+    currentTime: lastFrame,
+  } as DocumentTimeline);
+  const now = vi.spyOn(performance, 'now').mockReturnValue(readyAt);
+
+  revealTheme({ apply: () => {}, changed: true, automatic: true });
+  now.mockClear();
+  jobs[0].update();
+  jobs[0].updated.resolve();
+  jobs[0].ready.resolve();
+  await Promise.resolve();
+
+  expect(animate.mock.results.length).toBeGreaterThan(1);
+  for (const [index, result] of animate.mock.results.entries()) {
+    expect((result.value as Animation).startTime).toBe(readyAt);
+    expect(animate.mock.calls[index][1].duration).toBe(180);
+  }
+  expect(now).toHaveBeenCalledOnce();
+  jobs[0].finished.resolve();
+  await Promise.resolve();
+  expect(jobs[0].skipTransition).not.toHaveBeenCalled();
+});
+it.each([NaN, Infinity, -Infinity])(
+  'applies System intent without animation when the readiness timestamp is %s',
+  async (readyAt) => {
+    const { jobs, animate } = native();
+    vi.spyOn(performance, 'now').mockReturnValue(readyAt);
+    const apply = vi.fn();
+    revealTheme({ apply, changed: true, automatic: true });
+    jobs[0].update();
+    jobs[0].updated.resolve();
+    jobs[0].ready.resolve();
+    await Promise.resolve();
+
+    expect(animate).not.toHaveBeenCalled();
+    expect(jobs[0].skipTransition).toHaveBeenCalledOnce();
+    expect(apply).toHaveBeenCalled();
+    expect(frames.pending.size).toBe(0);
+    expect(document.querySelector('[data-theme-region]')).toBeNull();
+  },
+);
 it.each([null, undefined, NaN, Infinity, -Infinity, '100'])(
   'applies intent and retires the lease when the document epoch is %s',
   async (epoch) => {
