@@ -1,6 +1,7 @@
 'use client';
 import { afterTransitionCapture } from '@/components/forms/transition-capture';
 import {
+  useCallback,
   useEffect,
   useLayoutEffect,
   useId,
@@ -138,6 +139,13 @@ export function RoomToolbar({
 }) {
   const [open, setOpen] = useState(false);
   const [help, setHelp] = useState(false);
+  const pendingDismissal = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const cancelDismissal = useCallback(() => {
+    if (pendingDismissal.current !== null) {
+      clearTimeout(pendingDismissal.current);
+      pendingDismissal.current = null;
+    }
+  }, []);
   const host = useRef<HTMLDivElement>(null);
   const panel = useRef<HTMLDivElement>(null);
   const toolbar = useRef<HTMLDivElement>(null);
@@ -237,6 +245,7 @@ export function RoomToolbar({
     };
   }, [open, onOverlayChange]);
   const close = (restore = true) => {
+    cancelDismissal();
     setOpen(false);
     setHelp(false);
     if (restore) more.current?.focus({ preventScroll: true });
@@ -249,21 +258,29 @@ export function RoomToolbar({
         ?.querySelector<HTMLButtonElement>('button')
         ?.focus({ preventScroll: true }),
     );
-    const outside = (event: PointerEvent) => {
+    const outside = (event: MouseEvent) => {
       if (
         event.target instanceof Node &&
         !host.current?.contains(event.target)
       ) {
-        setOpen(false);
-        setHelp(false);
+        // An inline panel changes the canvas position when removed. Keep it
+        // mounted through down/up and every click handler, including native
+        // scene handlers that stop propagation. A microtask is too early.
+        cancelDismissal();
+        pendingDismissal.current = setTimeout(() => {
+          pendingDismissal.current = null;
+          setOpen(false);
+          setHelp(false);
+        }, 0);
       }
     };
-    document.addEventListener('pointerdown', outside, true);
+    document.addEventListener('click', outside, true);
     return () => {
       cancelFocus();
-      document.removeEventListener('pointerdown', outside, true);
+      cancelDismissal();
+      document.removeEventListener('click', outside, true);
     };
-  }, [open, onOverlayChange]);
+  }, [open, onOverlayChange, cancelDismissal]);
   useEffect(() => {
     const escape = (event: KeyboardEvent) => {
       if (
@@ -281,6 +298,7 @@ export function RoomToolbar({
       // default action. Toolbars inside that same dialog still handle their map.
       if (modal && host.current?.closest(ownerSelector) !== modal) return;
       event.preventDefault();
+      cancelDismissal();
       setOpen(false);
       setHelp(false);
       if (active) {
@@ -290,7 +308,7 @@ export function RoomToolbar({
     };
     document.addEventListener('keydown', escape);
     return () => document.removeEventListener('keydown', escape);
-  }, [active, open, onActiveChange, interact]);
+  }, [active, open, onActiveChange, interact, cancelDismissal]);
   const control = (kind: ViewCommandKind, label: string) => (
     <Button key={kind} variant="outline" onClick={() => onCommand(kind)}>
       {label}
@@ -375,6 +393,7 @@ export function RoomToolbar({
           aria-expanded={open}
           aria-controls={panelId}
           onClick={() => {
+            cancelDismissal();
             setOpen(!open);
             setHelp(false);
           }}
