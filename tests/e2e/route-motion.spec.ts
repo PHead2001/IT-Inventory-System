@@ -129,8 +129,14 @@ type Proof = {
     duration: number;
     delay: number;
   }>;
+  logout?: {
+    frameAt: number;
+    controlCurrent: boolean;
+    submittedAt: number | null;
+  };
   cls: number;
 };
+type BrowserProof = Proof & { onRunningFrame?: (at: number) => void };
 const denialWindows = new WeakMap<
   Page,
   {
@@ -174,6 +180,7 @@ test.afterEach(async ({ page }, info) => {
           .slice(-3)
           .map((entry) => ({ ...entry, effects: entry.effects.slice(0, 6) })),
         cancellations: proof.cancellations.slice(-6),
+        logout: proof.logout,
       };
     })
     .catch(() => null);
@@ -188,11 +195,11 @@ test.afterEach(async ({ page }, info) => {
   );
 });
 
-/** Passive native/WAAPI observation; React still invokes and commits transitions. */
+/** Observe native/WAAPI effects while React invokes and commits transitions. */
 async function observeMotion(page: Page, unsupported = false) {
   await page.addInitScript(
     ({ unsupported }) => {
-      const proof: Proof = {
+      const proof: BrowserProof = {
         transitions: [],
         cancellations: [],
         snapshotSkips: [],
@@ -525,6 +532,9 @@ async function observeMotion(page: Page, unsupported = false) {
             // Qualify the owned real animation in this browser frame. Passing
             // evidence avoids a second Node-to-browser validation round trip.
             sendReady(evidence);
+            const run = proof.onRunningFrame;
+            delete proof.onRunningFrame;
+            run?.(evidence.at);
           }
           if (!entry.finished) requestAnimationFrame(frame);
         };
@@ -1140,6 +1150,51 @@ async function atNextNativeReady(page: Page, run: () => Promise<void>) {
     run,
   );
 }
+
+/** Use the mounted form's native activation during the observed frame. Locator
+ * actionability runs beforehand so it cannot consume the animation window. */
+async function armLogoutDuringNativeFrame(signOut: Locator) {
+  await expect(signOut).toBeVisible();
+  await expect(signOut).toBeEnabled();
+  await signOut.click({ trial: true });
+  await signOut.evaluate((button) => {
+    if (!(button instanceof HTMLButtonElement) || !button.form)
+      throw new Error('Missing native logout submit button');
+    const form = button.form;
+    const proof = (window as Window & { routeMotionProof?: BrowserProof })
+      .routeMotionProof;
+    if (!proof || proof.onRunningFrame)
+      throw new Error('Cannot arm logout on the current native observer');
+    proof.onRunningFrame = (frameAt) => {
+      const controlCurrent =
+        button.isConnected &&
+        button.form === form &&
+        button.type === 'submit' &&
+        !button.matches(':disabled') &&
+        !button.closest('[hidden], [inert]') &&
+        button.getClientRects().length > 0 &&
+        getComputedStyle(button).visibility === 'visible';
+      const observation: NonNullable<Proof['logout']> = {
+        frameAt,
+        controlCurrent,
+        submittedAt: null,
+      };
+      proof.logout = observation;
+      if (!controlCurrent) return;
+      const submitted = (event: SubmitEvent) => {
+        if (event.submitter === button)
+          observation.submittedAt = performance.now();
+      };
+      form.addEventListener('submit', submitted, true);
+      try {
+        button.click();
+      } finally {
+        form.removeEventListener('submit', submitted, true);
+      }
+    };
+  });
+}
+
 async function navigationLink(page: Page, name: string) {
   const navigation = page.getByRole('navigation', { name: 'Main navigation' });
   if (!(await navigation.isVisible())) {
@@ -1260,11 +1315,27 @@ for (const width of [1280, 390]) {
     await auditLogin(page);
     await resetProof(page);
     const originalDocument = await page.evaluate(() => performance.timeOrigin);
+    await armLogoutDuringNativeFrame(
+      page.getByRole('button', { name: 'Sign out', exact: true }),
+    );
+    const origin = new URL(page.url()).origin;
+    const logoutResponse = page.waitForResponse(
+      (response) =>
+        response.url() === `${origin}/api/auth/logout` &&
+        response.request().method() === 'POST',
+    );
+    void logoutResponse.catch(() => {});
     const { completed } = await atNextNativeReady(page, async () => {
-      await page.getByRole('button', { name: 'Sign out', exact: true }).click();
+      const { logout } = await proof(page);
+      expect(logout?.controlCurrent).toBe(true);
+      expect(logout?.submittedAt).toBeGreaterThanOrEqual(
+        logout?.frameAt ?? Infinity,
+      );
     });
     await (await navigationLink(page, 'History')).click();
     await completed;
+    const response = await logoutResponse;
+    expect(response.ok()).toBe(true);
     await expect(page).toHaveURL(/\/login$/);
     expect(await page.evaluate(() => performance.timeOrigin)).toBe(
       originalDocument,
@@ -1275,11 +1346,14 @@ for (const width of [1280, 390]) {
     );
     await assertNoNativeSnapshots(page);
     const cancelled = await proof(page);
-    expect(cancelled.snapshotSkips.some((entry) => entry.whileActive)).toBe(
-      true,
-    );
+    const submittedAt = cancelled.logout?.submittedAt ?? Infinity;
+    expect(
+      cancelled.snapshotSkips.some(
+        (entry) => entry.whileActive && entry.at >= submittedAt,
+      ),
+    ).toBe(true);
     await info.attach('logout-during-native-route-animation', {
-      body: JSON.stringify(cancelled),
+      body: JSON.stringify({ ...cancelled, logoutStatus: response.status() }),
       contentType: 'application/json',
     });
   });
