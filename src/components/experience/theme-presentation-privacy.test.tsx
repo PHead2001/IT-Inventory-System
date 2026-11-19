@@ -448,8 +448,14 @@ it.each(['before native ready', 'after native ready'] as const)(
     const added = vi.spyOn(window, 'addEventListener');
     const animate = vi.fn((_frames, options) => ({
       effect: { pseudoElement: options.pseudoElement },
+      playState: 'running',
+      startTime: null,
       cancel: vi.fn(),
     }));
+    Object.defineProperty(document, 'timeline', {
+      configurable: true,
+      value: { currentTime: 100 },
+    });
     Object.defineProperty(document.documentElement, 'animate', {
       configurable: true,
       value: animate,
