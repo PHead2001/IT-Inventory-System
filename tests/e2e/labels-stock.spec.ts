@@ -1066,7 +1066,17 @@ test('mixed queue retains copies across navigation, decodes quantity QR, and pri
   await expect(
     page.getByText('Holdings: IT Closet / Left Storage / Shelf 1 / 1A: 3'),
   ).toBeVisible();
+  const additionToast = page.locator('[data-feedback-card]').filter({
+    has: page.getByRole('status').filter({
+      hasText: /^Added 1 label to the queue\.$/,
+    }),
+  });
   await addSearchRecord(page, quantityName);
+  await expect(additionToast).toBeVisible();
+  await additionToast
+    .getByRole('button', { name: 'Dismiss', exact: true })
+    .click();
+  await expect(additionToast).toHaveCount(0);
   const results = page.getByRole('region', { name: 'Label search results' });
   await expect(
     results.getByRole('button', { name: 'In queue', exact: true }),
@@ -1093,6 +1103,7 @@ test('mixed queue retains copies across navigation, decodes quantity QR, and pri
     results.getByText('2 selected records', { exact: true }),
   ).toBeVisible();
   await results.getByRole('button', { name: 'Add selected to queue' }).click();
+  await expect(additionToast).toBeVisible();
   await expect(
     results.getByText(
       `Added: ${assetName} (Individual asset). Already present: ${quantityName} (Quantity item). Unavailable to this account: none.`,
@@ -1100,10 +1111,8 @@ test('mixed queue retains copies across navigation, decodes quantity QR, and pri
     ),
   ).toBeVisible();
   await expect(
-    results
-      .getByRole('status')
-      .filter({ hasText: 'Already present: ' + quantityName }),
-  ).toHaveCount(1);
+    results.getByRole('status').filter({ hasText: 'Already present:' }),
+  ).toHaveText(`Already present: ${quantityName} (Quantity item).`);
   await expect(
     results.getByText('0 selected records', { exact: true }),
   ).toBeVisible();
