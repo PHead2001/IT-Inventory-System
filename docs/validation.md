@@ -32,10 +32,11 @@ failure is intentional uncertified feedback, not a defect to repair with a push.
 
 Foundation CI handles opened, reopened,
 synchronize, ready_for_review and converted_to_draft events, cancelling superseded
-runs for that PR. A draft uses a light runner and ends the stable `required` check
-with an explicit uncertified failure before dependency installation. Missing or
-malformed PR state is also rejected. Drafts emit no full-completion or executed
-workflow-source marker and cannot supply reusable success evidence. Marking ready
+runs for that PR. By default a draft uses a light runner and ends the stable
+`required` check with an explicit uncertified failure before dependency
+installation. Missing or malformed PR state is also rejected. Drafts emit no
+full-completion or executed workflow-source marker and cannot supply reusable
+success evidence. Marking ready
 for review runs the full heavy gate for the current SHA; converting back to draft
 invalidates certification even when the head SHA is unchanged.
 
@@ -43,15 +44,19 @@ For the temporary closeout of PRs 62, 64, 65, 66 and 67, Foundation CI routes on
 the `required` job to GitHub-hosted `ubuntu-24.04` when the event is `pull_request`
 in `PHead2001/IT-Inventory-System` and the head repository matches. This includes
 drafts, whose existing uncertified decision still applies. Every other case uses
-the existing light/heavy routing. The forty-minute deadline, validation steps,
-permissions, cleanup, main delivery and sibling jobs retain their existing gates.
+the existing light/heavy routing. Only the open, ready PR 67 from the matching
+repository receives a fifty-minute hosted job deadline. Its preceding hosted run
+reached the forty-minute job limit while Chromium was still running. Other
+required jobs retain forty minutes. Validation steps, permissions, cleanup,
+the two-minute failure artifact limit, main delivery and sibling jobs retain
+their existing gates.
 
 Ready PRs retain fresh locked installation, the offline application build, clean
 database start/reset/tests/type comparison, browser preparation, backend-specific
 E2E build/browser execution and cleanup. Both builds are intentional: the offline
 build proves database independence, and the E2E build binds runtime public backend
-values. The required-job deadline is forty minutes. This source deadline does not
-establish the installed runner's separate job deadline or measured job duration.
+values. The installed runner's deadline and measured job duration require separate
+evidence.
 
 Main retains its conservative exact-tree, latest-attempt reuse proof and immediate
 reverification of all mandatory evidence steps and the workflow-source marker. Missing or invalid evidence
@@ -63,7 +68,7 @@ clean worktree, local/remote parity or applicable preview/visual acceptance.
 
 ## Browser scheduling and interruption diagnostics
 
-The room spec is named `00-room.spec.ts` to start its unchanged sequential file
+The room spec is named `00-room.spec.ts` to start its remaining sequential file
 journeys early in the existing two-worker parallel phase. Pinned Playwright's
 collector sorts files lexically and dispatches those file groups in order. Shared
 fixtures retain the exclusive phase; focused runs retain one worker. Discovery
@@ -71,11 +76,23 @@ regressions require identical test coverage in both modes and room-first orderin
 This targets the observed late single-worker tail; it does not establish a measured
 end-to-end saving or a pass within the existing job deadline.
 
+The three global occupancy snapshot journeys and the desktop and phone drawer
+orbit journeys run in `room-occupancy-exclusive.spec.ts`. The occupancy cases
+read shared location totals, so concurrently owned inventory mutations can change
+their observations. The hosted retry reached different drawer orbit sides before
+the same sixty-second test limit. The room journeys now run before concurrent
+browser work while retaining the original time limits, native interactions and
+assertions. Shared helpers register isolated fixture lifecycles per spec.
+Discovery verifies all 358 cases remain scheduled once, with exactly five room
+cases exclusive and the remaining 29 in the first parallel file. The revised
+browser duration still requires hosted execution.
+
 Failed attempts publish bounded source coordinates immediately, before final
 reporting, so process cancellation and unavailable artifact uploads still leave
-an assertion-site pointer. Only this known test file's source coordinates are
-retained from at most three errors per attempt and twenty attempts. Test titles,
-assertion messages, expected/actual values, requests and attachments are excluded.
+an assertion-site pointer. Only the two room specs and their shared support file
+contribute source coordinates from at most three errors per attempt and twenty
+attempts. Test titles, assertion messages, expected/actual values, requests and
+attachments are excluded.
 The final report retains its existing bounded summary and omission count.
 
 The spatial interruption journey controls time only around transient flight/reveal

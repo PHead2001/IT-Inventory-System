@@ -1,5 +1,6 @@
 import { isPrivacyGenerationRead } from './privacy-read-request';
-import { expect, test, type Page } from '@playwright/test';
+import { expect, test, type Page, type Route } from '@playwright/test';
+import { captureForwardedResponse } from './capture-forwarded-response';
 import fixture from '../fixtures/auth.json' with { type: 'json' };
 import { acceptanceFixtures } from './audit-three-acceptance-fixtures';
 import { openRecordTask } from './record-task-controls';
@@ -97,17 +98,33 @@ test('real logout survives a first cleanup read failure and a hard reload before
 }) => {
   await signIn(page);
   await seedAndBlockFirstRead(page);
-  const signedOut = page.waitForResponse(
-    (response) =>
-      new URL(response.url()).pathname === '/api/auth/logout' &&
-      response.request().method() === 'POST',
-  );
+  let received!: (
+    result: Awaited<ReturnType<typeof captureForwardedResponse>>,
+  ) => void;
+  let failed!: (error: unknown) => void;
+  const signedOut = new Promise<
+    Awaited<ReturnType<typeof captureForwardedResponse>>
+  >((resolve, reject) => {
+    received = resolve;
+    failed = reject;
+  });
+  const captureLogout = async (route: Route) => {
+    if (route.request().method() !== 'POST') return route.continue();
+    try {
+      received(await captureForwardedResponse(route));
+    } catch (error) {
+      failed(error);
+      throw error;
+    }
+  };
+  await page.route('**/api/auth/logout', captureLogout);
   await page.getByRole('button', { name: 'Sign out', exact: true }).click();
   // Callback invalidation can expose a privacy-check alert before logout settles.
   // Confirm the actual logout receipt before checking its retained cookie.
   const response = await signedOut;
-  expect(response.status()).toBe(200);
-  const receipt = await response.json();
+  await page.unroute('**/api/auth/logout', captureLogout);
+  expect(response.status).toBe(200);
+  const receipt = JSON.parse(response.body.toString('utf8'));
   expect(receipt).toEqual({
     ok: true,
     logoutGeneration: expect.any(String),
