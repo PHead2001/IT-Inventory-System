@@ -803,7 +803,7 @@ interfaceTest(
     await expect(summary).toBeFocused();
     await summary.press('Enter');
     await expect(disclosure).toHaveAttribute('open', '');
-    const exact = disclosure.locator(':scope > p').first();
+    const exact = disclosure.getByRole('paragraph');
     await expect(exact).toBeVisible();
     await expect(exact).toContainText(/UTC|GMT/);
     expect(displayedInstant((await exact.textContent())!)).toBe(

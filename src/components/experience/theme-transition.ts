@@ -392,11 +392,19 @@ export function revealTheme({
           stop();
           return;
         }
-        const epoch = document.timeline?.currentTime;
-        if (typeof epoch !== 'number' || !Number.isFinite(epoch)) {
+        const frameTime = document.timeline?.currentTime;
+        if (typeof frameTime !== 'number' || !Number.isFinite(frameTime)) {
           stop();
           return;
         }
+        // The default timeline and performance.now() share a time origin.
+        // A stale frame timestamp can consume the short System fade before paint.
+        const readyTime = automatic ? performance.now() : frameTime;
+        if (!Number.isFinite(readyTime)) {
+          stop();
+          return;
+        }
+        const epoch = Math.max(frameTime, readyTime);
         for (const { name, rect } of captured) {
           const pseudo = `::view-transition-new(${name})`;
           const keyframes = automatic

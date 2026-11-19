@@ -1,5 +1,6 @@
 'use client';
 import { MagneticVisual } from '@/components/experience/magnetic-visual';
+import { RestockShortfall } from '@/features/inventory/components/restock-shortfall';
 import { PeekLink } from '@/features/peek/peek-link';
 import { CountTicker } from '@/components/experience/count-ticker';
 import { ListEntrance } from '@/components/experience/list-feedback';
@@ -33,7 +34,7 @@ export function DashboardSnapshotView({
   params,
 }: {
   initialSnapshot: DashboardSnapshot;
-  params: { page?: string };
+  params: { page?: string; view?: string };
 }) {
   const [snapshot, setSnapshot] = useState(initialSnapshot);
 
@@ -48,7 +49,9 @@ export function DashboardSnapshotView({
   function refresh() {
     startTask(async () => {
       try {
-        const response = await refreshDashboard(result.page);
+        const response = await (params.view === 'low-stock'
+          ? refreshDashboard(result.page, 'low-stock')
+          : refreshDashboard(result.page));
 
         if (!response.ok) {
           setFailed(true);
@@ -328,6 +331,10 @@ export function DashboardSnapshotView({
                     <br />
                     Total <strong>{row.ownedQuantity}</strong> · Threshold{' '}
                     <strong>{row.reorderThreshold}</strong>
+                    <RestockShortfall
+                      threshold={row.reorderThreshold}
+                      available={row.availableQuantity}
+                    />
                   </p>
 
                   <strong

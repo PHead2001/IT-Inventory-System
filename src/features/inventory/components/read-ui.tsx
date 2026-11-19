@@ -1,4 +1,5 @@
 import { CountTicker } from '@/components/experience/count-ticker';
+import { RestockShortfall } from './restock-shortfall';
 import { ListEntrance } from '@/components/experience/list-feedback';
 import { PeekLink } from '@/features/peek/peek-link';
 import { SpringDisclosure } from '@/components/experience/spring-disclosure';
@@ -319,8 +320,12 @@ export function InventoryRows({
                       ? 'Out of stock'
                       : 'Needs restocking'}{' '}
                     · Available in storage{' '}
-                    {row.availableQuantity ?? row.recordedTotal} / threshold{' '}
+                    {row.availableQuantity ?? 'unavailable'} / threshold{' '}
                     {row.reorderThreshold}
+                    <RestockShortfall
+                      threshold={row.reorderThreshold}
+                      available={row.availableQuantity}
+                    />
                   </span>
                 )}
               {row.customPreview && row.customPreview.answers.length > 0 && (

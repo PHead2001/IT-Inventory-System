@@ -235,17 +235,20 @@ describe('browser scheduling', () => {
       new Set(['chromium']),
     );
   }, 60_000);
-  it('keeps exactly the three global occupancy snapshot journeys exclusive', () => {
+  it('keeps exactly the five reviewed room journeys exclusive', () => {
     const titles = [
       'spatial reveal endpoints retain actual picking and labels across oblique, overhead, underside and panned views',
       'optional room counts reconcile with active leaf contents and refresh as uncached snapshots',
       '375px populated room shows every occupied target with passive badges and selected readable text',
+      'visible drawer labels remain distinct and clickable across desktop orbit views',
+      'visible drawer labels remain distinct and clickable across phone orbit views',
     ];
     const files = [
       'tests/e2e/00-room.spec.ts',
       'tests/e2e/room-occupancy-exclusive.spec.ts',
     ];
     const focused = discover(false, files);
+    expect(focused).toHaveLength(34);
     // Scheduled discovery also expands the exclusive dependency project.
     // Compare the requested room cases; the full-suite parity check covers all files.
     const scheduled = discover(true, files).filter((entry) =>
@@ -267,7 +270,7 @@ describe('browser scheduling', () => {
     const remaining = scheduled.filter(
       (entry) => entry.file === '00-room.spec.ts',
     );
-    expect(remaining.length).toBeGreaterThan(0);
+    expect(remaining).toHaveLength(29);
     for (const entry of remaining)
       expect(entry.project).toBe('chromium-parallel');
     expect(new Set(focused.map((entry) => entry.project))).toEqual(

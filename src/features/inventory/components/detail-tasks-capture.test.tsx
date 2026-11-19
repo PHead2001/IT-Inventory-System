@@ -172,6 +172,9 @@ it.each([
     });
     try {
       fireEvent.click(screen.getByRole('button', { name: 'Close task' }));
+      expect(screen.getByRole('alertdialog')).toHaveAccessibleDescription(
+        'Your current task for Cable has unsaved entries.',
+      );
       fireEvent.click(
         screen.getByRole('button', { name: 'Stay with this task' }),
       );

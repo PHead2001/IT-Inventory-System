@@ -270,6 +270,7 @@ it('labels item-wide low stock while retaining the location holding quantity', (
           assetTag: null,
           serialNumber: null,
           recordedTotal: 3,
+          availableQuantity: '3',
           reorderThreshold: 4,
           stockState: 'needs_restocking',
         },
@@ -281,10 +282,89 @@ it('labels item-wide low stock while retaining the location holding quantity', (
   ).toBeVisible();
   expect(
     screen.getByText(
-      /Needs restocking · Available in storage 3 \/ threshold 4/,
+      /Needs restocking · Available in storage 3 \/ threshold 4 · 1 below threshold/,
     ),
   ).toBeVisible();
 });
+it.each([
+  ['25', 30, 'needs_restocking', 2, '5 below threshold'],
+  ['30', 30, 'needs_restocking', 2, 'At threshold'],
+  ['0', 0, 'out_of_stock', 0, 'At threshold'],
+] as const)(
+  'uses current item-wide availability %s for shortfall without changing the holding count',
+  (availableQuantity, reorderThreshold, stockState, quantity, expected) => {
+    render(
+      <InventoryRows
+        rows={[
+          {
+            kind: 'quantity',
+            id: 'item',
+            name: 'Cable',
+            categoryName: 'Cables',
+            status: 'active',
+            location: quantity ? location : null,
+            quantity,
+            assetTag: null,
+            serialNumber: null,
+            recordedTotal: null,
+            availableQuantity,
+            assignedQuantity: '0',
+            ownedQuantity: availableQuantity,
+            reorderThreshold,
+            stockState,
+          },
+        ]}
+      />,
+    );
+    expect(
+      screen.getByText(`${quantity} units`, { selector: '[data-count-final]' }),
+    ).toBeInTheDocument();
+    expect(screen.getByText(new RegExp(expected))).toBeVisible();
+  },
+);
+it.each([undefined, null])(
+  'does not invent availability %s from recorded totals or show active restock attention on archived rows',
+  (availableQuantity) => {
+    const row: InventoryResult = {
+      kind: 'quantity',
+      id: 'item',
+      name: 'Cable',
+      categoryName: 'Cables',
+      status: 'active',
+      location,
+      quantity: 2,
+      assetTag: null,
+      serialNumber: null,
+      recordedTotal: 100,
+      availableQuantity,
+      reorderThreshold: 30,
+      stockState: 'needs_restocking',
+    };
+    const view = render(<InventoryRows rows={[row]} />);
+    expect(
+      screen.getByText(/Available in storage unavailable \/ threshold 30/),
+    ).toBeVisible();
+    expect(view.container).not.toHaveTextContent(
+      /below threshold|At threshold|Above threshold/,
+    );
+    view.rerender(
+      <InventoryRows
+        rows={[
+          {
+            ...row,
+            status: 'archived',
+            quantity: 0,
+            location: null,
+            availableQuantity: '0',
+          },
+        ]}
+      />,
+    );
+    expect(view.container).not.toHaveTextContent(
+      /Needs restocking|Out of stock|below threshold|At threshold/,
+    );
+  },
+);
 it('shows per-definition photo and PDF counts without inventing file counts for other rows', () => {
   const base = {
     categoryName: 'Equipment',

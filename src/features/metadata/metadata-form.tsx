@@ -1,13 +1,30 @@
 'use client';
 import { useTransientFeedbackOwner } from '@/components/experience/transient-feedback';
 import type { FeedbackTicket } from '@/components/experience/transient-feedback-state';
+import { usePrivacyReadiness } from '@/components/auth/privacy-readiness';
+import { freshPresentationGrant } from '@/components/experience/presentation-privacy';
+import {
+  assignmentEpoch,
+  readAuthoritativeCleanupRevision,
+  readPrivacyRevocationRevision,
+  subscribeAssignmentInvalidation,
+  subscribeAuthoritativeCleanup,
+  subscribePrivacyRevocation,
+} from '@/features/scan/assign-batch';
 import { SpringDisclosure } from '@/components/experience/spring-disclosure';
 import {
   ConfirmedSuccess,
   useFeedbackOwner,
 } from '@/components/experience/confirmed-success';
 
-import { afterTransitionCapture } from '@/components/forms/transition-capture';
+import {
+  afterTransitionCapture,
+  observeTransitionCapture,
+} from '@/components/forms/transition-capture';
+import {
+  hasBlockingPresentationAncestor,
+  isCaptureInertOwner,
+} from '@/components/forms/transition-capture-boundary';
 import {
   LoadingReveal,
   LoadingSkeleton,
@@ -245,6 +262,174 @@ function displayComparisonValue(
   if (value && typeof value === 'object') return JSON.stringify(value);
   return readable(value) || '(empty)';
 }
+/** One explicit click owns this bounded continuation, never a later readmission. */
+function valuesFocusTicket(input: HTMLInputElement, current: () => boolean) {
+  let retired = false;
+  let captureEpoch = 0;
+  const owners = new Map<HTMLElement, number>();
+  const expected: {
+    node: HTMLElement;
+    epoch: number;
+    before: string | null;
+    after: string | null;
+  }[] = [];
+  const dispose: (() => void)[] = [];
+  const cancel = () => {
+    if (retired) return;
+    retired = true;
+    for (const stop of dispose.splice(0)) stop();
+  };
+  const visible = () => {
+    if (
+      !input.isConnected ||
+      hasBlockingPresentationAncestor(input) ||
+      input.closest('[aria-hidden="true"], details:not([open])') ||
+      input.ownerDocument.visibilityState === 'hidden'
+    )
+      return false;
+    for (
+      let node: HTMLElement | null = input;
+      node;
+      node = node.parentElement
+    ) {
+      const style = node.ownerDocument.defaultView?.getComputedStyle(node);
+      if (
+        style?.display === 'none' ||
+        style?.visibility === 'hidden' ||
+        style?.visibility === 'collapse'
+      )
+        return false;
+    }
+    return true;
+  };
+  const inspect = (records: MutationRecord[]) => {
+    for (const [index, record] of records.entries()) {
+      if (record.type === 'childList') {
+        if (
+          Array.from(record.removedNodes).some(
+            (node) => node === input || node.contains(input),
+          )
+        )
+          cancel();
+        continue;
+      }
+      const node = record.target as HTMLElement;
+      const attribute = record.attributeName!;
+      const next = records
+        .slice(index + 1)
+        .find(
+          (later) => later.target === node && later.attributeName === attribute,
+        );
+      const after = next ? next.oldValue : node.getAttribute(attribute);
+      const before = record.oldValue;
+      if (attribute === 'inert') {
+        const allowedIndex = expected.findIndex((entry) => entry.node === node);
+        const allowed = expected[allowedIndex];
+        if (
+          allowed?.epoch === captureEpoch &&
+          allowed.before === before &&
+          allowed.after === after
+        )
+          expected.splice(allowedIndex, 1);
+        else cancel();
+      } else if (
+        (attribute === 'hidden' && (before !== null || after !== null)) ||
+        (attribute === 'aria-hidden' &&
+          (before === 'true' || after === 'true')) ||
+        (attribute === 'open' &&
+          node.tagName === 'DETAILS' &&
+          (before === null || after === null))
+      )
+        cancel();
+      else if (attribute === 'style') {
+        const old = input.ownerDocument.createElement('span').style;
+        old.cssText = before ?? '';
+        if (
+          old.display === 'none' ||
+          old.visibility === 'hidden' ||
+          old.visibility === 'collapse'
+        )
+          cancel();
+      } else if (
+        attribute === 'class' &&
+        /(?:^|\s)(?:hidden|invisible|collapse)(?:\s|$)/.test(before ?? '')
+      )
+        cancel();
+    }
+    if (!visible()) cancel();
+  };
+  const observer = new MutationObserver(inspect);
+  for (let node: HTMLElement | null = input; node; node = node.parentElement)
+    observer.observe(node, {
+      attributes: true,
+      attributeFilter: [
+        'hidden',
+        'inert',
+        'aria-hidden',
+        'open',
+        'class',
+        'style',
+      ],
+      attributeOldValue: true,
+      childList: node !== input,
+    });
+  dispose.push(
+    () => observer.disconnect(),
+    subscribePrivacyRevocation(cancel),
+    subscribeAssignmentInvalidation(cancel),
+    subscribeAuthoritativeCleanup(cancel),
+  );
+  const capture = observeTransitionCapture(input.ownerDocument, (capturing) => {
+    const records = observer.takeRecords();
+    if (capturing) {
+      captureEpoch++;
+      for (
+        let node: HTMLElement | null = input;
+        node;
+        node = node.parentElement
+      ) {
+        if (!isCaptureInertOwner(node)) continue;
+        owners.set(node, captureEpoch);
+        if (
+          records.some(
+            (record) =>
+              record.target === node && record.attributeName === 'inert',
+          )
+        )
+          expected.push({ node, epoch: captureEpoch, before: null, after: '' });
+      }
+    } else {
+      for (const [node, epoch] of owners)
+        if (
+          records.some(
+            (record) =>
+              record.target === node && record.attributeName === 'inert',
+          )
+        )
+          expected.push({ node, epoch, before: '', after: null });
+      owners.clear();
+    }
+    inspect(records);
+  });
+  if (retired) capture();
+  else dispose.push(capture);
+  return {
+    cancel,
+    schedule() {
+      if (retired) return;
+      const release = afterTransitionCapture(input.ownerDocument, () => {
+        inspect(observer.takeRecords());
+        if (retired) return;
+        const accepted = current() && visible() && !input.matches(':disabled');
+        cancel();
+        if (accepted) input.focus();
+      });
+      if (retired) release();
+      else dispose.push(release);
+    },
+  };
+}
+
 export function MetadataForm({
   kind,
   categories,
@@ -297,6 +482,9 @@ export function MetadataForm({
     ticket: FeedbackTicket | null;
   } | null>(null);
   const creationReviewHeading = useRef<HTMLHeadingElement>(null);
+  const returnToValues = useRef<ReturnType<typeof valuesFocusTicket> | null>(
+    null,
+  );
   const [inputGeneration, setInputGeneration] = useState(0);
   const cancelRef = useRef<HTMLButtonElement>(null);
   const keepRef = useRef<HTMLButtonElement>(null);
@@ -346,6 +534,14 @@ export function MetadataForm({
   const [state, setState] = useState<MutationState | CustodyState | null>(null);
   const resetTask = useTaskReset();
   const canStartTask = useTaskInteraction();
+  const privacy = usePrivacyReadiness();
+  const {
+    ready: focusReady,
+    visible: focusVisible,
+    generation: focusGeneration,
+    revocationRevision: focusRevocation,
+    verifiedEpoch: focusEpoch,
+  } = privacy;
   const taskCompleted = Boolean(state?.ok && (resetTask || !creating));
   const [openingQuantity, setOpeningQuantity] = useState('1');
   const [openingReason, setOpeningReason] = useState('');
@@ -361,6 +557,32 @@ export function MetadataForm({
     excludeId: kind === 'asset' ? latest?.id : undefined,
     enabled: kind === 'asset' && !preview && !actorStale && !taskCompleted,
   });
+  useLayoutEffect(() => {
+    const ticket = returnToValues.current;
+    if (!ticket || review) return;
+    ticket.schedule();
+    return () => {
+      ticket.cancel();
+      if (returnToValues.current === ticket) returnToValues.current = null;
+    };
+  }, [
+    review,
+    preview,
+    actorStale,
+    pending,
+    uncertain,
+    taskCompleted,
+    discardOpen,
+    canStartTask,
+    scopeId,
+    focusReady,
+    focusVisible,
+    focusGeneration,
+    focusRevocation,
+    focusEpoch,
+    latest?.id,
+    kind,
+  ]);
   const recoveryEnabled = creating && !preview;
   const editRecoveryEnabled = !creating && !preview;
   const editRecovery = useRef<EditEnvelope | null>(null);
@@ -3294,9 +3516,46 @@ export function MetadataForm({
               variant="outline"
               disabled={pending || uncertain}
               onClick={() => {
+                if (!canStartTask()) return;
+                const form = formRef.current;
+                const input = form?.elements.namedItem(
+                  scopeId + '-metadata-name',
+                );
+                returnToValues.current?.cancel();
+                const original = {
+                  generation: privacy.generation,
+                  revocation: readPrivacyRevocationRevision(),
+                  epoch: assignmentEpoch(),
+                  cleanup: readAuthoritativeCleanupRevision(),
+                };
+                returnToValues.current =
+                  form &&
+                  input instanceof HTMLInputElement &&
+                  freshPresentationGrant(privacy)
+                    ? valuesFocusTicket(
+                        input,
+                        () =>
+                          !preview &&
+                          !actorStale &&
+                          !pending &&
+                          !uncertain &&
+                          !taskCompleted &&
+                          !discardOpen &&
+                          canStartTask() &&
+                          form === formRef.current &&
+                          form.elements.namedItem(
+                            scopeId + '-metadata-name',
+                          ) === input &&
+                          freshPresentationGrant(privacy) &&
+                          privacy.generation === original.generation &&
+                          readPrivacyRevocationRevision() ===
+                            original.revocation &&
+                          assignmentEpoch() === original.epoch &&
+                          readAuthoritativeCleanupRevision() ===
+                            original.cleanup,
+                      )
+                    : null;
                 setReview(false);
-                if (creating)
-                  document.getElementById(scopeId + '-metadata-name')?.focus();
               }}
             >
               {creating ? 'Back to edit' : 'Edit values'}

@@ -232,3 +232,61 @@ it('retains each stat term and its exact accessible definition inside a stationa
       .closest('.experience-tilt'),
   ).toBeNull();
 });
+
+it('keeps an explicit detailed-stock refresh on the legacy report path', async () => {
+  mocks.refresh.mockResolvedValue({ ok: true, snapshot: initial });
+  render(
+    <DashboardSnapshotView
+      initialSnapshot={initial}
+      params={{ view: 'low-stock' }}
+    />,
+  );
+  fireEvent.click(screen.getByRole('button', { name: 'Refresh overview' }));
+  await waitFor(() =>
+    expect(mocks.refresh).toHaveBeenCalledWith(1, 'low-stock'),
+  );
+});
+
+it.each([
+  ['2', 4, '2 below threshold'],
+  ['4', 4, 'At threshold'],
+  ['0', 0, 'At threshold'],
+] as const)(
+  'shows snapshot storage shortfall for available %s threshold %s',
+  (availableQuantity, reorderThreshold, expected) => {
+    render(
+      <DashboardSnapshotView
+        initialSnapshot={{
+          ...initial,
+          result: {
+            ...initial.result,
+            needsRestockingCount: 1,
+            total: 1,
+            rows: [
+              {
+                id: 'item',
+                name: 'Cable',
+                categoryName: 'Cables',
+                recordedTotal: Number(availableQuantity),
+                availableQuantity,
+                assignedQuantity: '100',
+                ownedQuantity: (BigInt(availableQuantity) + 100n).toString(),
+                reorderThreshold,
+                stockState:
+                  availableQuantity === '0'
+                    ? 'out_of_stock'
+                    : 'needs_restocking',
+              },
+            ],
+          },
+        }}
+        params={{ view: 'low-stock' }}
+      />,
+    );
+    const detail = screen.getByRole('link', {
+      name: 'View item and locations',
+    });
+    expect(detail.closest('li')).toHaveTextContent(expected);
+    expect(detail).toHaveAttribute('href', '/inventory/quantity/item');
+  },
+);

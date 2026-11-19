@@ -1,5 +1,12 @@
 # Application architecture
 
+The additive caller-authorized Overview snapshot and its calendar/ledger coverage
+contract are documented in [Overview](overview.md). Current stock, custody,
+activity and reconstructed storage endpoints share one statement snapshot. This
+read projection adds no mutations and preserves existing low-stock reports at
+`/dashboard?view=low-stock` and bookmarked pagination URLs. Its local integration
+still requires database, generated-type, runtime and hosted acceptance.
+
 Optional record previews and storage-destination maps reuse the room's logical
 code selection, camera flight and visual opening controller. Form confirmation
 resolves the latest eligible UUID through the existing picker model and never

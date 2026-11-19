@@ -1,5 +1,6 @@
 import { SpringDisclosure } from '@/components/experience/spring-disclosure';
 import { CountTicker } from '@/components/experience/count-ticker';
+import { RestockShortfall } from '@/features/inventory/components/restock-shortfall';
 import { HoldingFeedback } from '@/components/experience/holding-feedback';
 import {
   InventoryCaptureGroup,
@@ -193,16 +194,21 @@ export default async function QuantityPage({
                   </div>
                 )}
               </dl>
-              {(stockSummary.stockState === 'needs_restocking' ||
-                stockSummary.stockState === 'out_of_stock') && (
-                <p className="mt-3 text-sm font-semibold text-amber-200">
-                  {stockSummary.stockState === 'out_of_stock'
-                    ? 'Out of stock'
-                    : 'Needs restocking'}{' '}
-                  · available in storage {stockSummary.availableQuantity} /
-                  threshold {stockSummary.reorderThreshold}
-                </p>
-              )}
+              {!item.archived &&
+                (stockSummary.stockState === 'needs_restocking' ||
+                  stockSummary.stockState === 'out_of_stock') && (
+                  <p className="mt-3 text-sm font-semibold text-amber-200">
+                    {stockSummary.stockState === 'out_of_stock'
+                      ? 'Out of stock'
+                      : 'Needs restocking'}{' '}
+                    · available in storage {stockSummary.availableQuantity} /
+                    threshold {stockSummary.reorderThreshold}
+                    <RestockShortfall
+                      threshold={stockSummary.reorderThreshold}
+                      available={stockSummary.availableQuantity}
+                    />
+                  </p>
+                )}
               {stockSummary.stockState === 'in_stock' && (
                 <p className="mt-3 text-sm text-emerald-200">
                   Above threshold (available in storage{' '}

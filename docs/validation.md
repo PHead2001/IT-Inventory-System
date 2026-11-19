@@ -1,5 +1,26 @@
 # Validation
 
+## A403 selective Overview integration
+
+The additive migration `20261019193000_overview_snapshot_v1.sql`, Overview SQL
+tests (including boundary and equal-time ordering cases), and registered
+`tests/integration/overview.ts` require clean local replay, forward-upgrade proof,
+canonical generated types, the complete database gate and query-cost evidence.
+Only that migration is imported; the held donor's older duplicate is excluded.
+Existing low-stock reports and their private reads, Peek links, CountTicker and
+motion owners remain intact. Overview uses those current shared components.
+
+[Overview](overview.md) records the single-statement, decimal-string, bounded
+projection and the donor's historical evidence. Those results do not certify
+this integration. Real authenticated timeout/concurrency proof, populated
+desktop/390px Dark/Light/System Full/Reduced inspection, exact-final-SHA CI,
+fresh review and hosted acceptance remain required. No A403 acceptance is claimed
+from source integration or unit tests. The current local checkpoint in
+[Overview](overview.md#selective-release-checkpoint--november-5-2026) records clean
+replay, generated types, focused UI/contract tests and composed database retry
+coverage, including the actual REST timeout. It does not claim an uninterrupted
+full database command or final application/hosted certification.
+
 ## Deferred-hydration browser probes
 
 The first-styled-paint and initial motion Settings probes share
@@ -50,10 +71,11 @@ failure is intentional uncertified feedback, not a defect to repair with a push.
 
 Foundation CI handles opened, reopened,
 synchronize, ready_for_review and converted_to_draft events, cancelling superseded
-runs for that PR. A draft uses a light runner and ends the stable `required` check
-with an explicit uncertified failure before dependency installation. Missing or
-malformed PR state is also rejected. Drafts emit no full-completion or executed
-workflow-source marker and cannot supply reusable success evidence. Marking ready
+runs for that PR. By default a draft uses a light runner and ends the stable
+`required` check with an explicit uncertified failure before dependency
+installation. Missing or malformed PR state is also rejected. Drafts emit no
+full-completion or executed workflow-source marker and cannot supply reusable
+success evidence. Marking ready
 for review runs the full heavy gate for the current SHA; converting back to draft
 invalidates certification even when the head SHA is unchanged.
 
@@ -61,15 +83,19 @@ For the temporary closeout of PRs 62, 64, 65, 66 and 67, Foundation CI routes on
 the `required` job to GitHub-hosted `ubuntu-24.04` when the event is `pull_request`
 in `PHead2001/IT-Inventory-System` and the head repository matches. This includes
 drafts, whose existing uncertified decision still applies. Every other case uses
-the existing light/heavy routing. The forty-minute deadline, validation steps,
-permissions, cleanup, main delivery and sibling jobs retain their existing gates.
+the existing light/heavy routing. The required job allows sixty minutes for the
+five listed PRs while open and ready from the matching repository. One hosted
+closeout run reached the forty-minute limit while Chromium was still running.
+Other required jobs retain forty minutes. Validation steps, permissions, cleanup,
+the two-minute failure artifact limit, main delivery and sibling jobs retain
+their existing gates.
 
 Ready PRs retain fresh locked installation, the offline application build, clean
 database start/reset/tests/type comparison, browser preparation, backend-specific
 E2E build/browser execution and cleanup. Both builds are intentional: the offline
 build proves database independence, and the E2E build binds runtime public backend
-values. The required-job deadline is forty minutes. This source deadline does not
-establish the installed runner's separate job deadline or measured job duration.
+values. The installed runner's deadline and measured job duration require separate
+evidence.
 
 Main retains its conservative exact-tree, latest-attempt reuse proof and immediate
 reverification of all mandatory evidence steps and the workflow-source marker. Missing or invalid evidence
@@ -100,12 +126,19 @@ all remaining `00-room.spec.ts` journeys retain room-first parallel scheduling.
 This isolates the fixture contract; it does not prove temporal overlap caused a
 historical CI mismatch.
 
+The desktop and phone drawer orbit journeys also run in that exclusive phase.
+The hosted desktop case failed both attempts before full-suite cancellation.
+The phone case passed. Both moved cases retain the original sixty-second
+test limits, native interactions and assertions. Collection confirms both
+viewport cases move together. The revised browser duration still requires
+hosted execution.
+
 Both specs explicitly call `registerRoomTestSupport` from the non-spec
 `room-test-support.ts` module. Each invocation owns its fixture identities,
 cleanup journals and failure-diagnostic maps, retains the local-target guard,
 and archives/clears its own stock through the audited RPC. Importing that module
 registers no hooks. The moved cases and their occupied-witness helpers preserve
-their assertions. Scheduling regressions require exactly those three titles in
+their assertions. Scheduling regressions require exactly those five titles in
 the exclusive file, matching focused/full discovery without duplicates or loss,
 and no spec-to-spec imports. Source and collection checks do not replace actual
 focused browser execution or final-candidate CI.

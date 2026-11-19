@@ -15,8 +15,11 @@ once inside that deadline. This fences versioned inventory changes and does not
 claim an atomic snapshot of independently changing photos or location names.
 
 The provider retains its workspace children and replaces only admission owners
-when actor, backend, verification or route/query changes. Strict presentation and
-the current route command boundary veto stale, hidden, inert and retired owners.
+when actor, backend, verification or route/query changes. A mounted record link
+keeps its DOM identity for native navigation, focus and outgoing route capture.
+Only its interaction controller and card are replaced on a scope or target
+change. Strict presentation and the current route command boundary veto stale,
+hidden, inert and retired owners.
 Terminal access denial withdraws a current card; a retired response cannot deny a
 successor. This decorative boundary never replaces server authorization or clears
 business drafts, pending mutations, receipts or retry identities.
