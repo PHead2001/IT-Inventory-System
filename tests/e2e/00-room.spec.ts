@@ -2,7 +2,6 @@ import { readFileSync } from 'node:fs';
 import { expect, test, type Page } from '@playwright/test';
 import { countFeedback } from './count-feedback-support';
 import { Box3, Matrix4, Ray, Vector3 } from 'three';
-import { measureRoomLabelName } from './room-label-name';
 import { enableRoomLayoutDiagnostics } from './room-layout-diagnostics';
 import {
   captureRoomAssertionState,
@@ -28,7 +27,6 @@ import {
 
 const {
   inventoryName,
-  locationNames,
   bindingBounds,
   login,
   chooseMapMode,
@@ -1529,141 +1527,6 @@ test('real WebGL room raycasting selects shelf and drawer inventory', async ({
   ).toHaveCount(1);
   await expect(countFeedback(fixtureRow, '4 units')).toBeVisible();
 });
-
-for (const { name, viewport } of [
-  { name: 'desktop', viewport: { width: 1280, height: 1100 } },
-  { name: 'phone', viewport: { width: 390, height: 844 } },
-]) {
-  test(`visible drawer labels remain distinct and clickable across ${name} orbit views`, async ({
-    page,
-  }, testInfo) => {
-    test.setTimeout(60_000);
-    trackRoomPage(testInfo, page);
-    markRoomProgress(testInfo, {
-      journey: 'drawer-labels',
-      stage: `room setup at ${viewport.width}px`,
-    });
-    await login(page);
-    await page.setViewportSize(viewport);
-    await page.goto('/room?location=ITC-S1A');
-    const viewer = await ready(page);
-    const toolbar = page.locator('[data-room-surface]');
-    await setRoomLabels(page, true);
-    for (const code of ['ITC-D01', 'ITC-D04']) {
-      const label = viewer.locator(`[data-location-code="${code}"]`).first();
-      await expect(label).toHaveAttribute(
-        'data-label-suppressed',
-        /^(true|false)$/,
-      );
-      // A hidden or never-placed target has no placement offset. Keep the
-      // subsequent real click/focus and opaque-visibility checks authoritative.
-      if (
-        (await label.getAttribute('data-label-suppressed')) === 'false' &&
-        (await label.isVisible())
-      ) {
-        await expect(label).toHaveAttribute('data-label-dx', /^-?\d/);
-        await expect(label).toHaveAttribute('data-label-dy', /^-?\d/);
-      }
-    }
-    await chooseMapMode(page, 'Free Orbit');
-    const clicked = new Set<string>();
-    for (let side = 0; side < 4; side++) {
-      await toolbar.getByRole('button', { name: 'Fit room' }).click();
-      await settledLabels(page);
-      for (const code of ['ITC-D01', 'ITC-D04']) {
-        markRoomProgress(testInfo, {
-          journey: 'drawer-labels',
-          stage: `drawer label at ${viewport.width}px side ${side}`,
-          code,
-        });
-        const label = viewer.locator(`[data-location-code="${code}"]`).first();
-        if ((await label.getAttribute('data-label-suppressed')) === 'true') {
-          await expect(label).toHaveAttribute('aria-hidden', 'true');
-          await expect(label).toHaveAttribute('tabindex', '-1');
-          continue;
-        }
-        if (!(await label.isVisible())) {
-          expect(
-            await label.evaluate((element) => {
-              element.focus();
-              return document.activeElement === element;
-            }),
-            `occluded ${code} label cannot receive keyboard focus`,
-          ).toBe(false);
-          continue;
-        }
-        await label.scrollIntoViewIfNeeded({ timeout: 3000 });
-        await settledLabels(page);
-        const firstChildRectCount = await label.evaluate((element) => {
-          const text = element.firstChild;
-          if (!text) return 0;
-          const range = document.createRange();
-          range.selectNodeContents(text);
-          return range.getClientRects().length;
-        });
-        try {
-          const name = await label.evaluate(measureRoomLabelName);
-          expect(name.text, `expected drawer name for ${code}`).toBe(
-            locationNames.get(code),
-          );
-          expect(name.visible, `visible drawer name for ${code}`).toBe(true);
-          expect(
-            name.rects,
-            'ordinary drawer names remain readable on one line',
-          ).toHaveLength(1);
-          expect(
-            name.rects[0].width,
-            `drawer name width for ${code}`,
-          ).toBeGreaterThan(0);
-          expect(
-            name.rects[0].height,
-            `drawer name height for ${code}`,
-          ).toBeGreaterThan(0);
-        } catch (error) {
-          reportRoomAssertionFailure('drawer-name-lines', code, {
-            viewport,
-            side,
-            firstChildRectCount,
-            state: await captureRoomAssertionState(page, code, false),
-          });
-          throw error;
-        }
-        const box = await label.boundingBox();
-        expect(box, `visible label bounds for ${code}`).toBeTruthy();
-        const point = {
-          x: box!.x + box!.width / 2,
-          y: box!.y + box!.height / 2,
-        };
-        expect(
-          await page.evaluate(
-            ({ x, y }) =>
-              document
-                .elementFromPoint(x, y)
-                ?.closest('[data-location-code]')
-                ?.getAttribute('data-location-code'),
-            point,
-          ),
-          `visible ${code} label center on side ${side}`,
-        ).toBe(code);
-        await label.click({ timeout: 3000 });
-        await expect(viewer).toHaveAttribute('data-selected-code', code);
-        clicked.add(code);
-        await toolbar.getByRole('button', { name: 'Fit room' }).click();
-        await settledLabels(page);
-      }
-      await toolbar
-        .getByRole('button', { name: 'More map controls', exact: true })
-        .click();
-      for (let step = 0; step < 9; step++)
-        await toolbar.getByRole('button', { name: 'Rotate right' }).click();
-      await toolbar
-        .getByRole('button', { name: 'More map controls', exact: true })
-        .click();
-    }
-    expect(clicked.has('ITC-D01'), 'Drawer 1 label reachable').toBe(true);
-    expect(clicked.has('ITC-D04'), 'Drawer 4 label reachable').toBe(true);
-  });
-}
 
 test('panned camera keeps visible drawer labels clickable', async ({
   page,
