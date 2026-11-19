@@ -84,10 +84,10 @@ the `required` job to GitHub-hosted `ubuntu-24.04` when the event is `pull_reque
 in `PHead2001/IT-Inventory-System` and the head repository matches. This includes
 drafts, whose existing uncertified decision still applies. Every other case uses
 the existing light/heavy routing. For open, ready PRs from the matching
-repository, the required job allows eighty minutes on 62, 64 and 65 and sixty
-minutes on 66 and 67. The broader limit gives the hosted runner time to finish
+repository, the required job allows eighty minutes on 62, 64, 65 and 67. PR 66
+has a sixty-minute deadline. The broader limit gives the hosted runner time to finish
 after a sixty-minute run reached the deadline during parallel browser testing.
-For 62, 64 and 65, the browser step runs the 29 cases in `00-room.spec.ts` in the
+For 62, 64, 65 and 67, the browser step runs the 29 cases in `00-room.spec.ts` in the
 single-worker exclusive phase alongside the five already-exclusive room cases.
 The other browser files follow the normal partition, with up to two workers in
 the parallel phase. Local, focused and other CI runs follow the default schedule.
