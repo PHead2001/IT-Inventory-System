@@ -78,9 +78,13 @@ masking or pseudo-element animation falls back instantly. ResizeObserver invalid
 changed region geometry. A single frame check runs only during the active native
 lease, retaining media and conventional-region identity and rectangles. A single
 650 ms total deadline, measured before native capture begins, bounds even a hung
-native handle. Capture readiness and WAAPI play readiness consume that same
-budget; the 450 ms reveal leaves their completion margin without extending the
-lease. System's 180 ms crossfade is unchanged. Cleanup removes names/background,
+native handle. After native readiness and current lease/geometry checks, every
+live effect receives the same finite document-timeline start time synchronously.
+Native play readiness therefore cannot defer each effect's clock. The nominal
+450 ms reveal and 180 ms System crossfade use that shared epoch within the original
+deadline. An unavailable clock, retired effect or failed clock assignment applies
+the current intent and retires the lease through the existing cleanup path.
+Cleanup removes names/background,
 cancels the frame/timer and clears captured node references. Discovery visits at
 most 2,048 elements, 256 conventional regions and 32 live-media elements before
 any name assignment/layout measurement; saturation or unsupported ResizeObserver
