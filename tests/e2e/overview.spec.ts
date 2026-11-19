@@ -47,10 +47,17 @@ for (const role of ['staff', 'viewer'] as const) {
       const attention = page.getByRole('region', {
         name: 'Items needing attention',
       });
+      await expect(attention.getByRole('listitem')).toHaveCount(
+        expected.stock.attention.length,
+      );
       for (const row of expected.stock.attention) {
-        const item = attention.locator('li').filter({
-          has: page.getByRole('link', { name: row.name, exact: true }),
+        const link = page.locator(
+          `a[href="/inventory/quantity/${row.itemId}"]`,
+        );
+        const item = attention.getByRole('listitem').filter({
+          has: link,
         });
+        await expect(item.locator(link)).toHaveText(row.name);
         await expect(item).toContainText(
           `Available ${row.available} · Threshold ${row.threshold} · ${row.available === row.threshold ? 'At threshold' : `Shortfall ${row.shortfall}`}`,
         );
@@ -66,16 +73,21 @@ for (const role of ['staff', 'viewer'] as const) {
           ),
         ).toContainText(event.name || 'Record name unavailable');
       const sites = page.getByRole('region', { name: 'Equipment at sites' });
-      for (const row of expected.atSites.rows)
+      const siteRows = sites.getByRole('listitem');
+      await expect(siteRows).toHaveCount(expected.atSites.rows.length);
+      for (const [index, row] of expected.atSites.rows.entries()) {
+        // A quantity definition can appear in multiple holdings at distinct sites.
+        const holding = siteRows.nth(index);
         await expect(
-          sites.locator('li').filter({
-            has: page.locator(
-              `a[href="/inventory/${row.kind === 'asset' ? 'assets' : 'quantity'}/${row.entityId}"]`,
-            ),
-          }),
-        ).toContainText(
-          `${row.siteName}${row.siteActive ? '' : ' (inactive)'} · ${row.quantity}`,
+          holding.getByRole('link', { name: row.name, exact: true }),
+        ).toHaveAttribute(
+          'href',
+          `/inventory/${row.kind === 'asset' ? 'assets' : 'quantity'}/${row.entityId}`,
         );
+        await expect(holding.locator('p')).toHaveText(
+          `${row.siteName}${row.siteActive ? '' : ' (inactive)'} · ${row.quantity} ${row.kind === 'asset' ? 'individual asset' : 'units'}`,
+        );
+      }
       await page
         .getByText('View daily activity table', { exact: true })
         .click();
@@ -83,24 +95,43 @@ for (const role of ['staff', 'viewer'] as const) {
         name: 'Recorded inventory events · each event counted once',
       });
       await expect(activity.locator('tbody tr')).toHaveCount(14);
-      for (const point of expected.activity.points.slice(0, -1))
-        await expect(
-          activity.locator('tr').filter({ hasText: point.date }),
-        ).toContainText(point.value ?? 'Not available');
+      for (const point of expected.activity.points.slice(0, -1)) {
+        const row = activity.getByRole('row').filter({
+          has: page.getByRole('rowheader', { name: point.date, exact: true }),
+        });
+        await expect(row.getByRole('cell')).toHaveText(
+          point.value ?? 'Not available',
+        );
+      }
+      const stockHistory = page.getByRole('region', {
+        name: 'Available stock · 14 days',
+      });
       for (const trend of expected.stockTrends) {
-        await page
+        const chart = stockHistory.getByRole('article').filter({
+          has: page.locator(`a[href="/inventory/quantity/${trend.itemId}"]`),
+        });
+        await chart
           .getByText(`View daily stock table for ${trend.name}`, {
             exact: true,
           })
           .click();
-        const table = page.getByRole('table', {
+        const table = chart.getByRole('table', {
           name: `${trend.name} · available in storage`,
+          exact: true,
         });
         await expect(table.locator('tbody tr')).toHaveCount(14);
-        for (const point of trend.points)
-          await expect(
-            table.locator('tr').filter({ hasText: point.date }),
-          ).toContainText(point.value ?? 'Not available');
+        for (const point of trend.points) {
+          const name =
+            point.date === expected.window.endDate
+              ? `${point.date} · today so far`
+              : point.date;
+          const row = table.getByRole('row').filter({
+            has: page.getByRole('rowheader', { name, exact: true }),
+          });
+          await expect(row.getByRole('cell').first()).toHaveText(
+            point.value ?? 'Not available',
+          );
+        }
       }
       expect(await main.innerText()).not.toMatch(
         /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/,

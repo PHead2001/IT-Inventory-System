@@ -264,7 +264,7 @@ test('generated labels inspect and explicitly assign a repeat quantity and an as
     const checklist = page.getByRole('region', { name: 'Batch checklist' });
     // The status exposes final counts without the tickers' decorative copies.
     await expect(checklist.getByRole('status')).toMatchAriaSnapshot(
-      '- status: / · 1 quantity assignment \\(1 unit\\) confirmed · /',
+      '- status: / · 1 quantity assignment \\(\\s*1 unit\\s*\\) confirmed · /',
     );
     expect(await eventCount()).toBe(1);
 
@@ -326,7 +326,7 @@ test('generated labels inspect and explicitly assign a repeat quantity and an as
       .click();
     const summary = page.getByRole('region', { name: 'Batch summary' });
     await expect(summary.getByRole('status')).toMatchAriaSnapshot(
-      '- status: /^1 asset assignment · 2 quantity assignments \\(2 units\\) confirmed · /',
+      '- status: /^1 asset assignment · 2 quantity assignments \\(\\s*2 units\\s*\\) confirmed · /',
     );
     await expect(
       summary.getByRole('link', { name: /View committed history/ }),

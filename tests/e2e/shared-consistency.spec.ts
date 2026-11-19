@@ -94,9 +94,26 @@ test('interactive transitions stay scoped across workspace routes and control st
               'rgb(117, 226, 236)',
             );
             await expect(camera).toHaveCSS('color', 'rgb(6, 19, 29)');
+            const position = () =>
+              camera.evaluate((button) => {
+                const { x, y, width, height } = button.getBoundingClientRect();
+                return { x: x + scrollX, y: y + scrollY, width, height };
+              });
+            const restingPosition = await position();
             await camera.focus();
             await expect(camera).toBeFocused();
-            await expect(camera).toHaveCSS('transform', 'none');
+            await expect
+              .poll(() =>
+                camera.evaluate((button) => {
+                  const { transform } = getComputedStyle(button);
+                  return (
+                    transform === 'none' ||
+                    new DOMMatrixReadOnly(transform).isIdentity
+                  );
+                }),
+              )
+              .toBe(true);
+            await expect.poll(position).toEqual(restingPosition);
           }
           if (path === recordHref) {
             await openRecordTask(page, 'Edit quantity metadata');
