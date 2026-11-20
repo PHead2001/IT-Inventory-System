@@ -160,7 +160,9 @@ async function fixture(
               ? '/inventory?q=other#inventory-row-2'
               : canonicalReturn,
             { domain: 'unplaced' },
-            revealOptions.wrongScope ? '/inventory?q=other' : registeredRawRoute,
+            revealOptions.wrongScope
+              ? '/inventory?q=other'
+              : registeredRawRoute,
           );
       expect(target).not.toBeNull();
       if (!revealOptions.unregistered)
