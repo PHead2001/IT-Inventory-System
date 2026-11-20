@@ -3,9 +3,8 @@
 // Files absent from this allowlist run exclusively, including future specs.
 // experience-visual reads the first global inventory/category/site records: it must
 // finish before another spec can archive, retire, rename, or remove its selection.
-// The pinned Playwright collector sorts files lexically and dispatches file groups
-// in that order. Start the long room journey first to avoid a lone late worker;
-// file-level sequencing and the existing two-worker ceiling remain unchanged.
+// The default parallel phase starts the long room journey first. The hosted
+// closeout can instead isolate that file from concurrent browser load.
 // Audit-four fixtures own their categories/records and use local session cleanup.
 // Native route geometry and skip-link fixtures use isolated page content only.
 // build-info remains exclusive: its compiled probe starts additional Next servers
@@ -43,9 +42,14 @@ type Scheduling = {
   }[];
 };
 
-export function e2eScheduling(fullSuite: boolean): Scheduling {
+export function e2eScheduling(
+  fullSuite: boolean,
+  isolateRoom = false,
+): Scheduling {
   if (!fullSuite) return { workers: 1, projects: [{ name: 'chromium' }] };
-  const patterns = parallelSpecs.map((file) => '**/' + file);
+  const patterns = parallelSpecs
+    .filter((file) => !isolateRoom || file !== '00-room.spec.ts')
+    .map((file) => '**/' + file);
   return {
     workers: 2,
     projects: [

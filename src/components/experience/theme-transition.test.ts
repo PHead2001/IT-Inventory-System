@@ -82,6 +82,8 @@ function native() {
     (_frames: Keyframe[], options: KeyframeAnimationOptions) =>
       ({
         effect: { pseudoElement: options.pseudoElement },
+        playState: 'running',
+        startTime: null,
         cancel: vi.fn(),
       }) as unknown as Animation,
   );
@@ -101,6 +103,10 @@ beforeEach(() => {
   Object.defineProperty(document, 'hidden', {
     value: false,
     configurable: true,
+  });
+  Object.defineProperty(document, 'timeline', {
+    configurable: true,
+    get: () => ({ currentTime: 100 }),
   });
   Object.defineProperty(document, 'startViewTransition', {
     value: () => {},
@@ -148,7 +154,7 @@ it('uses the control center and farthest visual viewport corner, excluding every
     'path(evenodd, "M0 0h100v80h-100ZM10 10h10v30h-10ZM20 10h20v40h-20ZM40 20h10v30h-10Z")',
   );
 });
-it('owns the actual native handle, animates only new disjoint snapshots for 500ms and never remounts media', async () => {
+it('owns the actual native handle, animates only new disjoint snapshots for 450ms and never remounts media', async () => {
   const { jobs, animate } = native();
   const canvas = document.querySelector('canvas');
   const apply = vi.fn();
@@ -173,7 +179,7 @@ it('owns the actual native handle, animates only new disjoint snapshots for 500m
   expect(apply).toHaveBeenCalledOnce();
   expect(animate).toHaveBeenCalled();
   for (const [frames, options] of animate.mock.calls) {
-    expect(options).toMatchObject({ duration: 500, fill: 'both' });
+    expect(options).toMatchObject({ duration: 450, fill: 'both' });
     expect(options.pseudoElement).toMatch(/^::view-transition-new\(theme-/);
     expect(Object.keys(frames[0])).toEqual(['clipPath']);
   }
@@ -184,6 +190,138 @@ it('owns the actual native handle, animates only new disjoint snapshots for 500m
   expect(document.querySelector('canvas')).toBe(canvas);
   expect(frames.pending.size).toBe(0);
 });
+it.each([0, 123.5])(
+  'anchors every current effect to one document epoch %s before play readiness',
+  async (epoch) => {
+    const { jobs, animate } = native();
+    const clock = vi.fn(() => epoch);
+    vi.spyOn(document, 'timeline', 'get').mockReturnValue({
+      get currentTime() {
+        return clock();
+      },
+    } as DocumentTimeline);
+    revealTheme({ apply: () => {}, changed: true, automatic: false });
+    expect(clock).not.toHaveBeenCalled();
+    jobs[0].update();
+    jobs[0].updated.resolve();
+    jobs[0].ready.resolve();
+    await Promise.resolve();
+    expect(clock).toHaveBeenCalledOnce();
+    expect(animate.mock.results.length).toBeGreaterThan(1);
+    for (const result of animate.mock.results)
+      expect((result.value as Animation).startTime).toBe(epoch);
+    jobs[0].finished.resolve();
+    await Promise.resolve();
+    expect(jobs[0].skipTransition).not.toHaveBeenCalled();
+  },
+);
+it('gives every System crossfade its full duration when native ready follows a stale paint timestamp', async () => {
+  const { jobs, animate } = native();
+  const lastFrame = 1126;
+  const readyAt = 1240;
+  vi.spyOn(document, 'timeline', 'get').mockReturnValue({
+    currentTime: lastFrame,
+  } as DocumentTimeline);
+  const now = vi.spyOn(performance, 'now').mockReturnValue(readyAt);
+
+  revealTheme({ apply: () => {}, changed: true, automatic: true });
+  now.mockClear();
+  jobs[0].update();
+  jobs[0].updated.resolve();
+  jobs[0].ready.resolve();
+  await Promise.resolve();
+
+  expect(animate.mock.results.length).toBeGreaterThan(1);
+  for (const [index, result] of animate.mock.results.entries()) {
+    expect((result.value as Animation).startTime).toBe(readyAt);
+    expect(animate.mock.calls[index][1].duration).toBe(180);
+  }
+  expect(now).toHaveBeenCalledOnce();
+  jobs[0].finished.resolve();
+  await Promise.resolve();
+  expect(jobs[0].skipTransition).not.toHaveBeenCalled();
+});
+it.each([NaN, Infinity, -Infinity])(
+  'applies System intent without animation when the readiness timestamp is %s',
+  async (readyAt) => {
+    const { jobs, animate } = native();
+    vi.spyOn(performance, 'now').mockReturnValue(readyAt);
+    const apply = vi.fn();
+    revealTheme({ apply, changed: true, automatic: true });
+    jobs[0].update();
+    jobs[0].updated.resolve();
+    jobs[0].ready.resolve();
+    await Promise.resolve();
+
+    expect(animate).not.toHaveBeenCalled();
+    expect(jobs[0].skipTransition).toHaveBeenCalledOnce();
+    expect(apply).toHaveBeenCalled();
+    expect(frames.pending.size).toBe(0);
+    expect(document.querySelector('[data-theme-region]')).toBeNull();
+  },
+);
+it.each([null, undefined, NaN, Infinity, -Infinity, '100'])(
+  'applies intent and retires the lease when the document epoch is %s',
+  async (epoch) => {
+    const { jobs, animate } = native();
+    vi.spyOn(document, 'timeline', 'get').mockReturnValue({
+      currentTime: epoch,
+    } as DocumentTimeline);
+    const apply = vi.fn();
+    revealTheme({ apply, changed: true, automatic: false });
+    jobs[0].update();
+    jobs[0].updated.resolve();
+    jobs[0].ready.resolve();
+    await Promise.resolve();
+    expect(animate).not.toHaveBeenCalled();
+    expect(jobs[0].skipTransition).toHaveBeenCalledOnce();
+    expect(apply).toHaveBeenCalledTimes(2);
+    expect(frames.pending.size).toBe(0);
+    expect(
+      document.querySelector(
+        '[data-theme-region],.experience-theme-background',
+      ),
+    ).toBeNull();
+  },
+);
+it.each(['idle', 'setter failure'] as const)(
+  'cancels registered effects and retires the lease on %s',
+  async (reason) => {
+    const { jobs, animate } = native();
+    const ordinary = animate.getMockImplementation()!;
+    const assign = vi.fn(() => {
+      throw new Error('Unsupported animation clock');
+    });
+    animate
+      .mockImplementationOnce(ordinary)
+      .mockImplementationOnce((keyframes, options) => {
+        const animation = ordinary(keyframes, options);
+        Object.defineProperty(
+          animation,
+          reason === 'idle' ? 'playState' : 'startTime',
+          reason === 'idle' ? { value: 'idle' } : { set: assign },
+        );
+        return animation;
+      });
+    revealTheme({ apply: () => {}, changed: true, automatic: false });
+    jobs[0].update();
+    jobs[0].updated.resolve();
+    jobs[0].ready.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(animate).toHaveBeenCalledTimes(2);
+    expect(assign).toHaveBeenCalledTimes(reason === 'idle' ? 0 : 1);
+    for (const result of animate.mock.results)
+      expect((result.value as Animation).cancel).toHaveBeenCalledOnce();
+    expect(jobs[0].skipTransition).toHaveBeenCalledOnce();
+    expect(frames.pending.size).toBe(0);
+    expect(
+      document.querySelector(
+        '[data-theme-region],.experience-theme-background',
+      ),
+    ).toBeNull();
+  },
+);
 it.each([
   'media resize',
   'media position',
@@ -289,6 +427,27 @@ it('uses a 180ms OS crossfade, while same appearance and pending navigation appl
   expect(start).toHaveBeenCalledOnce();
   expect(apply).toHaveBeenCalledTimes(2);
   unbind();
+});
+it('completes the nominal reveal inside the total lease after observed native setup overhead', async () => {
+  vi.useFakeTimers();
+  const { jobs, animate } = native();
+  revealTheme({ apply: () => {}, changed: true, automatic: false });
+  vi.advanceTimersByTime(60);
+  jobs[0].update();
+  jobs[0].updated.resolve();
+  jobs[0].ready.resolve();
+  await Promise.resolve();
+  const duration = Number(animate.mock.calls[0][1].duration);
+  // The real native failure had ~59ms capture plus ~96ms effect play readiness.
+  vi.advanceTimersByTime(95 + duration - 1);
+  expect(jobs[0].skipTransition).not.toHaveBeenCalled();
+  vi.advanceTimersByTime(1);
+  expect(duration).toBe(450);
+  jobs[0].finished.resolve();
+  await Promise.resolve();
+  expect(document.querySelector('[data-theme-region]')).toBeNull();
+  expect(frames.pending.size).toBe(0);
+  expect(vi.getTimerCount()).toBe(0);
 });
 it('latest intent wins when skipped callbacks and rejected native promises arrive out of order', async () => {
   const { jobs } = native();

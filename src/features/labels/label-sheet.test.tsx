@@ -481,11 +481,17 @@ it('prints stable identity and product facts without mutable holdings or lifecyc
   expect(sheet).not.toHaveTextContent(
     /stock|available|storage|site|archived|retired|QR used:/i,
   );
-  await waitFor(() =>
-    expect(
-      document.querySelectorAll('.label-card[data-code-ready="true"]'),
-    ).toHaveLength(2),
-  );
+  // Settle both lazy code engines and their React updates before checking the
+  // mixed sheet. Loading the real barcode module can take longer under CI load.
+  await act(async () => {
+    await vi.dynamicImportSettled();
+  });
+  expect(
+    document.querySelectorAll('.label-card[data-code-ready="true"]'),
+  ).toHaveLength(2);
+  expect(
+    screen.getByRole('img', { name: 'Code 128 AST:sw-00124' }),
+  ).not.toHaveClass('hidden');
 });
 
 it('uses the full name and curated product context without slicing by character count', () => {

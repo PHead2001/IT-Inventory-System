@@ -591,9 +591,81 @@ describe('narrow controls leave the canvas clear', () => {
       screen.getByRole('region', { name: 'More map controls' }).dataset
         .placement,
     ).toBe('inline');
-    fireEvent.pointerDown(document.body);
+    await user.click(document.body);
     expect(
       screen.queryByRole('region', { name: 'More map controls' }),
     ).not.toBeInTheDocument();
   });
+});
+
+describe('outside controls dismissal preserves native input dispatch', () => {
+  afterEach(() => vi.useRealTimers());
+  const region = () =>
+    screen.queryByRole('region', { name: 'More map controls' });
+  const open = () =>
+    fireEvent.click(screen.getByRole('button', { name: 'More map controls' }));
+
+  it('retains the panel through down, up and the whole stopped click dispatch, then closes without stealing focus', async () => {
+    vi.useFakeTimers();
+    setupToolbar();
+    open();
+    const panel = region();
+    const target = document.createElement('button');
+    document.body.append(target);
+    try {
+      target.focus();
+      fireEvent.pointerDown(target);
+      expect(region()).toBe(panel);
+      fireEvent.pointerUp(target);
+      expect(region()).toBe(panel);
+      const duringClick = vi.fn((event: MouseEvent) => {
+        event.stopPropagation();
+        expect(region()).toBe(panel);
+      });
+      target.addEventListener('click', duringClick);
+      fireEvent.click(target);
+      expect(duringClick).toHaveBeenCalledOnce();
+      await Promise.resolve();
+      expect(region()).toBe(panel);
+      act(() => vi.runOnlyPendingTimers());
+      expect(region()).toBeNull();
+      expect(target).toHaveFocus();
+    } finally {
+      target.remove();
+    }
+  });
+
+  it('ignores inside clicks and drags without a click', () => {
+    vi.useFakeTimers();
+    setupToolbar();
+    open();
+    const panel = region();
+    fireEvent.click(screen.getByRole('button', { name: 'Pan right' }));
+    fireEvent.pointerDown(document.body);
+    fireEvent.pointerMove(document.body);
+    fireEvent.pointerUp(document.body);
+    fireEvent.pointerCancel(document.body);
+    act(() => vi.runOnlyPendingTimers());
+    expect(region()).toBe(panel);
+  });
+
+  it.each(['Escape', 'toggle', 'unmount'] as const)(
+    'cancels deferred dismissal on %s so it cannot close a new opening or instance',
+    (method) => {
+      vi.useFakeTimers();
+      const { unmount } = setupToolbar();
+      open();
+      fireEvent.click(document.body);
+
+      if (method === 'Escape') fireEvent.keyDown(document, { key: 'Escape' });
+      else if (method === 'toggle') open();
+      else unmount();
+
+      if (method === 'unmount') setupToolbar();
+      open();
+      const panel = region();
+      act(() => vi.runOnlyPendingTimers());
+      expect(region()).toBe(panel);
+    },
+  );
 });

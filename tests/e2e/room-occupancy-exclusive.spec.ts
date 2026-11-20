@@ -1,6 +1,7 @@
 import { expect, test, type Page, type Locator } from '@playwright/test';
 import type { RoomOccupancy } from '../../src/features/room/occupancy-contract';
 import { occupancyText } from '../../src/features/room/occupancy-contract';
+import { measureRoomLabelName } from './room-label-name';
 import {
   roomSelectionOccupancy,
   observeRoomOccupancy,
@@ -47,6 +48,7 @@ import {
 
 const {
   bindingBounds,
+  locationNames,
   login,
   chooseMapMode,
   setRoomLabels,
@@ -713,6 +715,20 @@ test('375px populated room shows every occupied target with passive badges and s
           if (!bar || !frame) return false;
           const popup = element.getBoundingClientRect();
           const css = getComputedStyle(element);
+          // Measure the restored presentation, after the entrance spring ends.
+          if (
+            element.dataset.springState !== 'open' ||
+            element.hasAttribute('inert') ||
+            css.transform !== 'none' ||
+            css.opacity !== '1' ||
+            element
+              .getAnimations()
+              .some(
+                (animation) =>
+                  animation.pending || animation.playState === 'running',
+              )
+          )
+            return false;
           const outsideCanvas = popup.bottom <= frame.top;
           const scrollable =
             ['auto', 'scroll'].includes(css.overflowY) &&
@@ -784,6 +800,11 @@ test('375px populated room shows every occupied target with passive badges and s
   const menu = page.getByRole('region', {
     name: 'More map controls',
     exact: true,
+  });
+  const physicalMenu = page.getByRole('region', {
+    name: 'More map controls',
+    exact: true,
+    includeHidden: true,
   });
   await menu.hover();
   const controlsScroll = await menu.evaluate((element) => element.scrollTop);
@@ -1265,6 +1286,32 @@ test('375px populated room shows every occupied target with passive badges and s
   counts = snapshot.counts;
   await settledLabels(page);
   await assertCurrentGeneration();
+  // Committed counts can add controls above the room after the earlier scroll.
+  // Establish the actual viewport precondition before native hit-test witnesses.
+  await canvas.scrollIntoViewIfNeeded();
+  await settledLabels(page);
+  const visibleCanvas = await canvas.boundingBox();
+  const visibleViewport = page.viewportSize()!;
+  expect(
+    visibleCanvas,
+    'the populated canvas has a visible frame',
+  ).not.toBeNull();
+  expect(
+    visibleCanvas!.x,
+    'whole canvas is inside the viewport left edge',
+  ).toBeGreaterThanOrEqual(-1);
+  expect(
+    visibleCanvas!.y,
+    'whole canvas is inside the viewport top edge',
+  ).toBeGreaterThanOrEqual(-1);
+  expect(
+    visibleCanvas!.x + visibleCanvas!.width,
+    'whole canvas is inside the viewport right edge',
+  ).toBeLessThanOrEqual(visibleViewport.width + 1);
+  expect(
+    visibleCanvas!.y + visibleCanvas!.height,
+    'whole canvas is inside the viewport bottom edge',
+  ).toBeLessThanOrEqual(visibleViewport.height + 1);
   await assertCurrentRepresentations(
     await captureRoomWitness(page),
     'selected-red-before-resize',
@@ -1277,10 +1324,63 @@ test('375px populated room shows every occupied target with passive badges and s
   await settledLabels(page, beforeResize);
   await page.getByRole('button', { name: 'Fit room', exact: true }).click();
   await expect(more).toHaveAttribute('aria-expanded', 'false');
+  await expect(physicalMenu).toHaveCount(0);
+  // Native page scrolling puts the trigger too high for an above popup. Opening
+  // here must add real inline flow, reproducing the original click-shift case.
+  const closedMoreFrame = await more.boundingBox();
+  expect(closedMoreFrame).not.toBeNull();
+  await page.mouse.move(15, 15);
+  await page.mouse.wheel(0, closedMoreFrame!.y - 50);
+  await expect
+    .poll(async () => (await more.boundingBox())!.y)
+    .toBeGreaterThanOrEqual(0);
+  await expect
+    .poll(async () => (await more.boundingBox())!.y)
+    .toBeLessThan(100);
+  const readMenuFlow = () =>
+    more.evaluate((button) => {
+      const toolbar = button.closest('[role="toolbar"]')!;
+      const host = toolbar.parentElement!;
+      const surface = host.closest('[data-room-surface]')!;
+      const canvas = surface.querySelector('canvas')!;
+      const panel = host.querySelector<HTMLElement>('[role="region"]');
+      const frame = canvas.getBoundingClientRect();
+      const css = panel ? getComputedStyle(panel) : null;
+      return {
+        hostHeight: host.getBoundingClientRect().height,
+        canvas: {
+          x: frame.x,
+          y: frame.y,
+          width: frame.width,
+          height: frame.height,
+        },
+        canvasDocumentTop: frame.top + scrollY,
+        scrollY,
+        placement: panel?.dataset.placement ?? 'closed',
+        position: css?.position ?? null,
+        panelHeight: panel?.getBoundingClientRect().height ?? 0,
+        marginTop: css ? parseFloat(css.marginTop) : 0,
+      };
+    });
+  const closedMenuFlow = await readMenuFlow();
   await more.click();
+  await expect(menu).toHaveAttribute('data-placement', 'inline');
+  await assertMoreOutsideCanvas();
+  const openMenuFlow = await readMenuFlow();
+  expect(openMenuFlow.position).toBe('relative');
+  const addedMenuFlow = openMenuFlow.panelHeight + openMenuFlow.marginTop;
+  expect(addedMenuFlow).toBeGreaterThan(0);
+  expect(openMenuFlow.hostHeight - closedMenuFlow.hostHeight).toBeCloseTo(
+    addedMenuFlow,
+    3,
+  );
+  expect(
+    openMenuFlow.canvasDocumentTop - closedMenuFlow.canvasDocumentTop,
+  ).toBeCloseTo(addedMenuFlow, 3);
   await canvas.scrollIntoViewIfNeeded();
   await page.mouse.move(15, 15);
   await settledLabels(page);
+  await expect(menu).toHaveAttribute('data-placement', 'inline');
   await assertMoreOutsideCanvas();
   await expect(viewer).toHaveAttribute('data-selected-code', 'ITC-RED');
   await expect(red).toHaveAttribute('aria-pressed', 'true');
@@ -1354,6 +1454,7 @@ test('375px populated room shows every occupied target with passive badges and s
   ).toBeDefined();
   await page.mouse.move(resizedClick!.client.x, resizedClick!.client.y);
   await expect(canvas).toHaveAttribute('data-hover-visible-code', resizedCode);
+  const frameBeforeClick = await canvas.boundingBox();
   const resizedObservation = await observeNativeRoomClick(page);
   try {
     // Exactly one native click. The panel remains open until application input
@@ -1379,7 +1480,44 @@ test('375px populated room shows every occupied target with passive badges and s
       body: diagnostic,
       contentType: 'application/json',
     });
+    expect(phases.phases.map(({ phase }) => phase)).toEqual([
+      'pointerdown',
+      'pointerup',
+      'click',
+    ]);
+    for (const phase of phases.phases) {
+      expect(phase.trusted).toBe(true);
+      expect(phase.target).toBe('canvas');
+      expect(phase.moreExpanded).toBe(true);
+      expect(phase.panel.placement).toBe('inline');
+      expect(phase.frame).toEqual(frameBeforeClick);
+    }
   }
+  await expect(more).toHaveAttribute('aria-expanded', 'false');
+  // Full motion retains an inert exit panel until its spring presentation ends.
+  await expect(physicalMenu).toHaveCount(0);
+  await expect
+    .poll(
+      async () => openMenuFlow.hostHeight - (await readMenuFlow()).hostHeight,
+    )
+    .toBeCloseTo(addedMenuFlow, 3);
+  const dismissedMenuFlow = await readMenuFlow();
+  expect(dismissedMenuFlow.placement).toBe('closed');
+  expect(openMenuFlow.hostHeight - dismissedMenuFlow.hostHeight).toBeCloseTo(
+    addedMenuFlow,
+    3,
+  );
+  const inlineFlowEvidence = {
+    closed: closedMenuFlow,
+    open: openMenuFlow,
+    dismissed: dismissedMenuFlow,
+    addedMenuFlow,
+  };
+  console.log('ROOM_RESIZED_INLINE_FLOW', JSON.stringify(inlineFlowEvidence));
+  await testInfo.attach('390-resized-inline-menu-flow', {
+    body: JSON.stringify(inlineFlowEvidence),
+    contentType: 'application/json',
+  });
   await page.mouse.move(15, 15);
   await settledLabels(page);
   // A passive badge is also a valid start for a native canvas pan; it cannot
@@ -1573,3 +1711,138 @@ test('375px populated room shows every occupied target with passive badges and s
   expect(await canvas.getAttribute('data-label-layout-error')).toBeNull();
   expect(pageErrors).toEqual([]);
 });
+
+for (const { name, viewport } of [
+  { name: 'desktop', viewport: { width: 1280, height: 1100 } },
+  { name: 'phone', viewport: { width: 390, height: 844 } },
+]) {
+  test(`visible drawer labels remain distinct and clickable across ${name} orbit views`, async ({
+    page,
+  }, testInfo) => {
+    test.setTimeout(60_000);
+    trackRoomPage(testInfo, page);
+    markRoomProgress(testInfo, {
+      journey: 'drawer-labels',
+      stage: `room setup at ${viewport.width}px`,
+    });
+    await login(page);
+    await page.setViewportSize(viewport);
+    await page.goto('/room?location=ITC-S1A');
+    const viewer = await ready(page);
+    const toolbar = page.locator('[data-room-surface]');
+    await setRoomLabels(page, true);
+    for (const code of ['ITC-D01', 'ITC-D04']) {
+      const label = viewer.locator(`[data-location-code="${code}"]`).first();
+      await expect(label).toHaveAttribute(
+        'data-label-suppressed',
+        /^(true|false)$/,
+      );
+      // A hidden or never-placed target has no placement offset. Keep the
+      // subsequent real click/focus and opaque-visibility checks authoritative.
+      if (
+        (await label.getAttribute('data-label-suppressed')) === 'false' &&
+        (await label.isVisible())
+      ) {
+        await expect(label).toHaveAttribute('data-label-dx', /^-?\d/);
+        await expect(label).toHaveAttribute('data-label-dy', /^-?\d/);
+      }
+    }
+    await chooseMapMode(page, 'Free Orbit');
+    const clicked = new Set<string>();
+    for (let side = 0; side < 4; side++) {
+      await toolbar.getByRole('button', { name: 'Fit room' }).click();
+      await settledLabels(page);
+      for (const code of ['ITC-D01', 'ITC-D04']) {
+        markRoomProgress(testInfo, {
+          journey: 'drawer-labels',
+          stage: `drawer label at ${viewport.width}px side ${side}`,
+          code,
+        });
+        const label = viewer.locator(`[data-location-code="${code}"]`).first();
+        if ((await label.getAttribute('data-label-suppressed')) === 'true') {
+          await expect(label).toHaveAttribute('aria-hidden', 'true');
+          await expect(label).toHaveAttribute('tabindex', '-1');
+          continue;
+        }
+        if (!(await label.isVisible())) {
+          expect(
+            await label.evaluate((element) => {
+              element.focus();
+              return document.activeElement === element;
+            }),
+            `occluded ${code} label cannot receive keyboard focus`,
+          ).toBe(false);
+          continue;
+        }
+        await label.scrollIntoViewIfNeeded({ timeout: 3000 });
+        await settledLabels(page);
+        const firstChildRectCount = await label.evaluate((element) => {
+          const text = element.firstChild;
+          if (!text) return 0;
+          const range = document.createRange();
+          range.selectNodeContents(text);
+          return range.getClientRects().length;
+        });
+        try {
+          const name = await label.evaluate(measureRoomLabelName);
+          expect(name.text, `expected drawer name for ${code}`).toBe(
+            locationNames.get(code),
+          );
+          expect(name.visible, `visible drawer name for ${code}`).toBe(true);
+          expect(
+            name.rects,
+            'ordinary drawer names remain readable on one line',
+          ).toHaveLength(1);
+          expect(
+            name.rects[0].width,
+            `drawer name width for ${code}`,
+          ).toBeGreaterThan(0);
+          expect(
+            name.rects[0].height,
+            `drawer name height for ${code}`,
+          ).toBeGreaterThan(0);
+        } catch (error) {
+          reportRoomAssertionFailure('drawer-name-lines', code, {
+            viewport,
+            side,
+            firstChildRectCount,
+            state: await captureRoomAssertionState(page, code, false),
+          });
+          throw error;
+        }
+        const box = await label.boundingBox();
+        expect(box, `visible label bounds for ${code}`).toBeTruthy();
+        const point = {
+          x: box!.x + box!.width / 2,
+          y: box!.y + box!.height / 2,
+        };
+        expect(
+          await page.evaluate(
+            ({ x, y }) =>
+              document
+                .elementFromPoint(x, y)
+                ?.closest('[data-location-code]')
+                ?.getAttribute('data-location-code'),
+            point,
+          ),
+          `visible ${code} label center on side ${side}`,
+        ).toBe(code);
+        await label.click({ timeout: 3000 });
+        await expect(viewer).toHaveAttribute('data-selected-code', code);
+        clicked.add(code);
+        await toolbar.getByRole('button', { name: 'Fit room' }).click();
+        await settledLabels(page);
+      }
+      await toolbar
+        .getByRole('button', { name: 'More map controls', exact: true })
+        .click();
+      for (let step = 0; step < 9; step++)
+        await toolbar.getByRole('button', { name: 'Rotate right' }).click();
+      await toolbar
+        .getByRole('button', { name: 'More map controls', exact: true })
+        .click();
+    }
+    expect(clicked.has('ITC-D01'), 'Drawer 1 label reachable').toBe(true);
+    expect(clicked.has('ITC-D04'), 'Drawer 4 label reachable').toBe(true);
+  });
+}

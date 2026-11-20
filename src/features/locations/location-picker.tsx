@@ -755,18 +755,21 @@ export function LocationPicker({
         </InventoryCaptureRegionsContext>
       )}
       {(validationMessage || visibleOpen || !disabled) && (
-        <InventoryCaptureGroup
-          region={
-            mode === 'source'
-              ? 'picker-browser-source'
-              : 'picker-browser-destination'
-          }
-          className="space-y-2"
-        >
+        <>
+          {/* The fixed popover has no flow box in this region. Keep its exit
+              mounted independently so only real validation text is captured. */}
           {validationMessage && (
-            <p id={messageId} role="alert" className="text-sm text-amber-200">
-              {validationMessage}
-            </p>
+            <InventoryCaptureGroup
+              region={
+                mode === 'source'
+                  ? 'picker-browser-source'
+                  : 'picker-browser-destination'
+              }
+            >
+              <p id={messageId} role="alert" className="text-sm text-amber-200">
+                {validationMessage}
+              </p>
+            </InventoryCaptureGroup>
           )}
           <SpringPresence
             open={visibleOpen}
@@ -1045,7 +1048,7 @@ export function LocationPicker({
                 })}
             </ListEntrance>
           </SpringPresence>
-        </InventoryCaptureGroup>
+        </>
       )}
     </div>
   );

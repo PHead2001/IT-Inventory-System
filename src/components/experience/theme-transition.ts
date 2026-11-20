@@ -392,6 +392,19 @@ export function revealTheme({
           stop();
           return;
         }
+        const frameTime = document.timeline?.currentTime;
+        if (typeof frameTime !== 'number' || !Number.isFinite(frameTime)) {
+          stop();
+          return;
+        }
+        // The default timeline and performance.now() share a time origin.
+        // A stale frame timestamp can consume the short System fade before paint.
+        const readyTime = automatic ? performance.now() : frameTime;
+        if (!Number.isFinite(readyTime)) {
+          stop();
+          return;
+        }
+        const epoch = Math.max(frameTime, readyTime);
         for (const { name, rect } of captured) {
           const pseudo = `::view-transition-new(${name})`;
           const keyframes = automatic
@@ -405,7 +418,8 @@ export function revealTheme({
                 },
               ];
           const animation = root.animate(keyframes, {
-            duration: automatic ? 180 : 500,
+            // Keep the nominal reveal inside the original 650ms total lease.
+            duration: automatic ? 180 : 450,
             easing:
               getComputedStyle(root)
                 .getPropertyValue('--ease-workspace')
@@ -414,13 +428,20 @@ export function revealTheme({
             pseudoElement: pseudo,
           });
           animations.push(animation);
+          if (!lease.current() || cleaned) {
+            animation.cancel();
+            return;
+          }
           if (
             (animation.effect as KeyframeEffect | null)?.pseudoElement !==
-            pseudo
+              pseudo ||
+            animation.playState === 'idle'
           ) {
             stop();
             return;
           }
+          // Anchor every effect before native play readiness can defer its clock.
+          animation.startTime = epoch;
         }
       })
       .catch(stop);

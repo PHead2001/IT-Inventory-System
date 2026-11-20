@@ -281,6 +281,7 @@ it('admits initial, navigated, query and Back scopes through the current protect
   await screen.findByRole('textbox');
   await waitFor(() => expect(command.authorized()).toBe(true));
   const draft = screen.getByRole('textbox');
+  const record = screen.getByRole('link', { name: 'Joined record' });
   fireEvent.change(draft, { target: { value: 'retained' } });
   for (const [path, query] of [
     ['/history', ''],
@@ -293,7 +294,8 @@ it('admits initial, navigated, query and Back scopes through the current protect
     history.replaceState({}, '', path + (query ? '?' + query : ''));
     view.rerender(tree());
     await waitFor(() => expect(command.authorized()).toBe(true));
-    act(() => screen.getByRole('link', { name: 'Joined record' }).focus());
+    expect(screen.getByRole('link', { name: 'Joined record' })).toBe(record);
+    fireEvent.keyDown(record, { key: 'ArrowDown' });
     await screen.findByText('Joined private record');
     expect(screen.getByRole('dialog')).toHaveTextContent(
       'Joined private record',

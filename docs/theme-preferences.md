@@ -61,7 +61,7 @@ membership, data access or mutation authority.
 ## Snapshot ownership
 
 The existing route owner also binds a native theme lease and its real transition
-handle. A Full-motion control change reveals for 500 ms with `--ease-workspace`,
+handle. A Full-motion control change reveals for 450 ms with `--ease-workspace`,
 from the activated control's center to the farthest visual-viewport corner.
 OS-driven System changes crossfade for 180 ms. Same appearance, Reduced motion,
 unsupported APIs, hidden documents and pending route/server presentation apply
@@ -77,7 +77,14 @@ inputs and scanner streams are never replaced for theme motion. Unsupported medi
 masking or pseudo-element animation falls back instantly. ResizeObserver invalidates
 changed region geometry. A single frame check runs only during the active native
 lease, retaining media and conventional-region identity and rectangles. A single
-650 ms deadline bounds even a hung native handle; cleanup removes names/background,
+650 ms total deadline, measured before native capture begins, bounds even a hung
+native handle. After native readiness and current lease/geometry checks, every
+live effect receives the same finite document-timeline start time synchronously.
+Native play readiness therefore cannot defer each effect's clock. The nominal
+450 ms reveal and 180 ms System crossfade use that shared epoch within the original
+deadline. An unavailable clock, retired effect or failed clock assignment applies
+the current intent and retires the lease through the existing cleanup path.
+Cleanup removes names/background,
 cancels the frame/timer and clears captured node references. Discovery visits at
 most 2,048 elements, 256 conventional regions and 32 live-media elements before
 any name assignment/layout measurement; saturation or unsupported ResizeObserver
@@ -88,6 +95,30 @@ frame is awaited inside the update callback.
 All native ready/update/finished rejections are observed. Because skipped native
 transitions still run their update callback, lease and store-generation checks
 prevent late updates/failures from restoring an older preference.
+
+### November 6, 2026 UTC watchdog regression checkpoint
+
+The exact native-completion assertion from candidate `c5c8e09c` reproduced
+locally with the unchanged 500 ms reveal: the 650 ms watchdog skipped the real
+transition and rejected all five running/progressed pseudo-element animations.
+Passive observations measured roughly 59 ms to native readiness and another
+96 ms to animation play readiness. The approved 450 ms nominal reveal stays
+within Audit W12's 450–600 ms range and preserves the single total 650 ms lease;
+neither completion assertions nor privacy/geometry cancellation are relaxed.
+
+The corrected focused canonical local run passed both actual native circle/System
+and real logout-first-cleanup-failure/hard-reload journeys. All five 450 ms circle
+effects completed, with native finish at 618.2 ms from deadline registration;
+all five 180 ms System effects completed at 296.8 ms. No watchdog skip occurred.
+The logout test forwards the real server response/cookies and retains its bytes
+before browser delivery, avoiding document-bound response-body eviction.
+Eighty-one focused/sibling tests, strict typecheck, scoped lint and formatting
+passed. Retained artifacts are under
+`.local-tools/pr62-theme-logout-ci-fix/run-17ecf3ab-59ff-4c72-8e0c-3334fcaa96a5`
+(unchanged-product RED) and `run-efd06b47-1de9-4ab6-9f59-832f13186cc9` (GREEN).
+Both runs restored the exact local Auth container/configuration and retired their
+test signing key. These source-bound local results are not new-HEAD Linux CI,
+hosted certification, broader room/theme acceptance or resource-capacity proof.
 
 ## Palettes and exceptions
 
@@ -320,3 +351,21 @@ D402 and W12 remain in progress in the full master ledger.
 Primary contracts: [Supabase getClaims](https://supabase.com/docs/reference/javascript/auth-getclaims),
 [Supabase SSR cookies/Proxy](https://supabase.com/docs/guides/auth/server-side/creating-a-client?queryGroups=framework&framework=nextjs)
 and [native ViewTransition lifecycle](https://developer.mozilla.org/en-US/docs/Web/API/ViewTransition).
+
+## Hosted theme checkpoint — 2026-11-05
+
+The scoped hosted checks exercised code `7fd08332b230b154c8bb4fcdd29688a5c26fe983`, not the later documentation commit recording them. READY Vercel deployment `dpl_Ri3fTDLr92Xjnm9CvqZEahyRRdXq` served `https://it-inventory-system-qxehkxkiq-phead2002.vercel.app` against isolated Supabase preview `wbnjcvyxosiyfcyffwza`. [PR62 evidence](https://github.com/PHead2001/IT-Inventory-System/pull/62#issuecomment-6672666116) retains the checkpoint. Its cheap pre-push gate passed typecheck, zero-warning lint, formatting and 5,792 tests; fresh Codex review was clean with zero unresolved threads at that checkpoint. These checks are not complete final-candidate CI.
+
+Desktop Full, desktop Reduced, 390 px phone Full and 390 px phone Reduced each passed the signed-in collector. Each independently checked the actual Build Info SHA, backend and authorized room response before theme interaction. It observed Dark first paint, the native Light circle in Full or instant Reduced behavior, System behavior, saved Light/System reload paints, live WebGL palette changes and retained canvas/camera/selection. Mounted control checks from 502 to 320 px also passed. Each case retained six captures, proved normal sign-out and browser/process/profile closure, and recorded zero unexpected writes or foreign navigation. No inventory fixture or configuration write was made.
+
+The inventory was empty. Independent capture review found no actionable visible issue within that scope, but it does not certify populated records/forms, disclosure, toast, designer, Labels, Scan or all Spaces journeys, rendered whole-screen contrast, screen-reader behavior, physical phones or GPU frame performance. Each receipt also recorded five console-error events; the collector retained counts only, so these artifacts cannot establish their source, cause or harmlessness. Bounded console classification remains required before console-error-free runtime acceptance. D303.2, D402 and W12 remain incomplete, and the master ledger retains their wider gates and every other requirement. Earlier pending statements above remain historical for their named candidate; this checkpoint advances only the explicitly observed journeys.
+
+## Populated and independent checkpoint — tested code 7fd08332
+
+Four populated profiles now pass at the same isolated exact-code candidate `7fd08332b230b154c8bb4fcdd29688a5c26fe983`: Desktop Full `5af1beb4`, Desktop Reduced `7afe6ce8`, phone 390px Full `97b12277` and phone 390px Reduced `dbe4bcc3`. Each retained twenty Light/Dark captures across applied search, asset/quantity detail/edit/review/discard, History disclosure, Settings and mixed Labels queue. All measured controls met 44px/wrapping/visible-UUID checks; each verified build/backend/actor authority, zero denied writes/foreign navigation/page errors, unchanged fixture baseline and normal browser/SDK/process/profile closure. The [canonical populated ledger](audit-4-2-acceptance.md#pr62-populated-theme-and-independent-experience-checkpoint--tested-code-7fd08332) records full run identities, hashes, resource evidence and limits. [Two selected current captures](https://github.com/PHead2001/IT-Inventory-System/pull/62#issuecomment-6675163628) are attached to PR62; they do not establish complete before/after evidence.
+
+Desktop navigation indicators settled; phone navigation was closed and explicitly not visible. Labels retained the strict two-action/owned-payload/budget boundary while supporting verified canonical intent consumption. Client-blocked console events and intentionally aborted preview-feedback script counts remain reported; correlation is not exact Request identity or a waiver. Earlier failed receipts remain unchanged.
+
+Independent live run `2c127821` (full receipt/hash in the ledger) exercised desktop Full/Light asset review/edit/cancel/keep/discard and phone Reduced menu, keyboard search, theme/local-motion with OS precedence, owned quantity detail and History disclosure. Readability/clipping were inspected and discard restored focus to Edit details. However, PR66 owns unresolved pre-existing generic task-discard confirmation naming and Edit values review-exit focus defects: the affected record is unnamed, and removal of review controls leaves focus on the body after two natural frames. These are not fixed or waived in PR62. Earlier independent read-policy aborts were harness limits, not established application defects.
+
+Independent filtered Back/scroll restoration, mixed-queue invalid-copy coverage, Full animation timing, complete exact-final-SHA CI and broader page/contrast/Scan/Spaces/physical/assistive-technology proof remain pending. This checkpoint is for tested code 7fd, not the later docs commit, and does not claim merge readiness or complete D303.2/D402/W12 acceptance. The prior empty-screen checkpoint above remains historical for its stated scope.

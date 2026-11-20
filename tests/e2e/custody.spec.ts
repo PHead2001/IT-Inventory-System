@@ -603,9 +603,13 @@ test('site movements distinguish available, assigned and recorded; dated activit
   await page.goto('/locations/ITO-GENERAL');
   await expect(page.getByText('Inventory destination')).toBeVisible();
   await page.goto('/dashboard');
+  await page
+    .getByRole('link', { name: 'Detailed stock overview', exact: true })
+    .click();
+  await expect(page).toHaveURL('/dashboard?view=low-stock');
   const row = page
     .locator('li')
-    .filter({ has: page.getByRole('link', { name }) });
+    .filter({ has: page.getByRole('link', { name, exact: true }) });
   await expect(row).toContainText('Available 7 · Assigned 3');
   await expect(row).toContainText('Total 10 · Threshold 7');
   await page.goto('/inventory/quantity/' + id);
