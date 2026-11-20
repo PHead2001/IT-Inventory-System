@@ -1,31 +1,30 @@
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
-import { readdirSync } from 'node:fs';
 import { setTimeout as delay } from 'node:timers/promises';
 import { createClient } from '@supabase/supabase-js';
 import { Client } from 'pg';
 import fixture from '../fixtures/auth.json' with { type: 'json' };
 import { localCommandPaletteTarget } from '../helpers/local-command-palette-target';
+import {
+  assertTargets,
+  cleanupGroupedFixture,
+  groupedConnectionFailure,
+  GroupedTimeoutProofError,
+  assertGroupedTimeoutSchema,
+  proveGroupedStatementTimeout,
+} from '../helpers/grouped-timeout-proof';
 // Validate both endpoints before constructing any client, including pg's owner.
 const api = localCommandPaletteTarget(process.env.LOCAL_API_URL, 'api');
 const db = localCommandPaletteTarget(process.env.LOCAL_DB_URL, 'database');
 assert.ok(process.env.LOCAL_ANON_KEY && process.env.LOCAL_SERVICE_ROLE_KEY);
-const apiUrl = new URL(api);
-assert.equal(apiUrl.protocol, 'http:');
-assert.equal(apiUrl.username, '');
-assert.equal(apiUrl.password, '');
-assert.equal(apiUrl.pathname, '/');
-assert.equal(new URL(db).pathname, '/postgres');
+assertTargets(api, db);
 const owner = new Client({
   connectionString: db,
   application_name: 'inventory-views-integration',
   connectionTimeoutMillis: 3000,
   query_timeout: 4000,
 });
-const ownerFailure = new AbortController();
-owner.on('error', () =>
-  ownerFailure.abort(new Error('Inventory view owner connection failed')),
-);
+const ownerFailure = groupedConnectionFailure(owner, 'OWNER');
 const options = {
   auth: { persistSession: false, autoRefreshToken: false },
   global: {
@@ -63,44 +62,13 @@ async function read(
 ) {
   return clients[role].rpc(name, args);
 }
-async function cleanupFixture(
-  actions: (undefined | (() => Promise<unknown>))[],
-) {
-  let failed = false;
-  for (const action of actions) {
-    if (!action) continue;
-    try {
-      await action();
-    } catch {
-      failed = true;
-    }
-  }
-  if (failed) throw new Error('Inventory view fixture cleanup unproven');
-}
 async function main() {
   await owner.connect();
   // Read-only version/connection checks precede all authentication and fixture
   // changes. Installed SQL equality still needs exact-source clean-replay proof.
-  const expected = readdirSync('supabase/migrations')
-    .filter((name) => name.endsWith('.sql'))
-    .sort()
-    .map((name) => name.slice(0, 14));
-  assert.ok(expected.length > 0);
-  const identity = (
-    await owner.query(
-      'select current_database() db, current_user usr, ' +
-        "'public.quantity_items'::regclass::oid relation_oid, " +
-        '(select array_agg(version order by version) from supabase_migrations.schema_migrations) versions',
-    )
-  ).rows[0];
-  assert.equal(identity.db, 'postgres');
-  assert.equal(identity.usr, 'postgres');
-  assert.ok(
-    Number.isSafeInteger(identity.relation_oid) && identity.relation_oid > 0,
-  );
-  assert.deepEqual(identity.versions, expected);
+  await assertGroupedTimeoutSchema(owner);
   for (const [role, client] of Object.entries(clients)) {
-    ownerFailure.signal.throwIfAborted();
+    ownerFailure.throwIfAborted();
     const email =
       'inventory-views-' + role + '-' + randomUUID() + '@example.test';
     const created = await admin.auth.admin
@@ -280,10 +248,20 @@ async function main() {
       p_query: prefix,
     });
     assert.equal(later.data.rows[0].scoped_storage, '5');
+    const timeoutEvidence = await proveGroupedStatementTimeout({
+      observer: owner,
+      observerFailure: ownerFailure,
+      viewer: clients.viewer,
+      api,
+      database: db,
+      prefix,
+      itemId: item,
+    });
+    return timeoutEvidence;
   } finally {
     // Cleanup stays sequential on the owner connection and proceeds even when
     // an earlier action fails. Failed creates never confer ownership.
-    await cleanupFixture([
+    await cleanupGroupedFixture([
       snapshotLockHeld
         ? () => owner.query('select pg_advisory_unlock(91081,31)')
         : undefined,
@@ -336,25 +314,27 @@ main()
                 .delete()
                 .eq('user_id', id);
               if (membership.error)
-                throw new Error('Inventory view actor cleanup unproven');
+                throw new GroupedTimeoutProofError('ACTOR_CLEANUP_UNPROVEN');
             }
             const removed = await admin.auth.admin.deleteUser(id);
             if (removed.error)
-              throw new Error('Inventory view actor cleanup unproven');
+              throw new GroupedTimeoutProofError('ACTOR_CLEANUP_UNPROVEN');
           }
         }),
       );
       if (cleanup.some((result) => result.status === 'rejected'))
-        throw new Error('Inventory view actor cleanup unproven');
+        throw new GroupedTimeoutProofError('ACTOR_CLEANUP_UNPROVEN');
     }
   })
-  .then(() => {
-    ownerFailure.signal.throwIfAborted();
+  .then((timeoutEvidence) => {
+    ownerFailure.throwIfAborted();
+    // Report only typed evidence, after the owned fixture cleanup completes.
+    console.log(JSON.stringify(timeoutEvidence));
     console.log(
       'Inventory view caller authorization, concurrent snapshot and effective REST timeout checks passed.',
     );
   })
   .catch((error) => {
-    console.error(ownerFailure.signal.reason ?? error);
+    console.error(ownerFailure.reason ?? error);
     process.exitCode = 1;
   });
