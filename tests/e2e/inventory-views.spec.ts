@@ -135,6 +135,62 @@ test('grouped complete holdings, picking view, saved settings, Back and full-sco
         ).toBeInViewport();
       }
     }
+
+    const directoryQuery = new URLSearchParams({
+      q: 'ITC-S1A',
+      selected: 'ITC-S1A',
+      level: 'ITC-S1',
+      expanded: 'ITC-S1',
+    });
+    const directoryPath = '/locations?' + directoryQuery;
+    const directoryReturn = directoryPath + '#location-row-mobile-level-' + a;
+    await page.goto(directoryPath);
+    const browser = page.getByRole('navigation', {
+      name: 'Location browser',
+      exact: true,
+    });
+    await browser
+      .getByRole('link', {
+        name: 'View IT Closet / Left Storage / Shelf 1 / 1A location details',
+        exact: true,
+      })
+      .click();
+    const allLocations = page.getByRole('link', {
+      name: 'All locations',
+      exact: true,
+    });
+    await expect(allLocations).toHaveAttribute('href', directoryReturn);
+
+    await page
+      .getByRole('combobox', { name: 'Saved inventory view' })
+      .selectOption({ label: 'Owned grouped picking' });
+    await expect(page).toHaveURL(
+      (url) =>
+        url.pathname === '/locations/ITC-S1A' &&
+        url.searchParams.get('q') === prefix &&
+        url.searchParams.get('view') === 'items' &&
+        url.searchParams.get('returnTo') === directoryReturn,
+    );
+    await page
+      .getByRole('combobox', { name: 'Inventory view' })
+      .selectOption('holdings');
+    await expect(page).toHaveURL(
+      (url) =>
+        url.pathname === '/locations/ITC-S1A' &&
+        url.searchParams.get('view') === 'holdings' &&
+        url.searchParams.get('returnTo') === directoryReturn,
+    );
+    await allLocations.click();
+    await expect(page).toHaveURL(new URL(directoryReturn, page.url()).href);
+    await expect(
+      browser.getByRole('searchbox', { name: 'Browse locations', exact: true }),
+    ).toHaveValue('ITC-S1A');
+    await expect(
+      browser.getByRole('button', {
+        name: 'IT Closet / Left Storage / Shelf 1 / 1A ITC-S1A',
+        exact: true,
+      }),
+    ).toHaveAttribute('aria-current', 'location');
   } finally {
     await owned.cleanup();
   }

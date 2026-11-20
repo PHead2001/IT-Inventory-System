@@ -15,6 +15,7 @@ const m = vi.hoisted(() => ({
   inventory: vi.fn(),
   columns: vi.fn(async () => ({ fields: [], truncated: false })),
   redirect: vi.fn(),
+  viewControls: vi.fn<(props: Record<string, unknown>) => null>(() => null),
 }));
 const location = {
   id: 'root',
@@ -47,7 +48,7 @@ vi.mock('@/features/inventory/views.server', () => ({
   },
 }));
 vi.mock('@/features/inventory/components/view-controls', () => ({
-  InventoryViewControls: () => null,
+  InventoryViewControls: m.viewControls,
 }));
 vi.mock('@/features/inventory/queries.server', () => ({
   getLocation: async () => location,
@@ -70,6 +71,57 @@ import Page from './page';
 
 const scopedOrigin =
   '/locations?q=Office&selected=ITO&level=&expanded=ITO#location-row-selected-panel-00000000-0000-4000-8000-000000000001';
+
+it.each([
+  {
+    input: scopedOrigin.replace(
+      'q=Office&selected=ITO',
+      'selected=ITO&q=Office',
+    ),
+    expected: scopedOrigin,
+  },
+  { input: ['/locations', scopedOrigin], expected: undefined },
+  { input: '//outside.example/locations', expected: undefined },
+  { input: '/locations?q=%GG', expected: undefined },
+  { input: '/locations?q=Office#inventory-row-1', expected: undefined },
+])(
+  'only passes a validated directory parent to display navigation ($input)',
+  async ({ input, expected }) => {
+    m.viewControls.mockClear();
+    m.inventory.mockResolvedValueOnce({
+      rows: [],
+      total: 0,
+      page: 1,
+      pageSize: 25,
+      error: 'The item view is unavailable.',
+    });
+    vi.stubEnv('NEXT_PUBLIC_SUPABASE_URL', 'https://inventory.supabase.co');
+    try {
+      render(
+        await Page({
+          params: Promise.resolve({ code: 'ITO' }),
+          searchParams: Promise.resolve({ returnTo: input }),
+        }),
+      );
+      expect(m.viewControls.mock.lastCall?.[0].directoryReturnTo).toBe(
+        expected,
+      );
+      expect(m.viewControls.mock.lastCall?.[0].params).not.toHaveProperty(
+        'returnTo',
+      );
+      const href = new URL(
+        screen
+          .getByRole('link', { name: 'Use Holdings view' })
+          .getAttribute('href')!,
+        'https://inventory.invalid',
+      );
+      expect(href.searchParams.get('view')).toBe('holdings');
+      expect(href.searchParams.get('returnTo')).toBe(expected ?? null);
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  },
+);
 
 it('retains the validated browser origin through status, pagination and child detail navigation while export keeps inventory filters', async () => {
   m.inventory.mockResolvedValue({

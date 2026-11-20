@@ -34,6 +34,7 @@ const navigation = vi.hoisted(() => ({ push: vi.fn(), replace: vi.fn() }));
 vi.mock('next/navigation', () => ({ useRouter: () => navigation }));
 const id = (n: number) =>
   `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
+const directoryReturnTo = `/locations?q=Office&selected=ITC&level=ROOM&expanded=ROOM#location-row-mobile-level-${id(6)}`;
 const props = {
   memberId: id(1),
   backend: 'https://inventory.supabase.co',
@@ -214,7 +215,7 @@ it.each(['actor', 'backend'])(
     read.mockRestore();
   },
 );
-it('location views retain their authoritative path scope when a saved filter points elsewhere', async () => {
+it('location views retain their path scope and directory parent when a saved filter points elsewhere', async () => {
   localStorage.setItem(
     key,
     encodeSavedViews({
@@ -233,6 +234,7 @@ it('location views retain their authoritative path scope when a saved filter poi
       {...props}
       params={{ location: 'ITC' }}
       action="/locations/ITC"
+      directoryReturnTo={directoryReturnTo}
     />,
   );
   await act(async () => {
@@ -243,7 +245,145 @@ it('location views retain their authoritative path scope when a saved filter poi
     { target: { value: id(4) } },
   );
   expect(navigation.push).toHaveBeenCalledWith(
-    '/locations/ITC?location=ITC&view=holdings&density=compact',
+    `/locations/ITC?location=ITC&view=holdings&density=compact&returnTo=${encodeURIComponent(directoryReturnTo)}`,
+    { scroll: false },
+  );
+});
+
+it('retains the current directory occurrence through view, density and column navigation without saving it', async () => {
+  const locationControls = (
+    params: Record<string, string>,
+    parent = directoryReturnTo,
+  ) => (
+    <InventoryViewControls
+      {...props}
+      params={{ location: 'ITC', q: 'Cable', page: '2', ...params }}
+      action="/locations/ITC"
+      directoryReturnTo={parent}
+    />
+  );
+  const { rerender } = render(locationControls({ view: 'items' }));
+  await act(async () => {
+    await Promise.resolve();
+  });
+  const expectLocationNavigation = (
+    display: Record<string, string>,
+    parent = directoryReturnTo,
+  ) => {
+    const url = new URL(
+      navigation.push.mock.lastCall?.[0],
+      'https://inventory.invalid',
+    );
+    expect(url.pathname).toBe('/locations/ITC');
+    expect(Object.fromEntries(url.searchParams)).toEqual({
+      q: 'Cable',
+      location: 'ITC',
+      ...display,
+      returnTo: parent,
+    });
+    expect(url.hash).toBe('');
+  };
+  const view = screen.getByRole('combobox', { name: 'Inventory view' });
+  fireEvent.change(view, { target: { value: 'holdings' } });
+  expectLocationNavigation({ view: 'holdings', density: 'comfortable' });
+
+  const nextParent = directoryReturnTo.replace('q=Office', 'q=Closet');
+  rerender(locationControls({ view: 'holdings' }, nextParent));
+  fireEvent.change(view, { target: { value: 'items' } });
+  expectLocationNavigation(
+    { view: 'items', density: 'comfortable' },
+    nextParent,
+  );
+  fireEvent.change(
+    screen.getByRole('combobox', { name: 'Inventory density' }),
+    {
+      target: { value: 'compact' },
+    },
+  );
+  expectLocationNavigation(
+    { view: 'holdings', density: 'compact' },
+    nextParent,
+  );
+
+  fireEvent.click(screen.getByText(/^Custom columns/));
+  fireEvent.click(screen.getByRole('checkbox', { name: 'Count · Cables' }));
+  expectLocationNavigation(
+    { view: 'holdings', density: 'comfortable', columns: id(2) },
+    nextParent,
+  );
+  fireEvent.change(
+    screen.getByRole('textbox', { name: 'Find a published field' }),
+    {
+      target: { value: 'Count' },
+    },
+  );
+  fireEvent.click(screen.getByRole('button', { name: 'Find fields' }));
+  expectLocationNavigation(
+    { view: 'holdings', columnSearch: 'Count' },
+    nextParent,
+  );
+
+  fireEvent.change(screen.getByRole('textbox', { name: 'View name' }), {
+    target: { value: 'Location cables' },
+  });
+  fireEvent.click(screen.getByRole('button', { name: 'Save view' }));
+  expect(JSON.parse(localStorage.getItem(key)!).views[0].params).toEqual({
+    q: 'Cable',
+    location: 'ITC',
+    view: 'holdings',
+    density: 'comfortable',
+  });
+
+  rerender(locationControls({ view: 'invalid' }, nextParent));
+  const recovery = new URL(
+    screen
+      .getByRole('link', { name: 'Clear display settings' })
+      .getAttribute('href')!,
+    'https://inventory.invalid',
+  );
+  expect(recovery.pathname).toBe('/locations/ITC');
+  expect(Object.fromEntries(recovery.searchParams)).toEqual({
+    q: 'Cable',
+    location: 'ITC',
+    returnTo: nextParent,
+  });
+});
+
+it('restores the browser default with the current location parent and drops it when leaving the location', async () => {
+  localStorage.setItem(
+    key,
+    encodeSavedViews({
+      ...emptySavedViews(),
+      preferences: { view: 'holdings', density: 'compact', columns: [] },
+    }),
+  );
+  const { rerender } = render(
+    <InventoryViewControls
+      {...props}
+      params={{ location: 'ITC', page: '8' }}
+      action="/locations/ITC"
+      directoryReturnTo={directoryReturnTo}
+    />,
+  );
+  await act(async () => {
+    await Promise.resolve();
+  });
+  expect(navigation.replace).toHaveBeenCalledExactlyOnceWith(
+    `/locations/ITC?location=ITC&view=holdings&density=compact&returnTo=${encodeURIComponent(directoryReturnTo)}`,
+    { scroll: false },
+  );
+  rerender(
+    <InventoryViewControls
+      {...props}
+      params={{ returnTo: directoryReturnTo }}
+      directoryReturnTo={directoryReturnTo}
+    />,
+  );
+  fireEvent.change(screen.getByRole('combobox', { name: 'Inventory view' }), {
+    target: { value: 'holdings' },
+  });
+  expect(navigation.push).toHaveBeenCalledExactlyOnceWith(
+    '/inventory?view=holdings&density=comfortable',
     { scroll: false },
   );
 });

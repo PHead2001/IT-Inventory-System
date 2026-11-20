@@ -41,14 +41,15 @@ export default async function LocationPage({
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
   const { code } = await params;
-  const raw = await searchParams;
+  const { returnTo: rawReturnTo, ...raw } = await searchParams;
   const filters = Object.fromEntries(
     Object.entries(raw).map(([key, value]) => [
       key,
       Array.isArray(value) ? value[0] : value,
     ]),
   );
-  const returnTo = locationDetailReturnPath(filters.returnTo);
+  const directoryReturnTo = locationDetailReturnPath(rawReturnTo, '');
+  const returnTo = directoryReturnTo || '/locations';
   const location = await readLocationPage(code);
   if (!location) notFound();
   const [result, locations, catalog] = await Promise.all([
@@ -64,7 +65,7 @@ export default async function LocationPage({
   const { member } = await requireMember();
   const normalizedParams = {
     ...Object.fromEntries(navigationParams),
-    ...(filters.returnTo ? { returnTo } : {}),
+    ...(rawReturnTo ? { returnTo } : {}),
     page: String(filter.page),
   };
   const base = '/locations/' + encodeURIComponent(code);
@@ -84,13 +85,19 @@ export default async function LocationPage({
   const scopeHref = (status: string) => {
     const query = inventoryViewParams({ ...filters, status });
     query.delete('location');
-    if (filters.returnTo) query.set('returnTo', returnTo);
+    if (rawReturnTo) query.set('returnTo', returnTo);
     return base + (query.size ? '?' + query : '');
   };
+  const holdingsFallback = inventoryViewParams({
+    ...filters,
+    location: code,
+    view: 'holdings',
+  });
+  if (directoryReturnTo) holdingsFallback.set('returnTo', directoryReturnTo);
   const childHref = (childCode: string) =>
     '/locations/' +
     encodeURIComponent(childCode) +
-    (filters.returnTo ? '?' + new URLSearchParams({ returnTo }) : '');
+    (rawReturnTo ? '?' + new URLSearchParams({ returnTo }) : '');
   const constrained = hasInventoryConstraints({
     ...filters,
     location: undefined,
@@ -240,6 +247,7 @@ export default async function LocationPage({
                 memberId={member.user_id}
                 backend={process.env.NEXT_PUBLIC_SUPABASE_URL}
                 action={base}
+                directoryReturnTo={directoryReturnTo || undefined}
               />
             )}
             {result.error && (
@@ -250,7 +258,7 @@ export default async function LocationPage({
                 <p>{result.error}</p>
                 <Link
                   className="min-h-11 inline-flex items-center text-cyan-300 underline"
-                  href={`${base}?${inventoryViewParams({ ...filters, location: code, view: 'holdings' })}`}
+                  href={`${base}?${holdingsFallback}`}
                 >
                   Use Holdings view
                 </Link>

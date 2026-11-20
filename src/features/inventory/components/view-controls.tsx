@@ -34,6 +34,7 @@ type Props = {
   memberId: string;
   backend: string;
   action?: string;
+  directoryReturnTo?: string;
 };
 export function InventoryViewControls(props: Props) {
   const scope = savedViewStorageKey(props.memberId, props.backend);
@@ -50,6 +51,7 @@ function Controls({
   catalogError,
   storageKey,
   action = '/inventory',
+  directoryReturnTo,
 }: Props & { storageKey: string }) {
   const router = useRouter();
   const host = useRef<HTMLElement>(null);
@@ -103,22 +105,33 @@ function Controls({
     setSynced(signature);
     setSearch(params.columnSearch ?? '');
   }
+  const location = action.startsWith('/locations/')
+    ? params.location
+    : undefined;
+  const viewHref = useCallback(
+    (query: URLSearchParams) => {
+      if (location) {
+        query.set('location', location);
+        if (directoryReturnTo) query.set('returnTo', directoryReturnTo);
+      }
+      return action + (query.size ? '?' + query : '');
+    },
+    [action, directoryReturnTo, location],
+  );
   const navigate = useCallback(
     (query: URLSearchParams, replace = false) => {
       if (!owned()) return;
-      if (action.startsWith('/locations/') && params.location)
-        query.set('location', params.location);
+      const href = viewHref(query);
       // Cancel unsent search typing before this deliberate navigation, including A/B/A.
       window.dispatchEvent(
         new CustomEvent('inventory-view-navigation', {
           detail: query.toString(),
         }),
       );
-      const href = action + (query.size ? '?' + query : '');
       if (replace) router.replace(href, { scroll: false });
       else router.push(href, { scroll: false });
     },
-    [owned, action, params.location, router],
+    [owned, router, viewHref],
   );
   useEffect(() => {
     if (!admission || !owned() || restored.current) return;
@@ -214,7 +227,14 @@ function Controls({
       )}
       {urlError && (
         <Link
-          href={`${action}?${inventoryViewParams({ ...params, view: undefined, density: undefined, columns: undefined })}`}
+          href={viewHref(
+            inventoryViewParams({
+              ...params,
+              view: undefined,
+              density: undefined,
+              columns: undefined,
+            }),
+          )}
           className="text-cyan-300 underline"
         >
           Clear display settings
