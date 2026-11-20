@@ -178,7 +178,7 @@ it('distinguishes absent monitoring from healthy monitored zero and provides sta
     screen.getByRole('link', { name: 'Set threshold for Adapter' }),
   ).toHaveAttribute(
     'href',
-    '/inventory/quantity/' + data.stockTrends[0]!.itemId,
+    '/inventory/quantity/' + data.stockTrends[0]!.itemId + '/threshold',
   );
   const healthy = snapshot();
   healthy.stock.needsAttention = '0';
@@ -350,11 +350,6 @@ it('opens keyboard peeks for exact Overview records while history and aggregate 
       unmonitored.itemId,
     ],
     [
-      getRecord('Set up stock monitoring', 'Set threshold for Adapter'),
-      'quantity',
-      unmonitored.itemId,
-    ],
-    [
       getRecord('Equipment at sites', assigned.name),
       assigned.kind,
       assigned.entityId,
@@ -391,6 +386,20 @@ it('opens keyboard peeks for exact Overview records while history and aggregate 
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
     expect(link).toHaveFocus();
   }
+  expect(read).toHaveBeenCalledTimes(records.length);
+
+  const threshold = getRecord(
+    'Set up stock monitoring',
+    'Set threshold for Adapter',
+  );
+  expect(threshold).toHaveAttribute(
+    'href',
+    `/inventory/quantity/${unmonitored.itemId}/threshold`,
+  );
+  expect(threshold).not.toHaveAttribute('aria-haspopup');
+  await act(async () => threshold.focus());
+  expect(threshold).toHaveFocus();
+  expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
   expect(read).toHaveBeenCalledTimes(records.length);
 
   for (const [name, href] of [
@@ -522,7 +531,10 @@ it('applies a newly verified viewer permission on transient failure while preser
   expect(
     screen.queryByRole('link', { name: 'Set threshold for Adapter' }),
   ).not.toBeInTheDocument();
-  expect(screen.getByRole('link', { name: 'View Adapter' })).toBeVisible();
+  expect(screen.getByRole('link', { name: 'View Adapter' })).toHaveAttribute(
+    'href',
+    `/inventory/quantity/${data.stockTrends[0]!.itemId}`,
+  );
   expect(
     container.querySelector(`time[datetime="${data.fetchedAt}"]`),
   ).toBeInTheDocument();

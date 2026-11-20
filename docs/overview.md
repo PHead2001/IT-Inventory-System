@@ -106,11 +106,14 @@ Stock summaries count active quantity definitions. `monitoredItems` have a
 threshold; `needsAttention` use available storage quantity **at or below** that
 threshold; `zeroAvailable` is a subset of attention, never another additive
 total. `unmonitoredItems` have a null threshold. Five attention rows include
-`max(threshold - available, 0)`; five unmonitored rows support the existing setup
-flow. Storage at inactive locations remains available, consistent with existing
-stock reads. No headline adds quantities of different products or adds asset
-counts to quantity units. Current thresholds label the current state; the chart
-does not claim historical threshold values or monitoring coverage.
+`max(threshold - available, 0)`. Each of up to five unmonitored rows links staff to
+`/inventory/quantity/[id]/threshold`. The route opens the named active item with
+the threshold field first and uses the existing metadata review, version check
+and save. Viewers have a link to the read-only item detail. Storage at inactive
+locations remains available, consistent with existing stock reads. No headline
+adds quantities of different products or adds asset counts to quantity units.
+Current thresholds label the current state; the chart does not claim historical
+threshold values or monitoring coverage.
 
 Site counts distinguish active serialized assets, distinct quantity definitions
 with positive holdings, and occupied sites. Five deterministic rows name the

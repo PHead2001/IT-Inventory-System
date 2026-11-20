@@ -454,11 +454,18 @@ function OverviewRevisionView({
                       <p className={styles.metrics}>
                         Available {row.available} · Not monitored
                       </p>
-                      <OverviewRecordLink kind="quantity" id={row.itemId}>
-                        {mayEdit
-                          ? `Set threshold for ${row.name}`
-                          : `View ${row.name}`}
-                      </OverviewRecordLink>
+                      {mayEdit ? (
+                        <Link
+                          className={styles.link}
+                          href={`/inventory/quantity/${encodeURIComponent(row.itemId)}/threshold`}
+                        >
+                          Set threshold for {row.name}
+                        </Link>
+                      ) : (
+                        <OverviewRecordLink kind="quantity" id={row.itemId}>
+                          View {row.name}
+                        </OverviewRecordLink>
+                      )}
                     </li>
                   ))}
                 </ListEntrance>

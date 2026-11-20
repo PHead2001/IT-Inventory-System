@@ -224,6 +224,119 @@ describe('published metadata form', () => {
       draftForm: form(),
     });
   });
+  it.each(['published', 'omitted'] as const)(
+    'puts the %s threshold first, preserves other fields, and closes without a write',
+    async (layout) => {
+      const current = form();
+      current.published_definition.fields[0].required = false;
+      if (layout === 'published')
+        current.published_definition.layout[0].controls.push({
+          id: otherCategory,
+          kind: 'builtin',
+          builtin: 'reorder_threshold',
+          width: 12,
+        });
+      render(
+        <MetadataForm
+          {...props}
+          forms={{ [categoryId]: current }}
+          thresholdSetup
+        />,
+      );
+
+      const threshold = screen.getByRole('spinbutton', {
+        name: 'Reorder threshold (optional)',
+      });
+      await waitFor(() => expect(threshold).toBeEnabled());
+      expect(
+        threshold.compareDocumentPosition(screen.getByLabelText('Name')) &
+          Node.DOCUMENT_POSITION_FOLLOWING,
+      ).toBeTruthy();
+      expect(screen.getByLabelText('Category')).toHaveValue(categoryId);
+      expect(screen.getByRole('checkbox', { name: /Inspected/ })).toBeVisible();
+      expect(submitInventory).not.toHaveBeenCalled();
+
+      fireEvent.click(screen.getByRole('button', { name: 'Close' }));
+      expect(push).toHaveBeenCalledWith(`/inventory/quantity/${item.id}`);
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+      expect(submitInventory).not.toHaveBeenCalled();
+    },
+  );
+  it('reviews threshold changes, refocuses the threshold and submits the existing versioned edit', async () => {
+    const user = userEvent.setup();
+    const current = form();
+    current.published_definition.fields[0].required = false;
+    vi.mocked(submitInventory).mockResolvedValueOnce({
+      ok: true,
+      entityId: item.id,
+      version: '2',
+      changed: true,
+    });
+    vi.mocked(refreshMetadataRecord).mockResolvedValueOnce({
+      ok: true,
+      record: { ...item, version: 2, reorderThreshold: 7 },
+      form: current,
+      draftForm: current,
+    });
+    render(
+      focusGrant(
+        <MetadataForm
+          {...props}
+          forms={{ [categoryId]: current }}
+          thresholdSetup
+        />,
+      ),
+    );
+    const threshold = () =>
+      screen.getByLabelText('Reorder threshold (optional)');
+    await waitFor(() => expect(threshold()).toBeEnabled());
+    fireEvent.change(threshold(), { target: { value: '7' } });
+    await user.click(screen.getByRole('button', { name: 'Review details' }));
+    expect(
+      screen.getByRole('region', { name: 'Metadata review' }),
+    ).toHaveTextContent(/Reorder threshold.*Unanswered.*7/);
+    expect(submitInventory).not.toHaveBeenCalled();
+    await user.click(screen.getByRole('button', { name: 'Edit values' }));
+    await waitFor(() => expect(threshold()).toHaveFocus());
+    expect(threshold()).toHaveValue(7);
+
+    await user.click(screen.getByRole('button', { name: 'Review details' }));
+    await user.click(screen.getByRole('button', { name: 'Confirm save' }));
+    await waitFor(() => expect(submitInventory).toHaveBeenCalledOnce());
+    expect(vi.mocked(submitInventory).mock.calls[0][0]).toMatchObject({
+      operation: 'quantity_update_v2',
+      expectedActorId: props.actorId,
+      payload: {
+        item_id: item.id,
+        expected_version: item.version,
+        expected_published_revision_id: firstRevision,
+        reorder_threshold: 7,
+        custom_patch: { set: {}, unset: [] },
+      },
+    });
+    await user.click(await screen.findByRole('button', { name: 'Done' }));
+    expect(push).toHaveBeenCalledWith(`/inventory/quantity/${item.id}`);
+  });
+  it('requires explicit discard before canceling a changed threshold', async () => {
+    render(
+      <MetadataForm
+        {...props}
+        forms={{ [categoryId]: form() }}
+        thresholdSetup
+      />,
+    );
+    const threshold = screen.getByLabelText('Reorder threshold (optional)');
+    await waitFor(() => expect(threshold).toBeEnabled());
+    fireEvent.change(threshold, { target: { value: '4' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+    expect(
+      screen.getByRole('dialog', { name: 'Discard changes?' }),
+    ).toBeVisible();
+    expect(push).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: 'Discard changes' }));
+    expect(push).toHaveBeenCalledWith(`/inventory/quantity/${item.id}`);
+    expect(submitInventory).not.toHaveBeenCalled();
+  });
   it('closes an unchanged normalized edit without confirmation or a mutation', async () => {
     const user = userEvent.setup();
     render(

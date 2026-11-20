@@ -20,6 +20,10 @@ Populated Overview visual/browser, hosted and final exact-SHA gates remain open.
 [Overview](overview.md#selective-release-checkpoint--november-5-2026). No row is
 promoted by that local evidence.
 
+The A403 threshold setup source links staff directly to the named active item's
+reorder threshold editor and keeps the viewer's item detail link. Populated
+browser and final exact-SHA evidence for the new route remain pending.
+
 This is the durable acceptance index for the complete owner-authorized Audit 4.2 goal: 65 numbered requirements, with D303 split into two acceptance rows, plus C402–C404 and N01–N07 (76 rows, 75 distinct base IDs). All A and W requirements remain implementation scope, including U303, U313 and A307. This document tracks disposition and dependencies; recordings, logs and one-time measurements belong in the relevant PR or retained protected artifacts, following Playbook §7.4.
 
 ## Active visual source checkpoints — 2026-11-05
