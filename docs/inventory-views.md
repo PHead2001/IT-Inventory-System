@@ -237,3 +237,42 @@ Donor 3ef24157 was authored over 43351451. Its original worktree could not resol
 the shared Vitest configuration, so its runtime/type/DB/browser checks remained
 pending. The current focused results above are new local evidence for the
 reconciled source; they do not relabel the donor's earlier validation state.
+
+## Local database checkpoint — 2026-11-20
+
+This checkpoint supersedes the earlier execution status for the checks below.
+It combines separate runs on the leased local stack.
+
+- The retained 47-migration database upgraded to 49 and a clean reset replayed
+  all 49 on source `4b5400093fbd3a6c6c69d40b7205d8dba710ebb0`. The database
+  suite on `e94096791e21f7775f94105179193d0a2fc9815b` passed all 25 pgTAP
+  files and 1,629 assertions, including grouped inventory. The aggregate run
+  then stopped when the low-stock export cap returned `57014` at 5,011 ms.
+  The unchanged focused low-stock test passed at 1,817 ms. The separate
+  canonical `npm run db:types:check` passed on `e9409679`. Migration and
+  generated-type files are byte-identical between `e9409679` and the
+  grouped timeout candidate below.
+- The grouped integration on `e1acb073d587f616aeaf8431dc9cff1d79bc6d57`
+  passed caller authorization, concurrent snapshot and separate 100 ms hoisting
+  checks. On `0f596439731596d0babdea145f1ce0e262617715`, the active viewer's
+  actual `inventory_grouped_page` REST call returned PostgreSQL
+  statement-timeout SQLSTATE `57014` after 5,006.5526 ms. The observer
+  witnessed the PostgREST backend waiting on the owned
+  `public.quantity_items` relation lock. The blocker still held that lock
+  at response inspection, the exact witnessed request had retired before
+  release, and the grouped result matched the baseline after release. Fixture
+  cleanup completed.
+
+Retained local receipts are under `.local-tools/`. The upgrade and clean
+replay are in `local-db-nov20/group49-2026-11-20T16-21-30-461Z/`. The remaining
+receipts are in `local-db-nov20-continuation/`, in the directories
+`reuse49-2026-11-20T16-43-34-846Z` (pgTAP and aggregate stop),
+`types49-2026-11-20T16-48-30-075Z` (types),
+`focused49-2026-11-20T16-51-11-612Z` (low-stock retry),
+`grouped-e1ac49-2026-11-20T16-59-14-714Z` (grouped controls), and
+`grouped-0f5949-2026-11-20T17-01-15-509Z` (actual grouped timeout).
+
+An uninterrupted canonical database run remains pending. The grouped timeout
+proof leaves exact pooled-backend setting restoration, physical query-plan
+evidence, production-path races with moves, stock, custody, lifecycle and
+admission changes, populated visual acceptance, and final remote gates open.

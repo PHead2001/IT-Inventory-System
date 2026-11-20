@@ -1083,3 +1083,28 @@ P11's unpublished grouped candidate migration is renamed and appended as
 checkpoint records local safety/static preparation only. It promotes no hosted,
 runtime or whole-requirement acceptance and preserves every existing audit row,
 status and historical evidence boundary.
+
+### Grouped local database checkpoint — 2026-11-20
+
+The local 47-to-49 migration upgrade and 49-migration clean replay completed.
+On `e94096791e21f7775f94105179193d0a2fc9815b`, all 25 pgTAP files and 1,629
+assertions passed, including grouped inventory. The aggregate database run
+stopped at the low-stock export cap with SQLSTATE `57014` at 5,011 ms. The
+unchanged focused retry passed at 1,817 ms. The canonical generated-type check
+also passed on that revision. Migration and generated-type bytes match
+`0f596439731596d0babdea145f1ce0e262617715`.
+
+The grouped integration passed role authorization, concurrent snapshot and
+100 ms hoisting on `e1acb073d587f616aeaf8431dc9cff1d79bc6d57`. On
+`0f596439731596d0babdea145f1ce0e262617715`, the authenticated grouped read
+returned REST SQLSTATE `57014` at 5,006.5526 ms while the owned blocker still
+held the relation lock. The exact witnessed backend request retired before
+release, the next call matched the baseline, and fixture cleanup completed.
+[Inventory views](inventory-views.md#local-database-checkpoint--2026-11-20)
+identifies the retained receipts.
+
+These separate runs update the earlier local execution status. A complete
+canonical database run, exact pooled-backend timeout restoration, physical
+query plans, broader lifecycle and admission concurrency, visual acceptance,
+and final remote checks remain pending. All 76 acceptance rows retain their
+existing dispositions.
