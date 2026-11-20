@@ -187,7 +187,7 @@ const site = {
 vi.mock('@/lib/auth/session.server', () => ({
   requireMember: async () => ({
     member: {
-      user_id: 'staff',
+      user_id: '00000000-0000-4000-8000-000000000001',
       role: 'staff',
       can_manage_configuration: false,
     },
@@ -249,6 +249,7 @@ vi.mock('@/features/metadata/queries.server', () => ({
 }));
 
 beforeEach(() => {
+  vi.stubEnv('NEXT_PUBLIC_SUPABASE_URL', 'http://127.0.0.1:1');
   state.pending = true;
   state.site = false;
   state.locationPair = false;
@@ -278,6 +279,7 @@ beforeEach(() => {
 });
 afterEach(() => {
   vi.restoreAllMocks();
+  vi.unstubAllEnvs();
 });
 function expectOutsideCapture(element: Element) {
   expect(element.closest('[data-active-capture]')).toBeNull();
@@ -478,7 +480,9 @@ it('location title pairing captures only explicit header/body regions under its 
   ).not.toBeNull();
   expect(
     document.querySelector('[data-active-capture="accepted-title-content"]'),
-  ).not.toBeNull();
+  ).toContainElement(
+    screen.getByRole('region', { name: 'Inventory view settings' }),
+  );
   expect(
     screen
       .getByRole('heading', { name: 'Drawer 1' })
