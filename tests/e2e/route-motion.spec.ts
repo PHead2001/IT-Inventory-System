@@ -1985,7 +1985,10 @@ for (const width of [1280, 390]) {
       detailHref('inventory-row-1'),
     );
     await expect(title).toHaveAttribute('href', detailHref('inventory-row-2'));
-    await expect(details).toHaveAttribute('href', detailHref('inventory-row-2'));
+    await expect(details).toHaveAttribute(
+      'href',
+      detailHref('inventory-row-2'),
+    );
     await expect(details).toBeVisible();
     await details.scrollIntoViewIfNeeded();
     await details.hover();
