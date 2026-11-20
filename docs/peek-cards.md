@@ -1,9 +1,10 @@
 # Private record peeks
 
-W19 adds optional current-state cards to inventory, history, location, label and
-scan record links. Fine-pointer hover waits 400 ms; deliberate keyboard focus
-opens without moving focus. Escape closes the card, and touch keeps ordinary
-navigation. Cards use the shared spring presentation and respect Reduced motion.
+W19 adds optional current-state cards to inventory, history, location, label,
+scan and Overview record links. Fine-pointer hover waits 400 ms. Deliberate
+keyboard focus opens the card without moving focus. Escape closes the card, and
+touch keeps ordinary navigation. Cards use the shared spring presentation and
+respect Reduced motion.
 The record link and its existing navigation remain available during every read.
 
 `GET /api/peek` authenticates membership once before validating the strict asset,
@@ -38,14 +39,20 @@ the exact business result/rejection are preserved.
 
 ## Integration and verification limits
 
-The current Overview's attention-item title and View item and locations links
-use the existing quantity item UUID. Aggregate inventory filters and the CSV
-download have no single record target and retain ordinary navigation. Both
-current record links have consumer regressions. The newer Overview and grouped
-custom-view modules from the donor are absent in this checkout. Their additional
-W19 link integration and five donor consumer cases remain pending with those host
-features; no replacement host is introduced here.
-Focused mocked tests cover the present consumers and private lifecycle. They do
+### Expanded Overview source checkpoint
+
+The expanded Overview attaches shared peeks to attention-item titles, recent
+change **View record** links, unmonitored item titles and threshold actions,
+equipment at sites, and per-item stock trend titles. Each anchor keeps its
+existing destination and accessible name and uses its exact quantity or asset
+identity. Event details, aggregate and setup routes, and CSV downloads retain
+ordinary navigation. The detailed low-stock view already uses the shared peek
+for its item title and **View item and locations** links. Grouped custom-view
+consumer evidence belongs to its own integration checkpoint.
+
+The Overview consumer regression exercises keyboard focus and Escape, the exact
+peek request targets, and plain aggregate and event navigation. Focused mocked
+tests cover the present consumers and private lifecycle. They do
 not certify live RLS, concurrent database reads, Storage authorization, native
 keyboard/assistive technology, both-theme desktop/390 px appearance or browser
 hover transfer. Those boundaries require the canonical integrated gates and
