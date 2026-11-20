@@ -421,12 +421,26 @@ test('office storage and property custody keep an asset UUID and avoid fictional
   ).toContainText('1');
   // The browse filter uses site UUIDs. Search by unique asset name here, and
   // verify the row links to the site rather than claiming a closet drawer.
-  await page.goto('/inventory?q=' + encodeURIComponent(name));
+  await page.goto(
+    '/inventory?' +
+      new URLSearchParams({ q: name, view: 'items', density: 'comfortable' }),
+  );
+  const item = page.getByRole('listitem').filter({
+    has: page.getByRole('link', { name, exact: true }),
+  });
+  await expect(item).toHaveCount(1);
+  await item
+    .getByText('Storage and sites within these filters (1)', { exact: true })
+    .click();
   await expect(
-    page.getByRole('link', {
+    item.getByRole('link', {
       name: `Assigned to ${siteName} (${siteCode}) · no room model`,
+      exact: true,
     }),
-  ).toBeVisible();
+  ).toHaveAttribute('href', '/sites/' + siteCode);
+  await expect(
+    item.getByRole('link', { name: /^Show .* in (room|Spaces)$/ }),
+  ).toHaveCount(0);
   const csv = await page.request.get(
     '/api/exports/inventory?q=' + encodeURIComponent(name),
   );
@@ -680,34 +694,62 @@ test('site movements distinguish available, assigned and recorded; dated activit
   expect(siteCsvText).toContain(bCode);
   expect(siteCsvText).not.toContain(aCode);
   expect(siteCsvText).not.toContain('ITO-GENERAL');
-  await page.goto('/inventory?q=' + encodeURIComponent(name));
+  await page.goto(
+    '/inventory?' +
+      new URLSearchParams({
+        q: name,
+        view: 'holdings',
+        density: 'comfortable',
+      }),
+  );
   const holdings = page.getByRole('listitem').filter({
     has: page.getByRole('link', { name, exact: true }),
   });
   await expect(holdings).toHaveCount(3);
-  await expect(
-    holdings.getByText('Across all storage: 8 available', { exact: true }),
-  ).toHaveCount(3);
-  await expect(
-    holdings.getByText('Overall totals: 2 assigned · 10 recorded', {
-      exact: true,
-    }),
-  ).toHaveCount(3);
+  const totals = holdings
+    .locator('p')
+    .filter({ hasText: /^Overall item totals:/ });
+  await expect(totals).toHaveCount(3);
+  for (const label of [
+    'available across all storage',
+    'assigned across all sites',
+    'recorded',
+  ])
+    await expect(totals.filter({ hasText: label })).toHaveCount(3);
+  await expect(totals.locator('[data-count-final]')).toHaveText([
+    '8',
+    '2',
+    '10',
+    '8',
+    '2',
+    '10',
+    '8',
+    '2',
+    '10',
+  ]);
+  const physicalRows = holdings.getByRole('listitem');
+  await expect(physicalRows).toHaveCount(3);
   for (const siteCode of [aCode, bCode]) {
-    const siteHolding = holdings.filter({
-      has: page.getByRole('link', { name: new RegExp(siteCode) }),
+    const siteLink = page.getByRole('link', {
+      name: `Assigned to Fictional site ${siteCode} (${siteCode}) · no room model`,
+      exact: true,
     });
+    const siteHolding = physicalRows.filter({ has: siteLink });
+    await expect(siteHolding).toHaveCount(1);
+    await expect(siteLink).toHaveAttribute('href', '/sites/' + siteCode);
     await expect(
-      siteHolding.getByText('At this site', { exact: true }),
-    ).toBeVisible();
+      siteHolding.getByRole('link', { name: /^Show .* in (room|Spaces)$/ }),
+    ).toHaveCount(0);
     await expect(countFeedback(siteHolding, '1 unit')).toBeVisible();
   }
-  const storageHolding = holdings.filter({
-    has: page.getByRole('link', { name: /IT Office.*ITO-GENERAL/ }),
+  const locationLink = page.getByRole('link', {
+    name: /IT Office.*ITO-GENERAL/,
   });
-  await expect(
-    storageHolding.getByText('At this location', { exact: true }),
-  ).toBeVisible();
+  const storageHolding = physicalRows.filter({
+    has: locationLink,
+  });
+  await expect(storageHolding).toHaveCount(1);
+  await expect(locationLink).toHaveAttribute('href', '/locations/ITO-GENERAL');
   await expect(countFeedback(storageHolding, '8 units')).toBeVisible();
   await page.goto('/sites/' + aCode + '/open/quantity');
   await expect(

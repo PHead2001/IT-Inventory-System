@@ -13,8 +13,7 @@ export function InventoryViewCount({
       </p>
       <p className="mt-1">
         CSV includes all matching holdings, across pages and collapsed items.
-        Overall item totals repeat on holding rows; do not add those repeated
-        totals together.
+        Overall totals appear only on the first CSV row for each quantity item.
       </p>
     </div>
   );

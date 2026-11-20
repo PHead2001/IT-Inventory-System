@@ -33,13 +33,23 @@ for (const kind of ['quantity', 'asset'] as const) {
     const category = await auditCategory(page);
     const name = 'Audit two edit ' + crypto.randomUUID();
     const record = await auditCreateRecord(page, kind, category.name, name);
-    const scope = `/inventory?${new URLSearchParams({ q: name, type: kind, category: category.id, page: '1' })}`;
+    const filters = { q: name, type: kind, category: category.id };
+    const scope = `/inventory?${new URLSearchParams({ ...filters, page: '1' })}`;
+    const returnTo =
+      '/inventory?' +
+      new URLSearchParams({
+        ...filters,
+        view: 'items',
+        density: 'comfortable',
+        page: '1',
+      }) +
+      '#inventory-row-1';
     await page.goto(scope);
     await page.getByRole('link', { name, exact: true }).click();
     await expect(page).toHaveURL(
       (url) =>
         url.pathname === new URL(record.url).pathname &&
-        url.searchParams.get('returnTo') === scope + '#inventory-row-1',
+        url.searchParams.get('returnTo') === returnTo,
     );
     const scopedRecord = page.url();
     const formName = `Edit ${kind} metadata`;
@@ -57,11 +67,9 @@ for (const kind of ['quantity', 'asset'] as const) {
       'Recovered maker',
     );
     await page.getByRole('link', { name: 'Back to results' }).click();
-    await expect(page).toHaveURL(
-      new URL(scope + '#inventory-row-1', page.url()).href,
-    );
+    await expect(page).toHaveURL(new URL(returnTo, page.url()).href);
     expect(Object.fromEntries(new URL(page.url()).searchParams)).toEqual(
-      Object.fromEntries(new URL(scope, page.url()).searchParams),
+      Object.fromEntries(new URL(returnTo, page.url()).searchParams),
     );
     await page.goBack();
     await expect(page).toHaveURL(scopedRecord);

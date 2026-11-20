@@ -325,7 +325,9 @@ it('keeps full holdings export scope separate from grouped pages and selected co
     '/api/exports/inventory?customFields=true&q=%25_+literal&displayTimeZone=UTC',
   );
   expect(
-    screen.getByText(/Overall item totals repeat on holding rows/),
+    screen.getByText(
+      /Overall totals appear only on the first CSV row for each quantity item/,
+    ),
   ).toBeInTheDocument();
   expect(screen.getByRole('link', { name: 'Previous' })).toHaveAttribute(
     'href',

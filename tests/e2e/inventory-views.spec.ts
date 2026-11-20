@@ -25,6 +25,7 @@ test('grouped complete holdings, picking view, saved settings, Back and full-sco
     for (let n = 2; n <= 26; n++)
       await owned.quantity(`${prefix} ${String(n).padStart(2, '0')}`, null, 0);
     await page.setViewportSize({ width: 390, height: 850 });
+    await page.emulateMedia({ reducedMotion: 'no-preference' });
     await acceptanceLogin(page);
     await page.goto(`/inventory?q=${encodeURIComponent(prefix)}&view=items`);
     await expect(
@@ -41,19 +42,55 @@ test('grouped complete holdings, picking view, saved settings, Back and full-sco
         .locator('[data-count-final]')
         .first(),
     ).toHaveText('35');
+    await page
+      .getByRole('combobox', { name: 'Inventory density' })
+      .selectOption('compact');
+    await expect(page).toHaveURL(/density=compact/);
+    await expect(page.locator('html')).toHaveAttribute('data-motion', 'full');
     const disclosure = page.getByText(
       'Storage and sites within these filters (2)',
       { exact: true },
     );
     await disclosure.click();
+    await expect(disclosure).toHaveAttribute('aria-expanded', 'true');
     const firstRow = disclosure.locator('xpath=ancestor::li[1]');
     await expect(
       firstRow.getByRole('link', { name: /Show in room/ }),
     ).toHaveCount(2);
-    await page
-      .getByRole('combobox', { name: 'Inventory density' })
-      .selectOption('compact');
-    await expect(page).toHaveURL(/density=compact/);
+    const holding = firstRow.getByRole('link', { name: /\(ITC-S1B\)$/ });
+    // The stale height write occurs when the 250 ms spring deadline cancels
+    // the animation. Check layout after the following paint frames.
+    await page.evaluate(
+      () =>
+        new Promise<void>((resolve) =>
+          window.setTimeout(() => {
+            requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
+          }, 250),
+        ),
+    );
+    await holding.scrollIntoViewIfNeeded();
+    const geometry = await holding.evaluate((link) => {
+      const ownRow = link.closest('details')?.closest('li');
+      const nextRow = ownRow?.nextElementSibling;
+      if (!ownRow || !nextRow)
+        throw new Error('Missing adjacent inventory rows');
+      const rect = link.getBoundingClientRect();
+      return {
+        linkBottom: rect.bottom,
+        ownRowBottom: ownRow.getBoundingClientRect().bottom,
+        nextRowTop: nextRow.getBoundingClientRect().top,
+        receivesPointer: link.contains(
+          document.elementFromPoint(
+            rect.x + rect.width / 2,
+            rect.y + rect.height / 2,
+          ),
+        ),
+      };
+    });
+    expect(geometry.linkBottom).toBeLessThanOrEqual(geometry.ownRowBottom + 1);
+    expect(geometry.linkBottom).toBeLessThanOrEqual(geometry.nextRowTop + 1);
+    expect(geometry.receivesPointer).toBe(true);
+    await holding.click({ trial: true });
     expect(
       await page.evaluate(
         () => document.documentElement.scrollWidth <= window.innerWidth,

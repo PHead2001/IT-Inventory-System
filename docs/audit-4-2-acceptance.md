@@ -1108,3 +1108,29 @@ canonical database run, exact pooled-backend timeout restoration, physical
 query plans, broader lifecycle and admission concurrency, visual acceptance,
 and final remote checks remain pending. All 76 acceptance rows retain their
 existing dispositions.
+
+### Grouped preview checkpoint — 2026-11-20
+
+The signed-in PR68 preview served commit `b3677bf38c6389d1430f7e2240cfabe52c72fd14`
+with all 49 expected migrations on its isolated preview database. The owned
+fictional dataset showed 25 Items on page one and the remaining item on page
+two. The actual CSV downloaded from page one contained all 26 identities,
+27 holdings rows and 35 units. The two-location item showed 10 and 25 units
+in its holding rows. The CSV carried the item-wide total on its first row.
+All 26 owned items were archived, and cleanup verified their holdings were
+cleared with no unresolved operations.
+
+The scoped inventory screen rendered 25 first-page items without horizontal
+overflow at desktop and 390 px in Light and Dark with Full and Reduced motion.
+A temporary mobile saved view survived rename and reload. The browser
+preferences were restored. Independent phone inspection found the next
+Compact Items card could cover an expanded holding link. The follow-up
+disclosure fix adds pointer hit testing and a late callback regression. The
+CSV help now describes the observed compatible export format.
+
+[Foundation CI 44796090351](https://github.com/PHead2001/IT-Inventory-System/actions/runs/44796090351)
+passed application and database validation on that preview commit and reported
+17 browser failures. Browser verification of the follow-up, published custom
+columns and their mapping download, account-switch isolation, and final
+exact-commit CI and review remain pending for U303 and A305. This checkpoint
+does not promote an acceptance row to complete.

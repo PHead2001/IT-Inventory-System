@@ -165,8 +165,9 @@ alter authentication, membership or RLS.
 The existing inventory CSV endpoint, columns and holdings rows remain unchanged.
 The export menu calls this **Matching holdings rows**: it exports all matching
 holdings within existing export limits, regardless of item/holdings view or the
-visible page. Item-wide total columns repeat on holdings rows and must not be
-summed as per-holding quantities. **Inventory with custom fields** retains its
+visible page. **Quantity at Location** appears on every holding row. Item-wide
+total cells are filled only on the first exported row for each quantity item.
+**Inventory with custom fields** retains its
 existing full-scope custom export. The separate display-column mapping CSV
 contains selected field IDs, human labels/category and label provenance; it
 does not change the inventory CSV. Mapping text receives the existing formula

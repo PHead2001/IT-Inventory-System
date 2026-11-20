@@ -1912,15 +1912,24 @@ for (const width of [1280, 390]) {
     await create
       .getByLabel('Category', { exact: true })
       .selectOption({ label: category.name });
+    // This valid Short text value exceeds the selected preview's byte budget.
     await create
       .getByLabel('Pairing sibling note', { exact: true })
-      .fill('Owned source details link');
+      .fill('Owned source details link. '.repeat(10).trim());
     await metadataReviewButton(create).click();
     await metadataSaveButton(create).click();
     await expect(page).toHaveURL(/\/inventory\/quantity\/[0-9a-f-]+$/);
     const record = { id: new URL(page.url()).pathname.split('/').at(-1)! };
     const client = await auditReadback();
+    let fieldId: string;
     try {
+      const field = await client
+        .from('metadata_fields')
+        .select('id')
+        .eq('category_id', category.id)
+        .single();
+      expect(field.error).toBeNull();
+      fieldId = field.data!.id;
       const locations = await client
         .from('inventory_locations')
         .select('id,code')
@@ -1946,25 +1955,42 @@ for (const width of [1280, 390]) {
     } finally {
       await client.auth.signOut({ scope: 'local' });
     }
-    const scope = `/inventory?${new URLSearchParams({ q: name, type: 'quantity' })}`;
+    const scope = `/inventory?${new URLSearchParams({
+      q: name,
+      type: 'quantity',
+      view: 'holdings',
+      density: 'comfortable',
+      columns: fieldId,
+    })}`;
     const prefetch = await inventoryPrefetchProbe(page);
     // Hard navigation discards the prior creation/detail router cache. The
     // source page must preserve its actual second title on a truly cold visit.
     await page.goto(scope);
     await expect(page.getByRole('link', { name, exact: true })).toHaveCount(2);
-    const details = page
-      .locator('#inventory-row-2')
-      .getByRole('link', { name: 'Full details', exact: true });
+    const row = page.locator('#inventory-row-2');
+    const title = row.getByRole('link', { name, exact: true });
+    const otherTitle = page
+      .locator('#inventory-row-1')
+      .getByRole('link', { name, exact: true });
+    const details = row.getByRole('link', {
+      name: 'Preview shortened · full details',
+      exact: true,
+    });
+    const detailHref = (anchor: string) =>
+      `/inventory/quantity/${record.id}?${new URLSearchParams({
+        returnTo: scope + '#' + anchor,
+      })}`;
+    await expect(otherTitle).toHaveAttribute(
+      'href',
+      detailHref('inventory-row-1'),
+    );
+    await expect(title).toHaveAttribute('href', detailHref('inventory-row-2'));
+    await expect(details).toHaveAttribute('href', detailHref('inventory-row-2'));
     await expect(details).toBeVisible();
     await details.scrollIntoViewIfNeeded();
     await details.hover();
     await details.focus();
     await expect(details).toBeFocused();
-    const sourceHref = await page
-      .locator('#inventory-row-2')
-      .getByRole('link', { name, exact: true })
-      .getAttribute('href');
-    await expect(details).toHaveAttribute('href', sourceHref!);
     const inventoryNavigation = await navigationLink(page, 'Inventory');
     await inventoryNavigation.hover();
     await inventoryNavigation.focus();
@@ -1984,20 +2010,18 @@ for (const width of [1280, 390]) {
         .poll(() => page.evaluate(() => window.scrollY))
         .toBeGreaterThan(0);
     }
-    const row = page
-      .locator('#inventory-row-2')
-      .getByRole('link', { name, exact: true });
-    await row.scrollIntoViewIfNeeded();
+    await title.scrollIntoViewIfNeeded();
     await resetProof(page);
     await info.attach('before-row-navigation', {
       body: await page.screenshot(),
       contentType: 'image/png',
     });
-    const sourceNode = await row.elementHandle();
+    const sourceNode = await title.elementHandle();
     expect(sourceNode).not.toBeNull();
-    await row.focus();
+    await title.focus();
     const sourceScroll = await page.evaluate(() => window.scrollY);
     if (width === 390) expect(sourceScroll).toBeGreaterThan(0);
+    prefetch.assertNone();
     const streaming = await withHeldQuantityPrimary(info, async (held) => {
       const requested = page.waitForRequest(
         (request) =>
@@ -2445,7 +2469,12 @@ for (const mode of ['system-reduced', 'local-reduced'] as const) {
       } finally {
         await client.auth.signOut({ scope: 'local' });
       }
-      const scope = `/inventory?${new URLSearchParams({ q: name, type: 'quantity' })}`;
+      const scope = `/inventory?${new URLSearchParams({
+        q: name,
+        type: 'quantity',
+        view: 'holdings',
+        density: 'comfortable',
+      })}`;
       const anchoredScope = scope + '#inventory-row-2';
       const row = page
         .locator('#inventory-row-2')
