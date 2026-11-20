@@ -1264,7 +1264,10 @@ describe('unified room label registry', () => {
     vi.spyOn(canvas, 'getBoundingClientRect').mockReturnValue(viewport);
     const a = label(host),
       b = label(host);
-    const registry = createRoomLabelRegistry(vi.fn());
+    // Keep wall-clock scheduling out of the committed-placement fixture.
+    const registry = createRoomLabelRegistry(vi.fn(), undefined, undefined, {
+      clock: () => 0,
+    });
     const cleanup = registry.connect(canvas);
     registry.register('a', a.element, a.leader, {
       priority: 3,
@@ -1280,6 +1283,9 @@ describe('unified room label registry', () => {
     };
     const unregister = registry.register('b', b.element, b.leader, options);
     flush();
+    expect(canvas.dataset.labelLayoutStatus).toBe('complete');
+    expect(canvas.dataset.labelLayoutRevision).toBe('1');
+    expect(b.element.dataset.labelSuppressed).toBe('false');
     const displaced = b.element.dataset.labelDx;
     expect(displaced).not.toBe('0');
     // Camera geometry changes leave the previous B placement valid while its
@@ -1300,6 +1306,8 @@ describe('unified room label registry', () => {
       inspection: 'focus',
     });
     flush();
+    expect(canvas.dataset.labelLayoutStatus).toBe('complete');
+    expect(canvas.dataset.labelLayoutRevision).toBe('2');
     expect(b.element.dataset.labelDx).toBe(displaced);
     expect(a.element.dataset.labelDx).toBe('0');
     expect(a.element.dataset.labelSuppressed).toBe('false');
@@ -1482,7 +1490,11 @@ describe('unified room label registry', () => {
         [dimension]:
           (dimension === 'width' ? 40 : 32) + (++reads % 2 ? delta : 0),
       }));
-      const registry = createRoomLabelRegistry(vi.fn()),
+      // This matrix proves dimension tolerance and the four-pass cap. Elapsed
+      // time has separate budget/continuation tests and must not stop it early.
+      const registry = createRoomLabelRegistry(vi.fn(), undefined, undefined, {
+          clock: () => 0,
+        }),
         cleanup = registry.connect(canvas);
       registry.register('fractional', item.element, item.leader, {
         priority: 4,

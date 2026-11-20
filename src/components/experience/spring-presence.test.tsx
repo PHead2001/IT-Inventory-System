@@ -1,5 +1,7 @@
 import { AddItemLauncher } from '@/features/inventory/components/add-item-launcher';
 import { InventoryCaptureRegionsContext } from './inventory-capture-region';
+import { AuxiliaryRouteCaptureContext } from './auxiliary-route-context';
+import { createAuxiliaryRouteCapture } from './auxiliary-route-capture';
 import { RouteMotionProvider } from './route-motion';
 import { MotionPreference } from './motion-preference';
 import { useEffect, useState } from 'react';
@@ -431,36 +433,65 @@ it('close/reopen isolates the new task from old callbacks and exact-instance dis
   expect(discarded).toHaveBeenCalledTimes(2);
 });
 
-it('preserves the picker node through exit, keeps its current query reset, and reverses into fresh interactive state', () => {
+it('preserves the picker node through exit without admitting an empty route capture', () => {
   const choose = vi.fn();
-  render(
+  const registry = createAuxiliaryRouteCapture();
+  const picker = (error?: string, disabled?: boolean) => (
     <Managed>
-      <LocationPicker
-        label="Location"
-        mode="destination"
-        onValueChange={choose}
-        locations={[
-          {
-            id: 'drawer',
-            code: 'ITC-D1',
-            name: 'Drawer',
-            breadcrumb: 'IT Closet / Drawer',
-            parentId: null,
-            active: true,
-            can_hold_inventory: true,
-          },
-        ]}
-      />
-    </Managed>,
+      <AuxiliaryRouteCaptureContext value={registry}>
+        <InventoryCaptureRegionsContext
+          value={{
+            enabled: true,
+            pairedInventory: true,
+            conventionalPrimary: true,
+          }}
+        >
+          <LocationPicker
+            label="Location"
+            mode="destination"
+            error={error}
+            disabled={disabled}
+            onValueChange={choose}
+            locations={[
+              {
+                id: 'drawer',
+                code: 'ITC-D1',
+                name: 'Drawer',
+                breadcrumb: 'IT Closet / Drawer',
+                parentId: null,
+                active: true,
+                can_hold_inventory: true,
+              },
+            ]}
+          />
+        </InventoryCaptureRegionsContext>
+      </AuxiliaryRouteCaptureContext>
+    </Managed>
   );
-  fireEvent.click(screen.getByRole('combobox', { name: 'Location' }));
+  const view = render(picker());
+  const trigger = screen.getByRole('combobox', { name: 'Location' });
+  const browserRegion =
+    '[data-route-capture-region="picker-browser-destination"]';
+  expect(
+    trigger.closest('[data-route-capture-region="picker-destination"]'),
+  ).toBeInTheDocument();
+  expect(view.container.querySelector(browserRegion)).toBeNull();
+  fireEvent.click(trigger);
   const input = screen.getByRole('combobox', { name: 'Search locations' });
+  expect(input.closest(browserRegion)).toBeNull();
   fireEvent.change(input, { target: { value: 'Draw' } });
   const option = screen.getByRole('option', { name: /Drawer/ });
   fireEvent.click(option);
   expect(choose).toHaveBeenCalledOnce();
   expect(input).toHaveValue('');
   expect(input.closest('[data-spring-presence]')).toHaveAttribute('inert');
+  view.rerender(picker('Choose an available location.'));
+  const validation = screen.getByRole('alert');
+  expect(validation).toHaveTextContent('Choose an available location.');
+  expect(view.container.querySelectorAll(browserRegion)).toHaveLength(1);
+  expect(validation.closest(browserRegion)).toBeInTheDocument();
+  expect(input.closest(browserRegion)).toBeNull();
+  expect(input).toBeInTheDocument();
   fireEvent.click(option);
   expect(choose).toHaveBeenCalledOnce();
   act(() => vi.advanceTimersByTime(100));
@@ -471,6 +502,10 @@ it('preserves the picker node through exit, keeps its current query reset, and r
   expect(input).toHaveValue('');
   act(() => vi.advanceTimersByTime(250));
   expect(input.isConnected).toBe(true);
+  view.rerender(picker(undefined, true));
+  expect(trigger).toBeDisabled();
+  expect(input).not.toBeInTheDocument();
+  expect(view.container.querySelector(browserRegion)).toBeNull();
 });
 it('runs More commands exactly once before semantic close and retains the actual original obstruction until removal', () => {
   const command = vi.fn(),

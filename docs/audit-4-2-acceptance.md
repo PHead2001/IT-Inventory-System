@@ -37,13 +37,54 @@ CSV reuse the exact shortfall helper. The local P11 grouped-row preparation now
 connects that same helper to item-wide availability; filtered holdings never
 become its shortfall input. This does not broaden accepted A308 coverage.
 
-## Current delivery snapshot — 2026-11-05
+## PR62 theme, room and logout evidence checkpoint — 2026-11-05
+
+This checkpoint records PR62 at base `c5c8e09c66c7b61eecb78dd0212c695607a51630` plus local reviewed
+Theme and Room fixes. Those fixes are uncommitted; this is not a new HEAD or a final-SHA CI claim.
+
+- **PR57 integration:** PR #57 merged as main `aef008490373e79a6148b69e1a91d3a7be6a002f`.
+  Final candidate `17782ace` has an identical tree.
+- **PR62 checks at c5:** The normal hook reported `5792/371` passed. Fresh Codex receipt
+  `6675756066` was uniquely clean on the full SHA with zero unresolved findings.
+- **Complete CI:** Run `42158560591` failed and did not complete all planned E2E; it is not waived.
+  The 375→390 room click selected Red instead of S1A twice, and Full native theme animation
+  completion failed twice. Logout response-body collection failed once, then passed on retry.
+- **Room correction:** The More panel now defers its cancellable layout update until the next task
+  after the complete click, so pointerdown no longer removes the 205px inline flow before the scene
+  handler. Exact native run `bec461b0…` passed in 107.999s: the flow remained present; every click
+  phase used stable frame (30, 311.046875, 330, 408), selected S1A and matched inventory.
+- **Theme correction:** The former 500ms effects exceeded the 650ms total watchdog after 59ms capture
+  plus 96ms effect-ready time. The revised 450ms Full circle is within the Audit 450–600ms interval:
+  all five effects completed at visual-transition 618.2ms. The 180ms System effect completed at
+  296.8ms. The 650ms watchdog remains unchanged.
+- **Logout correction:** The real HTTP response capture test preserves logout, cookie, body-read-failure
+  and hard-reload coverage. Both focused native runs passed; 81 focused and sibling tests passed,
+  with ordinary review clear.
+- **Retained visual/source evidence:** Eight actual before/after images are attached to comment
+  `6676566647`. Source-qualified 835-inventory/header evidence is equivalent to main `aef008490373e79a6148b69e1a91d3a7be6a002f`.
+  The after source is `7fd08332`→`c5c8e09c` documentation-only. Compared images use different
+  fictional records and deployments; they do not establish History or Settings before/after, or
+  motion from stills.
+- **Artifacts and cleanup:** Source manifests and run evidence remain under
+  `.local-tools/pr62-theme-logout-ci-fix` and `.local-tools/pr62-room-menu-click`. Auth configuration
+  restoration, key retirement and process cleanup were proved. The old three-unit fixture is
+  unchanged (receipt prefix `61EC2761`).
+- **Remaining scope:** Independent focused theme-experience review is clear. The collector-limited
+  broader Labels workflow remains open. Helper candidate `197E89` has code review clear but still
+  needs final-source/deployment handoff and runtime evidence. Held U303/U313/A305 source and child
+  PR64/65/66 gates remain. No whole D402, W12 or Audit goal acceptance is claimed.
+- **Boundaries and next gate:** No room geometry, stock or RLS changes were made. The lead retains
+  batch commit, pre-push validation, fresh Codex review, complete CI and applicable hosted proof
+  before marking ready; automatic merge remains frozen. No production action occurred.
+
+## Historical snapshot before PR57 merge — 2026-11-05
 
 The lead verified PR #56 merged into `origin/main` `5bbf8ced7d865291ffd74d26491ee55484170dcb` from final candidate `22cd6c1f3153a5fd1bba4ffa03cc1c18d16f941d`. E22 records its exact-candidate CI, review and scoped runtime evidence. Those results do not certify the newly joined PR57 tree or integrated staging.
 
 - **Merged room dependency:** PR56 source is now on main. Retain its recorded desktop/phone Full/Reduced toolbar proof and stated limits; no room row is promoted to whole-ID acceptance by this reconciliation.
 - **PR57 integration:** A301 and W20 remain source/integration scopes with acceptance pending. Current base `b5189a8dcf8de229b68fea205c4fc6cfe451f1ee` failed two room-quiescence cases in CI run `41983148817`. A scoped hosted dense-room pass and the new local passive diagnostics do not establish the Linux CI cause or a fix; see the November 5 checkpoint below. The matrix retains both parents' evidence and main's PR52/E21 dispositions. Exact-final-SHA CI/review and hosted command/shortcut acceptance remain required.
-- **PR62 theme checkpoint:** Local source `13af3f39af14201c5fc172af49b37f685188f611` retains the theme/UI work and adds 44px History and saved-link controls plus passive native resized-click diagnostics. Its eight-path focused check passed 31 tests in three suites, canonical typecheck, zero-warning lint and formatting. Earlier exact-`8886a73effc434807d670e70dfbfda102289d0dd` CI run `41983830476` failed the mounted 375→390 room click with S1A expected and Red selected; the new diagnostic source does not establish its cause or remediation. These results are bound to the pre-join source, not the prepared join with PR57 diagnostic source `7e3bd76b94367bb9823448ef39763402d331f098`. Final-source local/browser gates, populated desktop/390px Full/Reduced inspection, exact-candidate CI and fresh review remain pending. Earlier theme profiles remain baseline evidence only; E24 does not extend D402 beyond its existing token foundation or accept W12/full theme behavior.
+- **PR62 theme checkpoint:** Tested code `7fd08332b230b154c8bb4fcdd29688a5c26fe983` passed four signed-in hosted theme profiles at desktop and 390 px in Full and Reduced motion. The exact candidate passed the cheap pre-push gate (5,792 tests), fresh Codex review was clean, and zero unresolved review threads remained at the checkpoint. [Retained evidence](https://github.com/PHead2001/IT-Inventory-System/pull/62#issuecomment-6672666116) records the candidate, isolated deployment/backend and bounded runtime checks. This proves the named theme/room/responsive journeys only: populated page/form/disclosure/Labels/Scan journeys and rendered contrast remain pending. D303.2, D402 and W12 remain incomplete; complete CI and wider acceptance are not supplied by this checkpoint. The detailed checkpoint below preserves the earlier source history.
+- **PR62 populated follow-up:** The same tested `7fd08332` now has four successful twenty-capture populated profiles and a scoped independent experience run. The populated checkpoint below supersedes only the earlier empty-inventory evidence limitation for its named journeys. PR66 owns unresolved pre-existing task-discard naming and review-exit focus defects; filtered Back/scroll/mixed-queue independent coverage and complete CI remain pending. D303.2, D402 and W12 are not complete and PR62 is not declared ready.
 - **Other scope:** PR62's theme work and held requirements retain their recorded owners and gates. No staging release, production promotion, physical-device/printer acceptance or overall goal completion is claimed.
 
 - **W01–W04 authored source checkpoint:** The current `assist/audit-four-presentation-surfaces` branch selectively integrates 24 shared-surface paths on joined PR62 base `8886a73effc434807d670e70dfbfda102289d0dd`. E25 records focused source validation only. Populated both-theme Full/Reduced visual/input/performance proof, canonical pre-push, final CI and fresh Codex review remain pending. This is authored source, not whole-requirement acceptance; W10 and the remaining audit scope are unchanged.
@@ -900,6 +941,43 @@ Normal-caller SDK fixture preparation `fixture-run-49575158-a18a-469e-b504-b2ec5
 
 The subsequent 19-path passive-demand diagnostic batch is committed as PR57 source `7e3bd76b94367bb9823448ef39763402d331f098`, based on `b5189a8`. Its retained checks apply to that diagnostic source before the prepared PR62 join; the joined merge SHA and validation are pending. Its focused suite passed 98 tests across 10 files, with Next type generation, strict TypeScript, changed-path zero-warning lint and formatting passing; independent Astra boundary review was clear. Counters expose connected-only coverage explicitly, preserve existing invalidation behavior and keep diagnostic observations out of readiness decisions. These are source-level diagnostic checks, not a browser reproduction or a fix claim. Exact-final-SHA CI, fresh remote review and A301/W20 command/shortcut acceptance remain pending. All 76 rows, 75 base IDs, status dispositions and other evidence, including E20 and E22, remain unchanged; no whole-goal acceptance is claimed.
 
+## PR62 exact-candidate hosted theme checkpoint — 2026-11-05
+
+This checkpoint tests code `7fd08332b230b154c8bb4fcdd29688a5c26fe983`, not the later documentation commit carrying this report. Its isolated READY deployment was `dpl_Ri3fTDLr92Xjnm9CvqZEahyRRdXq` at `https://it-inventory-system-qxehkxkiq-phead2002.vercel.app`, backed by Supabase preview `wbnjcvyxosiyfcyffwza`. [PR62 evidence](https://github.com/PHead2001/IT-Inventory-System/pull/62#issuecomment-6672666116) retains the exact candidate record. The cheap pre-push gate passed strict typecheck, zero-warning lint, formatting and 5,792 tests. Fresh Codex review was clean and zero unresolved threads remained at that checkpoint; this does not replace complete final-candidate CI.
+
+All four sequential signed-in profiles passed: desktop Full, desktop Reduced, 390 px phone Full and 390 px phone Reduced. Each independently verified Build Info, the expected backend and an actual authorized room response. The checks observed initial Dark paint, native Light circle or Reduced instant behavior, System behavior, saved Light/System first paints, live WebGL palette changes while preserving canvas/camera/selection, and mounted controls from 502 to 320 px. All 24 captures and scoped receipts remain retained. Minimum free memory ranged from 8.20 to 11.13 GiB. Each case proved normal sign-out, browser/process closure and temporary-profile cleanup, with zero unexpected writes or foreign navigation. No fixture was created or changed.
+
+Each receipt also retains five console-error events. The collector stored counts only, so their messages, sources and causes cannot be recovered or classified from these artifacts; they are not established as harmless. Further bounded diagnostics are needed before claiming console-error-free runtime acceptance. Independent capture review found no actionable visible issue within its stated empty-screen and theme scope, which does not resolve those console events.
+
+The isolated inventory was empty. These passes do not establish populated inventory, working forms, disclosure, toast, designer, Labels, Scan or every Spaces journey in both themes; rendered whole-screen contrast, independent visual acceptance, screen-reader, physical-phone and GPU/frame-performance proof remain separate. D303.2, D402 and W12 remain incomplete. No acceptance row, requirement or held feature is removed or promoted to whole-ID acceptance. Historical source/runtime evidence remains bound to its named candidate.
+
+Historical PR62 snapshot superseded by this scoped checkpoint:
+
+- **PR62 theme checkpoint:** Local source `13af3f39af14201c5fc172af49b37f685188f611` retains the theme/UI work and adds 44px History and saved-link controls plus passive native resized-click diagnostics. Its eight-path focused check passed 31 tests in three suites, canonical typecheck, zero-warning lint and formatting. Earlier exact-`8886a73effc434807d670e70dfbfda102289d0dd` CI run `41983830476` failed the mounted 375→390 room click with S1A expected and Red selected; the new diagnostic source does not establish its cause or remediation. These results are bound to the pre-join source, not the prepared join with PR57 diagnostic source `7e3bd76b94367bb9823448ef39763402d331f098`. Final-source local/browser gates, populated desktop/390px Full/Reduced inspection, exact-candidate CI and fresh review remain pending. Earlier theme profiles remain baseline evidence only; E24 does not extend D402 beyond its existing token foundation or accept W12/full theme behavior.
+
+## PR62 populated theme and independent experience checkpoint — tested code 7fd08332
+
+This advances only the named runtime evidence for `7fd08332b230b154c8bb4fcdd29688a5c26fe983`, not the later documentation commit. The tested isolated deployment remains `dpl_Ri3fTDLr92Xjnm9CvqZEahyRRdXq` at `https://it-inventory-system-qxehkxkiq-phead2002.vercel.app`, backed by preview `wbnjcvyxosiyfcyffwza`. PR57's dependency merge was verified as main `aef008490373e79a6148b69e1a91d3a7be6a002f`; this is not a new staging or production runtime pass. [PR62's populated evidence comment](https://github.com/PHead2001/IT-Inventory-System/pull/62#issuecomment-6675163628) attaches two selected current captures, not a complete before/after set.
+
+Four sequential populated profiles passed with twenty captures each. Each exercised both Light and Dark: applied owned search and distinct quantity holdings; asset/quantity details, edit, review and discard; native History disclosure; Settings; and a mixed asset/quantity Labels queue. All measured controls met the 44px minimum, wrapping and visible-UUID checks. Each independently verified current build/backend/actor authority, admitted nineteen bounded Labels reads without resetting the shared per-context budget, recorded zero denied writes/foreign navigation/page errors, and proved the final fixture baseline unchanged. Browser and SDK normal sign-out, page/context/process closure and temporary-profile removal were proven. These are synthetic desktop/390px browser results, not physical-phone or printer results.
+
+Receipts are retained under `.local-tools/pr62-hosted-nov6/fixtures/<run>/receipt.json`:
+
+| Profile             | Run directory                              | Receipt SHA256                                                     | Duration / minimum free RAM |
+| ------------------- | ------------------------------------------ | ------------------------------------------------------------------ | --------------------------- |
+| Desktop Full        | `run-5af1beb4-8026-4aeb-ac45-f863188cce8c` | `16EB9339C4CBBF9C52D30A7CC19653F1EF7914408C1B41BA5C499B4AFBA41D1B` | 67.1s / 11.70 GiB           |
+| Desktop Reduced     | `run-7afe6ce8-ace7-49ab-9539-eb2d29853335` | `BCB8E926648DC38ACAF84A2812D6BE814C61B5C0384DBB0679AC6411B67958B8` | 57.8s / 10.83 GiB           |
+| Phone 390px Full    | `run-97b12277-a558-4601-8f6a-23c272ccd202` | `E087A1BBACACF0BAF09E4A47010E8498F470A1FB2625684064E76729254E72E2` | 51.6s / 11.07 GiB           |
+| Phone 390px Reduced | `run-dbe4bcc3-fe1f-4116-96a2-1e2540029ff9` | `6FC3620AE58AFC7839EA6FDFEDCFC68E9640E8BF1626F909A298A532B81F7C8A` | 52.8s / 10.75 GiB           |
+
+The exact read-action contract supported both settled URL equality and the narrowly verified owned-intent-consuming pair required by Next's canonical action ordering; it did not create a generic POST or same-path allowance. Desktop navigation indicator checks settled within the active link with two stable frames. Closed phone navigation was explicitly `not-visible`, not a geometry pass. Receipts retain 15/15/15/16 client-blocked console events and the same counts of intentionally aborted preview-feedback scripts, with no unknown/page-error classification. Counts and bounded correlation do not prove exact console/Request identity or excuse unknown application errors. Prior failed runs and their original evidence remain unchanged; no error waiver is recorded.
+
+Independent live run `run-2c127821-3d3d-44e4-b8ea-2cdd38223780` (receipt SHA256 `633BF1F3752525F8756DEE66E640469AA887BEA4A8473457F4C3C70DD7774333`) passed its scoped desktop Full/Light asset Edit → Review → Edit values → Cancel → Keep editing → Close task → Discard journey, and phone 390px Reduced Menu → Inventory keyboard search → Light/Dark/local motion with OS precedence → owned quantity detail → History disclosure/Enter-close journey. Readability and clipping were inspected in that scope; discard restored focus to Edit details. It proved unchanged baseline, zero writes and complete normal browser/SDK/profile/process closure.
+
+**Unresolved pre-existing defects belong to PR66, not an exception to acceptance:** the generic Close task discard confirmation omits the affected record name. Separately, Edit values removes the review controls and leaves focus on the document body after two natural frames; the same source behavior exists on main. The observed discard focus restoration does not fix that review-exit focus defect. Both naming/focus issues remain open and are neither waived nor claimed fixed by PR62.
+
+Earlier independent attempts `86be01e5` and `98d267f3` stopped when the collector rejected legitimate read shapes (a returnTo query and repeated Labels empty/default reads). They are preserved failed harness evidence, not demonstrated application defects. The final independent run did not establish filtered Back/scroll restoration, mixed-queue invalid-copy behavior or Full animation timing. Those independent journeys, complete exact-final-SHA CI/review closeout, broader rendered contrast and the remaining pages/forms/Scan/Spaces/physical/assistive-technology requirements remain pending. The four automated profiles do not replace them. D303.2, D402 and W12 remain incomplete; no acceptance row or feature is removed and no PR-ready/full-goal claim is made. The fictional three-unit fixture remains held for independent acceptance and later authorized normal cleanup at this checkpoint.
+
 ## PR65 feedback and parent integration checkpoint — 2026-11-05
 
 PR65 source `39e1b8b40d0b17a7bff46127703e7dbeae633743` passed the normal pre-push gate with **6,194 tests across 400 files**, plus 87 focused Peek-related tests. Four representative local browser journeys passed: inventory search, room shelf/drawer selection, quantity lifecycle and site custody. Fresh Codex review was clean with zero unresolved threads, and preview checks passed. These are scoped candidate results; combined both-theme desktop/390 px Full/Reduced visual acceptance remains pending.
@@ -968,6 +1046,44 @@ desktop/390px Full/Reduced both-theme captures and exact-SHA certification remai
 required. All 76 rows, 75 base IDs and existing acceptance dispositions remain
 unchanged; source preparation is not runtime or whole-ID acceptance.
 
+### November 20 main reconciliation
+
+The local grouped candidate `5750ea11` now has a noncommitting merge of exact
+main `ac841de496bc969156a4467a1b66c495996037b0`, including merged PR62/64/65/66
+source and its later evidence. No conflicts required manual resolution.
+The unpublished grouped migration is appended as
+`20261119061422_inventory_grouped_views.sql`, after main's Overview UTC migration;
+its SQL bytes are unchanged. The retained local checkpoint records only 47
+migrations through `20261019193000`, no grouped RPC and no grouped upgrade/reset.
+No current database or hosted migration history was queried. Future History
+migrations must append after this grouped migration. Runtime gates, generated
+types, independent review and final exact-SHA certification remain pending;
+this source checkpoint does not change any acceptance disposition.
+
+### Delivery evidence checkpoint — 2026-11-20
+
+Verified Git `origin/main` is `ac841de496bc969156a4467a1b66c495996037b0`.
+Its merged audit slices are PR62 at `ac841de496bc969156a4467a1b66c495996037b0`,
+PR64 at `de07d500fd63cbbad306937a7595573b55076e8c`, PR65 at
+`3477f63cba4c34f4e766299401d37395445ba0ef`, and PR66 at
+`9f256938868518e49ee70759f3e459e04eff455d`. Git staging remains separately
+at `aef008490373e79a6148b69e1a91d3a7be6a002f`.
+
+Lead-supplied read-only provider evidence records production
+`dndqydmuqoduwaoujfki` and staging `ileoembzjxwhxgtiypec` with 46 applied
+migrations each, through `20261019151034`. Main contains 48 migrations,
+including Overview `20261019193000` and its UTC correction `20261119061421`.
+[Main workflow 44545614856](https://github.com/PHead2001/IT-Inventory-System/actions/runs/44545614856)
+failed during dependency installation before production database delivery;
+the delivery command was skipped. Main's source merge therefore does not
+establish deployment of either Overview migration or advancement of staging.
+
+P11's unpublished grouped candidate migration is renamed and appended as
+`20261119061422_inventory_grouped_views.sql`, with unchanged SQL bytes. This
+checkpoint records local safety/static preparation only. It promotes no hosted,
+runtime or whole-requirement acceptance and preserves every existing audit row,
+status and historical evidence boundary.
+
 ## Selective U313 history preparation — 2026-11-06
 
 Donor `45999655` is selectively reconciled onto reviewed grouped checkpoint
@@ -1027,3 +1143,23 @@ required. Original audit fixtures, production/staging and open-PR count were
 unchanged. All 76 rows, 75 base IDs and their dispositions remain unchanged;
 this is source and focused local validation evidence, not runtime or whole-goal
 acceptance.
+
+### History dependent-source reconciliation — 2026-11-20
+
+Local History `6dfdc525` has a noncommitting merge of exact grouped
+`e94096791e21f7775f94105179193d0a2fc9815b`, including main `ac841de4` and
+actual generated grouped public types. Both parents' historical checkpoints and
+all audit rows/statuses are preserved. The two conflicts were appended prose;
+no application or SQL conflicts required resolution. Grouped remains pending
+validation and separately releasable; joining its source does not accept either
+slice or expand History's scope.
+
+The unpublished History migration now appends as
+`20261119061423_inventory_history_tools.sql`, after the exact 49-migration
+grouped prefix, with unchanged SQL bytes. Available local receipts contain
+source/unit/type preparation and leave History DB execution pending; no remote
+ref contains the History introduction. No current local or hosted database
+history was queried during this reconciliation. History types still require
+actual generation/comparison, and replay/forward-upgrade, DB/RLS, real REST,
+browser/download and final exact-SHA gates remain pending. Static source/order
+checks alone promote no runtime or hosted acceptance.

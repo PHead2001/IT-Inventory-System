@@ -820,7 +820,7 @@ mutation, role, geometry authority or acceptance claim.
 ## U313 filtered history source integration
 
 History adds caller-invoker, active-member bounded reads in forward migration
-20261020151124_inventory_history_tools.sql. The internal event-key view and matcher
+20261119061423_inventory_history_tools.sql. The internal event-key view and matcher
 remain private; only the three bounded page/person/export RPCs are public. Literal
 search, stable historical actor identity, named-zone microsecond ranges, record
 locks and applied URL/export alignment preserve current route/privacy/motion/peek

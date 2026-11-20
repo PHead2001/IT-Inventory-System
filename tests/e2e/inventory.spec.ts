@@ -1387,7 +1387,8 @@ test('inventory search location picker exposes keyboard paths and stays framed o
     exact: true,
   });
   await form.getByRole('button', { name: 'More filters', exact: true }).click();
-  const trigger = form.getByLabel('Location', { exact: true });
+  // The closing tree can retain the same accessible label during its exit.
+  const trigger = form.locator('button#inventory-location');
   await trigger.click();
   const search = form.getByRole('combobox', { name: 'Search locations' });
   await expect(search).toBeFocused();
@@ -1415,6 +1416,7 @@ test('inventory search location picker exposes keyboard paths and stays framed o
   await withinViewport(option);
   await search.press('Enter');
   await expect(trigger).toBeFocused();
+  await expect(trigger).toHaveAttribute('aria-expanded', 'false');
   await expect(trigger).toContainText('ITC-D07');
   await expect(page).toHaveURL(
     (url) => url.searchParams.get('location') === 'ITC-D07',
@@ -1423,6 +1425,7 @@ test('inventory search location picker exposes keyboard paths and stays framed o
   await expect(search).toBeFocused();
   await search.press('Escape');
   await expect(trigger).toBeFocused();
+  await expect(trigger).toHaveAttribute('aria-expanded', 'false');
   await expect(search).toHaveCount(0);
   expect(
     await page.evaluate(

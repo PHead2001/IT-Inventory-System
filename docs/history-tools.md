@@ -47,8 +47,16 @@ in use. Phone history uses the existing compact representation, one row per even
 
 ## SQL and transport boundaries
 
-The CLI allocated forward migration
-`20261020151124_inventory_history_tools.sql`, after the grouped-view migration.
+The CLI allocated the original forward migration. Its unpublished, unapplied
+History source now appends as `20261119061423_inventory_history_tools.sql`, after
+grouped migration `20261119061422_inventory_grouped_views.sql`, with unchanged
+SQL bytes. On November 20, the local History candidate `6dfdc525` joins exact
+grouped `e94096791e21f7775f94105179193d0a2fc9815b`, which includes main
+`ac841de496bc969156a4467a1b66c495996037b0` and generated grouped public types.
+The two appended documentation checkpoints are retained together; no source or
+SQL conflicts required resolution. Grouped validation remains pending and its
+source remains separately releasable. History's new RPC types still require
+actual schema generation/comparison; grouped types do not certify History.
 `private.inventory_history_event_keys` is a security-invoker internal view and
 `private.inventory_history_matching` is an invoker helper. Existing private-schema
 usage is reused; no role/schema usage grants or definer authority are added.

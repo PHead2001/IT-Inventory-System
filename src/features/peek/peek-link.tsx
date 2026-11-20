@@ -3,6 +3,8 @@ import {
   cloneElement,
   isValidElement,
   useEffect,
+  useImperativeHandle,
+  useLayoutEffect,
   useId,
   useRef,
   useState,
@@ -10,8 +12,10 @@ import {
   useMemo,
   useSyncExternalStore,
   type ComponentProps,
+  type Dispatch,
   type ReactNode,
   type ReactElement,
+  type SetStateAction,
   type SyntheticEvent,
   type RefObject,
 } from 'react';
@@ -58,6 +62,11 @@ type PeekTriggerProps = Pick<
   | 'onClick'
 >;
 type PeekChildren = ReactNode | ((trigger: PeekTriggerProps) => ReactNode);
+type PeekTriggerEvents = Omit<
+  PeekTriggerProps,
+  'aria-haspopup' | 'aria-expanded' | 'aria-controls'
+>;
+type PeekControls = { owner: string; id: string };
 function compose<T extends SyntheticEvent>(
   existing: ((event: T) => void) | undefined,
   peek: ((event: T) => void) | undefined,
@@ -202,31 +211,71 @@ export function PeekAnchor({
   children: PeekChildren;
 }) {
   const scope = usePeekScope();
-  return scope && target ? (
-    <ScopedPeekAnchor
-      key={JSON.stringify([scope.scopeKey, peekKey(target)])}
-      target={target}
-      scope={scope}
-    >
-      {children}
-    </ScopedPeekAnchor>
-  ) : typeof children === 'function' ? (
-    children({})
-  ) : (
-    children
+  const anchorRef = useRef<HTMLSpanElement>(null);
+  const anchorId = useId();
+  const eventsRef = useRef<PeekTriggerEvents>(null);
+  const [controls, setControls] = useState<PeekControls | null>(null);
+  if (!scope || !target)
+    return typeof children === 'function' ? children({}) : children;
+
+  const owner = JSON.stringify([scope.scopeKey, peekKey(target)]);
+  const controlledId =
+    controls?.owner === owner && controls.id === scope.active
+      ? controls.id
+      : undefined;
+  const trigger: PeekTriggerProps = {
+    'aria-haspopup': 'dialog',
+    'aria-expanded': controlledId !== undefined,
+    'aria-controls': controlledId,
+    onPointerDown: (event) => eventsRef.current?.onPointerDown?.(event),
+    onPointerEnter: (event) => eventsRef.current?.onPointerEnter?.(event),
+    onPointerLeave: (event) => eventsRef.current?.onPointerLeave?.(event),
+    onFocus: (event) => eventsRef.current?.onFocus?.(event),
+    onBlur: (event) => eventsRef.current?.onBlur?.(event),
+    onKeyDown: (event) => eventsRef.current?.onKeyDown?.(event),
+    onClick: (event) => eventsRef.current?.onClick?.(event),
+  };
+  // Decoration only forwards these callbacks to native event props.
+  // eslint-disable-next-line react-hooks/refs
+  const link = decoratePeekTrigger(children, trigger);
+  // Preserve the native trigger for outgoing route capture. Only the scoped
+  // controller is replaced when route, verification or target changes.
+  return (
+    <>
+      <span id={anchorId} ref={anchorRef} className={styles.anchor}>
+        {link}
+      </span>
+      <PeekInteractions
+        key={owner}
+        owner={owner}
+        target={target}
+        scope={scope}
+        anchorRef={anchorRef}
+        anchorId={anchorId}
+        eventsRef={eventsRef}
+        setControls={setControls}
+      />
+    </>
   );
 }
-function ScopedPeekAnchor({
+function PeekInteractions({
+  owner,
   target,
-  children,
   scope,
+  anchorRef,
+  anchorId,
+  eventsRef,
+  setControls,
 }: {
+  owner: string;
   target: PeekTarget;
-  children: PeekChildren;
   scope: NonNullable<ReturnType<typeof usePeekScope>>;
+  anchorRef: RefObject<HTMLSpanElement | null>;
+  anchorId: string;
+  eventsRef: RefObject<PeekTriggerEvents | null>;
+  setControls: Dispatch<SetStateAction<PeekControls | null>>;
 }) {
   const id = useId();
-  const anchor = useRef<HTMLSpanElement>(null);
   const card = useRef<HTMLDivElement>(null);
   const timers = useRef<{
     hover?: ReturnType<typeof setTimeout>;
@@ -270,19 +319,19 @@ function ScopedPeekAnchor({
     scope.retire(id, true);
   }, [reset, scope, id]);
   const admitted = useStrictPresentation(
-    anchor,
+    anchorRef,
     JSON.stringify([key, scope.cache.actor, scope.cache.backend]),
     withdraw,
   );
   const triggerCurrent = useCallback(() => {
-    const link = anchor.current?.querySelector('a') ?? null;
+    const link = anchorRef.current?.querySelector('a') ?? null;
     return (
       scope.current() &&
       admitted() &&
       strictPresentationCurrent(privacy, link) &&
       renderedPresentation(link)
     );
-  }, [scope, admitted, privacy]);
+  }, [anchorRef, scope, admitted, privacy]);
   const open =
     scope.active === id &&
     pathname !== peekHref(target) &&
@@ -291,8 +340,7 @@ function ScopedPeekAnchor({
       privacy,
       typeof document === 'undefined'
         ? null
-        : (document.getElementById(id + '-trigger')?.querySelector('a') ??
-            null),
+        : (document.getElementById(anchorId)?.querySelector('a') ?? null),
     );
   const obstructionChanged = usePeekObstruction(
     card,
@@ -304,7 +352,7 @@ function ScopedPeekAnchor({
     if (dismissed.current || !triggerCurrent() || pathname === peekHref(target))
       return;
     clearTimers();
-    const rect = anchor.current?.getBoundingClientRect();
+    const rect = anchorRef.current?.getBoundingClientRect();
     if (!rect) return;
     const width = Math.min(320, window.innerWidth - 24);
     const top = Math.max(
@@ -341,7 +389,16 @@ function ScopedPeekAnchor({
           setFailed(true);
         }
       });
-  }, [clearTimers, close, id, pathname, scope, target, triggerCurrent]);
+  }, [
+    anchorRef,
+    clearTimers,
+    close,
+    id,
+    pathname,
+    scope,
+    target,
+    triggerCurrent,
+  ]);
   useEffect(() => {
     if (!open || !payload) return;
     const timer = setTimeout(() => {
@@ -354,14 +411,14 @@ function ScopedPeekAnchor({
     clearTimeout(timers.current.hover);
     timers.current.close = setTimeout(() => {
       if (
-        anchor.current?.contains(document.activeElement) ||
+        anchorRef.current?.contains(document.activeElement) ||
         card.current?.contains(document.activeElement)
       )
         return;
       close();
     }, 180);
-  }, [close]);
-  useEffect(() => {
+  }, [anchorRef, close]);
+  useLayoutEffect(() => {
     const currentTimers = timers.current;
     const generationCounter = generation;
     const keyboard = () => {
@@ -376,7 +433,7 @@ function ScopedPeekAnchor({
       document.removeEventListener('keydown', keyboard, true);
     };
   }, []);
-  useEffect(
+  useLayoutEffect(
     () =>
       subscribeClose(() => {
         reset();
@@ -388,14 +445,14 @@ function ScopedPeekAnchor({
       generation.current++;
     }
   }, [open, key]);
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (!open) return;
     const checkTrigger = () => {
       if (!triggerCurrent()) withdraw();
     };
     const observer = new MutationObserver(checkTrigger);
     for (
-      let node: Element | null = anchor.current?.querySelector('a') ?? null;
+      let node: Element | null = anchorRef.current?.querySelector('a') ?? null;
       node;
       node = node.parentElement
     )
@@ -409,7 +466,7 @@ function ScopedPeekAnchor({
         const inside = card.current?.contains(document.activeElement);
         close();
         if (inside)
-          anchor.current?.querySelector<HTMLAnchorElement>('a')?.focus();
+          anchorRef.current?.querySelector<HTMLAnchorElement>('a')?.focus();
       }
     };
     const leaveViewport = (event: Event) => {
@@ -429,10 +486,7 @@ function ScopedPeekAnchor({
       window.removeEventListener('resize', leaveViewport);
     };
   });
-  const trigger: PeekTriggerProps = {
-    'aria-haspopup': 'dialog',
-    'aria-expanded': open,
-    'aria-controls': open ? id : undefined,
+  const triggerEvents: PeekTriggerEvents = {
     onPointerDown: useCallback(
       (event) => {
         pointerFocus.current = true;
@@ -465,13 +519,13 @@ function ScopedPeekAnchor({
         pointerFocus.current = false;
         if (
           !(event.relatedTarget instanceof Node) ||
-          (!anchor.current?.contains(event.relatedTarget) &&
+          (!anchorRef.current?.contains(event.relatedTarget) &&
             !card.current?.contains(event.relatedTarget))
         )
           dismissed.current = false;
         leaving();
       },
-      [leaving],
+      [anchorRef, leaving],
     ),
     onKeyDown: useCallback(
       (event) => {
@@ -493,40 +547,17 @@ function ScopedPeekAnchor({
     ),
     onClick: useCallback(() => close(), [close]),
   };
-  // These closures are only forwarded to native event props. The render callback
-  // constructs trigger JSX; compose creates functions without invoking handlers
-  // or reading their captured refs. Keep this exemption confined to decoration.
-  /* eslint-disable react-hooks/refs */
-  let link: ReactNode;
-  if (typeof children === 'function') link = children(trigger);
-  else if (isValidElement(children)) {
-    const element = children as ReactElement<PeekTriggerProps>;
-    link = cloneElement(element, {
-      ...trigger,
-      onPointerDown: compose(
-        element.props.onPointerDown,
-        trigger.onPointerDown,
-      ),
-      onPointerEnter: compose(
-        element.props.onPointerEnter,
-        trigger.onPointerEnter,
-      ),
-      onPointerLeave: compose(
-        element.props.onPointerLeave,
-        trigger.onPointerLeave,
-      ),
-      onFocus: compose(element.props.onFocus, trigger.onFocus),
-      onBlur: compose(element.props.onBlur, trigger.onBlur),
-      onKeyDown: compose(element.props.onKeyDown, trigger.onKeyDown),
-      onClick: compose(element.props.onClick, trigger.onClick),
-    });
-  } else link = children;
-  /* eslint-enable react-hooks/refs */
+  useImperativeHandle(eventsRef, () => triggerEvents);
+  useLayoutEffect(() => {
+    if (!open) return;
+    const controls = { owner, id };
+    setControls(controls);
+    return () => {
+      setControls((current) => (current === controls ? null : current));
+    };
+  }, [id, open, owner, setControls]);
   return (
     <>
-      <span id={id + '-trigger'} ref={anchor} className={styles.anchor}>
-        {link}
-      </span>
       {open &&
         createPortal(
           <SpringPresence
@@ -552,7 +583,9 @@ function ScopedPeekAnchor({
                 event.target === card.current?.querySelector('a')
               ) {
                 event.preventDefault();
-                anchor.current?.querySelector<HTMLAnchorElement>('a')?.focus();
+                anchorRef.current
+                  ?.querySelector<HTMLAnchorElement>('a')
+                  ?.focus();
               }
               if (
                 !event.shiftKey &&
@@ -560,7 +593,7 @@ function ScopedPeekAnchor({
               ) {
                 if (
                   focusAfterPeek(
-                    anchor.current?.querySelector('a') ?? null,
+                    anchorRef.current?.querySelector('a') ?? null,
                     card.current,
                   )
                 ) {
@@ -660,7 +693,9 @@ function ScopedPeekAnchor({
               onClick={() => {
                 dismissed.current = true;
                 close();
-                anchor.current?.querySelector<HTMLAnchorElement>('a')?.focus();
+                anchorRef.current
+                  ?.querySelector<HTMLAnchorElement>('a')
+                  ?.focus();
               }}
             >
               Close preview
@@ -670,6 +705,31 @@ function ScopedPeekAnchor({
         )}
     </>
   );
+}
+
+function decoratePeekTrigger(
+  children: PeekChildren,
+  trigger: PeekTriggerProps,
+) {
+  if (typeof children === 'function') return children(trigger);
+  if (!isValidElement(children)) return children;
+  const element = children as ReactElement<PeekTriggerProps>;
+  return cloneElement(element, {
+    ...trigger,
+    onPointerDown: compose(element.props.onPointerDown, trigger.onPointerDown),
+    onPointerEnter: compose(
+      element.props.onPointerEnter,
+      trigger.onPointerEnter,
+    ),
+    onPointerLeave: compose(
+      element.props.onPointerLeave,
+      trigger.onPointerLeave,
+    ),
+    onFocus: compose(element.props.onFocus, trigger.onFocus),
+    onBlur: compose(element.props.onBlur, trigger.onBlur),
+    onKeyDown: compose(element.props.onKeyDown, trigger.onKeyDown),
+    onClick: compose(element.props.onClick, trigger.onClick),
+  });
 }
 export function PeekLink({
   peekTarget,

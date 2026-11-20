@@ -24,12 +24,39 @@ insert into public.app_members(user_id,display_name,role,active)
  select id,kind,case when kind='viewer' then 'viewer' else 'staff' end,kind<>'inactive'
  from overview_actors where kind<>'nonmember';
 grant select on overview_actors to authenticated;
+
+-- Clone the installed RPC into this session's temporary schema, replacing
+-- only the timezone catalog read with a canary that fails if reached.
+create function pg_temp.overview_timezone_read_guard()
+returns table(name text) language plpgsql as $$
+begin
+ raise exception using errcode='P0001',message='overview_timezone_catalog_read';
+end; $$;
+do $$
+declare definition text; guarded text;
+begin
+ select pg_get_functiondef('public.overview_snapshot_v1(text)'::regprocedure) into definition;
+ guarded:=replace(definition,'FUNCTION public.overview_snapshot_v1(','FUNCTION pg_temp.overview_timezone_probe(');
+ if guarded=definition or strpos(guarded,'from pg_catalog.pg_timezone_names')=0 then
+  raise exception 'Overview timezone canary could not instrument the installed RPC';
+ end if;
+ execute replace(guarded,'from pg_catalog.pg_timezone_names','from pg_temp.overview_timezone_read_guard()');
+end; $$;
+grant execute on function pg_temp.overview_timezone_read_guard(), pg_temp.overview_timezone_probe(text) to authenticated;
+
 select set_config('request.jwt.claims',json_build_object('sub',(select id from overview_actors where kind='viewer'),'role','authenticated')::text,true);
 set local role authenticated;
+select lives_ok($$select pg_temp.overview_timezone_probe()$$,'default timezone skips the timezone catalog');
+select lives_ok($$select pg_temp.overview_timezone_probe('UTC')$$,'explicit UTC skips the timezone catalog');
+select throws_ok($$select pg_temp.overview_timezone_probe('America/Chicago')$$,
+ 'P0001','overview_timezone_catalog_read','non-UTC named zones still consult the timezone catalog');
+select is(public.overview_snapshot_v1()->>'timeZone','UTC','Overview defaults to exact UTC');
 select is(public.overview_snapshot_v1()->'stock'->>'monitoredItems','0','empty database has zero monitored definitions');
 select is(public.overview_snapshot_v1()->'stockTrends','[]'::jsonb,'empty database does not fabricate stock series');
 select is(jsonb_array_length(public.overview_snapshot_v1()->'activity'->'points'),14,'empty activity still has fourteen known dates');
 select throws_ok($$select public.overview_snapshot_v1('CST')$$,'P1012','invalid_time_zone','reject ambiguous abbreviation');
+select throws_ok($$select public.overview_snapshot_v1('utc')$$,'P1012','invalid_time_zone','UTC remains case sensitive');
+select throws_ok($$select public.overview_snapshot_v1('america/chicago')$$,'P1012','invalid_time_zone','named zones remain case sensitive');
 select throws_ok($$select public.overview_snapshot_v1('Etc/Imaginary')$$,'P1012','invalid_time_zone','reject unknown zone');
 select throws_ok($$select public.overview_snapshot_v1(null)$$,'P1012','invalid_time_zone','reject null zone');
 select throws_ok($$select public.overview_snapshot_v1(repeat('x',101))$$,'P1012','invalid_time_zone','reject oversized zone');

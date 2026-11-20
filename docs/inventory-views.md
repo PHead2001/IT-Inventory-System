@@ -6,11 +6,21 @@ U303/A305 selectively adapts donor `31bc1d41` onto PR66 base `beba9904`; it does
 not replace the donor tree or join history donor `45999655`. The held dirty
 reader-retirement changes are adapted separately: settling the read scope aborts
 pending siblings and late response bodies are cancelled without replacing the
-settled result. The earlier donor's canonical CLI created forward
-migration `20261020143012_inventory_grouped_views.sql`, after the existing
-Overview migration. Earlier migrations and generated database types remain
+settled result. The earlier donor's canonical CLI created the grouped migration;
+the unpublished, locally unapplied source is now appended as
+`20261119061422_inventory_grouped_views.sql`, after main's
+`20261119061421_overview_utc_fast_path.sql`. The retained November 9 checkpoint
+records 47 migrations through `20261019193000`, no grouped RPC and no grouped
+upgrade/reset execution. Historical donor filenames do not identify an applied
+migration. Earlier migrations and generated database types remain
 unchanged. Actual schema replay/upgrade and canonical type generation/comparison
 are required before database acceptance; no manual declaration is certified.
+
+On November 20, exact main `ac841de496bc969156a4467a1b66c495996037b0`
+was merged locally without conflicts. Its only new migration replaces the
+independent Overview RPC; it does not change the grouped read dependencies.
+The grouped SQL bytes are unchanged by the append-only filename correction.
+This source reconciliation adds no runtime or hosted validation evidence.
 
 Current route-ready, capture and return ownership remain in both page shells.
 Rows retain current record/location peeks, exact count tickers, identity-based

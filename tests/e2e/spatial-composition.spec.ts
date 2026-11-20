@@ -603,6 +603,24 @@ for (const motion of ['no-preference', 'reduce'] as const) {
                         )
                       : null;
                   const countSpans = full?.querySelectorAll(':scope > span');
+                  // Each ticker has one painted value alongside its sizing and screen-reader copies.
+                  const countParts =
+                    countSpans?.length === 1
+                      ? [...countSpans[0].childNodes]
+                          .filter((node) => node.nodeType !== Node.COMMENT_NODE)
+                          .map((node) => {
+                            if (node.nodeType === Node.TEXT_NODE)
+                              return node.textContent;
+                            const visual =
+                              node instanceof HTMLElement &&
+                              node.querySelector('[data-count-visual]');
+                            return visual &&
+                              visual.getClientRects().length > 0 &&
+                              getComputedStyle(visual).visibility === 'visible'
+                              ? visual.textContent
+                              : null;
+                          })
+                      : [];
                   return {
                     label: full
                       ? Array.from(full.childNodes)
@@ -611,8 +629,8 @@ for (const motion of ['no-preference', 'reduce'] as const) {
                           .join('')
                       : null,
                     text:
-                      countSpans?.length === 1
-                        ? countSpans[0].textContent
+                      countParts.length > 0 && !countParts.includes(null)
+                        ? countParts.join('')
                         : null,
                   };
                 });
