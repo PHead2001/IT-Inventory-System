@@ -214,15 +214,6 @@ vi.mock('@/features/inventory/queries.server', () => ({
     },
   }),
   getLocation: async () => location,
-  getInventory: async () => ({
-    rows: [],
-    total: 0,
-    page: 1,
-    pageSize: 25,
-    totalPages: 1,
-    quantityTotal: '0',
-    assetTotal: 0,
-  }),
   getCategories: async () => [],
   getLocations: async () => [
     location,
@@ -235,6 +226,17 @@ vi.mock('@/features/inventory/queries.server', () => ({
     },
   ],
   getQuantityArchiveReview: async () => null,
+}));
+vi.mock('@/features/inventory/views.server', () => ({
+  getInventoryView: async () => ({
+    rows: [],
+    total: 0,
+    holdingRows: 0,
+    page: 1,
+    pageSize: 25,
+    unit: 'item',
+  }),
+  getInventoryColumns: async () => ({ fields: [], truncated: false }),
 }));
 vi.mock('@/features/custody/queries.server', () => ({
   getSites: async () => [site],

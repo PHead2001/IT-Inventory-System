@@ -1,4 +1,5 @@
 import { build } from 'esbuild';
+import { realpathSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { browserVariantModules } from 'next/dist/build/browser-variant-modules.js';
 
@@ -22,10 +23,12 @@ export async function routePrimaryFixture(kind: RoutePrimaryFixtureKind) {
   const conventionalSource = kind === 'history' || kind === 'location';
   // Mirror Next's generated exact resolved-path client aliases. The default
   // modules contain server implementations and must not enter this browser fixture.
+  // esbuild follows symlinks and junctions before resolving relative imports.
+  const nextDist = realpathSync(resolve('node_modules/next/dist'));
   const browserVariants = new Map(
     browserVariantModules.map((id) => [
-      resolve('node_modules/next/dist', id + '.js'),
-      resolve('node_modules/next/dist', id + '.browser.js'),
+      resolve(nextDist, id + '.js'),
+      resolve(nextDist, id + '.browser.js'),
     ]),
   );
   const result = await build({
@@ -130,7 +133,7 @@ export async function routePrimaryFixture(kind: RoutePrimaryFixtureKind) {
           builder.onResolve({ filter: /^(?:\.|next\/dist\/)/ }, (args) => {
             const requested = args.path.startsWith('.')
               ? resolve(args.resolveDir, args.path)
-              : resolve('node_modules', args.path);
+              : resolve(nextDist, args.path.slice('next/dist/'.length));
             const browser = browserVariants.get(
               requested.endsWith('.js') ? requested : requested + '.js',
             );
