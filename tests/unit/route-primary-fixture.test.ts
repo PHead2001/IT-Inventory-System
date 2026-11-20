@@ -35,6 +35,13 @@ it.each(['primary', 'paired', 'history', 'location'] as const)(
     ).toBe(true);
     expect(
       fixture.inputs.some((input) =>
+        input.endsWith(
+          'next/dist/client/components/navigation-dynamic-rendering.js',
+        ),
+      ),
+    ).toBe(false);
+    expect(
+      fixture.inputs.some((input) =>
         input.endsWith('next/dist/server/dynamic-rendering-utils.js'),
       ),
     ).toBe(false);

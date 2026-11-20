@@ -1269,7 +1269,7 @@ test('staff threshold persists into dashboard, inventory filter, and real CSV do
   const download = page.waitForEvent('download');
   await page
     .getByRole('group', { name: 'CSV export options' })
-    .getByRole('link', { name: 'Filtered inventory' })
+    .getByRole('link', { name: 'Matching holdings rows', exact: true })
     .click();
   const file = await download;
   expect(file.suggestedFilename()).toMatch(
@@ -1423,7 +1423,7 @@ test('mixed-case zero-prefixed punctuated asset tag retains exact spelling acros
     await page.locator('details.experience-export-menu > summary').click();
     const downloaded = page.waitForEvent('download');
     await page
-      .getByRole('link', { name: 'Filtered inventory', exact: true })
+      .getByRole('link', { name: 'Matching holdings rows', exact: true })
       .click();
     const destination = info.outputPath('display-spelling.csv');
     await (await downloaded).saveAs(destination);

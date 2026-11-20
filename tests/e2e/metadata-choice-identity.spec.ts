@@ -155,7 +155,30 @@ test('legacy choices remain readable on inventory and labels and editable withou
       for (const reducedMotion of ['no-preference', 'reduce'] as const) {
         await page.setViewportSize({ width, height: 900 });
         await page.emulateMedia({ reducedMotion });
-        await page.goto('/inventory?q=' + encodeURIComponent(name));
+        await page.goto(
+          '/inventory?' +
+            new URLSearchParams({
+              q: name,
+              view: 'items',
+              density: 'comfortable',
+              columnSearch: 'Readable choice',
+            }),
+        );
+        const viewSettings = page.getByRole('region', {
+          name: 'Inventory view settings',
+        });
+        await viewSettings
+          .getByText('Custom columns (0/6)', { exact: true })
+          .click();
+        await viewSettings
+          .getByRole('checkbox', {
+            name: 'Readable choice · ' + category.name,
+            exact: true,
+          })
+          .click();
+        await expect(page).toHaveURL(
+          (url) => url.searchParams.get('columns') === field,
+        );
         const row = page
           .getByRole('link', { name, exact: true })
           .first()

@@ -59,3 +59,23 @@ describe('create Cancel origins', () => {
     expect(inventoryRecordHref('asset', 'id')).toBe('/inventory/assets/id');
   });
 });
+
+it('retains grouped display and location record origins without admitting recursive or external return data', () => {
+  const field = '00000000-0000-4000-8000-000000000001';
+  expect(
+    inventoryReturnPath(
+      '/inventory?view=items&density=compact&columns=' +
+        field +
+        '&page=2&returnTo=https://evil.test#inventory-row-2',
+    ),
+  ).toBe(
+    '/inventory?view=items&density=compact&columns=' +
+      field +
+      '&page=2#inventory-row-2',
+  );
+  expect(
+    inventoryReturnPath(
+      '/locations/ITC-S1?location=OTHER&view=holdings&density=compact',
+    ),
+  ).toBe('/locations/ITC-S1?location=OTHER&view=holdings&density=compact');
+});

@@ -104,6 +104,19 @@ const test = () => {
     localTestEnv(status),
   );
   node(
+    [
+      '--test',
+      '--import',
+      'tsx',
+      'tests/integration/grouped-timeout-contract.test.ts',
+    ],
+    localTestEnv(status),
+  );
+  node(
+    ['--import', 'tsx', 'tests/integration/inventory-views.ts'],
+    localTestEnv(status),
+  );
+  node(
     ['--import', 'tsx', 'tests/integration/item-code.ts'],
     localTestEnv(status),
   );

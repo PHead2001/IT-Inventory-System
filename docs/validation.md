@@ -2019,3 +2019,30 @@ populated desktop/390px Full/Reduced both-theme proof and canonical exact-SHA
 certification remain pending. Current Overview hero/stat tilt uses the same stationary owner and decorative
 inner wrapper; native visual acceptance remains pending. Future A403 replacement
 hosts must retain these adapters.
+
+## U303/A305 selective current-tree preparation
+
+The grouped inventory slice is locally reconciled over PR66 `beba9904`, preserving
+the current PR64/65/66 and dependency-patch evidence above. Historical donor
+264/267-case counts in [inventory views](inventory-views.md) do not validate this
+candidate. Focused suites cover views/preferences/raw-reader retirement, page
+readiness/search/export/return state, Peek, current shortfall and shared
+holding/list/count/spring presentation. Run them through the canonical Vitest
+command when the bounded development lease and trusted dependency setup permit.
+
+The approved forward migration and SQL/REST fixtures remain subject to clean
+replay, forward upgrade, canonical type generation/comparison, complete DB/RLS
+checks and real API/concurrency/timeout/query-cost proof. Populated desktop and
+390px Full/Reduced both-theme browser inspection, before/after captures, exact-SHA
+CI and fresh review remain required. No application, database or browser gate is
+claimed by this source-only integration checkpoint.
+
+The November 20 local reconciliation joins exact main
+`ac841de496bc969156a4467a1b66c495996037b0` without conflicts and appends the
+unpublished grouped migration as `20261119061422_inventory_grouped_views.sql`
+after main's Overview UTC migration, preserving its SQL bytes. Static ordering
+and whitespace checks do not certify schema execution. Existing retained local
+evidence ends at 47 migrations through `20261019193000`, with no grouped RPC;
+no current local/hosted history or application/database/browser gate was run
+for this reconciliation. The generated-type and forward-upgrade checks above
+remain required before acceptance.

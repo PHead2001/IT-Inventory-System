@@ -171,38 +171,48 @@ function SpringMotion({
       height: element.style.height,
       overflow: element.style.overflow,
     };
-    const collapsed =
-      kind === 'disclosure'
-        ? { opacity: 0, height: 0 }
-        : {
-            opacity: 0,
-            transform: `translateY(${kind === 'toast' ? 12 : 6}px) scale(0.98)`,
-          };
-    const expanded =
-      kind === 'disclosure'
-        ? { opacity: 1, height: element.scrollHeight }
-        : { opacity: 1, transform: 'translateY(0px) scale(1)' };
-    if (kind === 'disclosure') element.style.setProperty('overflow', 'hidden');
+    const disclosureHeight =
+      kind === 'disclosure' ? element.scrollHeight : undefined;
+    const collapsedTransform = `translateY(${kind === 'toast' ? 12 : 6}px) scale(0.98)`;
+    if (disclosureHeight !== undefined)
+      element.style.setProperty('overflow', 'hidden');
     if (open) {
       element.style.setProperty('opacity', '0');
-      if (kind === 'disclosure') element.style.setProperty('height', '0px');
-      else element.style.setProperty('transform', collapsed.transform!);
+      if (disclosureHeight !== undefined)
+        element.style.setProperty('height', '0px');
+      else element.style.setProperty('transform', collapsedTransform);
     }
     let live = true;
     let frame = 0;
-    const control = animate(element, open ? expanded : collapsed, {
-      type: 'spring',
+    const spring = {
+      type: 'spring' as const,
       duration: springPresentation.duration,
       bounce: springPresentation.bounce,
-      onUpdate: () => {
-        if (!live) return;
-        if (!current()) {
-          withdraw();
-          return;
-        }
-        callbacks.current.onPresentationChange?.();
-      },
-    });
+    };
+    const update = (progress?: number) => {
+      if (!live) return;
+      if (!current()) {
+        withdraw();
+        return;
+      }
+      if (disclosureHeight !== undefined && progress !== undefined) {
+        element.style.height = `${disclosureHeight * Math.max(0, progress)}px`;
+        element.style.opacity = String(progress);
+      }
+      callbacks.current.onPresentationChange?.();
+    };
+    // A DOM height animation can queue another write when canceled. Keep
+    // layout styles owned by the guarded callback until natural height resumes.
+    const control =
+      disclosureHeight !== undefined
+        ? animate(open ? 0 : 1, open ? 1 : 0, { ...spring, onUpdate: update })
+        : animate(
+            element,
+            open
+              ? { opacity: 1, transform: 'translateY(0px) scale(1)' }
+              : { opacity: 0, transform: collapsedTransform },
+            { ...spring, onUpdate: () => update() },
+          );
     const stop = () => {
       if (!live) return;
       live = false;

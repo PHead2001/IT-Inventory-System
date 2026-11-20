@@ -33,6 +33,19 @@ export function recordDetailReturnPath(
       url.password
     )
       return fallback;
+    if (/^\/locations\/[^/]+$/.test(url.pathname)) {
+      const accepted = inventoryReturnPath(value, '/invalid-return');
+      if (accepted === '/invalid-return') return fallback;
+      const parents = url.searchParams.getAll('returnTo');
+      if (parents.length > 1) return fallback;
+      if (parents.length === 0) return accepted;
+      // Exactly one directory parent may survive the record-detail round trip.
+      const canonicalParent = locationDetailReturnPath(parents[0], '');
+      if (!canonicalParent) return fallback;
+      const result = new URL(accepted, 'https://inventory.invalid');
+      result.searchParams.set('returnTo', canonicalParent);
+      return result.pathname + result.search + result.hash;
+    }
     if (url.pathname === '/inventory' || /^\/sites\/[^/]+$/.test(url.pathname))
       return inventoryReturnPath(value, fallback);
     if (url.pathname === '/history') {
@@ -97,9 +110,21 @@ export function detailRecordHref(
     new URLSearchParams({ returnTo: recordDetailReturnPath(returnTo) })
   );
 }
-export function locationDetailReturnPath(value: unknown) {
-  const path = recordDetailReturnPath(value, '/locations');
-  return new URL(path, 'https://inventory.invalid').pathname === '/locations'
-    ? path
-    : '/locations';
+export function locationDetailReturnPath(
+  value: unknown,
+  fallback = '/locations',
+) {
+  if (typeof value !== 'string') return fallback;
+  try {
+    const origin = new URL(value, 'https://inventory.invalid');
+    // Check the directory route before calling the general detail validator.
+    if (origin.pathname !== '/locations') return fallback;
+    const path = recordDetailReturnPath(value, '');
+    return path &&
+      new URL(path, 'https://inventory.invalid').hash === origin.hash
+      ? path
+      : fallback;
+  } catch {
+    return fallback;
+  }
 }

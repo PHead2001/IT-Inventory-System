@@ -2,7 +2,11 @@ import { afterEach, expect, it, vi } from 'vitest';
 import { createRouteReadiness } from './route-readiness';
 import { createRoutePendingState } from './route-pending-state';
 import { routeKey } from './route-key';
-import { titleTarget } from './route-motion-state';
+import {
+  titleTarget,
+  groupedTitleTarget,
+  type InventorySource,
+} from './route-motion-state';
 import { inventoryFilterParams } from '@/features/inventory/scope-presentation';
 import { readFilters } from '@/features/inventory/read-model';
 
@@ -32,6 +36,7 @@ async function fixture(
     navigation?: boolean;
     deferAttach?: boolean;
     registeredRawRoute?: string;
+    source?: InventorySource;
   } = {},
 ) {
   history.replaceState(null, '', options.href ?? returned);
@@ -51,9 +56,14 @@ async function fixture(
   if (params.page)
     canonicalParams.set('page', String(readFilters(params).page));
   const canonicalReturn =
-    '/inventory' +
+    location.pathname +
     (canonicalParams.size ? '?' + canonicalParams : '') +
     '#inventory-row-2';
+  const groupedParams = new URLSearchParams(location.search);
+  groupedParams.set('view', params.view ?? 'items');
+  groupedParams.set('density', params.density ?? 'comfortable');
+  const groupedReturn =
+    location.pathname + '?' + groupedParams + '#inventory-row-2';
   vi.spyOn(performance, 'getEntriesByType').mockReturnValue([
     {
       name: new URL(
@@ -101,7 +111,7 @@ async function fixture(
   const unregister: Array<() => void> = [];
   let row: HTMLLIElement;
   const reveal = (
-    options: {
+    revealOptions: {
       missing?: boolean;
       duplicate?: boolean;
       hidden?: boolean;
@@ -119,10 +129,10 @@ async function fixture(
       section = document.createElement('section');
     root.append(section);
     document.body.append(root);
-    if (!options.missing) {
+    if (!revealOptions.missing) {
       row = document.createElement('li');
       row.id = 'inventory-row-2';
-      row.hidden = options.hidden ?? false;
+      row.hidden = revealOptions.hidden ?? false;
       row.getBoundingClientRect = () =>
         ({
           top: position.rowTop - position.y,
@@ -137,24 +147,34 @@ async function fixture(
       link.textContent = 'Synthetic cable';
       row.append(link);
       section.append(row);
-      const target = titleTarget(
-        record,
-        options.wrongScope
-          ? '/inventory?q=other#inventory-row-2'
-          : canonicalReturn,
-        { domain: 'unplaced' },
-        options.wrongScope ? '/inventory?q=other' : registeredRawRoute,
-      )!;
-      if (!options.unregistered)
-        unregister.push(owner.registerSource(target, link));
-      if (options.duplicate) {
+      const target = options.source
+        ? groupedTitleTarget(
+            record,
+            options.source,
+            groupedReturn,
+            registeredRawRoute,
+          )
+        : titleTarget(
+            record,
+            revealOptions.wrongScope
+              ? '/inventory?q=other#inventory-row-2'
+              : canonicalReturn,
+            { domain: 'unplaced' },
+            revealOptions.wrongScope
+              ? '/inventory?q=other'
+              : registeredRawRoute,
+          );
+      expect(target).not.toBeNull();
+      if (!revealOptions.unregistered)
+        unregister.push(owner.registerSource(target!, link));
+      if (revealOptions.duplicate) {
         const duplicate = row.cloneNode(true);
         section.append(duplicate);
       }
-      if (options.outsidePrimary) document.body.append(row);
+      if (revealOptions.outsidePrimary) document.body.append(row);
     }
     unready = readiness.register({
-      actorId: options.wrongActor ? 'other' : 'actor',
+      actorId: revealOptions.wrongActor ? 'other' : 'actor',
       routeKey: routeKey(
         location.pathname,
         new URLSearchParams(location.search),
@@ -202,6 +222,36 @@ async function fixture(
     },
   };
 }
+
+it.each(['aggregate', 'holding'] as const)(
+  'repairs a location %s reload only after original actor and exact real primary',
+  async (kind) => {
+    const href =
+      '/locations/ITC-S4B?density=comfortable&q=cable&view=' +
+      (kind === 'aggregate' ? 'items' : 'holdings') +
+      '#inventory-row-2';
+    const f = await fixture({
+      href,
+      source: {
+        kind: 'location-inventory',
+        locationCode: 'ITC-S4B',
+        occurrence:
+          kind === 'aggregate'
+            ? { kind: 'aggregate' }
+            : { kind: 'holding', holding: { domain: 'unplaced' } },
+      },
+    });
+    f.reveal();
+    await Promise.resolve();
+    expect(f.scroll).not.toHaveBeenCalled();
+    f.authorize();
+    await Promise.resolve();
+    expect(f.scroll).toHaveBeenCalledTimes(1);
+    f.controller.reconcile();
+    await Promise.resolve();
+    expect(f.scroll).toHaveBeenCalledTimes(1);
+  },
+);
 
 it('waits for original-actor fresh authorization and a real matching primary before the clamped fragment repair', async () => {
   const f = await fixture();

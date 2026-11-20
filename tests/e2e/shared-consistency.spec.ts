@@ -279,7 +279,7 @@ for (const fallback of [false, true]) {
       await page.goto('/inventory?q=' + encodeURIComponent(name));
       await page.getByText('Export CSV', { exact: true }).click();
       const exportLink = page.getByRole('link', {
-        name: 'Filtered inventory',
+        name: 'Matching holdings rows',
         exact: true,
       });
       if (fallback)

@@ -2090,6 +2090,19 @@ export type Database = {
         }
         Returns: undefined
       }
+      inventory_grouped_page: {
+        Args: {
+          p_category_id?: string
+          p_location_code?: string
+          p_low_stock?: boolean
+          p_page?: number
+          p_query?: string
+          p_site_id?: string
+          p_status?: string
+          p_type?: string
+        }
+        Returns: Json
+      }
       inventory_history: {
         Args: {
           p_entity_id?: string
@@ -2239,12 +2252,20 @@ export type Database = {
         Args: { p_payload: Json; p_request_id: string }
         Returns: Json
       }
+      metadata_inventory_columns: {
+        Args: { p_query?: string; p_selected?: string[] }
+        Returns: Json
+      }
       metadata_preview_batch: { Args: { p_keys: Json }; Returns: Json }
       metadata_publish: {
         Args: { p_payload: Json; p_request_id: string }
         Returns: Json
       }
       metadata_publish_review: { Args: { p_payload: Json }; Returns: Json }
+      metadata_selected_preview: {
+        Args: { p_fields: string[]; p_keys: Json }
+        Returns: Json
+      }
       overview_snapshot_v1: { Args: { p_time_zone?: string }; Returns: Json }
       quantity_adjust: {
         Args: { p_payload: Json; p_request_id: string }

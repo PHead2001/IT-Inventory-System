@@ -32,10 +32,10 @@ scope/SHA. They establish neither final runtime acceptance nor the latest PR HEA
 A308/A403 are in the active Overview/restock release slice with final acceptance
 pending. All 76 rows and their full requirements remain present.
 
-A308's current ordinary rows, quantity detail, detailed low-stock dashboard and low-stock CSV reuse
-the exact shortfall helper. The future P11 `view-rows` consumer does not exist in
-this release tree; its A308 hookup remains required when that consumer lands.
-This follow-up edge does not remove P11 or broaden accepted A308 coverage.
+A308's ordinary rows, quantity detail, detailed low-stock dashboard and low-stock
+CSV reuse the exact shortfall helper. The local P11 grouped-row preparation now
+connects that same helper to item-wide availability; filtered holdings never
+become its shortfall input. This does not broaden accepted A308 coverage.
 
 ## PR62 theme, room and logout evidence checkpoint — 2026-11-05
 
@@ -1028,3 +1028,109 @@ comparison. No final new-commit CI or hosted acceptance is claimed.
 The retained run directory also holds `receipt.json`, `fixture-cleanup.json` and
 `e2e-performance.json`. All 76 acceptance rows, their history and pending broader
 criteria remain unchanged. No production, hosted configuration or data changed.
+
+## Selective grouped inventory preparation — 2026-11-06
+
+U303/A305 donor `31bc1d41` is selectively reconciled onto PR66 base
+`beba99049655fe7d0e7fbfae59ab8d679e3bb4ad`. Current PR64/65/66 dispositions,
+readiness/privacy, shared navigation, Peek and presentation ownership are retained.
+Only the separately held reader-retirement fixes and their tests are adapted
+from the default worktree; history donor `45999655` is not imported.
+
+The approved grouped RPC/migration, RLS, response caps and decimal contracts are
+preserved. A308 uses the current shared shortfall helper and item-wide available
+quantity. [Inventory views](inventory-views.md) separates historical donor test
+counts from this uncommitted candidate. Focused regression execution, DB replay
+and upgrade, generated types, actual REST/concurrency/query-cost proof, populated
+desktop/390px Full/Reduced both-theme captures and exact-SHA certification remain
+required. All 76 rows, 75 base IDs and existing acceptance dispositions remain
+unchanged; source preparation is not runtime or whole-ID acceptance.
+
+### November 20 main reconciliation
+
+The local grouped candidate `5750ea11` now has a noncommitting merge of exact
+main `ac841de496bc969156a4467a1b66c495996037b0`, including merged PR62/64/65/66
+source and its later evidence. No conflicts required manual resolution.
+The unpublished grouped migration is appended as
+`20261119061422_inventory_grouped_views.sql`, after main's Overview UTC migration;
+its SQL bytes are unchanged. The retained local checkpoint records only 47
+migrations through `20261019193000`, no grouped RPC and no grouped upgrade/reset.
+No current database or hosted migration history was queried. Future History
+migrations must append after this grouped migration. Runtime gates, generated
+types, independent review and final exact-SHA certification remain pending;
+this source checkpoint does not change any acceptance disposition.
+
+### Delivery evidence checkpoint — 2026-11-20
+
+Verified Git `origin/main` is `ac841de496bc969156a4467a1b66c495996037b0`.
+Its merged audit slices are PR62 at `ac841de496bc969156a4467a1b66c495996037b0`,
+PR64 at `de07d500fd63cbbad306937a7595573b55076e8c`, PR65 at
+`3477f63cba4c34f4e766299401d37395445ba0ef`, and PR66 at
+`9f256938868518e49ee70759f3e459e04eff455d`. Git staging remains separately
+at `aef008490373e79a6148b69e1a91d3a7be6a002f`.
+
+Lead-supplied read-only provider evidence records production
+`dndqydmuqoduwaoujfki` and staging `ileoembzjxwhxgtiypec` with 46 applied
+migrations each, through `20261019151034`. Main contains 48 migrations,
+including Overview `20261019193000` and its UTC correction `20261119061421`.
+[Main workflow 44545614856](https://github.com/PHead2001/IT-Inventory-System/actions/runs/44545614856)
+failed during dependency installation before production database delivery;
+the delivery command was skipped. Main's source merge therefore does not
+establish deployment of either Overview migration or advancement of staging.
+
+P11's unpublished grouped candidate migration is renamed and appended as
+`20261119061422_inventory_grouped_views.sql`, with unchanged SQL bytes. This
+checkpoint records local safety/static preparation only. It promotes no hosted,
+runtime or whole-requirement acceptance and preserves every existing audit row,
+status and historical evidence boundary.
+
+### Grouped local database checkpoint — 2026-11-20
+
+The local 47-to-49 migration upgrade and 49-migration clean replay completed.
+On `e94096791e21f7775f94105179193d0a2fc9815b`, all 25 pgTAP files and 1,629
+assertions passed, including grouped inventory. The aggregate database run
+stopped at the low-stock export cap with SQLSTATE `57014` at 5,011 ms. The
+unchanged focused retry passed at 1,817 ms. The canonical generated-type check
+also passed on that revision. Migration and generated-type bytes match
+`0f596439731596d0babdea145f1ce0e262617715`.
+
+The grouped integration passed role authorization, concurrent snapshot and
+100 ms hoisting on `e1acb073d587f616aeaf8431dc9cff1d79bc6d57`. On
+`0f596439731596d0babdea145f1ce0e262617715`, the authenticated grouped read
+returned REST SQLSTATE `57014` at 5,006.5526 ms while the owned blocker still
+held the relation lock. The exact witnessed backend request retired before
+release, the next call matched the baseline, and fixture cleanup completed.
+[Inventory views](inventory-views.md#local-database-checkpoint--2026-11-20)
+identifies the retained receipts.
+
+These separate runs update the earlier local execution status. A complete
+canonical database run, exact pooled-backend timeout restoration, physical
+query plans, broader lifecycle and admission concurrency, visual acceptance,
+and final remote checks remain pending. All 76 acceptance rows retain their
+existing dispositions.
+
+### Grouped preview checkpoint — 2026-11-20
+
+The signed-in PR68 preview served commit `b3677bf38c6389d1430f7e2240cfabe52c72fd14`
+with all 49 expected migrations on its isolated preview database. The owned
+fictional dataset showed 25 Items on page one and the remaining item on page
+two. The actual CSV downloaded from page one contained all 26 identities,
+27 holdings rows and 35 units. The two-location item showed 10 and 25 units
+in its holding rows. The CSV carried the item-wide total on its first row.
+All 26 owned items were archived, and cleanup verified their holdings were
+cleared with no unresolved operations.
+
+The scoped inventory screen rendered 25 first-page items without horizontal
+overflow at desktop and 390 px in Light and Dark with Full and Reduced motion.
+A temporary mobile saved view survived rename and reload. The browser
+preferences were restored. Independent phone inspection found the next
+Compact Items card could cover an expanded holding link. The follow-up
+disclosure fix adds pointer hit testing and a late callback regression. The
+CSV help now describes the observed compatible export format.
+
+[Foundation CI 44796090351](https://github.com/PHead2001/IT-Inventory-System/actions/runs/44796090351)
+passed application and database validation on that preview commit and reported
+17 browser failures. Browser verification of the follow-up, published custom
+columns and their mapping download, account-switch isolation, and final
+exact-commit CI and review remain pending for U303 and A305. This checkpoint
+does not promote an acceptance row to complete.

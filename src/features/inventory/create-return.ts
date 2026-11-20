@@ -21,7 +21,8 @@ export function inventoryReturnPath(
       /[\\\x00-\x20]/.test(decodedPath) ||
       !(
         /^\/inventory$/.test(decodedPath) ||
-        /^\/sites\/[^/]+$/.test(decodedPath)
+        /^\/sites\/[^/]+$/.test(decodedPath) ||
+        /^\/locations\/[^/]+$/.test(decodedPath)
       )
     )
       return fallback;
@@ -34,6 +35,10 @@ export function inventoryReturnPath(
       'site',
       'lowStock',
       'page',
+      'view',
+      'density',
+      'columns',
+      'columnSearch',
     ]);
     for (const key of [...url.searchParams.keys()])
       if (!allowed.has(key)) url.searchParams.delete(key);
@@ -46,6 +51,8 @@ export function inventoryReturnPath(
       ),
     );
     for (const key of [...url.searchParams.keys()]) {
+      if (['view', 'density', 'columns', 'columnSearch'].includes(key))
+        continue;
       const canonical =
         key === 'q'
           ? normalized.query

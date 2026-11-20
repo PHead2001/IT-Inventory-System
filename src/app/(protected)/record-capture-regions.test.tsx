@@ -187,7 +187,7 @@ const site = {
 vi.mock('@/lib/auth/session.server', () => ({
   requireMember: async () => ({
     member: {
-      user_id: 'staff',
+      user_id: '00000000-0000-4000-8000-000000000001',
       role: 'staff',
       can_manage_configuration: false,
     },
@@ -214,15 +214,6 @@ vi.mock('@/features/inventory/queries.server', () => ({
     },
   }),
   getLocation: async () => location,
-  getInventory: async () => ({
-    rows: [],
-    total: 0,
-    page: 1,
-    pageSize: 25,
-    totalPages: 1,
-    quantityTotal: '0',
-    assetTotal: 0,
-  }),
   getCategories: async () => [],
   getLocations: async () => [
     location,
@@ -236,6 +227,17 @@ vi.mock('@/features/inventory/queries.server', () => ({
   ],
   getQuantityArchiveReview: async () => null,
 }));
+vi.mock('@/features/inventory/views.server', () => ({
+  getInventoryView: async () => ({
+    rows: [],
+    total: 0,
+    holdingRows: 0,
+    page: 1,
+    pageSize: 25,
+    unit: 'item',
+  }),
+  getInventoryColumns: async () => ({ fields: [], truncated: false }),
+}));
 vi.mock('@/features/custody/queries.server', () => ({
   getSites: async () => [site],
   getAssetReturnSuggestion: async () => undefined,
@@ -247,6 +249,7 @@ vi.mock('@/features/metadata/queries.server', () => ({
 }));
 
 beforeEach(() => {
+  vi.stubEnv('NEXT_PUBLIC_SUPABASE_URL', 'http://127.0.0.1:1');
   state.pending = true;
   state.site = false;
   state.locationPair = false;
@@ -276,6 +279,7 @@ beforeEach(() => {
 });
 afterEach(() => {
   vi.restoreAllMocks();
+  vi.unstubAllEnvs();
 });
 function expectOutsideCapture(element: Element) {
   expect(element.closest('[data-active-capture]')).toBeNull();
@@ -476,7 +480,9 @@ it('location title pairing captures only explicit header/body regions under its 
   ).not.toBeNull();
   expect(
     document.querySelector('[data-active-capture="accepted-title-content"]'),
-  ).not.toBeNull();
+  ).toContainElement(
+    screen.getByRole('region', { name: 'Inventory view settings' }),
+  );
   expect(
     screen
       .getByRole('heading', { name: 'Drawer 1' })

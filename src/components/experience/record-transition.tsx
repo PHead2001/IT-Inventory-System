@@ -13,6 +13,8 @@ import Link from '@/components/experience/route-link';
 import { useRouteMotion } from './route-motion';
 import {
   titleTarget,
+  groupedTitleTarget,
+  type InventorySource,
   sameTitleSource,
   samePresentationTarget,
   historyTitleTarget,
@@ -48,6 +50,7 @@ function listRouteKey(href: string | undefined) {
 export function InventoryRecordLink({
   record,
   holding,
+  source: inventorySource,
   pairable = true,
   returnTo,
   href,
@@ -55,13 +58,15 @@ export function InventoryRecordLink({
   children,
 }: {
   record: RecordIdentity;
-  holding: HoldingIdentity | null;
   pairable?: boolean;
   returnTo?: string;
   href: string;
   className?: string;
   children: React.ReactNode;
-}) {
+} & (
+  | { holding: HoldingIdentity | null; source?: never }
+  | { source: InventorySource; holding?: never }
+)) {
   const {
     intent,
     arm,
@@ -78,7 +83,19 @@ export function InventoryRecordLink({
   const contentIdentity = useContext(RouteContentIdentityContext);
   const target =
     returnTo && pairable
-      ? titleTarget(record, returnTo, holding, contentIdentity?.rawRouteKey)
+      ? inventorySource
+        ? groupedTitleTarget(
+            record,
+            inventorySource,
+            returnTo,
+            contentIdentity?.rawRouteKey,
+          )
+        : titleTarget(
+            record,
+            returnTo,
+            holding ?? null,
+            contentIdentity?.rawRouteKey,
+          )
       : null;
   const targetListKey = target ? listRouteKey(target.listHref) : null;
   useLayoutEffect(() => {
@@ -91,9 +108,16 @@ export function InventoryRecordLink({
     target &&
     sameRecord(intent, record) &&
     sameTitleSource(intent, target) &&
+    (target.source.kind === 'inventory' || intent.anchor === target.anchor) &&
     listRouteKey(intent.listHref) === targetListKey &&
     listRouteKey(contentIdentity ? contentIdentity.listHref : listHref) ===
-      targetListKey;
+      targetListKey &&
+    matchesTitleListRoute(
+      target,
+      contentIdentity?.rawRouteKey ??
+        listRouteKey(contentIdentity ? contentIdentity.listHref : listHref) ??
+        '',
+    );
   return (
     <PeekAnchor target={record}>
       {(trigger) => (
@@ -268,6 +292,8 @@ function scopedSourceMatches(
     !!intent &&
     !!target &&
     sameTitleSource(intent, target) &&
+    intent.anchor === target.anchor &&
+    intent.listHref === target.listHref &&
     !!rawKey &&
     matchesTitleListRoute(intent, rawKey)
   );

@@ -51,7 +51,7 @@ test('live inventory typing keeps applied rows, chips and CSV coherent through d
     await input.fill(alpha);
     await expect.poll(delayed.isHeld).toBe(true);
     await expect(input).toHaveValue(alpha);
-    await expect(countFeedback(page, '26 matching rows')).toBeVisible();
+    await expect(countFeedback(page, '26 items')).toBeVisible();
     await expect(
       page.getByRole('navigation', { name: 'Active inventory filters' }),
     ).toContainText(`Search: ${setup.prefix}`);
@@ -76,7 +76,7 @@ test('live inventory typing keeps applied rows, chips and CSV coherent through d
     await input.fill(beta);
     expect(delayed.requests).not.toContain(beta);
     await expect(input).toHaveValue(beta);
-    await expect(countFeedback(page, '24 matching rows')).toBeVisible();
+    await expect(countFeedback(page, '24 items')).toBeVisible();
     await exportScope(page, alpha);
     await input.dispatchEvent('compositionend');
     await appliedSearch(page, beta, 2);

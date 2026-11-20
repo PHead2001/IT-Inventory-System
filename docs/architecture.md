@@ -800,3 +800,19 @@ populated desktop/390px Full/Reduced both-theme proof and canonical exact-SHA
 certification remain pending. Current Overview hero/stat tilt uses the same stationary owner and decorative
 inner wrapper; native visual acceptance remains pending. Future A403 replacement
 hosts must retain these adapters.
+
+## Grouped inventory and personal display views
+
+The local U303/A305 slice groups distinct item/asset identities before paging,
+then expands every matching holding within the approved response bounds. Holdings
+view retains the picking projection. Caller-invoker snapshot/RLS, decimal totals,
+published selected-field previews and browser-only saved views retain the
+contracts in [inventory views](inventory-views.md).
+
+Current protected readiness, route/dirty-navigation guards, Peek, W01 spotlight,
+W05 identity entrances, W06 exact counts, holding feedback and spring disclosures
+remain the consumers' presentation owners. Multi-holding titles never invent a
+single holding for shared-title pairing. A308 reuses item-wide available storage
+for exact shortfall; scoped quantities never replace availability. Full holdings
+CSV scope and existing columns remain unchanged. This local integration adds no
+mutation, role, geometry authority or acceptance claim.

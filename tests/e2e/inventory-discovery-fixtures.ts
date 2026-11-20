@@ -127,7 +127,7 @@ export async function appliedSearch(page: Page, query: string, count: number) {
   await expect(
     page.getByRole('textbox', { name: 'Search inventory', exact: true }),
   ).toHaveValue(query);
-  await expect(countFeedback(page, `${count} matching rows`)).toBeVisible();
+  await expect(countFeedback(page, `${count} items`)).toBeVisible();
   await expect(
     page.getByText('Results and CSV use the applied search.', { exact: true }),
   ).toBeVisible();
@@ -139,7 +139,7 @@ export async function appliedSearch(page: Page, query: string, count: number) {
 export async function exportScope(page: Page, query: string) {
   const summary = page.locator('summary').filter({ hasText: 'Export CSV' });
   const link = page.getByRole('link', {
-    name: 'Filtered inventory',
+    name: 'Matching holdings rows',
     exact: true,
   });
   if (!(await link.isVisible())) await summary.click();
