@@ -2019,3 +2019,56 @@ populated desktop/390px Full/Reduced both-theme proof and canonical exact-SHA
 certification remain pending. Current Overview hero/stat tilt uses the same stationary owner and decorative
 inner wrapper; native visual acceptance remains pending. Future A403 replacement
 hosts must retain these adapters.
+
+## U303/A305 selective current-tree preparation
+
+The grouped inventory slice is locally reconciled over PR66 `beba9904`, preserving
+the current PR64/65/66 and dependency-patch evidence above. Historical donor
+264/267-case counts in [inventory views](inventory-views.md) do not validate this
+candidate. Focused suites cover views/preferences/raw-reader retirement, page
+readiness/search/export/return state, Peek, current shortfall and shared
+holding/list/count/spring presentation. Run them through the canonical Vitest
+command when the bounded development lease and trusted dependency setup permit.
+
+The approved forward migration and SQL/REST fixtures remain subject to clean
+replay, forward upgrade, canonical type generation/comparison, complete DB/RLS
+checks and real API/concurrency/timeout/query-cost proof. Populated desktop and
+390px Full/Reduced both-theme browser inspection, before/after captures, exact-SHA
+CI and fresh review remain required. No application, database or browser gate is
+claimed by this source-only integration checkpoint.
+
+The November 20 local reconciliation joins exact main
+`ac841de496bc969156a4467a1b66c495996037b0` without conflicts and appends the
+unpublished grouped migration as `20261119061422_inventory_grouped_views.sql`
+after main's Overview UTC migration, preserving its SQL bytes. Static ordering
+and whitespace checks do not certify schema execution. Existing retained local
+evidence ends at 47 migrations through `20261019193000`, with no grouped RPC;
+no current local/hosted history or application/database/browser gate was run
+for this reconciliation. The generated-type and forward-upgrade checks above
+remain required before acceptance.
+
+## Selective U313 current-tree validation — 2026-11-06
+
+The history donor is reconciled onto grouped checkpoint `9ee2d63b`, retaining
+current UI, privacy and grouped return contracts. Historical donor test/memory
+counts in [history tools](history-tools.md) do not certify this candidate. Current
+focused typecheck/Vitest, DB replay/upgrade/types/RLS, actual REST timeout/snapshot
+proof, export-memory, authenticated downloads, desktop/390px both-theme
+Full/Reduced/native AT and final exact-SHA gates remain required.
+
+The canonical `test:db` path already runs `tests/integration/custody.ts`, which
+awaits `historyToolsProof` from `tests/integration/history-tools.ts` with its owned
+caller/session. No duplicate standalone invocation is added. The existing
+`test:export:memory` gate includes the authored complete-history fixtures. All
+history proof and download endpoints use the current shared loopback target validator before
+new client construction. None of these runtime gates was run during preparation.
+
+The November 20 dependent-source join merges grouped
+`e94096791e21f7775f94105179193d0a2fc9815b` into local History `6dfdc525`.
+Its grouped public types are retained; History RPC types still need actual
+generation/comparison. History's unpublished SQL appends unchanged as
+`20261119061423_inventory_history_tools.sql`, preserving the exact grouped
+49-migration prefix before this 50th migration. Append-only documentation
+conflicts retain both histories. No runtime database, browser, full test suite
+or hosted gate was run for this join; grouped and History acceptance remain
+separate and pending.

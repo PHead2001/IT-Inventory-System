@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { CountTicker } from '@/components/experience/count-ticker';
 import { ListEntrance } from '@/components/experience/list-feedback';
 import { useOverviewRefreshAuthority } from './refresh-authority';
@@ -15,6 +15,8 @@ import {
 } from '@/components/operational-time';
 import { RestockShortfall } from '@/features/inventory/components/restock-shortfall';
 import { historyEventTitle } from '@/features/inventory/history-summary';
+import { PeekLink } from '@/features/peek/peek-link';
+import { peekHref } from '@/features/peek/contracts';
 import { ClosetPreview } from '@/components/experience/closet-preview';
 import { AmbientLight } from '@/components/experience/ambient-light';
 import type { OverviewSnapshot } from './contracts';
@@ -22,8 +24,6 @@ import { refreshOverview } from './refresh.actions';
 import { ActivityChart, StockChart } from './charts';
 import styles from './overview.module.css';
 
-const recordHref = (kind: 'quantity' | 'asset', id: string) =>
-  `/inventory/${kind === 'asset' ? 'assets' : 'quantity'}/${id}`;
 const coverageReasons = {
   ledger_budget: 'This item has more history than this chart can safely show.',
   missing_opening: 'An opening balance is missing from the recorded history.',
@@ -33,6 +33,27 @@ const coverageReasons = {
   current_mismatch:
     'The recorded history does not reconcile with current stock.',
 };
+
+function OverviewRecordLink({
+  kind,
+  id,
+  children,
+}: {
+  kind: 'quantity' | 'asset';
+  id: string;
+  children: ReactNode;
+}) {
+  const target = { kind, id };
+  return (
+    <PeekLink
+      className={styles.link}
+      href={peekHref(target)}
+      peekTarget={target}
+    >
+      {children}
+    </PeekLink>
+  );
+}
 
 type OverviewViewProps = {
   initialSnapshot: OverviewSnapshot | null;
@@ -290,12 +311,9 @@ function OverviewRevisionView({
               >
                 {snapshot.stock.attention.map((row) => (
                   <li className={styles.row} key={row.itemId}>
-                    <Link
-                      className={styles.link}
-                      href={recordHref('quantity', row.itemId)}
-                    >
+                    <OverviewRecordLink kind="quantity" id={row.itemId}>
                       {row.name}
-                    </Link>
+                    </OverviewRecordLink>
                     <p className={styles.metrics}>
                       Available <strong>{row.available}</strong> · Threshold{' '}
                       <strong>{row.threshold}</strong>
@@ -387,12 +405,12 @@ function OverviewRevisionView({
                           <OperationalTimestamp value={event.at} relative />
                         </div>
                       </div>
-                      <Link
-                        className={styles.link}
-                        href={recordHref(event.recordKind, event.entityId)}
+                      <OverviewRecordLink
+                        kind={event.recordKind}
+                        id={event.entityId}
                       >
                         View record
-                      </Link>
+                      </OverviewRecordLink>
                     </li>
                   ))}
                 </ListEntrance>
@@ -430,23 +448,24 @@ function OverviewRevisionView({
                 >
                   {snapshot.stock.unmonitored.map((row) => (
                     <li key={row.itemId} className={styles.row}>
-                      <Link
-                        className={styles.link}
-                        href={recordHref('quantity', row.itemId)}
-                      >
+                      <OverviewRecordLink kind="quantity" id={row.itemId}>
                         {row.name}
-                      </Link>
+                      </OverviewRecordLink>
                       <p className={styles.metrics}>
                         Available {row.available} · Not monitored
                       </p>
-                      <Link
-                        className={styles.link}
-                        href={recordHref('quantity', row.itemId)}
-                      >
-                        {mayEdit
-                          ? `Set threshold for ${row.name}`
-                          : `View ${row.name}`}
-                      </Link>
+                      {mayEdit ? (
+                        <Link
+                          className={styles.link}
+                          href={`/inventory/quantity/${encodeURIComponent(row.itemId)}/threshold`}
+                        >
+                          Set threshold for {row.name}
+                        </Link>
+                      ) : (
+                        <OverviewRecordLink kind="quantity" id={row.itemId}>
+                          View {row.name}
+                        </OverviewRecordLink>
+                      )}
                     </li>
                   ))}
                 </ListEntrance>
@@ -511,12 +530,9 @@ function OverviewRevisionView({
                     className={styles.row}
                     key={`${row.siteId}:${row.kind}:${row.entityId}`}
                   >
-                    <Link
-                      className={styles.link}
-                      href={recordHref(row.kind, row.entityId)}
-                    >
+                    <OverviewRecordLink kind={row.kind} id={row.entityId}>
                       {row.name}
-                    </Link>
+                    </OverviewRecordLink>
                     <p className={styles.metrics}>
                       {row.siteName}
                       {!row.siteActive ? ' (inactive)' : ''} · {row.quantity}{' '}
@@ -556,12 +572,9 @@ function OverviewRevisionView({
                 {snapshot.stockTrends.map((trend) => (
                   <article className={styles.trend} key={trend.itemId}>
                     <h3 className="text-base font-semibold">
-                      <Link
-                        className={styles.link}
-                        href={recordHref('quantity', trend.itemId)}
-                      >
+                      <OverviewRecordLink kind="quantity" id={trend.itemId}>
                         {trend.name}
-                      </Link>
+                      </OverviewRecordLink>
                     </h3>
                     <p className={styles.metrics}>
                       Available now {trend.available} ·{' '}

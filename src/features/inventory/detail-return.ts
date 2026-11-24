@@ -1,3 +1,8 @@
+import {
+  historyFilterKeys,
+  historyFilterParams,
+  parseHistoryFilters,
+} from './history-filters';
 import { inventoryReturnPath } from './create-return';
 import {
   parseLocationBrowserState,
@@ -33,36 +38,37 @@ export function recordDetailReturnPath(
       url.password
     )
       return fallback;
+    if (/^\/locations\/[^/]+$/.test(url.pathname)) {
+      const accepted = inventoryReturnPath(value, '/invalid-return');
+      if (accepted === '/invalid-return') return fallback;
+      const parents = url.searchParams.getAll('returnTo');
+      if (parents.length > 1) return fallback;
+      if (parents.length === 0) return accepted;
+      // Exactly one directory parent may survive the record-detail round trip.
+      const canonicalParent = locationDetailReturnPath(parents[0], '');
+      if (!canonicalParent) return fallback;
+      const result = new URL(accepted, 'https://inventory.invalid');
+      result.searchParams.set('returnTo', canonicalParent);
+      return result.pathname + result.search + result.hash;
+    }
     if (url.pathname === '/inventory' || /^\/sites\/[^/]+$/.test(url.pathname))
       return inventoryReturnPath(value, fallback);
     if (url.pathname === '/history') {
-      const keys = new Set(['type', 'location', 'entityId', 'page']);
+      const keys = new Set<string>([...historyFilterKeys, 'page']);
       if (
         [...url.searchParams.keys()].some((key) => !keys.has(key)) ||
         [...keys].some((key) => url.searchParams.getAll(key).length > 1)
       )
         return fallback;
-      const params = new URLSearchParams();
-      const type = url.searchParams.get('type');
-      if (type && type !== 'all' && type !== 'asset' && type !== 'quantity')
+      const input = Object.fromEntries(url.searchParams);
+      if (!parseHistoryFilters(input).valid) return fallback;
+      const location = input.location;
+      if (
+        location &&
+        (location.length > 160 || /[\\/\x00-\x1f\x7f]/.test(location))
+      )
         return fallback;
-      if (type && type !== 'all') params.set('type', type);
-      const location = url.searchParams.get('location');
-      if (location) {
-        if (location.length > 160 || /[\\/\x00-\x1f\x7f]/.test(location))
-          return fallback;
-        params.set('location', location);
-      }
-      const entity = url.searchParams.get('entityId');
-      if (entity) {
-        if (!presentationUuid.test(entity)) return fallback;
-        params.set('entityId', entity);
-      }
-      const page = url.searchParams.get('page');
-      if (page) {
-        if (!/^[1-9]\d{0,5}$/.test(page)) return fallback;
-        if (page !== '1') params.set('page', page);
-      }
+      const params = historyFilterParams(input, true);
       const hash =
         /^#history-event-(asset|quantity)-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(
           url.hash,
@@ -97,9 +103,21 @@ export function detailRecordHref(
     new URLSearchParams({ returnTo: recordDetailReturnPath(returnTo) })
   );
 }
-export function locationDetailReturnPath(value: unknown) {
-  const path = recordDetailReturnPath(value, '/locations');
-  return new URL(path, 'https://inventory.invalid').pathname === '/locations'
-    ? path
-    : '/locations';
+export function locationDetailReturnPath(
+  value: unknown,
+  fallback = '/locations',
+) {
+  if (typeof value !== 'string') return fallback;
+  try {
+    const origin = new URL(value, 'https://inventory.invalid');
+    // Check the directory route before calling the general detail validator.
+    if (origin.pathname !== '/locations') return fallback;
+    const path = recordDetailReturnPath(value, '');
+    return path &&
+      new URL(path, 'https://inventory.invalid').hash === origin.hash
+      ? path
+      : fallback;
+  } catch {
+    return fallback;
+  }
 }

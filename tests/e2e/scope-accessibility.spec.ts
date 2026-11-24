@@ -249,25 +249,30 @@ test('location status, holding scope, matching rows and real CSV agree across na
     );
     await signIn(page);
     await page.setViewportSize({ width: 1180, height: 757 });
-    const scoped = '/locations/ITC-BLACK?q=' + encodeURIComponent(setup.prefix);
+    const scoped =
+      '/locations/ITC-BLACK?' +
+      new URLSearchParams({
+        q: setup.prefix,
+        view: 'holdings',
+        density: 'comfortable',
+      });
     await page.goto(scoped);
     const active = page.getByRole('link', { name: 'Active only', exact: true });
     const all = page.getByRole('link', { name: 'All statuses', exact: true });
     await expect(active).toHaveAttribute('aria-current', 'page');
     await expect(page.getByText('Current scope: Active only')).toHaveCount(0);
-    await expect(countFeedback(page, '28 matching rows')).toBeVisible();
-    const split = page.locator('li').filter({
-      has: page.getByRole('link', { name: setup.splitName, exact: true }),
-    });
+    await expect(countFeedback(page, '28 holding rows')).toBeVisible();
+    const split = page
+      .getByRole('link', { name: setup.splitName, exact: true })
+      .locator('xpath=ancestor::li[1]');
     await expect(countFeedback(split, '1 unit')).toBeVisible();
     await expect(split.getByText('At this location')).toBeVisible();
-    const localGrid = split.locator('[class*="rowGrid"]').first();
     expect(
       await split.evaluate((row) => row.getBoundingClientRect().width),
     ).toBeGreaterThan(680);
     await expect
       .poll(() =>
-        localGrid.evaluate(
+        split.evaluate(
           (grid) =>
             getComputedStyle(grid).gridTemplateColumns.split(/\s+/).length,
         ),
@@ -276,7 +281,7 @@ test('location status, holding scope, matching rows and real CSV agree across na
     await page.setViewportSize({ width: 375, height: 812 });
     await expect
       .poll(() =>
-        localGrid.evaluate(
+        split.evaluate(
           (grid) =>
             getComputedStyle(grid).gridTemplateColumns.split(/\s+/).length,
         ),
@@ -288,9 +293,13 @@ test('location status, holding scope, matching rows and real CSV agree across na
     });
     await page.setViewportSize({ width: 1180, height: 757 });
 
+    const overallTotals = split.locator('p').filter({
+      hasText: 'Overall item totals:',
+    });
+    await expect(overallTotals).toContainText('available across all storage');
     await expect(
-      split.getByText('Across all storage: 2 available'),
-    ).toBeVisible();
+      overallTotals.locator('[data-count-visual]').first(),
+    ).toHaveText('2');
     let slowStarted = false;
     let slowDelivered = false;
     const slowScope = new Promise<void>((release) => {
@@ -315,40 +324,50 @@ test('location status, holding scope, matching rows and real CSV agree across na
     await all.click({ noWaitAfter: true });
     await expect.poll(() => slowStarted).toBe(true);
     await expect(active).toHaveAttribute('aria-current', 'page');
-    await expect(countFeedback(page, '28 matching rows')).toBeVisible();
+    await expect(countFeedback(page, '28 holding rows')).toBeVisible();
     await active.click({ noWaitAfter: true });
     releaseScope();
     await expect.poll(() => slowDelivered).toBe(true);
     await expect(active).toHaveAttribute('aria-current', 'page');
-    await expect(countFeedback(page, '28 matching rows')).toBeVisible();
+    await expect(countFeedback(page, '28 holding rows')).toBeVisible();
     await page.unroute('**/locations/ITC-BLACK?**');
     await all.click();
     await expect(all).toHaveAttribute('aria-current', 'page');
     await expect(active).not.toHaveAttribute('aria-current', 'page');
-    await expect(countFeedback(page, '29 matching rows')).toBeVisible();
+    await expect(countFeedback(page, '29 holding rows')).toBeVisible();
     await expect(page).toHaveURL(/status=all/);
     await page.reload();
     await expect(all).toHaveAttribute('aria-current', 'page');
     await page.goBack();
     await expect(active).toHaveAttribute('aria-current', 'page');
-    await expect(countFeedback(page, '28 matching rows')).toBeVisible();
+    await expect(countFeedback(page, '28 holding rows')).toBeVisible();
     await page.goForward();
     await expect(all).toHaveAttribute('aria-current', 'page');
     const downloading = page.waitForEvent('download');
-    await page.getByRole('link', { name: 'Export' }).click();
+    await page
+      .getByRole('link', { name: 'Matching holdings CSV', exact: true })
+      .click();
     const download = await downloading;
     const path = testInfo.outputPath('all-status-location.csv');
     await download.saveAs(path);
     const csv = csvRows(await readFile(path, 'utf8'));
     expect(csv).toHaveLength(30);
-    expect(csv.filter((row) => row.includes(setup.splitName))).toHaveLength(1);
+    const splitRows = csv.slice(1).filter((row) => row[0] === setup.splitId);
+    expect(splitRows).toHaveLength(1);
+    for (const [column, value] of [
+      ['Name', setup.splitName],
+      ['Location Code', 'ITC-BLACK'],
+      ['Quantity at Location', '1'],
+      ['Available in Storage (Item-wide)', '2'],
+    ])
+      expect(splitRows[0][csv[0].indexOf(column)]).toBe(value);
     expect(
       csv.some((row) => row.some((value) => value.includes('retired laptop'))),
     ).toBe(true);
     await page.screenshot({
       path: testInfo.outputPath('location-all-status.png'),
     });
-    await page.goto('/inventory');
+    await page.goto('/inventory?view=holdings');
     const search = page.getByRole('form', { name: 'Search inventory' });
     await search
       .getByLabel('Search inventory', { exact: true })
@@ -358,50 +377,71 @@ test('location status, holding scope, matching rows and real CSV agree across na
       (url) =>
         url.pathname === '/inventory' &&
         url.searchParams.get('q') === setup.prefix &&
+        url.searchParams.get('view') === 'holdings' &&
         !url.searchParams.has('page'),
     );
-    await expect(countFeedback(page, '30 matching rows')).toBeVisible();
-    await expect(page.getByText(/^On this page:/)).toBeVisible();
+    await expect(countFeedback(page, '30 holding rows')).toBeVisible();
+    await expect(page.getByText('25 holdings rows on this page')).toBeVisible();
     const next = page
       .getByRole('navigation', { name: 'Pagination' })
       .getByRole('link', { name: 'Next', exact: true });
     await expect(next).toHaveAttribute(
       'href',
-      '/inventory?' + new URLSearchParams({ q: setup.prefix, page: '2' }),
+      '/inventory?' +
+        new URLSearchParams({ q: setup.prefix, view: 'holdings', page: '2' }),
     );
     await next.click();
     await expect(page).toHaveURL(
       (url) =>
         url.pathname === '/inventory' &&
         url.searchParams.get('q') === setup.prefix &&
+        url.searchParams.get('view') === 'holdings' &&
         url.searchParams.get('page') === '2',
     );
     await expect(page.getByText('Page 2 of 2', { exact: true })).toBeVisible();
-    await expect(countFeedback(page, '30 matching rows')).toBeVisible();
+    await expect(countFeedback(page, '30 holding rows')).toBeVisible();
+    await expect(
+      page.getByText(/\b5 holdings rows on this page/),
+    ).toBeVisible();
     await expect(
       page.getByRole('link', { name: 'Next', exact: true }),
     ).toHaveCount(0);
     await page.goto(
       '/inventory?q=' +
         encodeURIComponent(setup.prefix) +
-        '&status=all&page=999',
+        '&status=all&view=holdings&page=999',
     );
     await expect(page).toHaveURL(/status=all.*page=2/);
     await expect(
       search.getByLabel('Search inventory', { exact: true }),
     ).toHaveValue(setup.prefix);
-    await expect(countFeedback(page, '31 matching rows')).toBeVisible();
-    await page.goto('/inventory?q=' + encodeURIComponent(setup.splitName));
-    await expect(countFeedback(page, '2 matching rows')).toBeVisible();
-    await expect(
-      page.getByText('On this page: 2 quantity rows with stock'),
-    ).toBeVisible();
-    await expect(
-      page.getByText(
-        'Distinct quantity products on this page: 1 (overlaps the row counts).',
-        { exact: true },
-      ),
-    ).toBeVisible();
+    await expect(countFeedback(page, '31 holding rows')).toBeVisible();
+    await page.goto(
+      '/inventory?' +
+        new URLSearchParams({ q: setup.splitName, view: 'holdings' }),
+    );
+    await expect(countFeedback(page, '2 holding rows')).toBeVisible();
+    await expect(page.getByText('2 holdings rows on this page')).toBeVisible();
+    const holdingLinks = page.getByRole('link', {
+      name: setup.splitName,
+      exact: true,
+    });
+    await expect(holdingLinks).toHaveCount(2);
+    for (const code of ['ITC-BLACK', 'ITC-RED']) {
+      const location = page.getByRole('link', {
+        name: new RegExp('\\(' + code + '\\)$'),
+      });
+      const row = holdingLinks
+        .locator('xpath=ancestor::li[1]')
+        .filter({ has: location });
+      await expect(
+        row.getByRole('link', { name: setup.splitName, exact: true }),
+      ).toHaveAttribute(
+        'href',
+        new RegExp('^/inventory/quantity/' + setup.splitId + '\\?'),
+      );
+      await expect(countFeedback(row, '1 unit')).toBeVisible();
+    }
     await page.setViewportSize({ width: 390, height: 844 });
     await assertFits(page);
     await page.screenshot({

@@ -800,3 +800,45 @@ populated desktop/390px Full/Reduced both-theme proof and canonical exact-SHA
 certification remain pending. Current Overview hero/stat tilt uses the same stationary owner and decorative
 inner wrapper; native visual acceptance remains pending. Future A403 replacement
 hosts must retain these adapters.
+
+## Grouped inventory and personal display views
+
+The local U303/A305 slice groups distinct item/asset identities before paging,
+then expands every matching holding within the approved response bounds. Holdings
+view retains the picking projection. Caller-invoker snapshot/RLS, decimal totals,
+published selected-field previews and browser-only saved views retain the
+contracts in [inventory views](inventory-views.md).
+
+Current protected readiness, route/dirty-navigation guards, Peek, W01 spotlight,
+W05 identity entrances, W06 exact counts, holding feedback and spring disclosures
+remain the consumers' presentation owners. Multi-holding titles never invent a
+single holding for shared-title pairing. A308 reuses item-wide available storage
+for exact shortfall; scoped quantities never replace availability. Full holdings
+CSV scope and existing columns remain unchanged. This local integration adds no
+mutation, role, geometry authority or acceptance claim.
+
+## U313 filtered history source integration
+
+History adds caller-invoker, active-member bounded reads in forward migration
+20261119061423_inventory_history_tools.sql. The internal event-key view and matcher
+remain private; only the three bounded page/person/export RPCs are public. Literal
+search, stable historical actor identity, named-zone microsecond ranges, record
+locks and applied URL/export alignment preserve current route/privacy/motion/peek
+ownership. Filtered CSV is one snapshot with event rows and complete storage/site
+ledger lines; overflow never truncates an event. See [history tools](history-tools.md)
+for exact limits, recorded/current provenance, token verification and pending DB,
+generated-type, REST and native acceptance. Existing mutation/version authority and
+legacy event/detail/custom-snapshot reads remain unchanged.
+
+History person searches have an exact request lifetime within their verified
+component scope. Query/page replacement retires that request before the central
+route-action denial observer receives a late result. The same guard owns request
+start, denial processing and local result/error handling; current owned denial
+still uses the existing presentation suppression contract. No central denial-ticket
+or membership semantics change.
+
+This current U313 integration also retires the history transport when its owned
+query/reference callback settles, including early success, failure and late
+headers/body. Known RPC failures are checked before awaiting reference siblings;
+current denial remains explicit and late results cannot publish a replacement.
+Canonical grouped and one-level location-directory parent returns remain intact.

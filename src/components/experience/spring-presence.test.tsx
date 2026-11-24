@@ -30,7 +30,7 @@ import {
 } from '@/features/inventory/components/task-state';
 const animation = vi.hoisted(() => ({
   stops: [] as ReturnType<typeof vi.fn>[],
-  updates: [] as (() => void)[],
+  updates: [] as ((progress: number) => void)[],
 }));
 vi.mock('next/navigation', () => ({
   usePathname: () => '/inventory',
@@ -48,13 +48,19 @@ vi.mock('@/lib/supabase/browser', () => ({
 vi.mock('motion', () => ({
   animate: vi.fn(
     (
-      element: HTMLElement,
-      target: { opacity?: number },
-      options: { onUpdate: () => void },
+      subject: HTMLElement | number,
+      target: { opacity?: number } | number,
+      options: { onUpdate: (progress: number) => void },
     ) => {
-      if (target.opacity !== undefined)
-        element.style.opacity = String(target.opacity);
-      const cancel = vi.fn();
+      if (
+        typeof subject !== 'number' &&
+        typeof target !== 'number' &&
+        target.opacity !== undefined
+      )
+        subject.style.opacity = String(target.opacity);
+      const cancel = vi.fn(() => {
+        if (typeof subject === 'number') options.onUpdate(subject);
+      });
       animation.stops.push(cancel);
       animation.updates.push(options.onUpdate ?? (() => {}));
       return { cancel };
@@ -238,6 +244,7 @@ it('disclosure summary activates once, retains a pending form and collapses its 
   expect(view.container.querySelector('input')).toBe(original);
   expect(mounts).toBe(1);
   fireEvent.click(summary);
+  act(() => vi.advanceTimersByTime(250));
   expect(screen.getByText('Confirmed receipt')).toBeVisible();
 });
 it('animates a fresh authorized disclosure open initially and after a settled native close', async () => {
@@ -259,6 +266,49 @@ it('animates a fresh authorized disclosure open initially and after a settled na
   vi.mocked(animate).mockClear();
   fireEvent.click(screen.getByText('Details'));
   expect(animate).toHaveBeenCalledOnce();
+});
+it('restores natural disclosure height and refuses retired updates after close and reopen', () => {
+  render(
+    <Managed>
+      <SpringDisclosure summary="Details">
+        <button>Original action</button>
+      </SpringDisclosure>
+    </Managed>,
+  );
+  const summary = screen.getByText('Details');
+  const action = screen.getByText('Original action');
+  const body = action.closest<HTMLElement>('[data-spring-presence]')!;
+  vi.spyOn(body, 'scrollHeight', 'get').mockReturnValue(120);
+
+  fireEvent.click(summary);
+  const finishOpening = animation.updates.at(-1)!;
+  act(() => finishOpening(0.5));
+  expect(body.style.height).toBe('60px');
+  expect(body.style.opacity).toBe('0.5');
+  act(() => vi.advanceTimersByTime(250));
+  act(() => finishOpening(0));
+  expect(body.style.height).toBe('');
+  expect(body.style.overflow).toBe('');
+  expect(body.style.opacity).toBe('');
+
+  fireEvent.click(summary);
+  const interruptedClose = animation.updates.at(-1)!;
+  act(() => interruptedClose(0.25));
+  expect(body.style.height).toBe('30px');
+  expect(body).toHaveAttribute('inert');
+  expect(body).toHaveAttribute('aria-hidden', 'true');
+
+  fireEvent.click(summary);
+  const reopen = animation.updates.at(-1)!;
+  act(() => reopen(0.75));
+  act(() => interruptedClose(0));
+  expect(body.style.height).toBe('90px');
+  expect(body).not.toHaveAttribute('inert');
+  expect(body).not.toHaveAttribute('aria-hidden');
+  expect(screen.getByRole('button', { name: 'Original action' })).toBe(action);
+  act(() => vi.advanceTimersByTime(250));
+  expect(body.style.height).toBe('');
+  expect(body.style.overflow).toBe('');
 });
 it('does not replay entry when an already-open surface regains privacy verification', () => {
   const tree = (ready: boolean) => (

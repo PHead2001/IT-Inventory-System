@@ -114,8 +114,23 @@ function ExactTimestamp({
 }
 export function ExportLink({
   href,
+  onClick,
   ...props
 }: Omit<AnchorHTMLAttributes<HTMLAnchorElement>, 'href'> & { href: string }) {
   const context = useContext(TimeZoneContext);
-  return <a {...props} href={exportTimeZoneHref(href, context)} />;
+  return (
+    <a
+      {...props}
+      href={exportTimeZoneHref(href, context)}
+      onClick={(event) => {
+        onClick?.(event);
+        // A download keeps the page in place, so close the export menu that
+        // would otherwise stay open over the results it was opened from.
+        const menu = event.currentTarget.closest(
+          'details.experience-export-menu',
+        );
+        if (menu instanceof HTMLDetailsElement) menu.open = false;
+      }}
+    />
+  );
 }

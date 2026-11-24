@@ -5,6 +5,7 @@ vi.mock('server-only', () => ({}));
 const mocks = vi.hoisted(() => ({
   requireMember: vi.fn(),
   getInventory: vi.fn(),
+  getInventoryColumns: vi.fn(),
   hasRecordedInventory: vi.fn(),
   redirect: vi.fn(),
   getCategories: vi.fn(),
@@ -15,6 +16,26 @@ const mocks = vi.hoisted(() => ({
 }));
 vi.mock('@/lib/auth/session.server', () => ({
   requireMember: mocks.requireMember,
+}));
+vi.mock('@/features/inventory/views.server', () => ({
+  getInventoryColumns: mocks.getInventoryColumns,
+  getInventoryView: async (input: Record<string, string | undefined>) => {
+    const result = await mocks.getInventory(input);
+    return {
+      ...result,
+      unit: input.view === 'holdings' ? 'holding row' : 'item',
+      holdingRows: result.rows.length,
+      rows: result.rows.map(
+        (row: import('@/features/inventory/contracts-ui').InventoryResult) => ({
+          row,
+          holdings: [row],
+          scopedStorage: String(row.quantity ?? 0),
+          scopedSite: '0',
+          holdingCount: row.location || row.site ? 1 : 0,
+        }),
+      ),
+    };
+  },
 }));
 vi.mock('@/features/inventory/queries.server', () => ({
   getInventory: mocks.getInventory,
@@ -32,11 +53,14 @@ vi.mock('@/features/inventory/components/search-form', () => ({
   SearchForm: mocks.searchForm,
 }));
 
+vi.mock('@/features/inventory/components/view-controls', () => ({
+  InventoryViewControls: () => null,
+}));
 vi.mock('next/navigation', () => ({ redirect: mocks.redirect }));
 
 import InventoryPage from './page';
 import { RouteReady } from '@/components/experience/route-ready';
-import { InventoryRows } from '@/features/inventory/components/read-ui';
+import { InventoryViewRows as InventoryRows } from '@/features/inventory/components/view-rows';
 import { routeKey, type RouteQuery } from '@/components/experience/route-key';
 import { Children, isValidElement, type ReactNode } from 'react';
 
@@ -47,6 +71,7 @@ beforeEach(() => {
   vi.stubEnv('VERCEL_ENV', 'preview');
   mocks.requireMember.mockResolvedValue({ member: { role: 'staff' } });
   mocks.getInventory.mockResolvedValue(result);
+  mocks.getInventoryColumns.mockResolvedValue({ fields: [], truncated: false });
   mocks.hasRecordedInventory.mockResolvedValue(false);
   mocks.getCategories.mockResolvedValue([]);
   mocks.getLocations.mockResolvedValue([]);
@@ -91,6 +116,22 @@ it.each([
     // Page two must be a real current page, so this case does not take recovery.
     mocks.getInventory.mockResolvedValue({
       ...result,
+      rows: [
+        {
+          kind: 'quantity',
+          id: '00000000-0000-4000-8000-000000000001',
+          name: 'USB',
+          categoryName: 'Cables',
+          status: 'active',
+          location: null,
+          quantity: 0,
+          assetTag: null,
+          serialNumber: null,
+          recordedTotal: null,
+          reorderThreshold: null,
+          stockState: null,
+        },
+      ],
       total: 60,
       page: 'page' in raw && raw.page === '2' ? 2 : 1,
     });
@@ -98,8 +139,17 @@ it.each([
     const primary = findElement(page, RouteReady)!;
     const rows = findElement(page, InventoryRows)!;
     expect(primary.props.routeKey).toBe(routeKey('/inventory', raw));
-    expect(primary.props.pairingHref).toBe(canonical);
-    expect(rows.props.returnTo).toBe(canonical);
+    const explicit = new URL(canonical, 'https://inventory.invalid');
+    explicit.searchParams.set('view', 'items');
+    explicit.searchParams.set('density', 'comfortable');
+    const returnTo = rows.props.returnTo;
+    if (typeof returnTo !== 'string')
+      throw new Error('Expected the inventory return path to be a string');
+    const actualReturn = new URL(returnTo, 'https://inventory.invalid');
+    expect(routeKey(actualReturn.pathname, actualReturn.searchParams)).toBe(
+      routeKey(explicit.pathname, explicit.searchParams),
+    );
+    expect(primary.props.pairingHref).toBe(rows.props.returnTo);
     expect(page.props.routeKey).toBe(routeKey('/inventory', raw));
   },
 );
@@ -108,7 +158,7 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-it('times concurrent inventory reads and waits for their result before file summaries', async () => {
+it('starts the column catalog with concurrent inventory reads and waits for inventory before file summaries', async () => {
   const info = vi.spyOn(console, 'info').mockImplementation(() => {});
   let releaseInventory: (value: typeof result) => void = () => {};
   mocks.getInventory.mockReturnValue(
@@ -122,6 +172,7 @@ it('times concurrent inventory reads and waits for their result before file summ
     expect(mocks.getCategories).toHaveBeenCalledOnce();
     expect(mocks.getLocations).toHaveBeenCalledOnce();
     expect(mocks.getSites).toHaveBeenCalledOnce();
+    expect(mocks.getInventoryColumns).toHaveBeenCalledExactlyOnceWith({});
   });
   expect(mocks.getFileListSummaries).not.toHaveBeenCalled();
   releaseInventory(result);
@@ -239,7 +290,92 @@ it('explains both tracking choices before entry and preserves the selected inven
     );
     expect(url.pathname).toBe(path);
     expect(url.searchParams.get('returnTo')).toBe(
-      '/inventory?q=adapter&type=quantity&page=2',
+      '/inventory?q=adapter&type=quantity&view=items&density=comfortable&page=2',
     );
   }
+});
+
+it('keeps full holdings export scope separate from grouped pages and selected columns', async () => {
+  vi.stubEnv('AUTH_DIAGNOSTICS', '0');
+  const column = '00000000-0000-4000-8000-000000000003';
+  mocks.requireMember.mockResolvedValue({ member: { role: 'viewer' } });
+  mocks.getInventory.mockResolvedValue({ ...result, total: 60, page: 2 });
+  render(
+    await InventoryPage({
+      searchParams: Promise.resolve({
+        q: '%_ literal',
+        view: 'items',
+        density: 'compact',
+        columns: column,
+        columnSearch: 'Enabled',
+        page: '2',
+      }),
+    }),
+  );
+  const csvScope = screen.getByText(
+    /Overall totals appear only on the first CSV row for each quantity item/,
+  );
+  expect(csvScope).not.toBeVisible();
+  fireEvent.click(screen.getByText('Export CSV', { exact: true }));
+  expect(csvScope).toBeVisible();
+  const csv = screen.getByRole('link', { name: 'Matching holdings rows' });
+  const query = new URL(csv.getAttribute('href')!, 'https://inventory.test')
+    .searchParams;
+  expect(query.get('q')).toBe('%_ literal');
+  for (const key of ['view', 'density', 'columns', 'columnSearch', 'page'])
+    expect(query.has(key)).toBe(false);
+  expect(
+    screen.getByRole('link', { name: 'Inventory with custom fields' }),
+  ).toHaveAttribute(
+    'href',
+    '/api/exports/inventory?customFields=true&q=%25_+literal&displayTimeZone=UTC',
+  );
+  expect(screen.getByRole('link', { name: 'Previous' })).toHaveAttribute(
+    'href',
+    expect.stringContaining('density=compact'),
+  );
+});
+it('keeps an overflow page actionable without pretending it is empty or recovering its page', async () => {
+  vi.stubEnv('AUTH_DIAGNOSTICS', '0');
+  mocks.requireMember.mockResolvedValue({ member: { role: 'viewer' } });
+  mocks.getInventory.mockResolvedValue({
+    ...result,
+    page: 99,
+    error: 'Narrow the filters; this view exceeds its response limit.',
+  });
+  render(
+    await InventoryPage({
+      searchParams: Promise.resolve({ page: '99', view: 'items' }),
+    }),
+  );
+  expect(screen.getByRole('alert')).toHaveTextContent('Narrow the filters');
+  expect(
+    screen.getByRole('link', { name: 'Use Holdings view' }),
+  ).toHaveAttribute('href', '/inventory?view=holdings');
+  expect(mocks.redirect).not.toHaveBeenCalled();
+  expect(mocks.hasRecordedInventory).not.toHaveBeenCalled();
+  expect(screen.queryByText('No inventory has been recorded yet.')).toBeNull();
+});
+
+it('gates all independent reads on membership and propagates column-catalog failure', async () => {
+  vi.stubEnv('AUTH_DIAGNOSTICS', '0');
+  const denied = new Error('membership denied');
+  mocks.requireMember.mockRejectedValueOnce(denied);
+  await expect(
+    InventoryPage({ searchParams: Promise.resolve({}) }),
+  ).rejects.toBe(denied);
+  expect(mocks.getInventory).not.toHaveBeenCalled();
+  expect(mocks.getInventoryColumns).not.toHaveBeenCalled();
+
+  const original = new Error('column catalog unavailable');
+  mocks.getInventoryColumns.mockRejectedValueOnce(original);
+  await expect(
+    InventoryPage({
+      searchParams: Promise.resolve({ columnSearch: 'Enabled' }),
+    }),
+  ).rejects.toBe(original);
+  expect(mocks.getInventoryColumns).toHaveBeenCalledExactlyOnceWith({
+    columnSearch: 'Enabled',
+  });
+  expect(mocks.getFileListSummaries).not.toHaveBeenCalled();
 });

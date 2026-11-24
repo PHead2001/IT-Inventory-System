@@ -512,7 +512,7 @@ test('actual location status, pagination, child and recovery links retain one va
       await all.click();
       await expect(page).toHaveURL(allURL.href);
       await expect(all).toHaveAttribute('aria-current', 'page');
-      await expect(countFeedback(page, '26 matching rows')).toBeVisible();
+      await expect(countFeedback(page, '26 items')).toBeVisible();
       const rows = page.getByRole('link', {
         name: new RegExp(`^Fictional pagination ${owned.suffix} \\d{2}$`),
       });

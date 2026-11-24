@@ -20,6 +20,10 @@ Populated Overview visual/browser, hosted and final exact-SHA gates remain open.
 [Overview](overview.md#selective-release-checkpoint--november-5-2026). No row is
 promoted by that local evidence.
 
+The A403 threshold setup source links staff directly to the named active item's
+reorder threshold editor and keeps the viewer's item detail link. Populated
+browser and final exact-SHA evidence for the new route remain pending.
+
 This is the durable acceptance index for the complete owner-authorized Audit 4.2 goal: 65 numbered requirements, with D303 split into two acceptance rows, plus C402–C404 and N01–N07 (76 rows, 75 distinct base IDs). All A and W requirements remain implementation scope, including U303, U313 and A307. This document tracks disposition and dependencies; recordings, logs and one-time measurements belong in the relevant PR or retained protected artifacts, following Playbook §7.4.
 
 ## Active visual source checkpoints — 2026-11-05
@@ -32,10 +36,10 @@ scope/SHA. They establish neither final runtime acceptance nor the latest PR HEA
 A308/A403 are in the active Overview/restock release slice with final acceptance
 pending. All 76 rows and their full requirements remain present.
 
-A308's current ordinary rows, quantity detail, detailed low-stock dashboard and low-stock CSV reuse
-the exact shortfall helper. The future P11 `view-rows` consumer does not exist in
-this release tree; its A308 hookup remains required when that consumer lands.
-This follow-up edge does not remove P11 or broaden accepted A308 coverage.
+A308's ordinary rows, quantity detail, detailed low-stock dashboard and low-stock
+CSV reuse the exact shortfall helper. The local P11 grouped-row preparation now
+connects that same helper to item-wide availability; filtered holdings never
+become its shortfall input. This does not broaden accepted A308 coverage.
 
 ## PR62 theme, room and logout evidence checkpoint — 2026-11-05
 
@@ -289,7 +293,7 @@ P05 [PR #47](https://github.com/PHead2001/IT-Inventory-System/pull/47) merged as
 | W16    | Cached one-shot contact shadows/static corner depth ground objects; invalidate relevant scene/theme changes without ghosting, extra idle frames or material runtime regression.       | P09a; W13, D402                                                                                             | Source implemented in current stack; runtime/integration acceptance pending                                                                    | Requirement + current source checkpoint (acceptance pending); Focused local regressions; real WebGL and reference GPU evidence required | S/W16; G/W16; E18; Next proof: Prove bounded cached shadows/depth and theme/scene invalidation without ghosting, extra idle work or material runtime regression. PR56 source evidence: original-session/lease fences, shared browser quality, lazy bloom/contact regressions; no CI/browser/GPU pass claimed                                                                                                                                                                                                                                                                                                                                                                                                         | Recorded reference hardware/frame cost; SwiftShader alone is not GPU proof.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
 | W17    | Both camera flows show search framing/laser, honest decoded lock, then inspection; actual transformed decoder bounds when available, fixed frame otherwise.                           | P09b; F501, U502, W08                                                                                       | Active PR65 source `b66593e4`; runtime/final acceptance pending                                                                                | Requirement + local source checkpoint (not runtime acceptance)                                                                          | S/W17; G/W17; E20; Next proof: Use actual decoder evidence for framing/landmarks; no fabricated exact polygon from three finder points; camera/device/native timing pending.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         | Real cameras/crop/mirror; static reduced states; no invented coordinates.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
 | W18    | Distinct supported haptic and opt-in generated audio decode/assignment/failure cues; sound off initially, persisted, user-activated, never load/background.                           | P09b; U409, W17, A501                                                                                       | Active PR65 source `b66593e4`; runtime/final acceptance pending                                                                                | Requirement + Hardware + local source checkpoint (not runtime acceptance)                                                               | S/W18; G/W18; E20; Next proof: Prove supported haptic/opt-in sound on physical supported devices; off by default, gesture gated, scoped persistence and no background/load audio.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    | Real supported phone/audio activation; preference semantics, quiet unsupported fallback; dedupe retries/restored receipts.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
-| W19    | Lazy authenticated record/location peeks at listed links after ~400ms hover or keyboard focus; real identity/photo/stock/location, Escape and reachable controls; normal touch/click. | P09c; U408, W11/W14                                                                                         | Active PR65 source `b66593e4`; runtime/final acceptance pending                                                                                | Requirement + local source checkpoint (not runtime acceptance)                                                                          | S/W19; G/W19; E20; Next proof: Prove actual lazy authenticated peeks at all listed links, bounded invalidated cache, Escape/keyboard controls and normal touch/click.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                | Bounded actor/environment/freshness cache, invalidation/sign-out; no technical IDs or blocked primary navigation.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| W19    | Lazy authenticated record/location peeks at listed links after ~400ms hover or keyboard focus; real identity/photo/stock/location, Escape and reachable controls; normal touch/click. | P09c; U408, W11/W14                                                                                         | Active PR65 and expanded Overview source; runtime/final acceptance pending                                                                     | Requirement + local source checkpoint (not runtime acceptance)                                                                          | S/W19; G/W19; E20; [Expanded Overview source checkpoint](peek-cards.md#expanded-overview-source-checkpoint); Next proof: Prove actual lazy authenticated peeks at all listed links, bounded invalidated cache, Escape/keyboard controls and normal touch/click.                                                                                                                                                                                                                                                                                                                                                                                                                                                      | Bounded actor/environment/freshness cache, invalidation/sign-out; no technical IDs or blocked primary navigation.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
 | W20    | Shared palette/shortcut registry, badges and accessible cheat sheet; typing/composition/scanning/modal navigation excluded; disable preference; ordinary controls remain.             | P08e; A301                                                                                                  | Source published in PR57 `8356984620bdf9a4536a7a27130e01f912c18d8a`; scoped runtime evidence only, full acceptance pending.                    | Requirement + current source/runtime checkpoint; E23 (acceptance pending)                                                               | S/W20; G/W20; E18; Next proof: Prove one registry, visible hints/cheat sheet, IME/editable/scanner/modal exclusion and disable-shortcuts with usable ordinary controls. PR57 source checkpoint: command integration preparation 2026-10-12                                                                                                                                                                                                                                                                                                                                                                                                                                                                           | /, N, S, L, G then I/H/M, ?; platform conflicts documented; browser/AT shortcuts and Escape focus preserved. PR57 command acceptance: Real-provider privacy/ticket/task-handoff and insertion/layout retirement regressions; streamed-body cancellation, active inspection/visible-overlay shortcut guards and bounded breadcrumb-context coverage; at exact source `8356984620bdf9a4536a7a27130e01f912c18d8a`, local 724 pgTAP assertions and the five-second Data API timeout integration executed on the retained 47-migration database, while CI `41972953268` passed its separate clean 46-migration database/tests/generated-types gate. Overall browser CI failed outside the passing quantity Move/recovery/history/Done logs; final-candidate full CI/review, broader KNN/performance, hosted staff/viewer Full/Reduced desktop/phone and AT acceptance remain pending (E23).                                                                                                                                                                                                                 |
 | C402   | Inactive map drag briefly explains Interact to rotate / Scroll moves page without stealing scroll.                                                                                    | P04                                                                                                         | Merged source; full-ID/current integration acceptance pending                                                                                  | Note                                                                                                                                    | S/C402 (not live-verified); G/C402; E19; Next proof: Render the bounded inactive-drag hint on actual scroll/drag, without stealing scroll; source/unit proof alone is not visual acceptance.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         | Pointer/touch/keyboard fallback and active/inactive ownership.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
 | C403   | Consolidate redundant milestone E2E into feature specs only with failure-to-retained-coverage mapping; replace fixed debounce sleeps with observable readiness.                       | Across affected slices; P12 closeout                                                                        | Source consolidation complete; canonical runtime/resource proof pending                                                                        | Note + current source checkpoint (acceptance pending)                                                                                   | S/C403; G/C403; E18; Next proof: Retain mapped failure/race coverage and canonical full-suite CI; measure actual runtime/resources rather than infer savings from line deletion.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     | Preserve races/security/CI/gates; no coverage cuts or runner changes to game runtime/line ratio.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
@@ -1028,3 +1032,189 @@ comparison. No final new-commit CI or hosted acceptance is claimed.
 The retained run directory also holds `receipt.json`, `fixture-cleanup.json` and
 `e2e-performance.json`. All 76 acceptance rows, their history and pending broader
 criteria remain unchanged. No production, hosted configuration or data changed.
+
+## Selective grouped inventory preparation — 2026-11-06
+
+U303/A305 donor `31bc1d41` is selectively reconciled onto PR66 base
+`beba99049655fe7d0e7fbfae59ab8d679e3bb4ad`. Current PR64/65/66 dispositions,
+readiness/privacy, shared navigation, Peek and presentation ownership are retained.
+Only the separately held reader-retirement fixes and their tests are adapted
+from the default worktree; history donor `45999655` is not imported.
+
+The approved grouped RPC/migration, RLS, response caps and decimal contracts are
+preserved. A308 uses the current shared shortfall helper and item-wide available
+quantity. [Inventory views](inventory-views.md) separates historical donor test
+counts from this uncommitted candidate. Focused regression execution, DB replay
+and upgrade, generated types, actual REST/concurrency/query-cost proof, populated
+desktop/390px Full/Reduced both-theme captures and exact-SHA certification remain
+required. All 76 rows, 75 base IDs and existing acceptance dispositions remain
+unchanged; source preparation is not runtime or whole-ID acceptance.
+
+### November 20 main reconciliation
+
+The local grouped candidate `5750ea11` now has a noncommitting merge of exact
+main `ac841de496bc969156a4467a1b66c495996037b0`, including merged PR62/64/65/66
+source and its later evidence. No conflicts required manual resolution.
+The unpublished grouped migration is appended as
+`20261119061422_inventory_grouped_views.sql`, after main's Overview UTC migration;
+its SQL bytes are unchanged. The retained local checkpoint records only 47
+migrations through `20261019193000`, no grouped RPC and no grouped upgrade/reset.
+No current database or hosted migration history was queried. Future History
+migrations must append after this grouped migration. Runtime gates, generated
+types, independent review and final exact-SHA certification remain pending;
+this source checkpoint does not change any acceptance disposition.
+
+### Delivery evidence checkpoint — 2026-11-20
+
+Verified Git `origin/main` is `ac841de496bc969156a4467a1b66c495996037b0`.
+Its merged audit slices are PR62 at `ac841de496bc969156a4467a1b66c495996037b0`,
+PR64 at `de07d500fd63cbbad306937a7595573b55076e8c`, PR65 at
+`3477f63cba4c34f4e766299401d37395445ba0ef`, and PR66 at
+`9f256938868518e49ee70759f3e459e04eff455d`. Git staging remains separately
+at `aef008490373e79a6148b69e1a91d3a7be6a002f`.
+
+Lead-supplied read-only provider evidence records production
+`dndqydmuqoduwaoujfki` and staging `ileoembzjxwhxgtiypec` with 46 applied
+migrations each, through `20261019151034`. Main contains 48 migrations,
+including Overview `20261019193000` and its UTC correction `20261119061421`.
+[Main workflow 44545614856](https://github.com/PHead2001/IT-Inventory-System/actions/runs/44545614856)
+failed during dependency installation before production database delivery;
+the delivery command was skipped. Main's source merge therefore does not
+establish deployment of either Overview migration or advancement of staging.
+
+P11's unpublished grouped candidate migration is renamed and appended as
+`20261119061422_inventory_grouped_views.sql`, with unchanged SQL bytes. This
+checkpoint records local safety/static preparation only. It promotes no hosted,
+runtime or whole-requirement acceptance and preserves every existing audit row,
+status and historical evidence boundary.
+
+### Grouped local database checkpoint — 2026-11-20
+
+The local 47-to-49 migration upgrade and 49-migration clean replay completed.
+On `e94096791e21f7775f94105179193d0a2fc9815b`, all 25 pgTAP files and 1,629
+assertions passed, including grouped inventory. The aggregate database run
+stopped at the low-stock export cap with SQLSTATE `57014` at 5,011 ms. The
+unchanged focused retry passed at 1,817 ms. The canonical generated-type check
+also passed on that revision. Migration and generated-type bytes match
+`0f596439731596d0babdea145f1ce0e262617715`.
+
+The grouped integration passed role authorization, concurrent snapshot and
+100 ms hoisting on `e1acb073d587f616aeaf8431dc9cff1d79bc6d57`. On
+`0f596439731596d0babdea145f1ce0e262617715`, the authenticated grouped read
+returned REST SQLSTATE `57014` at 5,006.5526 ms while the owned blocker still
+held the relation lock. The exact witnessed backend request retired before
+release, the next call matched the baseline, and fixture cleanup completed.
+[Inventory views](inventory-views.md#local-database-checkpoint--2026-11-20)
+identifies the retained receipts.
+
+These separate runs update the earlier local execution status. A complete
+canonical database run, exact pooled-backend timeout restoration, physical
+query plans, broader lifecycle and admission concurrency, visual acceptance,
+and final remote checks remain pending. All 76 acceptance rows retain their
+existing dispositions.
+
+### Grouped preview checkpoint — 2026-11-20
+
+The signed-in PR68 preview served commit `b3677bf38c6389d1430f7e2240cfabe52c72fd14`
+with all 49 expected migrations on its isolated preview database. The owned
+fictional dataset showed 25 Items on page one and the remaining item on page
+two. The actual CSV downloaded from page one contained all 26 identities,
+27 holdings rows and 35 units. The two-location item showed 10 and 25 units
+in its holding rows. The CSV carried the item-wide total on its first row.
+All 26 owned items were archived, and cleanup verified their holdings were
+cleared with no unresolved operations.
+
+The scoped inventory screen rendered 25 first-page items without horizontal
+overflow at desktop and 390 px in Light and Dark with Full and Reduced motion.
+A temporary mobile saved view survived rename and reload. The browser
+preferences were restored. Independent phone inspection found the next
+Compact Items card could cover an expanded holding link. The follow-up
+disclosure fix adds pointer hit testing and a late callback regression. The
+CSV help now describes the observed compatible export format.
+
+[Foundation CI 44796090351](https://github.com/PHead2001/IT-Inventory-System/actions/runs/44796090351)
+passed application and database validation on that preview commit and reported
+17 browser failures. Browser verification of the follow-up, published custom
+columns and their mapping download, account-switch isolation, and final
+exact-commit CI and review remain pending for U303 and A305. This checkpoint
+does not promote an acceptance row to complete.
+
+## Selective U313 history preparation — 2026-11-06
+
+Donor `45999655` is selectively reconciled onto reviewed grouped checkpoint
+`9ee2d63bcbc5810004e4dcf1f0886131079e06fa`. Current grouped/nested location
+return paths, PR64/65/66 presentation, metadata snapshots, actor/relative-time
+rendering and A308 inventory CSV Shortfall remain intact. Only the specified
+held history query/reader lifetime fixes are adapted from the read-only donor.
+
+An already-completed history RPC error is checked inside its read scope before
+joining reference reads; a known denial cannot become a timeout while a reference
+lookup is pending. The existing denial taxonomy is unchanged. Read-scope cleanup
+retires supported transport and late results; physical cancellation of unrelated
+SDK reference/Auth requests is not claimed.
+
+The forward migration and complete-event snapshot/row/wire/CSV bounds retain the
+contracts in [history tools](history-tools.md). Replay/upgrade, actual generated
+types, DB/RLS/REST/concurrency, memory and populated browser/visual/full gates are
+pending for this candidate. All 76 matrix rows, 75 base IDs and dispositions are
+unchanged; source integration is not runtime acceptance.
+
+## P11 grouped inventory and history local preparation — 2026-11-09
+
+Unpushed Group checkpoint `5750ea11e16686f0f01239be8bc99dad81e0822e` and
+History checkpoint `577205b7905040b24aaf9e3e3462b0ddddac9b99` are selectively
+integrated into the current Overview base. Grouped reads/views, preferences,
+A308 shortfall and return-source integration, plus History filters, bounded CSV
+and reader lifetime are present. Independent static reviews of the source
+boundaries were clear. This local preparation has no PR or preview and promotes
+no row.
+
+The initial nine pure files passed 236 tests on `4d4c7a`. The later 11 component
+and API files had 9 failures and 405 passes; the failures were repaired for
+legacy-holding order/raw scope, a test shadow, the authority fresh-owner fixture
+and disclosure accessibility fixture. The combined 11-file run then passed
+414/414 on `2cccd651a87e580a984c481e762d24108924ff4d`, before four typing fixes.
+After those fixes, four files passed 70/70; canonical Next type generation and
+strict TypeScript passed, as did affected-path formatting and zero-warning lint.
+Test execution used two CPUs, 512 MiB heap per Node process and one worker;
+TypeScript used a 2048 MiB heap (not a total-RSS limit). Owned cleanup was
+verified. Mocked-prefetch, jsdom and insertion warnings were reported; the run
+was not console-clean.
+
+Database proof remains pending. The canonical restored local project was
+identified as `it-inventory` on local API/database ports `45321`/`45322`, Storage `1.77.9`, with 47
+migrations. Group migration 48 and History migration 49 are unapplied; generated
+types are not refreshed and no database tests ran. The first Rancher probe
+aborted after a guard misclassified the expected WSL utility VM; normal shutdown
+preserved the volume and original migration state. The zero-memory reading was a
+VM sentinel; actual free RAM was 5.36 GiB, and after cleanup/settling with no
+VM it was 8.47 GiB. Corrected private cohort preparation is under review; no
+threshold, global setting or runner change was made.
+
+Full pre-push/build, clean and upgrade database/RLS, snapshot/timeout/memory and
+hosted 390 px Full/Reduced, native WebGL, independent experience and exact-final-
+SHA review/CI remain pending. A307 physical paper/hardware acceptance remains
+required. Original audit fixtures, production/staging and open-PR count were
+unchanged. All 76 rows, 75 base IDs and their dispositions remain unchanged;
+this is source and focused local validation evidence, not runtime or whole-goal
+acceptance.
+
+### History dependent-source reconciliation — 2026-11-20
+
+Local History `6dfdc525` has a noncommitting merge of exact grouped
+`e94096791e21f7775f94105179193d0a2fc9815b`, including main `ac841de4` and
+actual generated grouped public types. Both parents' historical checkpoints and
+all audit rows/statuses are preserved. The two conflicts were appended prose;
+no application or SQL conflicts required resolution. Grouped remains pending
+validation and separately releasable; joining its source does not accept either
+slice or expand History's scope.
+
+The unpublished History migration now appends as
+`20261119061423_inventory_history_tools.sql`, after the exact 49-migration
+grouped prefix, with unchanged SQL bytes. Available local receipts contain
+source/unit/type preparation and leave History DB execution pending; no remote
+ref contains the History introduction. No current local or hosted database
+history was queried during this reconciliation. History types still require
+actual generation/comparison, and replay/forward-upgrade, DB/RLS, real REST,
+browser/download and final exact-SHA gates remain pending. Static source/order
+checks alone promote no runtime or hosted acceptance.

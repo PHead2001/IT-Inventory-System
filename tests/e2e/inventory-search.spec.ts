@@ -8,6 +8,7 @@ import {
   appliedSearch,
   exportScope,
   csvRows,
+  runDiscoveryCleanup,
 } from './inventory-discovery-fixtures';
 
 // This read/search fixture uses the current category schema. Keep it exclusive
@@ -26,10 +27,13 @@ test('live inventory typing keeps applied rows, chips and CSV coherent through d
   page,
 }, info) => {
   test.setTimeout(180_000);
+  page.setDefaultTimeout(15_000);
+  page.setDefaultNavigationTimeout(20_000);
   const setup = await discoveryFixture();
   const alpha = setup.prefix + ' Alpha';
   const beta = setup.prefix + ' Beta';
   let dispose = async () => {};
+  let primaryFailure: { cause: unknown } | undefined;
   try {
     await signIn(page);
     await page.goto('/inventory?q=' + encodeURIComponent(setup.prefix));
@@ -49,9 +53,11 @@ test('live inventory typing keeps applied rows, chips and CSV coherent through d
     const delayed = await holdFirstSearch(page, alpha);
     dispose = delayed.dispose;
     await input.fill(alpha);
-    await expect.poll(delayed.isHeld).toBe(true);
+    await expect
+      .poll(() => delayed.isHeld() && delayed.requests.includes(alpha))
+      .toBe(true);
     await expect(input).toHaveValue(alpha);
-    await expect(countFeedback(page, '26 matching rows')).toBeVisible();
+    await expect(countFeedback(page, '26 items')).toBeVisible();
     await expect(
       page.getByRole('navigation', { name: 'Active inventory filters' }),
     ).toContainText(`Search: ${setup.prefix}`);
@@ -65,7 +71,9 @@ test('live inventory typing keeps applied rows, chips and CSV coherent through d
     // A is in flight; rapid B/A edits must survive that earlier response.
     await input.fill(beta);
     await input.fill(alpha);
-    delayed.release();
+    await test.step('Release the held Alpha search', delayed.release, {
+      timeout: 15_000,
+    });
     await appliedSearch(page, alpha, 24);
     await expect(fixtureRows).toHaveCount(24);
     for (const name of await fixtureRows.allTextContents())
@@ -76,7 +84,7 @@ test('live inventory typing keeps applied rows, chips and CSV coherent through d
     await input.fill(beta);
     expect(delayed.requests).not.toContain(beta);
     await expect(input).toHaveValue(beta);
-    await expect(countFeedback(page, '24 matching rows')).toBeVisible();
+    await expect(countFeedback(page, '24 items')).toBeVisible();
     await exportScope(page, alpha);
     await input.dispatchEvent('compositionend');
     await appliedSearch(page, beta, 2);
@@ -172,11 +180,18 @@ test('live inventory typing keeps applied rows, chips and CSV coherent through d
         page.url(),
       ).searchParams.has('page'),
     ).toBe(false);
-    const downloadEvent = page.waitForEvent('download');
-    await exported.click();
-    const download = await downloadEvent;
     const path = info.outputPath('applied-discovery.csv');
-    await download.saveAs(path);
+    await test.step(
+      'Download the applied holdings CSV',
+      async () => {
+        const [download] = await Promise.all([
+          page.waitForEvent('download', { timeout: 20_000 }),
+          exported.click(),
+        ]);
+        await download.saveAs(path);
+      },
+      { timeout: 30_000 },
+    );
     const [headers, ...rows] = csvRows(await readFile(path, 'utf8'));
     expect(rows).toHaveLength(26);
     const names = rows.map((row) => row[headers.indexOf('Name')]);
@@ -185,11 +200,20 @@ test('live inventory typing keeps applied rows, chips and CSV coherent through d
       path,
       contentType: 'text/csv',
     });
+  } catch (cause) {
+    primaryFailure = { cause };
+    throw cause;
   } finally {
-    try {
-      await dispose();
-    } finally {
-      await setup.cleanup();
-    }
+    await runDiscoveryCleanup(
+      [
+        {
+          name: 'Release the search route',
+          run: () =>
+            test.step('Release the search route', dispose, { timeout: 15_000 }),
+        },
+        { name: 'Archive owned discovery data', run: setup.cleanup },
+      ],
+      primaryFailure,
+    );
   }
 });

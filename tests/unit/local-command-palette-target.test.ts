@@ -84,6 +84,10 @@ it.each([
     await expect(
       import('../integration/command-palette-timeout'),
     ).rejects.toThrow(error);
+    await expect(import('../integration/inventory-views')).rejects.toThrow(
+      error,
+    );
+    await expect(import('../integration/custody')).rejects.toThrow(error);
     expect(constructors.postgres).not.toHaveBeenCalled();
     expect(constructors.supabase).not.toHaveBeenCalled();
   },

@@ -66,6 +66,7 @@ import {
   inventoryHolding,
   recordHoldingKey,
   type HoldingIdentity,
+  type InventorySource,
   type PresentationTarget,
 } from './route-motion-state';
 
@@ -220,6 +221,91 @@ const replacementHolding: HoldingIdentity = {
   id: '00000000-0000-4000-8000-000000000003',
 };
 const returnTo = '/inventory#inventory-row-2';
+it.each([
+  { kind: 'inventory-aggregate' },
+  {
+    kind: 'location-inventory',
+    locationCode: 'ITC-S4B',
+    occurrence: { kind: 'aggregate' },
+  },
+  {
+    kind: 'location-inventory',
+    locationCode: 'ITC-S4B',
+    occurrence: { kind: 'holding', holding: { domain: 'unplaced' } },
+  },
+] satisfies InventorySource[])(
+  'gives only the initiating grouped occurrence the opaque name: %j',
+  (source) => {
+    const entity = {
+      kind: 'quantity' as const,
+      id: '00000000-0000-4000-8000-000000000008',
+    };
+    const pathname =
+      source.kind === 'inventory-aggregate'
+        ? '/inventory'
+        : '/locations/ITC-S4B';
+    const params = new URLSearchParams({
+      density: 'comfortable',
+      view:
+        source.kind === 'location-inventory' &&
+        source.occurrence.kind === 'holding'
+          ? 'holdings'
+          : 'items',
+    });
+    if (source.kind === 'location-inventory')
+      params.set(
+        'returnTo',
+        '/locations?q=Closet&selected=ITC-S4B&level=ITC&expanded=ITC#location-row-desktop-tree-' +
+          entity.id,
+      );
+    const scope = routeKey(pathname, params);
+    runtime.pathname = pathname;
+    runtime.query = scope.split('?')[1];
+    vi.spyOn(HTMLElement.prototype, 'getClientRects').mockReturnValue({
+      length: 1,
+    } as DOMRectList);
+    const previous = location.href;
+    try {
+      history.replaceState(null, '', scope);
+      render(
+        view(
+          <RouteReady
+            actorId="staff"
+            routeKey={scope}
+            contentIdentity={scope}
+            pairedInventory
+          >
+            {[1, 2].map((ordinal) => (
+              <li key={ordinal} id={`inventory-row-${ordinal}`}>
+                <InventoryRecordLink
+                  record={entity}
+                  source={source}
+                  returnTo={scope + `#inventory-row-${ordinal}`}
+                  href={`/inventory/quantity/${entity.id}?${new URLSearchParams({ returnTo: scope + `#inventory-row-${ordinal}` })}`}
+                >
+                  Grouped occurrence {ordinal}
+                </InventoryRecordLink>
+              </li>
+            ))}
+          </RouteReady>,
+        ),
+      );
+      fireEvent.click(
+        screen.getByRole('link', { name: 'Grouped occurrence 2' }),
+      );
+      expect(
+        screen
+          .getByText('Grouped occurrence 2')
+          .getAttribute('data-test-transition-name'),
+      ).toMatch(/^inventory-title-/);
+      expect(screen.getByText('Grouped occurrence 1')).not.toHaveAttribute(
+        'data-test-transition-name',
+      );
+    } finally {
+      history.replaceState(null, '', previous);
+    }
+  },
+);
 const detailPath = '/inventory/quantity/record-id';
 function List({
   wrongRecord = false,

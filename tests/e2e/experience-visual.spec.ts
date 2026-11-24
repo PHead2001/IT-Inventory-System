@@ -290,8 +290,13 @@ async function openInventoryRecord(
     .locator('xpath=ancestor::li[1]')
     .getAttribute('id');
   expect(rowId).toMatch(/^inventory-row-\d+$/);
-  const returnTo =
-    (expectedScope ?? inventory.pathname + inventory.search) + '#' + rowId;
+  const scope = new URL(
+    expectedScope ?? inventory.pathname + inventory.search,
+    inventory,
+  );
+  scope.searchParams.set('view', 'items');
+  scope.searchParams.set('density', 'comfortable');
+  const returnTo = scope.pathname + scope.search + '#' + rowId;
   expect(destination.searchParams.get('returnTo')).toBe(returnTo);
   await record.click();
   await expect(page).toHaveURL(
@@ -467,10 +472,10 @@ test('representative shell and auth surfaces render at desktop and phone sizes w
     const firstName = page
       .locator('li[id^="inventory-row-"] a[href^="/inventory/"]')
       .first();
-    // Retain the unfiltered acceptance check as well as the deterministic case.
     await page.setViewportSize({ width: 502, height: 757 });
     await headerControlsFit(page);
     await withFailureGeometry(page, 'inventory-first-row', async () => {
+      expect(await page.evaluate(() => window.scrollY)).toBe(0);
       await expect(firstName).toBeInViewport();
     });
     await page.screenshot({
@@ -492,7 +497,7 @@ test('representative shell and auth surfaces render at desktop and phone sizes w
       (url) =>
         url.pathname === '/inventory' && url.searchParams.get('q') === query,
     );
-    await expect(countFeedback(page, '2 matching rows')).toBeVisible();
+    await expect(countFeedback(page, '2 items')).toBeVisible();
     const activeFilters = page.getByRole('navigation', {
       name: 'Active inventory filters',
     });

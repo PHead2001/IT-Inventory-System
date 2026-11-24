@@ -10,17 +10,11 @@ import {
 } from '@/features/inventory/scope-presentation';
 import { requireMember } from '@/lib/auth/session.server';
 import {
-  getInventory,
   getCategories,
   getLocations,
   hasRecordedInventory,
 } from '@/features/inventory/queries.server';
-import {
-  InventoryRows,
-  InventoryCount,
-  panel,
-  Pagination,
-} from '@/features/inventory/components/read-ui';
+import { panel, Pagination } from '@/features/inventory/components/read-ui';
 import { SearchForm } from '@/features/inventory/components/search-form';
 import { AddItemLauncher } from '@/features/inventory/components/add-item-launcher';
 import { readFilters } from '@/features/inventory/read-model';
@@ -47,13 +41,11 @@ export default async function InventoryPage({
   const params = Object.fromEntries(
     Object.entries(raw).map(([k, v]) => [k, Array.isArray(v) ? v[0] : v]),
   );
-  const [result, categories, locations, sites] = await observeAuthStage(
-    diagnostic,
-    'inventory.parallelReads',
-    () =>
+  const [result, categories, locations, sites, columnCatalog] =
+    await observeAuthStage(diagnostic, 'inventory.parallelReads', () =>
       Promise.all([
         observeAuthStage(diagnostic, 'inventory.search', () =>
-          getInventory(params),
+          getInventoryView(params),
         ),
         observeAuthStage(diagnostic, 'inventory.categories', () =>
           getCategories(),
@@ -62,27 +54,35 @@ export default async function InventoryPage({
           getLocations(),
         ),
         observeAuthStage(diagnostic, 'inventory.sites', () => getSites()),
+        getInventoryColumns(params),
       ]),
-  );
+    );
   const fileSummaries = await observeAuthStage(
     diagnostic,
     'inventory.fileSummaries',
-    () => getFileListSummaries(result.rows),
+    () => getFileListSummaries(result.rows.map((group) => group.row)),
   );
   const filters = readFilters(params);
   const exportParams = inventoryFilterParams(params);
-  const recovery = pageRecoveryHref(
-    '/inventory',
-    Object.fromEntries(exportParams),
-    result,
-  );
+  const display = readViewPreferences(params);
+  const navigationParams = inventoryViewParams(params);
+  const recovery =
+    !result.error && !display.error
+      ? pageRecoveryHref(
+          '/inventory',
+          Object.fromEntries(navigationParams),
+          result,
+        )
+      : null;
   if (recovery)
     redirect(
       recovery + (recovery.includes('?') ? '&' : '?') + 'scopeAdjusted=true',
     );
   const constrained = hasInventoryConstraints(params);
   const recorded =
-    result.total === 0 && !constrained ? await hasRecordedInventory() : null;
+    result.total === 0 && !constrained && !display.error && !result.error
+      ? await hasRecordedInventory()
+      : null;
   const emptyMessage = constrained
     ? 'No inventory matches these filters.'
     : !recorded
@@ -90,7 +90,9 @@ export default async function InventoryPage({
       : filters.status === 'active'
         ? 'No active inventory. Historical records are available.'
         : 'No inventory in this status scope.';
-  const returnParams = new URLSearchParams(exportParams);
+  const returnParams = new URLSearchParams(navigationParams);
+  returnParams.set('view', display.preferences.view);
+  returnParams.set('density', display.preferences.density);
   if (params.page) returnParams.set('page', String(filters.page));
   const returnTo =
     '/inventory' + (returnParams.size ? '?' + returnParams.toString() : '');
@@ -125,18 +127,51 @@ export default async function InventoryPage({
               sites={sites}
               diagnosticsEnabled={authDiagnosticsEnabled()}
             />
+            {member.user_id && process.env.NEXT_PUBLIC_SUPABASE_URL && (
+              <InventoryViewControls
+                collapseSettings
+                params={params}
+                columns={columnCatalog.fields}
+                truncated={columnCatalog.truncated}
+                catalogError={columnCatalog.error}
+                memberId={member.user_id}
+                backend={process.env.NEXT_PUBLIC_SUPABASE_URL}
+              />
+            )}
+            {result.error && (
+              <div
+                role="alert"
+                className="experience-surface mb-3 p-4 text-amber-200"
+              >
+                <p>{result.error}</p>
+                <Link
+                  className="min-h-11 inline-flex items-center text-cyan-300 underline"
+                  href={`/inventory?${inventoryViewParams({ ...params, view: 'holdings', page: undefined })}`}
+                >
+                  Use Holdings view
+                </Link>
+              </div>
+            )}
+            {display.error && (
+              <p role="alert" className="mb-3 text-amber-200">
+                {display.error}
+              </p>
+            )}
             <div className="experience-inventory-results mb-2 flex flex-wrap items-center justify-between gap-3 sm:mb-3">
               <div>
                 <h2 className="text-lg font-semibold">Matching inventory</h2>
-                <InventoryCount result={result} />
+                {!result.error && !display.error && (
+                  <InventoryViewCount result={result} includeCsvScope={false} />
+                )}
               </div>
               <details className="experience-export-menu">
                 <summary>
                   <Download size={15} aria-hidden="true" /> Export CSV
                 </summary>
                 <div role="group" aria-label="CSV export options">
+                  <InventoryCsvScope className="experience-muted px-2 py-1 text-sm" />
                   <ExportLink href={'/api/exports/inventory?' + exportParams}>
-                    Filtered inventory
+                    Matching holdings rows
                   </ExportLink>
                   <ExportLink
                     href={
@@ -162,42 +197,45 @@ export default async function InventoryPage({
                 item-wide threshold calculation.
               </p>
             )}
-            <InventoryRows
-              returnTo={returnTo}
-              rows={result.rows}
-              fileSummaries={fileSummaries}
-              emptyState={
-                <div className={panel}>
-                  <p>{emptyMessage}</p>
-                  {constrained ? (
-                    <Link
-                      className="inline-flex min-h-11 items-center text-cyan-300 underline"
-                      href="/inventory"
-                    >
-                      Clear inventory filters
-                    </Link>
-                  ) : recorded ? (
-                    <Link
-                      className="inline-flex min-h-11 items-center text-cyan-300 underline"
-                      href="/inventory?status=all"
-                    >
-                      Include all statuses
-                    </Link>
-                  ) : member.role === 'staff' ? (
-                    <Link
-                      className="inline-flex min-h-11 items-center text-cyan-300 underline"
-                      href={'/inventory/quantity/new?' + createQuery}
-                    >
-                      Add the first quantity item
-                    </Link>
-                  ) : (
-                    <p className="mt-2 text-sm text-slate-400">
-                      Ask an IT staff member to add the first record.
-                    </p>
-                  )}
-                </div>
-              }
-            />
+            {result.rows.length > 0 ? (
+              <InventoryViewRows
+                result={result}
+                preferences={display.preferences}
+                columns={columnCatalog.fields}
+                fileSummaries={fileSummaries}
+                returnTo={returnTo}
+              />
+            ) : !display.error && !result.error ? (
+              <div className={panel}>
+                <p>{emptyMessage}</p>
+                {constrained ? (
+                  <Link
+                    className="inline-flex min-h-11 items-center text-cyan-300 underline"
+                    href="/inventory"
+                  >
+                    Clear inventory filters
+                  </Link>
+                ) : recorded ? (
+                  <Link
+                    className="inline-flex min-h-11 items-center text-cyan-300 underline"
+                    href="/inventory?status=all"
+                  >
+                    Include all statuses
+                  </Link>
+                ) : member.role === 'staff' ? (
+                  <Link
+                    className="inline-flex min-h-11 items-center text-cyan-300 underline"
+                    href={'/inventory/quantity/new?' + createQuery}
+                  >
+                    Add the first quantity item
+                  </Link>
+                ) : (
+                  <p className="mt-2 text-sm text-slate-400">
+                    Ask an IT staff member to add the first record.
+                  </p>
+                )}
+              </div>
+            ) : null}
             <Pagination result={result} base="/inventory" params={params} />
           </div>
         </>
@@ -206,3 +244,18 @@ export default async function InventoryPage({
   );
 }
 import { ExportLink } from '@/components/operational-time';
+import {
+  getInventoryView,
+  getInventoryColumns,
+} from '@/features/inventory/views.server';
+import { InventoryViewRows } from '@/features/inventory/components/view-rows';
+import { InventoryViewControls } from '@/features/inventory/components/view-controls';
+import {
+  inventoryViewParams,
+  readViewPreferences,
+} from '@/features/inventory/view-preferences';
+
+import {
+  InventoryCsvScope,
+  InventoryViewCount,
+} from '@/features/inventory/components/view-count';

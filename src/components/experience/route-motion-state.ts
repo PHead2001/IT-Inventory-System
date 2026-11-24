@@ -42,6 +42,15 @@ export function recordHoldingKey(
 }
 export type LocationIdentity = { kind: 'location'; id: string; code: string };
 export type PresentationTarget = RecordIdentity | LocationIdentity;
+export type InventoryOccurrence =
+  { kind: 'aggregate' } | { kind: 'holding'; holding: HoldingIdentity };
+export type InventorySource =
+  | { kind: 'inventory-aggregate' }
+  | {
+      kind: 'location-inventory';
+      locationCode: string;
+      occurrence: InventoryOccurrence;
+    };
 type TitleFields = {
   listHref: string;
   rawSourceRouteKey?: string;
@@ -50,6 +59,10 @@ type TitleFields = {
 };
 export type TitleTarget = TitleFields &
   (
+    | (RecordIdentity & {
+        source: InventorySource;
+        holding?: never;
+      })
     | (RecordIdentity & {
         source: { kind: 'inventory'; holding: HoldingIdentity };
         holding: HoldingIdentity;
@@ -90,6 +103,16 @@ export function sameTitleSource(left: TitleTarget, right: TitleTarget) {
   if (a.kind !== b.kind) return false;
   if (a.kind === 'inventory' && b.kind === 'inventory')
     return sameHolding(a.holding, b.holding);
+  if (a.kind === 'inventory-aggregate' && b.kind === 'inventory-aggregate')
+    return true;
+  if (a.kind === 'location-inventory' && b.kind === 'location-inventory')
+    return (
+      a.locationCode === b.locationCode &&
+      a.occurrence.kind === b.occurrence.kind &&
+      (a.occurrence.kind === 'aggregate' ||
+        (b.occurrence.kind === 'holding' &&
+          sameHolding(a.occurrence.holding, b.occurrence.holding)))
+    );
   if (a.kind === 'history-event' && b.kind === 'history-event')
     return a.eventKind === b.eventKind && a.eventId === b.eventId;
   return (
@@ -164,8 +187,9 @@ function scopedTitleFields(
   anchor: string,
   pathname: string,
   rawSourceRouteKey?: string,
+  canonicalize = recordDetailReturnPath,
 ): TitleFields | null {
-  const accepted = recordDetailReturnPath(returnTo, '/invalid-return');
+  const accepted = canonicalize(returnTo, '/invalid-return');
   if (accepted === '/invalid-return') return null;
   const url = new URL(accepted, 'https://inventory.invalid');
   if (url.pathname !== pathname || url.hash !== '#' + anchor) return null;
@@ -181,12 +205,11 @@ function scopedTitleFields(
       raw.pathname !== pathname ||
       raw.hash ||
       rawSourceRouteKey !== routeKey(raw.pathname, raw.searchParams) ||
-      recordDetailReturnPath(rawSourceRouteKey, '/invalid-return') ===
-        '/invalid-return'
+      canonicalize(rawSourceRouteKey, '/invalid-return') === '/invalid-return'
     )
       return null;
     const canonicalRaw = new URL(
-      recordDetailReturnPath(rawSourceRouteKey),
+      canonicalize(rawSourceRouteKey),
       'https://inventory.invalid',
     );
     if (
@@ -201,6 +224,110 @@ function scopedTitleFields(
     detailPath: recordPath(record),
     ...(rawSourceRouteKey === undefined ? {} : { rawSourceRouteKey }),
   };
+}
+/** New grouped sources encode the server's rendered defaults. The raw readiness
+ * key remains exact and separate; normalization never grants route readiness. */
+function groupedReturnPath(value: unknown, fallback = '/inventory') {
+  const accepted = recordDetailReturnPath(value, '/invalid-return');
+  if (accepted === '/invalid-return' || typeof value !== 'string')
+    return fallback;
+  const raw = new URL(value, 'https://inventory.invalid');
+  for (const key of ['view', 'density', 'columns', 'columnSearch'])
+    if (raw.searchParams.getAll(key).length > 1) return fallback;
+  const view = raw.searchParams.get('view');
+  const density = raw.searchParams.get('density');
+  if (
+    (view !== null && view !== 'items' && view !== 'holdings') ||
+    (density !== null && density !== 'comfortable' && density !== 'compact')
+  )
+    return fallback;
+  const columns = raw.searchParams.get('columns');
+  const columnSearch = raw.searchParams.get('columnSearch');
+  if (
+    columnSearch !== null &&
+    (columnSearch.length > 200 || /[\x00-\x1f\x7f]/.test(columnSearch))
+  )
+    return fallback;
+  if (columns !== null && columns !== '') {
+    const ids = columns.split(',');
+    if (
+      ids.length > 6 ||
+      new Set(ids).size !== ids.length ||
+      ids.some((id) => !presentationUuid.test(id))
+    )
+      return fallback;
+  }
+  const url = new URL(accepted, 'https://inventory.invalid');
+  if (columns === '') url.searchParams.delete('columns');
+  if (columnSearch === '') url.searchParams.delete('columnSearch');
+  url.searchParams.set('view', view ?? 'items');
+  url.searchParams.set('density', density ?? 'comfortable');
+  return routeKey(url.pathname, url.searchParams) + url.hash;
+}
+export function groupedTitleTarget(
+  record: RecordIdentity,
+  source: InventorySource,
+  returnTo: string,
+  rawSourceRouteKey?: string,
+): TitleTarget | null {
+  if (!presentationUuid.test(record.id)) return null;
+  const occurrence =
+    source.kind === 'inventory-aggregate'
+      ? { kind: 'aggregate' as const }
+      : source.occurrence;
+  if (
+    occurrence.kind === 'holding' &&
+    occurrence.holding.domain !== 'unplaced' &&
+    !presentationUuid.test(occurrence.holding.id)
+  )
+    return null;
+  if (
+    source.kind === 'location-inventory' &&
+    (!source.locationCode ||
+      source.locationCode.length > 160 ||
+      /[\\/\x00-\x20\x7f]/.test(source.locationCode) ||
+      ['.', '..'].includes(source.locationCode))
+  )
+    return null;
+  const pathname =
+    source.kind === 'inventory-aggregate'
+      ? '/inventory'
+      : '/locations/' + encodeURIComponent(source.locationCode);
+  const accepted = groupedReturnPath(returnTo, '/invalid-return');
+  if (accepted === '/invalid-return') return null;
+  const url = new URL(accepted, 'https://inventory.invalid');
+  if (
+    url.searchParams.get('view') !==
+      (occurrence.kind === 'aggregate' ? 'items' : 'holdings') ||
+    !/^#inventory-row-[1-9]\d{0,2}$/.test(url.hash)
+  )
+    return null;
+  const fields = scopedTitleFields(
+    record,
+    returnTo,
+    url.hash.slice(1),
+    pathname,
+    rawSourceRouteKey,
+    groupedReturnPath,
+  );
+  return fields ? { ...record, source, ...fields } : null;
+}
+export type InventoryTitleTarget = Extract<
+  TitleTarget,
+  {
+    source: {
+      kind: 'inventory' | 'inventory-aggregate' | 'location-inventory';
+    };
+  }
+>;
+export function isInventoryTitleTarget(
+  target: TitleTarget,
+): target is InventoryTitleTarget {
+  return (
+    target.source.kind === 'inventory' ||
+    target.source.kind === 'inventory-aggregate' ||
+    target.source.kind === 'location-inventory'
+  );
 }
 export function historyTitleTarget(
   record: RecordIdentity,
@@ -421,18 +548,28 @@ export function createRouteMotionState() {
       const target =
         origin.source.kind === 'inventory' && record.kind !== 'location'
           ? titleTarget(record, returnTo, origin.source.holding)
-          : origin.source.kind === 'history-event' && record.kind !== 'location'
-            ? historyTitleTarget(
-                record,
-                { kind: origin.source.eventKind, id: origin.source.eventId },
-                returnTo,
-              )
-            : origin.source.kind === 'location-row' &&
-                record.kind === 'location'
-              ? locationTitleTarget(record, origin.source.occurrence, returnTo)
-              : null;
+          : (origin.source.kind === 'inventory-aggregate' ||
+                origin.source.kind === 'location-inventory') &&
+              record.kind !== 'location'
+            ? groupedTitleTarget(record, origin.source, returnTo)
+            : origin.source.kind === 'history-event' &&
+                record.kind !== 'location'
+              ? historyTitleTarget(
+                  record,
+                  { kind: origin.source.eventKind, id: origin.source.eventId },
+                  returnTo,
+                )
+              : origin.source.kind === 'location-row' &&
+                  record.kind === 'location'
+                ? locationTitleTarget(
+                    record,
+                    origin.source.occurrence,
+                    returnTo,
+                  )
+                : null;
       return target?.listHref === origin.listHref &&
-        target.anchor === origin.anchor
+        target.anchor === origin.anchor &&
+        sameTitleSource(target, origin)
         ? origin
         : null;
     },

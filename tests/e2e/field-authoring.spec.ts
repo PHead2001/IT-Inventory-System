@@ -936,7 +936,7 @@ test('authors all twelve types through the UI and preserves their preview, creat
   const downloadEvent = page.waitForEvent('download');
   await page.getByText('Export CSV', { exact: true }).click();
   await page
-    .getByRole('link', { name: 'Filtered inventory', exact: true })
+    .getByRole('link', { name: 'Matching holdings rows', exact: true })
     .click();
   const downloaded = await downloadEvent;
   const csvPath = info.outputPath('base-export.csv');
@@ -1152,7 +1152,7 @@ test('whole-form Cancel preserves inventory filters, dirty drafts and focus at n
     await page.goto(
       '/inventory?q=' + encodeURIComponent(query) + '&type=quantity&page=2',
     );
-    await expect(countFeedback(page, '26 matching rows')).toBeVisible();
+    await expect(countFeedback(page, '26 items')).toBeVisible();
     await expect(
       page.getByRole('navigation', { name: 'Pagination' }),
     ).toContainText('Page 2 of 2');
@@ -1162,12 +1162,15 @@ test('whole-form Cancel preserves inventory filters, dirty drafts and focus at n
     await page.getByLabel('Add item', { exact: true }).click();
     await page.getByRole('link', { name: 'Add quantity item' }).click();
     await page.getByRole('button', { name: 'Cancel', exact: true }).click();
+    const returnQuery = new URLSearchParams({
+      q: query,
+      type: 'quantity',
+      view: 'items',
+      density: 'comfortable',
+      page: '2',
+    });
     await expect(page).toHaveURL(
-      new RegExp(
-        '/inventory\\?q=' +
-          query.replaceAll(' ', '\\+') +
-          '&type=quantity&page=2',
-      ),
+      new URL('/inventory?' + returnQuery, page.url()).href,
     );
     await page.setViewportSize({ width: 390, height: 844 });
     await page.emulateMedia({ reducedMotion: 'reduce' });

@@ -130,7 +130,7 @@ for (const width of [1280, 390])
         await page.getByText('Export CSV', { exact: true }).click();
         const downloadPending = page.waitForEvent('download');
         await page
-          .getByRole('link', { name: 'Filtered inventory', exact: true })
+          .getByRole('link', { name: 'Matching holdings rows', exact: true })
           .click();
         const download = await downloadPending;
         const csv = await readFile((await download.path())!, 'utf8');

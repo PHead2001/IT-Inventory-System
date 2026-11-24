@@ -112,7 +112,7 @@ export default async function QuantityPage({
                 href={returnTo}
                 className={`text-sm text-cyan-200 underline ${styles.textTarget}`}
               >
-                ←{' '}
+                <span aria-hidden="true">← </span>
                 {returnTo === '/inventory'
                   ? 'Back to inventory'
                   : 'Back to results'}

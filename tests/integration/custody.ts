@@ -1,19 +1,14 @@
+import { historyToolsProof } from './history-tools';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { setTimeout as delay } from 'node:timers/promises';
 import { createClient } from '@supabase/supabase-js';
 import { Client } from 'pg';
 import authFixture from '../fixtures/auth.json' with { type: 'json' };
+import { localCommandPaletteTarget } from '../helpers/local-command-palette-target';
 
-function local(value: string | undefined, port: number) {
-  assert.ok(value);
-  const url = new URL(value);
-  assert.ok(['localhost', '127.0.0.1', '[::1]'].includes(url.hostname));
-  assert.equal(Number(url.port), port);
-  return value;
-}
-const api = local(process.env.LOCAL_API_URL, 45321);
-const db = local(process.env.LOCAL_DB_URL, 45322);
+const api = localCommandPaletteTarget(process.env.LOCAL_API_URL, 'api');
+const db = localCommandPaletteTarget(process.env.LOCAL_DB_URL, 'database');
 assert.ok(process.env.LOCAL_ANON_KEY && process.env.LOCAL_SERVICE_ROLE_KEY);
 const options = { auth: { persistSession: false, autoRefreshToken: false } };
 const admin = createClient(api, process.env.LOCAL_SERVICE_ROLE_KEY, options);
@@ -962,6 +957,7 @@ async function main() {
     'update public.app_members set active=true where user_id=$1',
     [actor],
   );
+  await historyToolsProof({ owner, db, actor, caller: staff });
   console.log(
     'Custody receipt, accounting, rollback, independent-connection races, topology barrier and isolation passed.',
   );
