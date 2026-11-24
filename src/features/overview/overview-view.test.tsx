@@ -7,17 +7,27 @@ import {
 } from '@testing-library/react';
 import type { ReactNode } from 'react';
 import { PrivacyReadinessContext } from '@/components/auth/privacy-readiness';
+import { PeekProvider } from '@/features/peek/peek-provider';
 import {
   assignmentEpoch,
   readPrivacyRevocationRevision,
 } from '@/features/scan/assign-batch';
-import { beforeEach, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { parseOverviewProjection, type OverviewSnapshot } from './contracts';
 import { overviewFixture } from './test-fixtures';
 import type { OverviewResult } from './refresh-contract';
 import { stockPaths } from './charts';
 const mocks = vi.hoisted(() => ({ refresh: vi.fn() }));
 vi.mock('./refresh.actions', () => ({ refreshOverview: mocks.refresh }));
+vi.mock('@/lib/supabase/browser', () => ({
+  createSupabaseBrowserClient: () => ({
+    auth: {
+      onAuthStateChange: () => ({
+        data: { subscription: { unsubscribe() {} } },
+      }),
+    },
+  }),
+}));
 import { OverviewView } from './overview-view';
 
 // Match the protected caller's verified grant; ordinary SSR values remain exact.
@@ -44,6 +54,10 @@ const snapshot = (): OverviewSnapshot => ({
   fetchedAt: '2026-10-14T12:01:00Z',
 });
 beforeEach(() => vi.resetAllMocks());
+afterEach(() => {
+  vi.unstubAllGlobals();
+  vi.restoreAllMocks();
+});
 
 it('keeps exact values, threshold equality and stock subset meaning without adding unlike units', () => {
   const data = snapshot();
@@ -164,7 +178,7 @@ it('distinguishes absent monitoring from healthy monitored zero and provides sta
     screen.getByRole('link', { name: 'Set threshold for Adapter' }),
   ).toHaveAttribute(
     'href',
-    '/inventory/quantity/' + data.stockTrends[0]!.itemId,
+    '/inventory/quantity/' + data.stockTrends[0]!.itemId + '/threshold',
   );
   const healthy = snapshot();
   healthy.stock.needsAttention = '0';
@@ -229,6 +243,177 @@ it('links real base events once and shows separate site equipment counts and rea
   expect(container.textContent).not.toMatch(
     /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/,
   );
+});
+
+it('opens keyboard peeks for exact Overview records while history and aggregate links keep plain navigation', async () => {
+  const data = snapshot();
+  const attention = data.stock.attention[0]!;
+  const trend = data.stockTrends[0]!;
+  const unmonitored = {
+    itemId: '00000000-0000-4000-8000-000000000002',
+    name: 'Adapter',
+    available: '0',
+  };
+  const event = {
+    eventId: '00000000-0000-4000-8000-000000000003',
+    entityId: '00000000-0000-4000-8000-000000000004',
+    recordKind: 'asset',
+    kind: 'metadata_updated',
+    name: 'Tablet',
+    actorName: 'Casey',
+    at: data.asOf,
+  } as const;
+  const assigned = {
+    siteId: '00000000-0000-4000-8000-000000000005',
+    siteName: 'Library',
+    siteActive: true,
+    entityId: '00000000-0000-4000-8000-000000000006',
+    name: 'Dock',
+    kind: 'quantity',
+    quantity: '2',
+  } as const;
+  const assignedAsset = {
+    ...assigned,
+    entityId: '00000000-0000-4000-8000-000000000008',
+    name: 'Site laptop',
+    kind: 'asset',
+    quantity: '1',
+  } as const;
+  data.stock.unmonitoredItems = '1';
+  data.stock.unmonitored = [unmonitored];
+  data.recentEvents = [event];
+  data.atSites = {
+    assets: '1',
+    quantityDefinitions: '1',
+    occupiedSites: '1',
+    rows: [assigned, assignedAsset],
+  };
+
+  const actor = '00000000-0000-4000-8000-000000000007';
+  const backend = 'https://overview.example.test';
+  const read = vi.fn(async (href: string) => {
+    const { searchParams } = new URL(href, 'https://inventory.invalid');
+    return Response.json({
+      actor,
+      backend,
+      payload: {
+        target: Object.fromEntries(searchParams),
+        name: 'Current inventory details',
+        status: 'active',
+        assetTag: null,
+        stock: null,
+        locations: [],
+        moreLocations: false,
+        siteName: null,
+        photo: null,
+      },
+    });
+  });
+  vi.stubGlobal('fetch', read);
+  vi.stubGlobal('matchMedia', () => ({
+    matches: true,
+    addEventListener() {},
+    removeEventListener() {},
+  }));
+  vi.spyOn(HTMLElement.prototype, 'getClientRects').mockReturnValue([
+    new DOMRect(10, 20, 120, 30),
+  ] as unknown as DOMRectList);
+  render(
+    <PeekProvider actor={actor} backend={backend}>
+      <OverviewView
+        serverRevision="peek"
+        initialSnapshot={data}
+        initialMayEdit
+      />
+    </PeekProvider>,
+  );
+  expect(read).not.toHaveBeenCalled();
+
+  const getRecord = (region: string, name: string) =>
+    within(screen.getByRole('region', { name: region })).getByRole('link', {
+      name,
+    });
+  const records = [
+    [
+      getRecord('Items needing attention', attention.name),
+      'quantity',
+      attention.itemId,
+    ],
+    [
+      getRecord('Last ten inventory events', 'View record'),
+      'asset',
+      event.entityId,
+    ],
+    [
+      getRecord('Set up stock monitoring', unmonitored.name),
+      'quantity',
+      unmonitored.itemId,
+    ],
+    [
+      getRecord('Equipment at sites', assigned.name),
+      assigned.kind,
+      assigned.entityId,
+    ],
+    [
+      getRecord('Equipment at sites', assignedAsset.name),
+      assignedAsset.kind,
+      assignedAsset.entityId,
+    ],
+    [
+      getRecord('Available stock · 14 days', trend.name),
+      'quantity',
+      trend.itemId,
+    ],
+  ] as const;
+  for (const [link, kind, id] of records) {
+    expect(link).toHaveAttribute(
+      'href',
+      `/inventory/${kind === 'asset' ? 'assets' : 'quantity'}/${id}`,
+    );
+    expect(link).toHaveAttribute('aria-haspopup', 'dialog');
+    expect(link).toHaveAttribute('aria-expanded', 'false');
+    await act(async () => link.focus());
+    expect(link).toHaveFocus();
+    const dialog = await screen.findByRole('dialog', {
+      name: 'Current details preview',
+    });
+    expect(link).toHaveAttribute('aria-controls', dialog.id);
+    expect(read).toHaveBeenLastCalledWith(
+      `/api/peek?kind=${kind}&id=${id}`,
+      expect.any(Object),
+    );
+    fireEvent.keyDown(link, { key: 'Escape' });
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    expect(link).toHaveFocus();
+  }
+  expect(read).toHaveBeenCalledTimes(records.length);
+
+  const threshold = getRecord(
+    'Set up stock monitoring',
+    'Set threshold for Adapter',
+  );
+  expect(threshold).toHaveAttribute(
+    'href',
+    `/inventory/quantity/${unmonitored.itemId}/threshold`,
+  );
+  expect(threshold).not.toHaveAttribute('aria-haspopup');
+  await act(async () => threshold.focus());
+  expect(threshold).toHaveFocus();
+  expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+  expect(read).toHaveBeenCalledTimes(records.length);
+
+  for (const [name, href] of [
+    ['Details updated · Tablet', `/history/events/asset/${event.eventId}`],
+    ['View all history', '/history'],
+    ['View all low-stock items', '/inventory?lowStock=true'],
+    ['Detailed stock overview', '/dashboard?view=low-stock'],
+    ['Browse quantity items and thresholds', '/inventory?type=quantity'],
+    ['View properties & sites', '/sites'],
+  ]) {
+    const link = screen.getByRole('link', { name });
+    expect(link).toHaveAttribute('href', href);
+    expect(link).not.toHaveAttribute('aria-haspopup');
+  }
 });
 
 it('breaks stock paths at gaps and exposes exact tables and unavailable coverage instead of zero', () => {
@@ -346,7 +531,10 @@ it('applies a newly verified viewer permission on transient failure while preser
   expect(
     screen.queryByRole('link', { name: 'Set threshold for Adapter' }),
   ).not.toBeInTheDocument();
-  expect(screen.getByRole('link', { name: 'View Adapter' })).toBeVisible();
+  expect(screen.getByRole('link', { name: 'View Adapter' })).toHaveAttribute(
+    'href',
+    `/inventory/quantity/${data.stockTrends[0]!.itemId}`,
+  );
   expect(
     container.querySelector(`time[datetime="${data.fetchedAt}"]`),
   ).toBeInTheDocument();

@@ -132,6 +132,7 @@ type Props = {
   item?: QuantityItem;
   asset?: AssetItem;
   preview?: boolean;
+  thresholdSetup?: boolean;
   returnTo?: string;
   actorId?: string;
   recoveryBackend?: string;
@@ -438,6 +439,7 @@ export function MetadataForm({
   item,
   asset,
   preview = false,
+  thresholdSetup = false,
   openingSite,
   returnTo,
   actorId,
@@ -465,6 +467,8 @@ export function MetadataForm({
     mountedActor.current = actorId;
   }, [actorId]);
   const creating = !latest;
+  const prioritizesThreshold =
+    thresholdSetup && kind === 'quantity' && !!item && !preview;
   const scopeId = useId();
   const [formActor] = useState(actorId);
   const successOwner = useFeedbackOwner(formActor);
@@ -1831,6 +1835,11 @@ export function MetadataForm({
       resetTask();
       return;
     }
+    if (prioritizesThreshold) {
+      setDiscardOpen(false);
+      router.push(cancelPath);
+      return;
+    }
     if (refreshNeeded) {
       const details = formRef.current?.closest('details');
       if (details) {
@@ -3018,12 +3027,21 @@ export function MetadataForm({
           }
           className="min-w-0 w-full max-w-full space-y-5"
         >
+          {prioritizesThreshold && builtin('reorder_threshold')}
           {definition?.layout
-            .filter((section) =>
-              section.controls.some((control) =>
-                controlVisible(definition, section, control, kind),
+            .map((section) => ({
+              ...section,
+              controls: section.controls.filter(
+                (control) =>
+                  controlVisible(definition, section, control, kind) &&
+                  !(
+                    prioritizesThreshold &&
+                    control.kind === 'builtin' &&
+                    control.builtin === 'reorder_threshold'
+                  ),
               ),
-            )
+            }))
+            .filter((section) => section.controls.length > 0)
             .map((section) => (
               <section
                 key={section.id}
@@ -3033,45 +3051,38 @@ export function MetadataForm({
                   {section.label}
                 </h3>
                 <div className="flex flex-wrap gap-3">
-                  {section.controls
-                    .filter((control) =>
-                      controlVisible(definition, section, control, kind),
-                    )
-                    .map((control) => {
-                      const content =
-                        control.kind === 'field' ? (
-                          customControl(control.field_id ?? '')
-                        ) : control.kind === 'builtin' ? (
-                          builtin(control.builtin ?? '')
-                        ) : (
-                          <p className="break-words whitespace-pre-wrap text-sm text-slate-400">
-                            {control.help}
-                          </p>
-                        );
-                      if (!content) return null;
-                      const booleanShort =
-                        control.kind === 'field' &&
-                        applicable.some(
-                          (value) =>
-                            value.id === control.field_id &&
-                            value.type === 'boolean',
-                        ) &&
-                        (control.width === 'Auto' ||
-                          control.width === 3 ||
-                          control.width === 4);
-                      return (
-                        <div
-                          key={control.id}
-                          style={controlLayoutStyle(
-                            control.width,
-                            booleanShort,
-                          )}
-                          className="min-w-0 break-words"
-                        >
-                          {content}
-                        </div>
+                  {section.controls.map((control) => {
+                    const content =
+                      control.kind === 'field' ? (
+                        customControl(control.field_id ?? '')
+                      ) : control.kind === 'builtin' ? (
+                        builtin(control.builtin ?? '')
+                      ) : (
+                        <p className="break-words whitespace-pre-wrap text-sm text-slate-400">
+                          {control.help}
+                        </p>
                       );
-                    })}
+                    if (!content) return null;
+                    const booleanShort =
+                      control.kind === 'field' &&
+                      applicable.some(
+                        (value) =>
+                          value.id === control.field_id &&
+                          value.type === 'boolean',
+                      ) &&
+                      (control.width === 'Auto' ||
+                        control.width === 3 ||
+                        control.width === 4);
+                    return (
+                      <div
+                        key={control.id}
+                        style={controlLayoutStyle(control.width, booleanShort)}
+                        className="min-w-0 break-words"
+                      >
+                        {content}
+                      </div>
+                    );
+                  })}
                 </div>
               </section>
             ))}
@@ -3518,9 +3529,8 @@ export function MetadataForm({
               onClick={() => {
                 if (!canStartTask()) return;
                 const form = formRef.current;
-                const input = form?.elements.namedItem(
-                  scopeId + '-metadata-name',
-                );
+                const controlId = `${scopeId}-metadata-${prioritizesThreshold ? 'reorder_threshold' : 'name'}`;
+                const input = form?.elements.namedItem(controlId);
                 returnToValues.current?.cancel();
                 const original = {
                   generation: privacy.generation,
@@ -3543,9 +3553,7 @@ export function MetadataForm({
                           !discardOpen &&
                           canStartTask() &&
                           form === formRef.current &&
-                          form.elements.namedItem(
-                            scopeId + '-metadata-name',
-                          ) === input &&
+                          form.elements.namedItem(controlId) === input &&
                           freshPresentationGrant(privacy) &&
                           privacy.generation === original.generation &&
                           readPrivacyRevocationRevision() ===
