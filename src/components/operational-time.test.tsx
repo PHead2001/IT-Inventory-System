@@ -205,3 +205,23 @@ it('leaves actual date-only metadata controls unchanged when the operational dis
   expect(screen.getByText(/29 Feb 2024/)).toBeVisible();
   expect(changed).not.toHaveBeenCalled();
 });
+
+it('closes its export menu after a download is chosen and keeps the caller click handler', () => {
+  const callerClick = vi.fn((event: { preventDefault(): void }) =>
+    event.preventDefault(),
+  );
+  const { container } = render(
+    <details className="experience-export-menu" open>
+      <summary>Export CSV</summary>
+      <div>
+        <ExportLink href="/api/exports/inventory?q=cable" onClick={callerClick}>
+          Matching holdings rows
+        </ExportLink>
+      </div>
+    </details>,
+  );
+  const menu = container.querySelector('details')!;
+  fireEvent.click(screen.getByRole('link', { name: 'Matching holdings rows' }));
+  expect(callerClick).toHaveBeenCalledTimes(1);
+  expect(menu.open).toBe(false);
+});
