@@ -472,10 +472,10 @@ test('representative shell and auth surfaces render at desktop and phone sizes w
     const firstName = page
       .locator('li[id^="inventory-row-"] a[href^="/inventory/"]')
       .first();
-    // Retain the unfiltered acceptance check as well as the deterministic case.
     await page.setViewportSize({ width: 502, height: 757 });
     await headerControlsFit(page);
     await withFailureGeometry(page, 'inventory-first-row', async () => {
+      expect(await page.evaluate(() => window.scrollY)).toBe(0);
       await expect(firstName).toBeInViewport();
     });
     await page.screenshot({

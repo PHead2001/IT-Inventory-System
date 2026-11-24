@@ -1438,6 +1438,21 @@ for (const width of [1280, 390]) {
     await page.setViewportSize({ width, height: 900 });
     await page.emulateMedia({ reducedMotion: 'no-preference' });
     await observeMotion(page);
+    const expectFreshSource = async (path: string, heading: string) => {
+      const arrival = page.locator('.experience-page-arrival:visible').last();
+      await expect(arrival).toHaveAttribute('data-route-path', path);
+      await expect(
+        arrival.getByRole('heading', { name: heading, exact: true }),
+      ).toBeVisible();
+      // The prior heading and motion flag can stay visible during a recheck.
+      // This shell control enables only for the current fresh presentation grant.
+      const commands = page.getByRole('button', {
+        name: 'Search and commands',
+        exact: true,
+      });
+      await expect(commands).toBeVisible();
+      await expect(commands).toBeEnabled();
+    };
     await auditLogin(page);
     const category = await auditCategory(page);
     await page.getByRole('button', { name: 'Sign out', exact: true }).click();
@@ -1479,12 +1494,14 @@ for (const width of [1280, 390]) {
           'data-route-motion-private',
           'true',
         );
+        const historyLink = await navigationLink(page, 'History');
         await resetProof(page);
+        await expectFreshSource('/inventory', 'Inventory');
         const { completed } = await atNextNativeReady(page, async () => {
           pending.release();
           await pending.delivery;
         });
-        await (await navigationLink(page, 'History')).click();
+        await historyLink.click();
         await completed;
         await expect(
           page.getByRole('heading', { name: 'Inventory history', exact: true }),
@@ -1501,11 +1518,18 @@ for (const width of [1280, 390]) {
         expect(
           replacement.snapshotSkips.filter((entry) => entry.whileActive),
         ).toHaveLength(0);
+        const inventoryLink = await navigationLink(page, 'Inventory');
         await resetProof(page);
-        await (await navigationLink(page, 'Inventory')).click();
+        await expectFreshSource('/history', 'Inventory history');
+        const { completed: laterCompleted } = await atNextNativeReady(
+          page,
+          () => Promise.resolve(),
+        );
+        await inventoryLink.click();
         await expect(
           page.getByRole('heading', { name: 'Inventory', exact: true }),
         ).toBeVisible();
+        await laterCompleted;
         await settled(page);
         await expect(page.locator('html')).toHaveAttribute(
           'data-route-motion-private',

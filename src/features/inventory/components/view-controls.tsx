@@ -35,6 +35,7 @@ type Props = {
   backend: string;
   action?: string;
   directoryReturnTo?: string;
+  collapseSettings?: boolean;
 };
 export function InventoryViewControls(props: Props) {
   const scope = savedViewStorageKey(props.memberId, props.backend);
@@ -52,6 +53,7 @@ function Controls({
   storageKey,
   action = '/inventory',
   directoryReturnTo,
+  collapseSettings = false,
 }: Props & { storageKey: string }) {
   const router = useRouter();
   const host = useRef<HTMLElement>(null);
@@ -214,32 +216,8 @@ function Controls({
         ordinal: null,
       },
   );
-  return (
-    <section
-      ref={host}
-      aria-label="Inventory view settings"
-      className="experience-surface mb-3 p-3 text-sm"
-    >
-      {(error || urlError || catalogError) && (
-        <p role="alert" className="text-amber-200">
-          {urlError ?? (error || catalogError)}
-        </p>
-      )}
-      {urlError && (
-        <Link
-          href={viewHref(
-            inventoryViewParams({
-              ...params,
-              view: undefined,
-              density: undefined,
-              columns: undefined,
-            }),
-          )}
-          className="text-cyan-300 underline"
-        >
-          Clear display settings
-        </Link>
-      )}
+  const settings = (
+    <>
       <div className="flex flex-wrap items-end gap-3">
         <label>
           View
@@ -471,6 +449,49 @@ function Controls({
         sites. Display column mapping identifies your selected fields; it does
         not change the inventory CSV.
       </p>
+    </>
+  );
+  return (
+    <section
+      ref={host}
+      aria-label="Inventory view settings"
+      className={`experience-surface mb-3 text-sm${collapseSettings ? '' : ' p-3'}`}
+    >
+      {(error || urlError || catalogError) && (
+        <p
+          role="alert"
+          className={`text-amber-200${collapseSettings ? ' px-3 pt-3' : ''}`}
+        >
+          {urlError ?? (error || catalogError)}
+        </p>
+      )}
+      {urlError && (
+        <Link
+          href={viewHref(
+            inventoryViewParams({
+              ...params,
+              view: undefined,
+              density: undefined,
+              columns: undefined,
+            }),
+          )}
+          className={`text-cyan-300 underline${collapseSettings ? ' mx-3' : ''}`}
+        >
+          Clear display settings
+        </Link>
+      )}
+      {collapseSettings ? (
+        <SpringDisclosure
+          summary="View settings"
+          summaryProps={{
+            className: 'min-h-11 cursor-pointer px-3 py-3 font-semibold',
+          }}
+        >
+          <div className="px-3 pb-3">{settings}</div>
+        </SpringDisclosure>
+      ) : (
+        settings
+      )}
     </section>
   );
 }

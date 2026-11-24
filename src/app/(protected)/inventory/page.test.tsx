@@ -312,6 +312,12 @@ it('keeps full holdings export scope separate from grouped pages and selected co
       }),
     }),
   );
+  const csvScope = screen.getByText(
+    /Overall totals appear only on the first CSV row for each quantity item/,
+  );
+  expect(csvScope).not.toBeVisible();
+  fireEvent.click(screen.getByText('Export CSV', { exact: true }));
+  expect(csvScope).toBeVisible();
   const csv = screen.getByRole('link', { name: 'Matching holdings rows' });
   const query = new URL(csv.getAttribute('href')!, 'https://inventory.test')
     .searchParams;
@@ -324,11 +330,6 @@ it('keeps full holdings export scope separate from grouped pages and selected co
     'href',
     '/api/exports/inventory?customFields=true&q=%25_+literal&displayTimeZone=UTC',
   );
-  expect(
-    screen.getByText(
-      /Overall totals appear only on the first CSV row for each quantity item/,
-    ),
-  ).toBeInTheDocument();
   expect(screen.getByRole('link', { name: 'Previous' })).toHaveAttribute(
     'href',
     expect.stringContaining('density=compact'),

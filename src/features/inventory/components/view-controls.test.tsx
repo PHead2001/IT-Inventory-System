@@ -516,7 +516,7 @@ it('cannot publish a storage result that retires its generation during the read'
   expect(navigation.replace).not.toHaveBeenCalled();
 });
 
-it('restores an implicit browser default only once and lets committed Back parameters remain authoritative', async () => {
+it('restores a browser default while settings are closed and lets Back win', async () => {
   localStorage.setItem(
     key,
     encodeSavedViews({
@@ -525,7 +525,11 @@ it('restores an implicit browser default only once and lets committed Back param
     }),
   );
   const view = render(
-    <InventoryViewControls {...props} params={{ q: 'Cable', page: '8' }} />,
+    <InventoryViewControls
+      {...props}
+      collapseSettings
+      params={{ q: 'Cable', page: '8' }}
+    />,
   );
   await act(async () => {
     await Promise.resolve();
@@ -534,18 +538,35 @@ it('restores an implicit browser default only once and lets committed Back param
     '/inventory?q=Cable&view=holdings&density=compact',
     { scroll: false },
   );
+  const summary = screen.getByText('View settings', { exact: true });
+  expect(summary).toHaveAttribute('aria-expanded', 'false');
+  expect(screen.queryByRole('combobox', { name: 'Inventory view' })).toBeNull();
   view.rerender(
     <InventoryViewControls
       {...props}
+      collapseSettings
       params={{ q: 'Cable', view: 'holdings', density: 'compact' }}
     />,
   );
-  view.rerender(<InventoryViewControls {...props} params={{ q: 'Cable' }} />);
+  view.rerender(
+    <InventoryViewControls
+      {...props}
+      collapseSettings
+      params={{ q: 'Cable' }}
+    />,
+  );
   await act(async () => {
     await Promise.resolve();
   });
-  expect(screen.getByRole('combobox', { name: 'Inventory view' })).toHaveValue(
-    'items',
-  );
+  fireEvent.click(summary);
+  const inventoryView = screen.getByRole('combobox', {
+    name: 'Inventory view',
+  });
+  expect(inventoryView).toHaveValue('items');
+  inventoryView.focus();
+  expect(inventoryView).toHaveFocus();
+  fireEvent.click(summary);
+  expect(summary).toHaveFocus();
+  expect(screen.queryByRole('combobox', { name: 'Inventory view' })).toBeNull();
   expect(navigation.replace).toHaveBeenCalledTimes(1);
 });

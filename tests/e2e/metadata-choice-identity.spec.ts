@@ -167,6 +167,7 @@ test('legacy choices remain readable on inventory and labels and editable withou
         const viewSettings = page.getByRole('region', {
           name: 'Inventory view settings',
         });
+        await viewSettings.getByText('View settings', { exact: true }).click();
         await viewSettings
           .getByText('Custom columns (0/6)', { exact: true })
           .click();

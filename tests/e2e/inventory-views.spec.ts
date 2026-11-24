@@ -5,12 +5,24 @@ import {
   acceptanceFixtures,
   acceptanceLogin,
 } from './audit-three-acceptance-fixtures';
+import { countFeedback } from './count-feedback-support';
 
 test('grouped complete holdings, picking view, saved settings, Back and full-scope CSV at phone width', async ({
   page,
 }) => {
   const owned = await acceptanceFixtures();
   const prefix = `Grouped ${owned.suffix}`;
+  const viewSettings = page.getByText('View settings', { exact: true });
+  async function setViewSettingsOpen(open: boolean) {
+    const expanded = String(open);
+    await expect(viewSettings).toHaveAttribute(
+      'aria-expanded',
+      /^(true|false)$/,
+    );
+    if ((await viewSettings.getAttribute('aria-expanded')) !== expanded)
+      await viewSettings.click();
+    await expect(viewSettings).toHaveAttribute('aria-expanded', expanded);
+  }
   try {
     const a = await owned.location('ITC-S1A');
     const b = await owned.location('ITC-S1B');
@@ -42,10 +54,13 @@ test('grouped complete holdings, picking view, saved settings, Back and full-sco
         .locator('[data-count-final]')
         .first(),
     ).toHaveText('35');
+    await expect(viewSettings).toHaveAttribute('aria-expanded', 'false');
+    await setViewSettingsOpen(true);
     await page
       .getByRole('combobox', { name: 'Inventory density' })
       .selectOption('compact');
     await expect(page).toHaveURL(/density=compact/);
+    await setViewSettingsOpen(false);
     await expect(page.locator('html')).toHaveAttribute('data-motion', 'full');
     const disclosure = page.getByText(
       'Storage and sites within these filters (2)',
@@ -54,9 +69,25 @@ test('grouped complete holdings, picking view, saved settings, Back and full-sco
     await disclosure.click();
     await expect(disclosure).toHaveAttribute('aria-expanded', 'true');
     const firstRow = disclosure.locator('xpath=ancestor::li[1]');
-    await expect(
-      firstRow.getByRole('link', { name: /Show in room/ }),
-    ).toHaveCount(2);
+    for (const [code, quantity] of [
+      ['ITC-S1A', 10],
+      ['ITC-S1B', 25],
+    ] as const) {
+      const location = firstRow.getByRole('link', {
+        name: new RegExp('\\(' + code + '\\)$'),
+      });
+      await expect(location).toHaveAttribute('href', '/locations/' + code);
+      const holdingRow = location.locator('xpath=ancestor::li[1]');
+      await expect(
+        countFeedback(holdingRow, `${quantity} units`),
+      ).toBeVisible();
+      await expect(
+        holdingRow.getByRole('link', {
+          name: `Show ${code} in room`,
+          exact: true,
+        }),
+      ).toHaveAttribute('href', '/room?location=' + code);
+    }
     const holding = firstRow.getByRole('link', { name: /\(ITC-S1B\)$/ });
     // The stale height write occurs when the 250 ms spring deadline cancels
     // the animation. Check layout after the following paint frames.
@@ -96,12 +127,13 @@ test('grouped complete holdings, picking view, saved settings, Back and full-sco
         () => document.documentElement.scrollWidth <= window.innerWidth,
       ),
     ).toBe(true);
+    await setViewSettingsOpen(true);
     await page
       .getByRole('textbox', { name: 'View name' })
       .fill('Owned grouped picking');
     await page.getByRole('button', { name: 'Save view', exact: true }).click();
     await page
-      .getByRole('combobox', { name: 'Inventory view' })
+      .getByRole('combobox', { name: 'Inventory view', exact: true })
       .selectOption('holdings');
     await expect(
       page
@@ -112,8 +144,9 @@ test('grouped complete holdings, picking view, saved settings, Back and full-sco
       page.getByRole('link', { name: `${prefix} 01`, exact: true }),
     ).toHaveCount(2);
     await page.goBack();
+    await setViewSettingsOpen(true);
     await expect(
-      page.getByRole('combobox', { name: 'Inventory view' }),
+      page.getByRole('combobox', { name: 'Inventory view', exact: true }),
     ).toHaveValue('items');
     await page.getByText('Export CSV', { exact: true }).click();
     const downloadEvent = page.waitForEvent('download');
@@ -135,6 +168,7 @@ test('grouped complete holdings, picking view, saved settings, Back and full-sco
       .getByRole('link', { name: 'Back to results', exact: true })
       .click();
     await expect(page).toHaveURL(/page=2/);
+    await setViewSettingsOpen(true);
     await expect(
       page.getByRole('combobox', { name: 'Inventory density' }),
     ).toHaveValue('compact');
@@ -144,6 +178,7 @@ test('grouped complete holdings, picking view, saved settings, Back and full-sco
       .selectOption({ label: 'Owned grouped picking' });
     await expect(page).not.toHaveURL(/page=2/);
     await page.reload();
+    await setViewSettingsOpen(true);
     await expect(
       page.getByRole('combobox', { name: 'Inventory density' }),
     ).toHaveValue('compact');
@@ -153,7 +188,7 @@ test('grouped complete holdings, picking view, saved settings, Back and full-sco
     );
     for (const mode of ['items', 'holdings']) {
       await page
-        .getByRole('combobox', { name: 'Inventory view' })
+        .getByRole('combobox', { name: 'Inventory view', exact: true })
         .selectOption(mode);
       // Repeated App Back returns to an already-used fragment. Native history
       // cannot supply this return's reveal on the application's behalf.
@@ -209,7 +244,7 @@ test('grouped complete holdings, picking view, saved settings, Back and full-sco
         url.searchParams.get('returnTo') === directoryReturn,
     );
     await page
-      .getByRole('combobox', { name: 'Inventory view' })
+      .getByRole('combobox', { name: 'Inventory view', exact: true })
       .selectOption('holdings');
     await expect(page).toHaveURL(
       (url) =>

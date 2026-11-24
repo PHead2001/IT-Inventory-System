@@ -129,6 +129,7 @@ export default async function InventoryPage({
             />
             {member.user_id && process.env.NEXT_PUBLIC_SUPABASE_URL && (
               <InventoryViewControls
+                collapseSettings
                 params={params}
                 columns={columnCatalog.fields}
                 truncated={columnCatalog.truncated}
@@ -160,7 +161,7 @@ export default async function InventoryPage({
               <div>
                 <h2 className="text-lg font-semibold">Matching inventory</h2>
                 {!result.error && !display.error && (
-                  <InventoryViewCount result={result} />
+                  <InventoryViewCount result={result} includeCsvScope={false} />
                 )}
               </div>
               <details className="experience-export-menu">
@@ -168,6 +169,7 @@ export default async function InventoryPage({
                   <Download size={15} aria-hidden="true" /> Export CSV
                 </summary>
                 <div role="group" aria-label="CSV export options">
+                  <InventoryCsvScope className="experience-muted px-2 py-1 text-sm" />
                   <ExportLink href={'/api/exports/inventory?' + exportParams}>
                     Matching holdings rows
                   </ExportLink>
@@ -253,4 +255,7 @@ import {
   readViewPreferences,
 } from '@/features/inventory/view-preferences';
 
-import { InventoryViewCount } from '@/features/inventory/components/view-count';
+import {
+  InventoryCsvScope,
+  InventoryViewCount,
+} from '@/features/inventory/components/view-count';
