@@ -149,7 +149,7 @@ it.each(['quantity', 'asset'] as const)(
       }),
     );
     expect(
-      screen.getByRole('link', { name: '← Back to results' }),
+      screen.getByRole('link', { name: 'Back to results' }),
     ).toHaveAttribute('href', scope);
     first.unmount();
     render(
@@ -159,7 +159,7 @@ it.each(['quantity', 'asset'] as const)(
       }),
     );
     expect(
-      screen.getByRole('link', { name: '← Back to inventory' }),
+      screen.getByRole('link', { name: 'Back to inventory' }),
     ).toHaveAttribute('href', '/inventory');
   },
 );
