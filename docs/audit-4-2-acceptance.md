@@ -1138,6 +1138,7 @@ passed application and database validation on that preview commit and reported
 columns and their mapping download, account-switch isolation, and final
 exact-commit CI and review remain pending for U303 and A305. This checkpoint
 does not promote an acceptance row to complete.
+
 ## Selective U313 history preparation — 2026-11-06
 
 Donor `45999655` is selectively reconciled onto reviewed grouped checkpoint
