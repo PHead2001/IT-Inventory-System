@@ -172,7 +172,11 @@ export async function historyToolsProof(input: {
     if (current && !current.archived) {
       const cleanup = await caller.rpc('quantity_archive', {
         p_request_id: randomUUID(),
-        p_payload: { item_id: item, expected_version: current.version },
+        p_payload: {
+          item_id: item,
+          expected_version: current.version,
+          reason: 'History tools integration cleanup',
+        },
       });
       assert.equal(cleanup.error, null, cleanup.error?.message);
     }

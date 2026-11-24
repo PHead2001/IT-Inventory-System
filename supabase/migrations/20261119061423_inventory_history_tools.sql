@@ -99,7 +99,7 @@ begin
   lines:='[]'::jsonb;
   row_data:=(to_jsonb(r)-array['actor_id','current_item_code','current_asset_tag','current_serial_number'])||jsonb_build_object('lines',lines);
   row_bytes:=octet_length(row_data::text);
-  if used_bytes+row_bytes+case when row_count=0 then 0 else 2 end>2097152 then
+  if used_bytes+row_bytes+(case when row_count=0 then 0 else 2 end)>2097152 then
    raise exception using errcode='P1025',message='history_page_too_large'; end if;
   if r.kind='quantity' then
    -- No nested aggregate is evaluated before the cumulative row/byte guard.
@@ -108,7 +108,7 @@ begin
     if physical_lines>10000 then raise exception using errcode='P1013',message='history_line_limit'; end if;
     line_data:=jsonb_build_object('location_id',x.location_id,'delta',x.delta,'before_quantity',x.before_quantity,'after_quantity',x.after_quantity);
     extra_bytes:=octet_length(line_data::text)+case when lines='[]'::jsonb then 0 else 2 end;
-    if used_bytes+row_bytes+extra_bytes+case when row_count=0 then 0 else 2 end>2097152 then
+    if used_bytes+row_bytes+extra_bytes+(case when row_count=0 then 0 else 2 end)>2097152 then
      raise exception using errcode='P1025',message='history_page_too_large'; end if;
     row_bytes:=row_bytes+extra_bytes;
     lines:=lines||jsonb_build_array(line_data);
@@ -164,7 +164,7 @@ begin
   if r.same_name_count>9007199254740991 or r.name_ordinal>9007199254740991 then
    raise exception using errcode='P1025',message='history_count_too_large'; end if;
   row_data:=to_jsonb(r)-'total'; row_bytes:=octet_length(row_data::text);
-  if used_bytes+row_bytes+case when row_count=0 then 0 else 2 end>131072 then
+  if used_bytes+row_bytes+(case when row_count=0 then 0 else 2 end)>131072 then
    raise exception using errcode='P1025',message='history_actors_too_large'; end if;
   used_bytes:=used_bytes+row_bytes+case when row_count=0 then 0 else 2 end;
   rows:=rows||jsonb_build_array(row_data); row_count:=row_count+1;
@@ -198,6 +198,16 @@ begin
  ) k;
  used_bytes:=octet_length(jsonb_build_object('rows','[]'::jsonb,'event_count',event_count,'row_count',10000,'exported_at',to_char(exported_at at time zone 'UTC','YYYY-MM-DD"T"HH24:MI:SS.US"Z"'))::text);
  if event_count>10000 then raise exception using errcode='P1013',message='export_row_limit'; end if;
+ -- Count physical ledger rows before building JSON so the row cap is decided
+ -- deterministically rather than by whichever bound is crossed first while serializing.
+ select count(*) into physical_rows from (
+  select 1 from public.quantity_event_lines q where q.event_id=any(event_keys)
+  union all
+  select 1 from public.site_quantity_event_lines q where q.event_id=any(event_keys)
+  limit 10001
+ ) ledger_rows;
+ if event_count+physical_rows>10000 then raise exception using errcode='P1013',message='export_row_limit'; end if;
+ physical_rows:=0;
  for r in select e.*,fl.code from_code,fl.breadcrumb from_label,tl.code to_code,tl.breadcrumb to_label,
   afl.code assignment_from_code,atl.code assignment_to_code,
   fs.code from_site_code,ts.code to_site_code

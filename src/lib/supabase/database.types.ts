@@ -2113,6 +2113,38 @@ export type Database = {
         }
         Returns: Json
       }
+      inventory_history_actors: {
+        Args: { p_page?: number; p_query?: string; p_selected_id?: string }
+        Returns: Json
+      }
+      inventory_history_export_snapshot: {
+        Args: {
+          p_actor_id?: string
+          p_entity_id?: string
+          p_event_type?: string
+          p_from?: string
+          p_location_code?: string
+          p_query?: string
+          p_type?: string
+          p_until?: string
+        }
+        Returns: Json
+      }
+      inventory_history_v2: {
+        Args: {
+          p_actor_id?: string
+          p_entity_id?: string
+          p_event_type?: string
+          p_from?: string
+          p_location_code?: string
+          p_page?: number
+          p_page_size?: number
+          p_query?: string
+          p_type?: string
+          p_until?: string
+        }
+        Returns: Json
+      }
       inventory_item_code_lookup: { Args: { p_code: string }; Returns: Json }
       inventory_label_context: {
         Args: { p_entity_id: string; p_kind: string }

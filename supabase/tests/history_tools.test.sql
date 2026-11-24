@@ -189,9 +189,10 @@ select set_config('request.jwt.claims',jsonb_build_object('sub',(select id from 
 create temporary table history_byte_size as select octet_length(inventory_history_export_snapshot(p_entity_id=>(select asset from history_byte_fixture where delta=-2))::text) bytes;
 reset role;
 grant select on history_byte_size to authenticated;
+-- Reasons are capped at 2,000 characters, so pad the uncapped actor snapshot instead.
 insert into public.asset_events(asset_id,kind,actor_id,actor_name,version,created_at,reason)
-select asset,'created',(select id from history_actors where kind='staff'),'Byte actor',1,'2026-11-01T06:59:59.123456Z',
- E'😀"\\'||repeat('x',2097152-(select bytes from history_byte_size)-4+delta)
+select asset,'created',(select id from history_actors where kind='staff'),
+ 'Byte actor'||repeat('x',2097152-(select bytes from history_byte_size)-4+delta),1,'2026-11-01T06:59:59.123456Z',E'😀"\\'
 from history_byte_fixture where delta<>-2;
 set local role authenticated;
 select lives_ok(format('select inventory_history_export_snapshot(p_entity_id=>%L::uuid)',asset),'complete JSON below/at conservative computed limit '||delta)
