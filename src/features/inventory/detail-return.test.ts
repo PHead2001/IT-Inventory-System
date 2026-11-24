@@ -136,3 +136,23 @@ it('retains bounded location draft and exact occurrence while rejecting foreign 
     '/locations',
   );
 });
+
+it('round trips applied U313 filters and rejects invalid or repeated scopes', () => {
+  const scope = `/history?actor=${id}&eventType=movements&q=literal%25_&from=2026-11-01T06%3A59%3A59.123456Z&until=2026-11-01T06%3A59%3A59.123457Z&zone=America%2FChicago&page=2#history-event-quantity-${id}`;
+  const result = new URL(
+    recordDetailReturnPath(scope),
+    'https://inventory.invalid',
+  );
+  expect(result.pathname).toBe('/history');
+  expect(result.searchParams.get('actor')).toBe(id);
+  expect(result.searchParams.get('q')).toBe('literal%_');
+  expect(result.searchParams.get('from')).toContain('.123456Z');
+  expect(result.hash).toBe(`#history-event-quantity-${id}`);
+  for (const invalid of [
+    '/history?actor=bad',
+    '/history?from=infinity',
+    '/history?eventType=retired&type=quantity',
+    '/history?actor=' + id + '&actor=' + id,
+  ])
+    expect(recordDetailReturnPath(invalid)).toBe('/inventory');
+});

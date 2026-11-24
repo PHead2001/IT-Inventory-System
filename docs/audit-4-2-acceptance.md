@@ -1134,3 +1134,82 @@ passed application and database validation on that preview commit and reported
 columns and their mapping download, account-switch isolation, and final
 exact-commit CI and review remain pending for U303 and A305. This checkpoint
 does not promote an acceptance row to complete.
+## Selective U313 history preparation — 2026-11-06
+
+Donor `45999655` is selectively reconciled onto reviewed grouped checkpoint
+`9ee2d63bcbc5810004e4dcf1f0886131079e06fa`. Current grouped/nested location
+return paths, PR64/65/66 presentation, metadata snapshots, actor/relative-time
+rendering and A308 inventory CSV Shortfall remain intact. Only the specified
+held history query/reader lifetime fixes are adapted from the read-only donor.
+
+An already-completed history RPC error is checked inside its read scope before
+joining reference reads; a known denial cannot become a timeout while a reference
+lookup is pending. The existing denial taxonomy is unchanged. Read-scope cleanup
+retires supported transport and late results; physical cancellation of unrelated
+SDK reference/Auth requests is not claimed.
+
+The forward migration and complete-event snapshot/row/wire/CSV bounds retain the
+contracts in [history tools](history-tools.md). Replay/upgrade, actual generated
+types, DB/RLS/REST/concurrency, memory and populated browser/visual/full gates are
+pending for this candidate. All 76 matrix rows, 75 base IDs and dispositions are
+unchanged; source integration is not runtime acceptance.
+
+## P11 grouped inventory and history local preparation — 2026-11-09
+
+Unpushed Group checkpoint `5750ea11e16686f0f01239be8bc99dad81e0822e` and
+History checkpoint `577205b7905040b24aaf9e3e3462b0ddddac9b99` are selectively
+integrated into the current Overview base. Grouped reads/views, preferences,
+A308 shortfall and return-source integration, plus History filters, bounded CSV
+and reader lifetime are present. Independent static reviews of the source
+boundaries were clear. This local preparation has no PR or preview and promotes
+no row.
+
+The initial nine pure files passed 236 tests on `4d4c7a`. The later 11 component
+and API files had 9 failures and 405 passes; the failures were repaired for
+legacy-holding order/raw scope, a test shadow, the authority fresh-owner fixture
+and disclosure accessibility fixture. The combined 11-file run then passed
+414/414 on `2cccd651a87e580a984c481e762d24108924ff4d`, before four typing fixes.
+After those fixes, four files passed 70/70; canonical Next type generation and
+strict TypeScript passed, as did affected-path formatting and zero-warning lint.
+Test execution used two CPUs, 512 MiB heap per Node process and one worker;
+TypeScript used a 2048 MiB heap (not a total-RSS limit). Owned cleanup was
+verified. Mocked-prefetch, jsdom and insertion warnings were reported; the run
+was not console-clean.
+
+Database proof remains pending. The canonical restored local project was
+identified as `it-inventory` on local API/database ports `45321`/`45322`, Storage `1.77.9`, with 47
+migrations. Group migration 48 and History migration 49 are unapplied; generated
+types are not refreshed and no database tests ran. The first Rancher probe
+aborted after a guard misclassified the expected WSL utility VM; normal shutdown
+preserved the volume and original migration state. The zero-memory reading was a
+VM sentinel; actual free RAM was 5.36 GiB, and after cleanup/settling with no
+VM it was 8.47 GiB. Corrected private cohort preparation is under review; no
+threshold, global setting or runner change was made.
+
+Full pre-push/build, clean and upgrade database/RLS, snapshot/timeout/memory and
+hosted 390 px Full/Reduced, native WebGL, independent experience and exact-final-
+SHA review/CI remain pending. A307 physical paper/hardware acceptance remains
+required. Original audit fixtures, production/staging and open-PR count were
+unchanged. All 76 rows, 75 base IDs and their dispositions remain unchanged;
+this is source and focused local validation evidence, not runtime or whole-goal
+acceptance.
+
+### History dependent-source reconciliation — 2026-11-20
+
+Local History `6dfdc525` has a noncommitting merge of exact grouped
+`e94096791e21f7775f94105179193d0a2fc9815b`, including main `ac841de4` and
+actual generated grouped public types. Both parents' historical checkpoints and
+all audit rows/statuses are preserved. The two conflicts were appended prose;
+no application or SQL conflicts required resolution. Grouped remains pending
+validation and separately releasable; joining its source does not accept either
+slice or expand History's scope.
+
+The unpublished History migration now appends as
+`20261119061423_inventory_history_tools.sql`, after the exact 49-migration
+grouped prefix, with unchanged SQL bytes. Available local receipts contain
+source/unit/type preparation and leave History DB execution pending; no remote
+ref contains the History introduction. No current local or hosted database
+history was queried during this reconciliation. History types still require
+actual generation/comparison, and replay/forward-upgrade, DB/RLS, real REST,
+browser/download and final exact-SHA gates remain pending. Static source/order
+checks alone promote no runtime or hosted acceptance.

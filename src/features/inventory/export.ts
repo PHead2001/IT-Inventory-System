@@ -87,7 +87,7 @@ export class ExportTooLargeError extends Error {
   }
 }
 const csvLimit = 3 * 1024 * 1024;
-function boundedCsv(
+export function boundedCsv(
   lines: Iterable<string>,
   checkDeadline: () => void,
   onRow?: (bytes: number) => void,

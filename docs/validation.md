@@ -2046,3 +2046,29 @@ evidence ends at 47 migrations through `20261019193000`, with no grouped RPC;
 no current local/hosted history or application/database/browser gate was run
 for this reconciliation. The generated-type and forward-upgrade checks above
 remain required before acceptance.
+
+## Selective U313 current-tree validation — 2026-11-06
+
+The history donor is reconciled onto grouped checkpoint `9ee2d63b`, retaining
+current UI, privacy and grouped return contracts. Historical donor test/memory
+counts in [history tools](history-tools.md) do not certify this candidate. Current
+focused typecheck/Vitest, DB replay/upgrade/types/RLS, actual REST timeout/snapshot
+proof, export-memory, authenticated downloads, desktop/390px both-theme
+Full/Reduced/native AT and final exact-SHA gates remain required.
+
+The canonical `test:db` path already runs `tests/integration/custody.ts`, which
+awaits `historyToolsProof` from `tests/integration/history-tools.ts` with its owned
+caller/session. No duplicate standalone invocation is added. The existing
+`test:export:memory` gate includes the authored complete-history fixtures. All
+history proof and download endpoints use the current shared loopback target validator before
+new client construction. None of these runtime gates was run during preparation.
+
+The November 20 dependent-source join merges grouped
+`e94096791e21f7775f94105179193d0a2fc9815b` into local History `6dfdc525`.
+Its grouped public types are retained; History RPC types still need actual
+generation/comparison. History's unpublished SQL appends unchanged as
+`20261119061423_inventory_history_tools.sql`, preserving the exact grouped
+49-migration prefix before this 50th migration. Append-only documentation
+conflicts retain both histories. No runtime database, browser, full test suite
+or hosted gate was run for this join; grouped and History acceptance remain
+separate and pending.

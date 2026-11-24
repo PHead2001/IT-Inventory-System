@@ -4,24 +4,28 @@ import { ProtectedPrivacyContent } from '@/components/auth/privacy-content';
 import { formatCustomValue } from '@/features/metadata/contracts';
 import { WebLinkValue } from '@/features/metadata/web-link-value';
 import {
-  getHistory,
   getHistoryRecord,
   getLocations,
 } from '@/features/inventory/queries.server';
-import { readFilters } from '@/features/inventory/read-model';
+import {
+  parseHistoryFilters,
+  historyFilterParams,
+} from '@/features/inventory/history-filters';
+import {
+  getFilteredHistory,
+  getHistoryActors,
+} from '@/features/inventory/history-queries.server';
+import { HistoryFilters } from '@/features/inventory/components/history-filters';
+import { supabaseConfig } from '@/lib/supabase/config';
 import { pageRecoveryHref } from '@/features/inventory/scope-presentation';
 import { countLabel } from '@/lib/count';
 import {
   HistoryList,
   Pagination,
-  field,
   panel,
 } from '@/features/inventory/components/read-ui';
-import { Button } from '@/components/ui/button';
-import { LocationPicker } from '@/features/locations/location-picker';
 import { getEventCustomPage } from '@/features/metadata/queries.server';
 import { notFound, redirect } from 'next/navigation';
-import Form from '@/components/experience/route-get-form';
 import Link from '@/components/experience/route-link';
 import styles from '@/features/inventory/components/inventory-visual.module.css';
 import { recordDetailReturnPath } from '@/features/inventory/detail-return';
@@ -195,20 +199,19 @@ export default async function HistoryPage({
       </ProtectedPrivacyContent>
     );
   }
-  const filter = readFilters(params);
+  const requestedFilter = parseHistoryFilters(params);
   const record =
     params.entityId !== undefined
       ? await getHistoryRecord(params.entityId)
       : null;
-  const coherentParams: Record<string, string | undefined> & { type: string } =
-    {
-      ...params,
-      type: record?.kind ?? filter.type,
-    };
-  const clearQuery = new URLSearchParams();
-  if (coherentParams.type !== 'all')
-    clearQuery.set('type', coherentParams.type);
-  if (filter.location) clearQuery.set('location', filter.location);
+  const coherentParams = {
+    ...params,
+    type: record?.kind ?? requestedFilter.type,
+    ...(requestedFilter.actor ? { actor: requestedFilter.actor } : {}),
+  };
+  const filter = parseHistoryFilters(coherentParams);
+  const clearQuery = historyFilterParams(coherentParams);
+  clearQuery.delete('entityId');
   const clearHref = '/history' + (clearQuery.size ? '?' + clearQuery : '');
   if (params.entityId !== undefined && !record) {
     return (
@@ -233,24 +236,23 @@ export default async function HistoryPage({
       </ProtectedPrivacyContent>
     );
   }
-  const [result, locations] = await Promise.all([
-    getHistory(coherentParams),
+  const [result, locations, people] = await Promise.all([
+    filter.valid ? getFilteredHistory(coherentParams) : Promise.resolve(null),
     getLocations(),
+    getHistoryActors('', filter.actor),
   ]);
-  const recovery = pageRecoveryHref('/history', coherentParams, result);
+  const recovery = result
+    ? pageRecoveryHref('/history', coherentParams, result)
+    : null;
   if (recovery) redirect(recovery);
-  const historyScope = new URLSearchParams();
-  for (const key of ['type', 'location', 'entityId', 'page']) {
-    const value = coherentParams[key];
-    if (value) historyScope.set(key, value);
-  }
+  const historyScope = historyFilterParams(coherentParams, true);
   const returnTo = recordDetailReturnPath(
     '/history' + (historyScope.size ? '?' + historyScope : ''),
     '/history',
   );
   return (
     <ProtectedPrivacyContent routeKey={readiness.routeKey}>
-      <RouteReady {...readiness} conventionalPrimary>
+      <RouteReady {...readiness} pairingHref={returnTo} conventionalPrimary>
         <>
           <p className="experience-eyebrow">Inventory · Audit trail</p>
           <h1 className="experience-heading mt-3">Inventory history</h1>
@@ -258,94 +260,25 @@ export default async function HistoryPage({
             Append-only records of inventory changes. Physical movements and
             record corrections are shown separately.
           </p>
-          <Form
-            action="/history"
-            className={panel + ' mb-5 space-y-3'}
-            aria-label="Filter history"
-          >
-            <div className="grid gap-3 sm:grid-cols-2">
-              <div>
-                <label htmlFor="history-type">Tracking type</label>
-                <select
-                  key={`${record?.id ?? 'all'}:${coherentParams.type}`}
-                  className={field}
-                  id="history-type"
-                  name="type"
-                  defaultValue={
-                    coherentParams.type === 'all' ? '' : coherentParams.type
-                  }
-                  disabled={Boolean(record)}
-                  aria-describedby={record ? 'history-type-help' : undefined}
-                >
-                  <option value="">All types</option>
-                  <option value="quantity">Quantity items</option>
-                  <option value="asset">Individual assets</option>
-                </select>
-                {record && (
-                  <>
-                    <input type="hidden" name="type" value={record.kind} />
-                    <p
-                      id="history-type-help"
-                      className="mt-2 text-sm text-slate-400"
-                    >
-                      Tracking type is locked to this record. Clear the record
-                      filter to choose another type.
-                    </p>
-                  </>
-                )}
-              </div>
-              <LocationPicker
-                key={params.location ?? ''}
-                id="history-location"
-                label="Location"
-                locations={locations}
-                mode="browse"
-                name="location"
-                defaultValue={params.location ?? ''}
-                allowAll
-              />
-            </div>
-            {record && (
-              <>
-                <input type="hidden" name="entityId" value={record.id} />
-                <p className="text-sm text-slate-400">
-                  Record:{' '}
-                  <Link
-                    className={`text-cyan-300 underline ${styles.textTarget}`}
-                    href={
-                      '/inventory/' +
-                      (record.kind === 'quantity' ? 'quantity' : 'assets') +
-                      '/' +
-                      record.id
-                    }
-                  >
-                    {record.name}
-                  </Link>{' '}
-                  ·{' '}
-                  {record.kind === 'quantity'
-                    ? 'Quantity item'
-                    : 'Individual asset'}
-                  .{' '}
-                  <Link
-                    className={`text-cyan-300 underline ${styles.textTarget}`}
-                    href={clearHref}
-                  >
-                    Clear record filter
-                  </Link>
-                </p>
-                {params.type && params.type !== record.kind && (
-                  <p role="status" className="text-sm text-amber-100">
-                    Tracking type was reconciled to{' '}
-                    {record.kind === 'quantity'
-                      ? 'Quantity items'
-                      : 'Individual assets'}{' '}
-                    for this record.
-                  </p>
-                )}
-              </>
-            )}
-            <Button type="submit">Filter history</Button>
-          </Form>
+          {record && params.type && params.type !== record.kind && (
+            <p role="status" className="text-sm experience-muted">
+              Tracking type was reconciled to{' '}
+              {record.kind === 'quantity'
+                ? 'Quantity items'
+                : 'Individual assets'}{' '}
+              for this record.
+            </p>
+          )}
+          <HistoryFilters
+            params={coherentParams}
+            locations={locations}
+            actors={people.rows}
+            actorTotal={people.total}
+            record={record}
+            clearHref={clearHref}
+            memberId={readiness.actorId}
+            backend={new URL(supabaseConfig().url).origin}
+          />
           {filter.location && (
             <p className="mb-3 text-sm text-slate-300">
               Location:{' '}
@@ -372,13 +305,28 @@ export default async function HistoryPage({
               </Link>
             </p>
           )}
-          <p className="experience-muted mb-3 text-sm">
-            {countLabel(result.total, 'matching event')}
-          </p>
-          <div className={styles.history}>
-            <HistoryList returnTo={returnTo} events={result.rows} compact />
-          </div>
-          <Pagination result={result} base="/history" params={coherentParams} />
+          {result ? (
+            <>
+              <p className="experience-muted mb-3 text-sm">
+                {countLabel(result.total, 'matching event')}
+              </p>
+              <div className={styles.history}>
+                <HistoryList
+                  returnTo={returnTo}
+                  events={result.rows}
+                  compact
+                  linkToEvent
+                />
+              </div>
+              <Pagination
+                result={result}
+                base="/history"
+                params={coherentParams}
+              />
+            </>
+          ) : (
+            <p className={panel}>Check the filter errors to load history.</p>
+          )}
         </>
       </RouteReady>
     </ProtectedPrivacyContent>

@@ -125,6 +125,7 @@ const test = () => {
     localTestEnv(status),
   );
   node(
+    // Custody awaits historyToolsProof using its owned caller/DB session.
     ['--import', 'tsx', 'tests/integration/custody.ts'],
     localTestEnv(status),
   );
