@@ -870,6 +870,10 @@ a {
   position: relative;
   z-index: 3;
 }
+/* Keyboard focus scrolls a result row fully into view, never leaving it clipped at the fold. */
+[id^='inventory-row-'] a {
+  scroll-margin-block: 16px;
+}
 .experience-export-menu > summary {
   display: inline-flex;
   min-height: 44px;

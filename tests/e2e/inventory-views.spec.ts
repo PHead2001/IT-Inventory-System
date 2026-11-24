@@ -190,6 +190,8 @@ test('grouped complete holdings, picking view, saved settings, Back and full-sco
       await page
         .getByRole('combobox', { name: 'Inventory view', exact: true })
         .selectOption(mode);
+      // Follow rows only after the selected view is applied to their return links.
+      await expect(page).toHaveURL(new RegExp('view=' + mode));
       // Repeated App Back returns to an already-used fragment. Native history
       // cannot supply this return's reveal on the application's behalf.
       for (let attempt = 0; attempt < 2; attempt++) {
